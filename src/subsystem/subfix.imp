@@ -174,7 +174,7 @@
 !***********************************************************************
 !
 %if XIMPLHOST=1 %start
-%external %routine %spec disconnect %alias "SUBFIX#DISCONNECT"(%string (255) s, %integer %name f)
+%external %routine %spec disconnect %alias "IMAGE#S#DISCONNECT"(%string (255) s, %integer %name f)
 %finish %else %start
 %external %routine %spec disconnect %alias "S#DISCONNECT"(%string (255) s, %integer %name f)
 %finish
@@ -210,7 +210,7 @@
 %external %integer %fn %spec outstream %alias "s#outstream"
 %external %routine %spec setreturncode %alias "s#setreturncode"(%integer n)
 %if XIMPLHOST=1 %start
-%external %routine %spec trim %alias "SUBFIX#TRIM"(%string (255) nfile, %integer %name flag)
+%external %routine %spec trim %alias "IMAGE#S#TRIM"(%string (255) nfile, %integer %name flag)
 %finish %else %start
 %external %routine %spec trim %alias "S#TRIM"(%string (255) nfile, %integer %name flag)
 %finish
@@ -223,10 +223,10 @@
 
 %if XIMPLHOST=1 %start
 %if XIMPLP64=1 %start
-%externalroutinespec connect %alias "SUBFIX#CONNECT"(%string(255) file,%integer mode,hole,prot,
+%externalroutinespec connect %alias "IMAGE#CONNECT"(%string(255) file,%integer mode,hole,prot,
    %longintegername conad,%integername type,start,end,flag)
 %finish %else %start
-%external %routine %spec connect %alias "SUBFIX#CONNECT"(%string (255) file, %integer mode, hole,
+%external %routine %spec connect %alias "IMAGE#CONNECT"(%string (255) file, %integer mode, hole,
    prot, %integer %name conad, type, start, end, flag)
 %finish
 %finish %else %start
@@ -241,10 +241,10 @@
 %external %routine %spec phex %alias "S#PHEX"(%integer n)
 %if XIMPLHOST=1 %start
 %if XIMPLP64=1 %start
-%externalroutinespec outfile %alias "SUBFIX#OUTFILE"(%string(255) file,%integer size,hole,prot,
+%externalroutinespec outfile %alias "IMAGE#S#OUTFILE"(%string(255) file,%integer size,hole,prot,
    %longintegername conad,%integername flag)
 %finish %else %start
-%external %routine %spec outfile %alias "SUBFIX#OUTFILE"(%string (255) file, %integer size, hole,
+%external %routine %spec outfile %alias "IMAGE#S#OUTFILE"(%string (255) file, %integer size, hole,
    prot, %integer %name conad, flag)
 %finish
 %finish %else %start

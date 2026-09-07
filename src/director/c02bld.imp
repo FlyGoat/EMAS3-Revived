@@ -132,15 +132,37 @@
 %EXTERNALINTEGERFNSPEC OUTSTREAM %alias "s#outstream"
 %EXTERNALROUTINESPEC DEFINE %alias "s#define" (%integer channel,
    %STRING(255)id, %integername afd, flag)
+%if XIMPLHOST=1 %start
+%EXTERNALROUTINESPEC TRIM %ALIAS "IMAGE#S#TRIM" (%STRING(255)FILE, %INTEGERNAME FLAG)
+%finish %else %start
 %EXTERNALROUTINESPEC TRIM %ALIAS "S#TRIM" (%STRING(255)FILE, %INTEGERNAME FLAG)
+%finish
+%if XIMPLHOST=1 %start
+%EXTERNALROUTINESPEC DISCONNECT %ALIAS "IMAGE#S#DISCONNECT" (%STRING(255) S, %INTEGERNAME FLAG)
+%finish %else %start
 %EXTERNALROUTINESPEC DISCONNECT %ALIAS "S#DISCONNECT" (%STRING(255) S, %INTEGERNAME FLAG)
+%finish
+%if XIMPLHOST=1 %start
+%EXTERNALROUTINESPEC CONNECT %ALIAS "IMAGE#S#OLDCONNECT" (%STRING(255)FILE,
+   %INTEGER MODE, HOLE, PROT, %RECORD(RRF)%NAME RR, %INTEGERNAME FLAG)
+%finish %else %start
 %EXTERNALROUTINESPEC CONNECT %ALIAS "S#oldCONNECT" (%STRING(255)FILE,
    %INTEGER MODE, HOLE, PROT, %RECORD(RRF)%NAME RR, %INTEGERNAME FLAG)
+%finish
 %if XIMPLP64=1 %start
+%if XIMPLHOST=1 %start
+%external%routine%spec outfile %alias "IMAGE#S#OUTFILE"(%string(255) file,%integer size,%integer hole,%integer prot,%long%integer%name conad,%integer%name flag)
+%finish %else %start
 %external%routine%spec outfile %alias "S#OUTFILE"(%string(255) file,%integer size,%integer hole,%integer prot,%long%integer%name conad,%integer%name flag)
+%finish
+%finish %else %start
+%if XIMPLHOST=1 %start
+%EXTERNALROUTINESPEC OUTFILE %ALIAS "IMAGE#S#OUTFILE" (%STRING(255)FILE,
+   %INTEGER SIZE, HOLE, PROT, %INTEGERNAME CONAD, FLAG)
 %finish %else %start
 %EXTERNALROUTINESPEC OUTFILE %ALIAS "S#OUTFILE" (%STRING(255)FILE,
    %INTEGER SIZE, HOLE, PROT, %INTEGERNAME CONAD, FLAG)
+%finish
 %finish
 %if XIMPLP64=1 %start
 %external%routine%spec move %alias "S#MOVE"(%integer len,%long%integer from,%long%integer to)
@@ -182,7 +204,11 @@
 %ROUTINE FAIL(%STRING(100)S)
       SELECTOUTPUT(0)
       PRINTSTRING("FAILURE IN FIX - ".S)
+%if XIMPLHOST=1 %start
+      %signal 9,3
+%finish %else %start
       %STOP
+%finish
 %END
 !
 !
@@ -209,7 +235,12 @@
 !
 %CONSTINTEGER IPUT = 0, LPUT = 1
 !
+%if XIMPLP64=1 %start
+%INTEGER TYPE,CO,GL,ENTP,PWORD,ad
+%longinteger refarray
+%finish %else %start
 %INTEGER TYPE, CO, GL, ENTP, PWORD, ad, refarray
+%finish
 %integer afd, site
 %string(6)label
 %STRING(31)IDEN
@@ -219,12 +250,21 @@
 !
 %INTEGER AREACODE, AREADISP, BASECODE, BASEDISP, N, J
 %INTEGER UNSATCODE, CUROUTSTREAM, BLOCKS
+%if XIMPLP64=1 %start
+%INTEGER FLAG,I,LINK,LEN,OUTLEN
+%longinteger INBASE,OUTBASE,LOC
+%finish %else %start
 %INTEGER FLAG, INBASE, OUTBASE, LOC, I, LINK, LEN, OUTLEN
-%STRING(31)IN, OUT, LIST
+%finish
+%STRING(255)IN, OUT, LIST
 %CONSTINTEGER TOPAREA = 10
 %CONSTINTEGER CODESTART = CODE SEG << SEG SHIFT
 {%CONSTINTEGER GLASTART  = X'C0000'}
+%if XIMPLP64=1 %start
+%longintegerarray BASE(1:TOPAREA)
+%finish %else %start
 %INTEGERARRAY BASE(1 : TOPAREA);              !AREA START ADDRESSES IN  FILE 'OUT'
+%finish
 %INTEGERARRAY LBASE(1 : TOPAREA);             !AREA START ADDRESSES WHEN LOADED
 %INTEGERARRAYFORMAT LDATAAF(0 : 14)
 %INTEGERARRAYNAME LDATA
@@ -240,12 +280,12 @@
 !
 %ROUTINE ANALYSE(%RECORD(CENTF)%NAME CENT,
       %INTEGERNAME TYPE, %STRINGNAME IDEN)
-      %IF 0 < LENGTH(CENT_IDEN) < 32 %START
-         TYPE = LPUT
-         IDEN = CENT_IDEN
-      %FINISH %ELSE %IF 0 < LENGTH(CENT_IDEN2) < 32 %START
-         TYPE = IPUT
-         IDEN = CENT_IDEN2
+      %IF 0 < LENGTH(CENT_IDEN2) < 32 %START
+         TYPE = iput
+         IDEN = cent_iden2
+      %FINISH %ELSE %IF 0 < LENGTH(CENT_IDEN) < 32 %START
+         TYPE = lput
+         IDEN = cent_iden
       %FINISH %ELSE %START
          FAIL("Analyse")
       %FINISH
@@ -306,14 +346,19 @@
 %END; ! FINDCODEEEP
 !
 !
-%INTEGERFN BUILD SCT(%INTEGER FILEAD, INFILEAD, CODESTART, GLASTART)
+%INTEGERFN BUILD SCT(%byteintegername file buffer,input buffer,%INTEGER CODESTART, GLASTART)
 ! MAKES THE SYSTEM CALL TABLE AND ALSO
 ! A RECORDARRAY WITH THE ENTRY-POINT IDENTS AND THE CORRESPONDING I,J
 ! VALUES.
 %externalintegerfnspec cpdt %alias "s#currentpackeddt"
 
 %INTEGER EP, F, LINK, ERRORS
-%INTEGER J, SCT BLOCK AD, IDENS RELST
+%INTEGER J,IDENS RELST
+%if XIMPLP64=1 %start
+%longinteger FILEAD,INFILEAD,SCT BLOCK AD,SCT SIZE
+%finish %else %start
+%integer FILEAD,INFILEAD,SCT BLOCK AD,SCT SIZE
+%finish
 %STRING (31) ENT, S, W1, W2, D1, LAST
 %RECORD(CENTF)%NAME CENT
 %RECORD(OBJF)%NAME H
@@ -336,13 +381,15 @@
 !
 !
 !
+   FILEAD=addr(file buffer);INFILEAD=addr(input buffer)
    W("BUILD SCT VSN  ".VSN)
    ERRORS = 0
    H == RECORD(FILEAD)
    SCT BLOCK AD = FILEAD+H_SCT RELST
    SCT HDR == RECORD(SCT BLOCK AD)
    SCT HDR_HORIZ VECTOR BOUND = TOP J VALUE+1
-   SCT HDR_SCT RELST = ADDR(SCT HDR_ENDF)-ADDR(SCT HDR)
+   SCT SIZE=ADDR(SCT HDR_ENDF)-ADDR(SCT HDR)
+   SCT HDR_SCT RELST <- SCT SIZE
       IDENS RELST = SCT HDR_SCT RELST
    SCT HDR_IDENS ARRAY RELST = IDENS RELST
    SCT HDR_DT STAMP = cpdt
@@ -406,8 +453,10 @@
    spar("List", list)
    spar("Label", label)
    ipar("Site", site)
+%if XIMPLHOST=0 %start
    j = checkname(out, 2, 0)
    -> err %unless j = 0
+%finish
 !
       CUROUTSTREAM = OUTSTREAM
       DEFINE(1, LIST, afd, j)
@@ -426,6 +475,7 @@
       OUTFILE(OUT,OUTLEN,0,0,OUTBASE,FLAG)
       -> ERR %IF FLAG # 0
 !
+%if XIMPLHOST=0 %start
       J = DSFI("ERCC04", -1, 11, 0, DSFIS, DSFII)
       %IF J = 0 %START
          DIRECTOR VSN = ITOS(DSFII(0)//10)
@@ -436,12 +486,13 @@
          J = DSFI("ERCC04", -1, 8, 1, DSFIS, DSFII)
       %FINISH
 !
+%finish
       MOVE(LEN,INBASE,OUTBASE);            !COPY FILE TO 'OUT'
       LDATA == ARRAY(INBASE+INTEGER(INBASE+24),LDATAAF)
                                            !LOAD DATA
       OFM == ARRAY(INBASE+INTEGER(INBASE+28)+4,OFMAF)
                                            !OBJECT FILE MAP
-      %CYCLE I = 1,1,5
+      %CYCLE I = 1,1,TOPAREA
          BASE(I) = OUTBASE+OFM(I)_START
       %REPEAT
       LBASE(1) = OFM(1)_START+CODESTART;   !START OF LOADED CODE
@@ -521,7 +572,7 @@ SPACES(3); PHEX(PWORD); NEWLINE
          LINK = CENT_LINK
       %REPEAT
 !
-      PRINTBOTH("NO DIRLDR !!!") %IF ENTP = 0
+      FAIL("No DIRLDR") %IF ENTP = 0
       INTEGER(OUTBASE+16) = X'47F0C000' ! (ENTP & X'FFF' - 28)
       INTEGER(OUTBASE+24) = OFM(2)_START;    !START OF GLAP
       INTEGER(OUTBASE+28) = OFM(2)_L + OFM(5)_L; ! length of GLAP
@@ -529,8 +580,9 @@ SPACES(3); PHEX(PWORD); NEWLINE
       INTEGER(OUTBASE) = (INTEGER(INBASE+24) + 127) & (-128)
       INTEGER(OUTBASE+12) = INTEGER(OUTBASE); ! start of SCT, used by Director
 !
-      FLAG = BUILDSCT(OUTBASE, INBASE, LBASE(1), LBASE(2))
-      PRINTBOTH("NUMBER OF SCT FAULTS: ".ITOS(FLAG)) %UNLESS FLAG = 0
+      FLAG = BUILDSCT(byteinteger(OUTBASE), byteinteger(INBASE), LBASE(1), LBASE(2))
+      FAIL("Incomplete system call table") %UNLESS FLAG = 0
+      FAIL("Unresolved code references") %UNLESS UNSATCODE=0
 !
 !
 !
@@ -541,8 +593,10 @@ SPACES(3); PHEX(PWORD); NEWLINE
       %IF UNSATCODE = 0 %start
          PRINTBOTH("ALL REFS FILLED")
          PRINTBOTH("NUMBER OF 4K BLOCKS: ".ITOS(BLOCKS))
+%if XIMPLHOST=0 %start
          out -> index . (":") . out
          flag = dprg(index, out, -1, label, site)
+%finish
       %ELSE
          PRINTBOTH(ITOS(UNSATCODE) ."  UNSATISFIED CODE REFERENCES")
          %RETURN

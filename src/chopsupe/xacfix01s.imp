@@ -1,3 +1,4 @@
+%constinteger XIMPLHOST=0
 %constinteger XIMPLP64=0
 !
 !updated 25-09-85..SH..subsys specs
@@ -13,14 +14,30 @@
 %externalroutinespec emas3string(%stringname vector,value)
 %externalroutinespec emas3integer(%stringname vectore,%integername i)
 %if XIMPLP64=1 %start
+%if XIMPLHOST=1 %start
+%external%long%integer%fn%spec rdfilead %alias "IMAGE#RDFILEAD"(%string(255) file)
+%finish %else %start
 %external%long%integer%fn%spec rdfilead(%string(255) file)
+%finish
+%finish %else %start
+%if XIMPLHOST=1 %start
+%externalintegerfnspec rdfilead %alias "IMAGE#RDFILEAD"(%string(255)file)
 %finish %else %start
 %externalintegerfnspec rdfilead(%string(255)file)
 %finish
+%finish
 %if XIMPLP64=1 %start
+%if XIMPLHOST=1 %start
+%external%long%integer%fn%spec nwfilead %alias "IMAGE#NWFILEAD"(%string(255) file,%integer pages)
+%finish %else %start
 %external%long%integer%fn%spec nwfilead(%string(255) file,%integer pages)
+%finish
+%finish %else %start
+%if XIMPLHOST=1 %start
+%externalintegerfnspec nwfilead %alias "IMAGE#NWFILEAD"(%string(255)file,%integer pages)
 %finish %else %start
 %externalintegerfnspec nwfilead(%string(255)file,%integer pages)
+%finish
 %finish
 %if XIMPLP64=1 %start
 %external%routine%spec move %alias "S#MOVE"(%integer l,%long%integer f,%long%integer t)
@@ -50,7 +67,12 @@
 %record(creff)%name cref
 %record(dreff)%name dref
 %record(relf)%name rel
+%if XIMPLP64=1 %start
+%longintegerarray base(1:areas)
+%integerarray lbase(1:areas)
+%finish %else %start
 %integerarray base,lbase(1:areas);               !area start addresses when loaded
+%finish
 %integerarrayformat ldataaf(0:14)
 %integerarrayformat reflocaf(1:1000)
 %integerarrayname ldata, refloc
@@ -79,11 +101,21 @@
       0,0,        { cyl }
       0,0,        { track }
       1           { sector }
+%if XIMPLP64=1 %start
+%integer codestart,ep,codelen,glalen
+%longinteger glastart
+%finish %else %start
 %integer codestart,glastart,ep,codelen,glalen
+%finish
 %integer areacode, areadisp, basecode, basedisp, n, co, gl, entp
 %integer unsatcode, unsatdata, rlink
+%if XIMPLP64=1 %start
+%integer flag,link,ad,lput type,map,BCmode,i,j,datad,track
+%longinteger conad,inbase,loc,refarray,k,ccwad,inputad
+%finish %else %start
 %integer conad, flag, inbase, loc, link, ad, refarray,lput type
-%integer map,BCmode,i,j,k,datad,track
+%integer map,BCmode,i,j,k,datad,track,ccwad,inputad
+%finish
  %constinteger seek=x'07000000'
 %constinteger ss=x'23000000'
 %constinteger tic=x'08000000'
@@ -100,53 +132,65 @@
       emas3string("File to be fixed;file,uc;".default obj,infile)
       emas3integer("Map yes or no;word,no,yes;no",map)
       emas3integer("BC mode (yes or no);word,no,yes;no",BCmode)
-      i=rdfilead(infile)
-      %stop %if i=0
-      j=(integer(i)+4095)>>12;          ! chopsupe pages
+      inputad=rdfilead(infile)
+%if XIMPLHOST=1 %start
+      %signal 9,3 %if inputad=0
+%finish %else %start
+      %stop %if inputad=0
+%finish
+      j=(integer(inputad)+4095)>>12;          ! chopsupe pages
       conad=nwfilead("ichopt",j+xtra)
+%if XIMPLHOST=1 %start
+      %signal 9,3 %if conad=0
+%finish %else %start
       %stop %if conad=0
+%finish
       inbase=conad+xtra*4096
       integer(conad)=integer(conad+8);  ! next free byte
       integer(conad+4)=4096;            ! header length
-      move(integer(i),i,inbase);  ! chopsupe
+      move(integer(inputad),inputad,inbase);  ! chopsupe
       integer(inbase)=j<<12;            ! stack base
       move(irsize*4,addr(ipl rec(1)),conad+4096); ! IPL record
       %if BCmode#0 %then integer(conad+4096)=0;! psw0 to all zeros
       i=j+2;                            ! total pages
-      j=conad+8192;                     ! read CCWs
-      k=j+1024;                         ! seek/search data
+      ccwad=conad+8192;                     ! read CCWs
+      k=ccwad+1024;                         ! seek/search data
       datad=load address
       n=2
       track=0
       %cycle
          %for n=n,1,pptrkmo %cycle
-            integer(j)=rd!datad
-            integer(j+4)=cc!4096
+            integer(ccwad)=rd!datad
+            integer(ccwad+4)=cc!4096
             datad=datad+4096
             %if datad=x'20000' %then datad=x'21000'
             ! leave hole for VM ipl simulator
-            j=j+8
+            ccwad=ccwad+8
          %repeat
          i=i-pptrkmo
          %exit %if i<=0
          track=track+1
          move(7,addr(seek data(0)),k)
          byteinteger(k+5)=track
-         integer(j)=seek!(k-(conad+4096))
-         integer(j+4)=cc!6
-         j=j+8
-         integer(j)=ss;                 ! RA 0
-         integer(j+4)=cc!1
-         j=j+8
-         integer(j)=sie!(k+2-(conad+4096))
-         integer(j+4)=cc!5
-         j=j+8
-         integer(j)=tic!(j-8-(conad+4096))
-         j=j+8
+%if XIMPLHOST=1 %start
+         %externalroutinespec image bytes(%byteintegername address,%integer length)
+         image bytes(byteinteger(k),8)
+%finish
+         integer(ccwad)<-seek!(k-(conad+4096))
+         integer(ccwad+4)=cc!6
+         ccwad=ccwad+8
+         integer(ccwad)=ss;                 ! RA 0
+         integer(ccwad+4)=cc!1
+         ccwad=ccwad+8
+         integer(ccwad)<-sie!(k+2-(conad+4096))
+         integer(ccwad+4)=cc!5
+         ccwad=ccwad+8
+         integer(ccwad)<-tic!(ccwad-8-(conad+4096))
+         ccwad=ccwad+8
          k=k+8
          n=0
       %repeat
-      integer(j-4)=4096;                ! unchain
+      integer(ccwad-4)=4096;                ! unchain
       move(ecsize*4,addr(entry code(1)),conad+x'2800'); ! entry code
       !
       unsatcode=0
@@ -170,6 +214,7 @@
       lbase(1)=ofm(1)_start+codestart;  !start of loaded code
       lbase(2)=ofm(2)_start+codestart;  !start of loaded gla
       lbase(4)=ofm(4)_start+codestart;  !start of loaded sst
+      lbase(9)=0;                      ! Empty zero-UST has no loaded base
       lbase(5)=ofm(2)_l+lbase(2);       !start of loaded ust
       lbase(6)=ofm(6)_start+codestart;! start of diag tables
       lbase(10)=ofm(10)_start+codestart;! start of constant area
@@ -306,6 +351,9 @@
       findcodeep(entry name,i,gl,ep,flag)
       %if flag#0 %then printstring("Entry point ".entry name." not found")
       newline
+%if XIMPLHOST=1 %start
+      %signal 9,3 %if unsatcode#0 %or unsatdata#0
+%finish
       integer(inbase+16)=ep;            ! entry point to header
       integer(inbase+8)=x'100000';      ! stack top
       newlines(2)
@@ -313,18 +361,22 @@
       %return
 %routine analyse(%record(centf)%name cent,%integername lput type, %c
       %stringname iden,%integer link)
-%if 0<length(cent_iden)<32 %start
-      lput type=lput
-      iden=cent_iden
-%finish %else %if 0<length(cent_iden2)<32 %start
+%if 0<length(cent_iden2)<32 %start
       lput type=iput
       iden=cent_iden2
+%finish %else %if 0<length(cent_iden)<32 %start
+      lput type=lput
+      iden=cent_iden
 %finish %else %start
       select output(0)
       printstring("Invalid load data entry at offset ")
       phex(link)
       newline
+%if XIMPLHOST=1 %start
+      %signal 9,3
+%finish %else %start
       %stop
+%finish
 %finish
 %end
 %routine findcodeep(%string (31) entry, %integername co,gl,ep, flag)

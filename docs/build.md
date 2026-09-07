@@ -43,6 +43,7 @@ The outputs are:
 | `build/executives/ispoolr` | Spooler image |
 | `build/executives/imailer` | Mailer image |
 | `build/executives/iftrans` | File-transfer image |
+| `build/fixers/fix-image` | Shared tool for all archived IMP image fixers |
 
 `make host-driver` builds the hosted compiler. To compile your own
 IMP source to an IBM object file, use:
@@ -53,6 +54,21 @@ build/host/emas-imp input.imp output
 
 Compilation logs are beside the system objects under `build/supervisor`,
 `build/chopsupe`, `build/director` and `build/executives`.
+
+The image fixers run the archived `ifix8s.imp`, `xacfix01s.imp`, `c02bld.imp`,
+`vsmfix1s.imp` and `subfix.imp` through ximplang. `XIMPLP64` widens host
+addresses while retaining 32-bit guest words. The IMP file adapters convert IBM
+byte order at the boundary and preserve strings, code and IPL byte records.
+Director's unused call-table string padding is cleared for reproducible output.
+Python still handles object combination, disk packaging and provisioning.
+
+`make image-fixers` builds the shared native fixer tool. The subsystem command
+also takes the Director image that supplies its system-call table:
+
+```sh
+build/fixers/fix-image subsystem build/subsystem/combined \
+  build/subsystem/basefile build/director/ERCC04:DIRECTOR
+```
 
 Next, [create the disks and start EMAS](running.md).
 

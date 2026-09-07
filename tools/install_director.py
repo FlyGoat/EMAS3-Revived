@@ -6,23 +6,24 @@
 
 import argparse
 import struct
+import subprocess
 from pathlib import Path
 
-from fix_image import build
 from write_emas_pages import stage
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def install(object_path, disk_path, *, replace=False, output_directory=None):
-    data, warnings = build("director", object_path)
-    if not data or len(data) % 4096 or len(data) > 128 * 4096:
-        raise ValueError("Director must occupy 1 to 128 whole pages")
     output_directory = Path(output_directory or ROOT / "build/director")
     output_directory.mkdir(parents=True, exist_ok=True)
-    (output_directory / "ERCC04:DIRECTOR").write_bytes(data)
-    for warning in warnings:
-        print(warning)
+    output = output_directory / "ERCC04:DIRECTOR"
+    subprocess.run(
+        [ROOT / "build/fixers/fix-image", "director", object_path, output], check=True
+    )
+    data = output.read_bytes()
+    if not data or len(data) % 4096 or len(data) > 128 * 4096:
+        raise ValueError("Director must occupy 1 to 128 whole pages")
     pages, first, label = stage(
         disk_path, 512, data, system_area=True, expected_label="EMAS00", replace=replace
     )
@@ -43,7 +44,7 @@ def main():
             replace=args.replace,
             output_directory=args.output_directory,
         )
-    except (OSError, ValueError, KeyError, struct.error) as error:
+    except (OSError, ValueError, KeyError, struct.error, subprocess.CalledProcessError) as error:
         parser.exit(1, f"Director installation failed: {error}\n")
 
 

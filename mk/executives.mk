@@ -43,7 +43,7 @@ build/executives/ispoolr: EXEC_NAME=spoolr
 build/executives/imailer: EXEC_NAME=mailer
 build/executives/iftrans: EXEC_NAME=ftrans
 EXEC_IMAGES = $(addprefix build/executives/i,volums spoolr mailer ftrans)
-$(EXEC_IMAGES): build/executives/$$(EXEC_NAME)-combined $(IMAGE_TOOLS)
-	$(PYTHON) tools/fix_image.py executive $< $@ > $@.log
+$(EXEC_IMAGES): build/executives/$$(EXEC_NAME)-combined $(IMAGE_FIXER)
+	$(IMAGE_FIXER) executive $< $@ > $@.console.log
 .PHONY: executive-images
 executive-images: $(EXEC_IMAGES)

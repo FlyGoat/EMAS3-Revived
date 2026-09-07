@@ -1,3 +1,4 @@
+%constinteger XIMPLHOST=0
 
 %const %string (20) version= "IFIX 8  11/1/88"
 %constantinteger XIMPLP64=0
@@ -33,30 +34,55 @@
 %external %routine %spec emas3(%string %name cmd, param, %integer %name i)
 !%systemroutinespec PSYSMES(%integer ROOT, FLAG)
 
+%if XIMPLHOST=1 %start
+%external %routine %spec trim %alias "IMAGE#EMAS3TRIM"(%string %name nfile, %integer %name flag)
+%finish %else %start
 %external %routine %spec trim %alias "EMAS3TRIM"(%string %name nfile, %integer %name flag)
+%finish
 !%systemroutinespec DISCONNECT(%string (31) S, %integername FLAG)
 
 %external %integer %fn %spec current packed dt %alias "S#CURRENTPACKEDDT"
 
+%if XIMPLHOST=1 %start
+%external %routine %spec disconnect %alias "IMAGE#EMAS3DISCONNECT"(%string %name nfile, %integer %name flag)
+%finish %else %start
 %external %routine %spec disconnect %alias "EMAS3DISCONNECT"(%string %name nfile, %integer %name flag)
+%finish
 
 %external %routine %spec emas3string(%string %name qualifier, value)
 
 %record %format chdrform(%integer conad, filetype, datastart, dataend)
 %if XIMPLP64=1 %start
+%if XIMPLHOST=1 %start
+%external%routine%spec connect %alias "IMAGE#EMAS3CONNECT"(%string(*)%name s,%integer%name a,%integer%name m,%integer%name p,%long%integer%name r1,%integer%name r2,%integer%name r3,%integer%name r4,%integer%name flag)
+%finish %else %start
 %external%routine%spec connect %alias "EMAS3CONNECT"(%string(*)%name s,%integer%name a,%integer%name m,%integer%name p,%long%integer%name r1,%integer%name r2,%integer%name r3,%integer%name r4,%integer%name flag)
+%finish
+%finish %else %start
+%if XIMPLHOST=1 %start
+%external %routine %spec connect %alias "IMAGE#EMAS3CONNECT"(%string %name s, %integer %name a, m, p, r1, r2, r3, r4, flag)
 %finish %else %start
 %external %routine %spec connect %alias "EMAS3CONNECT"(%string %name s, %integer %name a, m, p, r1, r2, r3, r4, flag)
+%finish
 %finish
 !%systemroutinespec OUTFILE(%string (31) FILE,        %c
 !   %integer SIZE, HOLE, PROT, %integername CONAD, FLAG)
 
 
 %if XIMPLP64=1 %start
+%if XIMPLHOST=1 %start
+%external%routine%spec outfile %alias "IMAGE#EMAS3OUTFILE"(%string(*)%name nfile,%integer%name nfilesize,%integer%name nhole,%integer%name nprot,%long%integer%name conad,%integer%name flag)
+%finish %else %start
 %external%routine%spec outfile %alias "EMAS3OUTFILE"(%string(*)%name nfile,%integer%name nfilesize,%integer%name nhole,%integer%name nprot,%long%integer%name conad,%integer%name flag)
+%finish
+%finish %else %start
+%if XIMPLHOST=1 %start
+%external %routine %spec outfile %alias "IMAGE#EMAS3OUTFILE"(%string %name nfile, %integer %name nfilesize, nhole, nprot,
+   conad, flag)
 %finish %else %start
 %external %routine %spec outfile %alias "EMAS3OUTFILE"(%string %name nfile, %integer %name nfilesize, nhole, nprot,
    conad, flag)
+%finish
 %finish
 
 %if XIMPLP64=1 %start
@@ -111,21 +137,25 @@
 %finish
 
 %routine analyse(%record (centf) %name cent, %integer %name lput type, %string %name iden, %integer link)
-   %if 0<length(cent_iden)<32 %start
-      lput type = lput
-      iden = cent_iden
-   %finish %else %if 0<length(cent_iden2)<32 %start
+   %if 0<length(cent_iden2)<32 %start
       lput type = iput
       iden = cent_iden2
+   %finish %else %if 0<length(cent_iden)<32 %start
+      lput type = lput
+      iden = cent_iden
    %else
       select output(0)
       printstring("Invalid load data entry at offset ")
       phex(link)
       newline
+%if XIMPLHOST=1 %start
+      %signal 9,3
+%finish %else %start
       %stop
+%finish
    %finish
 %end
-%routine fix(%string (31) in, out, list, %integer mode, codestart, glastart)
+%routine fix(%string (255) in, out, list, %integer mode, codestart, glastart)
 !BITS IN MODE -
 !2**0 COPY LOAD DATA
 !2**1 FILL REFS FROM CURRECT SC TABLE
@@ -175,7 +205,11 @@
    %routine fail(%string (100) s)
       selectoutput(0)
       printstring("FAILURE IN FIX - ".s)
+%if XIMPLHOST=1 %start
+      %signal 9,3
+%finish %else %start
       %stop
+%finish
    %end;                                 !OF FAIL
 
    %routine findcodeep(%string (31) entry, %integer %name co, gl, ep, pword, flag)
@@ -396,15 +430,15 @@
       integer(outbase+16) = gl
       integer(outbase+28) = entp
       oldstart = base(2)
-      newstart = roundup(base(2), 4096); !ROUND UP TO NEXT PAGE
+      newstart = outbase+roundup(base(2)-outbase, 4096); !ROUND UP TO NEXT PAGE
       glen = ofm(2)_l+ofm(5)_l+ofm(7)_l+ofm(8)_l+ofm(9)_l; !TOTAL LENGTH OF GLAP
       %if newstart#oldstart %start;      !DONT MOVE IF ALREADY ALIGNED
          %for i = glen-1, -1, 0 %cycle;  !FIELDS MIGHT OVERLAP - DONT USE MOVE
             byteinteger(newstart+i) = byteinteger(oldstart+i)
          %repeat
       %finish
-      integer(outbase) = newstart+glen-outbase; !NEW LENGTH OF FILE
-      integer(outbase+24) = newstart-outbase
+      integer(outbase) <- newstart+glen-outbase; !NEW LENGTH OF FILE
+      integer(outbase+24) <- newstart-outbase
 !NOW CHECK FOR UN-USED ENTRIES
       link = ldata(1);                   !LIST HEAD OF CODE ENTRIES
       %while link#0 %cycle
@@ -441,6 +475,7 @@
    blocks = roundup(integer(outbase), 4096)>>12; !NO OF 4K BLOCKS
    dtword = current packed dt
    integer(outbase+20) = dtword
+   %if unsatcode#0 %or unsatdata#0 %then fail("Unresolved references")
    disconnect(out, flag)
    trim(out, flag)
    %unless flag=0 %then printboth("Trim flag = ".itos(flag))
@@ -459,6 +494,7 @@
    t = itos(blocks)
    %if blocks>64 %then t <- t.tostring(7)." !!!"
    printboth("NUMBER OF 4K BLOCKS: ".t)
+%if XIMPLHOST=0 %start
    supvsn = ""
    scanad = inbase+ofm(2)_start
    %for scanad = scanad, 4, scanad+ofm(2)_l %cycle
@@ -467,6 +503,7 @@
    %repeat
    emas3("analyse", in.",h,t#fixlog", flag)
    emas3("msg", "fixlog,t#fixlog,supervisor ".supvsn." ".htos(dtword, 8), flag)
+%finish
    %return
 err:
 
@@ -542,7 +579,7 @@ err:
 %external %routine isupfix %alias "C#ISUPFIX"
    %integer sshift
    %const %integer code seg=4, gla seg=8
-   %string (31) in, out, list, p4
+   %string (255) in, out, list, p4
    emas3string("From;file,exist,object;?;FIle to be Fixed", in)
    emas3string("To;file,write;?;FIle for Supervisor", out)
    emas3string("Listing;file,write;T#LIST;FIle for error messages", list)

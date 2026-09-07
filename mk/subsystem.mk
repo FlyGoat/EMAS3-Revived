@@ -19,18 +19,5 @@ build/subsystem/combined: $(SUBSYSTEM_OBJECTS) tools/ibm_combine.py
 .PHONY: subsystem-image
 subsystem-image: build/subsystem/basefile
 
-# Run the archived IMP fixer natively, with the same host ABI adaptations as
-# the compiler. The adapter supplies files and the Director SCT, not fixups.
-build/subsystem/subfix.o: src/subsystem/subfix.imp mk/subsystem.mk .venv/.requirements-installed
-	mkdir -p $(@D)
-	$(XIMPLANG) -DXIMPLHOST=1 -c $< -o $@
-
-build/subsystem/subfix_main.o: host/subfix_main.imp mk/subsystem.mk .venv/.requirements-installed
-	mkdir -p $(@D)
-	$(XIMPLANG) -c $< -o $@
-
-build/subsystem/subfix: build/subsystem/subfix.o build/subsystem/subfix_main.o $(HOST_LIBRARY) $(HOST_RUNTIME)
-	$(CLANG) $^ -lm -pthread -o $@
-
-build/subsystem/basefile: build/subsystem/combined $(SUBSYSTEM_DIRECTOR) build/subsystem/subfix
-	build/subsystem/subfix $< $(SUBSYSTEM_DIRECTOR) $@
+build/subsystem/basefile: build/subsystem/combined $(SUBSYSTEM_DIRECTOR) $(IMAGE_FIXER)
+	$(IMAGE_FIXER) subsystem $< $@ $(SUBSYSTEM_DIRECTOR) > $@.console.log

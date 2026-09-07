@@ -16,9 +16,9 @@ export HERCULES DASDINIT SOURCE_DATE_EPOCH
 
 HOST_COMPILER := build/host/emas-imp
 DIRECTOR_IMAGE := build/director/ERCC04\:DIRECTOR
-IMAGE_TOOLS := tools/fix_image.py tools/ibm_object.py
 
 include mk/host.mk
+include mk/fixers.mk
 include mk/system.mk
 include mk/executives.mk
 include mk/subsystem.mk

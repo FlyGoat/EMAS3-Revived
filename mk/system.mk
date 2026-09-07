@@ -44,14 +44,14 @@ build/supervisor/isup-combined: $(SYSTEM_SUP_OBJECTS) tools/ibm_combine.py
 build/chopsupe/ichop-combined: $(SYSTEM_CHOP_OBJECTS) tools/ibm_combine.py
 	$(PYTHON) tools/ibm_combine.py $@ $(SYSTEM_CHOP_OBJECTS) > $@.log
 
-build/supervisor/isup-fixed: build/supervisor/isup-combined $(IMAGE_TOOLS)
-	$(PYTHON) tools/fix_image.py supervisor $< $@ > $@.log
+build/supervisor/isup-fixed: build/supervisor/isup-combined $(IMAGE_FIXER)
+	$(IMAGE_FIXER) supervisor $< $@ > $@.console.log
 
-build/chopsupe/ichopt: build/chopsupe/ichop-combined $(IMAGE_TOOLS) src/chopsupe/xacfix01s.imp
-	$(PYTHON) tools/fix_image.py loader $< $@ > $@.log
+build/chopsupe/ichopt: build/chopsupe/ichop-combined $(IMAGE_FIXER) src/chopsupe/xacfix01s.imp
+	$(IMAGE_FIXER) loader $< $@ > $@.log
 
-$(DIRECTOR_IMAGE): build/director/combined $(IMAGE_TOOLS) src/director/c02bld.imp
-	$(PYTHON) tools/fix_image.py director $< $@ > $@.log
+$(DIRECTOR_IMAGE): build/director/combined $(IMAGE_FIXER) src/director/c02bld.imp
+	$(IMAGE_FIXER) director $< $@ > $@.console.log
 
 build/supervisor/isup12fy: SYSTEM_SOURCE=src/supervisor/isup12fs.imp
 $(SYSTEM_SUP_OBJECTS): SYSTEM_OPTIONS=src/compilers/ercc07/ctoptnassmp.imp

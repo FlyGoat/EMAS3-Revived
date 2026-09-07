@@ -1,3 +1,4 @@
+%constinteger XIMPLHOST=0
 %constinteger XIMPLP64=0
 ! minimal fixer for volums, spoolr, etc.
 ! fixes only static precedure refs,data refs and relocations.
@@ -22,18 +23,40 @@
 
 %external %routine %spec psysmes %alias "S#PSYSMES"(%integer root, flag)
 
+%if XIMPLHOST=1 %start
+%external %routine %spec trim %alias "IMAGE#S#TRIM"(%string (255) nfile, %integer %name flag)
+%finish %else %start
 %external %routine %spec trim %alias "S#TRIM"(%string (255) nfile, %integer %name flag)
+%finish
 
+%if XIMPLHOST=1 %start
+%external %routine %spec disconnect %alias "IMAGE#S#DISCONNECT"(%string (255) nfile, %integer %name flag)
+%finish %else %start
 %external %routine %spec disconnect %alias "S#DISCONNECT"(%string (255) nfile, %integer %name flag)
+%finish
 
+%if XIMPLHOST=1 %start
+%external %routine %spec connect %alias "IMAGE#S#OLDCONNECT"(%string (255) file, %integer mode, hole, prot,
+   %record (rrf) %name r, %integer %name flag)
+%finish %else %start
 %external %routine %spec connect %alias "S#OLDCONNECT"(%string (255) file, %integer mode, hole, prot,
    %record (rrf) %name r, %integer %name flag)
+%finish
 
 %if XIMPLP64=1 %start
+%if XIMPLHOST=1 %start
+%external%routine%spec outfile %alias "IMAGE#S#OUTFILE"(%string(255) nfile,%integer nfilesize,%integer nhole,%integer nprot,%long%integer%name conad,%integer%name flag)
+%finish %else %start
 %external%routine%spec outfile %alias "S#OUTFILE"(%string(255) nfile,%integer nfilesize,%integer nhole,%integer nprot,%long%integer%name conad,%integer%name flag)
+%finish
+%finish %else %start
+%if XIMPLHOST=1 %start
+%external %routine %spec outfile %alias "IMAGE#S#OUTFILE"(%string (255) nfile, %integer nfilesize, nhole, nprot,
+   %integer %name conad, flag)
 %finish %else %start
 %external %routine %spec outfile %alias "S#OUTFILE"(%string (255) nfile, %integer nfilesize, nhole, nprot,
    %integer %name conad, flag)
+%finish
 %finish
 
 %if XIMPLP64=1 %start
@@ -42,7 +65,7 @@
 %external %routine %spec move %alias "S#MOVE"(%integer nlength, nfrom, nto)
 %finish
 
-%external %routine %spec phex %alias "S#PHEX"(%integer %name ni)
+%external %routine %spec phex %alias "S#PHEX"(%integer ni)
 
 %external %string %fn %spec itos %alias "S#ITOS"(%integer nn)
 %external %routine %spec getinteger %alias "S#GETINTEGER"(%string (255) vector, %integer %name value)
@@ -61,10 +84,19 @@
    %integer co, gl, entp, pword, seg size, codestart
    %integer areacode, areadisp, basecode, basedisp, n, repstream
    %integer unsatdat, unsatcode, curoutstream, blocks
+%if XIMPLP64=1 %start
+   %integer flag,i,link,len,outlen,ad
+   %longinteger inbase,outbase,loc,refarray
+%finish %else %start
    %integer flag, inbase, outbase, loc, i, link, len, outlen, refarray, ad
-   %string (31) in, out, list, target
+%finish
+   %string (255) in, out, list, target
    %integer glastart
+%if XIMPLP64=1 %start
+   %longintegerarray base(1:10)
+%finish %else %start
    %integer %array base(1:10);           !area start addresses in  file 'out'
+%finish
    %integer %array lbase(1:10);          !area start addresses when loaded
    %integer %array %format ldataaf(0:14)
    %integer %array %format reflocaf(1:1000)
@@ -275,7 +307,7 @@
    %if unsatcode=0 %then printboth("all refs filled") %else printboth(itos(unsatcode)."  unsatisfied code references")
    %if unsatdat=0 %then printboth("all data refs filled") %else printboth(itos(unsatdat)." unsatisfied data refs")
    printboth("number of 4k blocks: ".itos(blocks))
-   flag = 0
+   flag = unsatdat
 err:
    selectoutput(0)
    setreturncode(flag)

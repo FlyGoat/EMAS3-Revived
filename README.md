@@ -44,8 +44,9 @@ make supervisor-image loader-image director-image executive-images
 
 The end-to-end workflow compiles the system, fixes and stages its images,
 provisions disks, then starts EMAS in Hercules through the console tools.
-Image fixing runs directly in Python using IBM byte order. Install Hercules
-separately. The tools use `hercules` and `dasdinit` from PATH, or the executable
+All image fixers, including `subfix`, run through the shared native IMP tool
+`build/fixers/fix-image`, with IBM byte order handled at the host file boundary.
+Install Hercules separately. The tools use `hercules` and `dasdinit` from PATH, or the executable
 paths set by `HERCULES` and `DASDINIT`:
 
 ```sh
