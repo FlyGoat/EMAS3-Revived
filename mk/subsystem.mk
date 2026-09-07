@@ -8,8 +8,8 @@ SUBSYSTEM_OBJECTS = $(addprefix build/subsystem/,$(addsuffix y,$(SUBSYSTEM_MODUL
 subsystem-objects: $(SUBSYSTEM_OBJECTS)
 build/subsystem/%y: src/subsystem/%s.imp src/subsystem/ssownf3.imp $(wildcard src/subsystem/*.imp) $(HOST_COMPILER) Makefile mk/subsystem.mk
 	mkdir -p $(@D)
-	$(HOST_COMPILER) -fno-check -fno-array-check \
-	  -fno-line -fno-diag --include SUBARC:SSOWNF3=src/subsystem/ssownf3.imp \
+	$(HOST_COMPILER) -O -fno-check -fno-array-check \
+	  --include SUBARC:SSOWNF3=src/subsystem/ssownf3.imp \
 	  $< $@ > $@.log 2>&1
 
 # Require the already fixed Director that this basefile will run against.
@@ -19,6 +19,18 @@ build/subsystem/combined: $(SUBSYSTEM_OBJECTS) tools/ibm_combine.py
 .PHONY: subsystem-image
 subsystem-image: build/subsystem/basefile
 
-build/subsystem/basefile: build/subsystem/combined $(SUBSYSTEM_DIRECTOR) tools/subfix.py tools/ibm_object.py
-	$(PYTHON) tools/subfix.py $< $(SUBSYSTEM_DIRECTOR) $@
+# Run the archived IMP fixer natively, with the same host ABI adaptations as
+# the compiler. The adapter supplies files and the Director SCT, not fixups.
+build/subsystem/subfix.o: src/subsystem/subfix.imp mk/subsystem.mk .venv/.requirements-installed
+	mkdir -p $(@D)
+	$(XIMPLANG) -DXIMPLHOST=1 -c $< -o $@
 
+build/subsystem/subfix_main.o: host/subfix_main.imp mk/subsystem.mk .venv/.requirements-installed
+	mkdir -p $(@D)
+	$(XIMPLANG) -c $< -o $@
+
+build/subsystem/subfix: build/subsystem/subfix.o build/subsystem/subfix_main.o $(HOST_LIBRARY) $(HOST_RUNTIME)
+	$(CLANG) $^ -lm -pthread -o $@
+
+build/subsystem/basefile: build/subsystem/combined $(SUBSYSTEM_DIRECTOR) build/subsystem/subfix
+	build/subsystem/subfix $< $(SUBSYSTEM_DIRECTOR) $@

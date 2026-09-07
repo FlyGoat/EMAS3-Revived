@@ -1,0 +1,269 @@
+! SPDX-License-Identifier: MIT
+! Copyright (c) 2026 Jiaxun Yang <jiaxun.yang@flygoat.com>
+
+! Unix file and Director interfaces for the archived SUBFIX. The fixer sees
+! native integer words; this boundary preserves the IBM bytes on disk. Strings
+! in load-data and loader tables are excluded from word conversion. Code and
+! other opaque bytes are converted back unchanged, except words SUBFIX fixes.
+%include "unix_host.imp"
+%constinteger XIMPLP64=0
+%constinteger XIMPLITTLEENDIAN=0
+%constinteger maximum=2<<20
+%ownbyteintegerarray textword(0:maximum//4-1)
+%ownlonginteger inputbase=0,outputbase=0,directorbase=0
+%owninteger inputsize=0,outputsize=0,directorsize=0,sctstart=0,sctcount=0,stamp=0
+%ownstring(255) outputpath
+%externalroutinespec subfix %alias "C#SUBFIX"
+%externalintegerfnspec hostparameter(%string(255) name,value)
+%externalintegerfnspec hostbegin
+%externalintegerfnspec hostend
+%if XIMPLP64=1 %start
+%externallongintegermapspec hostcomregmap(%integer item)
+%finish %else %start
+%externalintegermapspec hostcomregmap(%integer item)
+%finish
+
+%routine reject(%string(255) message)
+   selectoutput(0);printstring("SUBFIX: ".message);newline
+   %signal 9,3
+%end
+
+%integerfn beword(%longinteger base,%integer offset)
+   %result=byteinteger(base+offset)<<24!byteinteger(base+offset+1)<<16!%c
+      byteinteger(base+offset+2)<<8!byteinteger(base+offset+3)
+%end
+
+%integerfn fileword(%longinteger base,%integer offset,native)
+   %if native#0 %then %result=integer(base+offset)
+   %result=beword(base,offset)
+%end
+
+%routine marktext(%longinteger base,%integer offset,limit)
+%integer bytes,i
+   %unless 0<=offset<limit %and offset&3=0 %then reject("invalid string offset")
+   bytes=(byteinteger(base+offset)+4)&\3
+   %unless bytes<=32 %and offset+bytes<=limit %then reject("invalid entry name")
+   %for i=offset//4,1,(offset+bytes)//4-1 %cycle
+      textword(i)=1
+   %repeat
+%end
+
+%routine marknames(%longinteger base,%integer limit,native)
+%constintegerarray prefixes(1:14)=5,4,0,4,0,0,2,2,3,4,0,0,0,0
+%integer ldata,i,link,next,steps
+   ldata=fileword(base,24,native)
+   %unless 32<=ldata<=limit-60 %and ldata&3=0 %then reject("invalid load-data")
+   %unless fileword(base,ldata,native)=14 %then reject("invalid load-data count")
+   %for i=1,1,14 %cycle
+      %continue %if prefixes(i)=0
+      link=fileword(base,ldata+4*i,native);steps=0
+      %while link#0 %cycle
+         %unless ldata+60<=link<=limit-4*prefixes(i)-4 %and link&3=0 %then reject("invalid entry link")
+         next=fileword(base,link,native)
+         marktext(base,link+4*prefixes(i),limit)
+         link=next;steps=steps+1
+         %unless steps<=limit//8 %then reject("cyclic entry list")
+      %repeat
+   %repeat
+%end
+
+%routine convert(%longinteger base,%integer size)
+%integer i,v
+%if XIMPLITTLEENDIAN=1 %start
+   %for i=0,4,size-4 %cycle
+      %continue %if textword(i//4)#0
+      v=integer(base+i)
+      integer(base+i)=(v>>24)&255!(v>>8)&x'FF00'!(v<<8)&x'FF0000'!v<<24
+   %repeat
+%finish
+%end
+
+%longintegerfn readfile(%string(255) path,%integername size)
+%longinteger base,bytes
+%integer fd,n,flag
+   fd=unix open(path,0)
+   %unless fd>=0 %then reject("cannot open ".path)
+   bytes=unix length(fd)
+   %unless 32<=bytes<=maximum %and bytes&3=0 %then reject("invalid file size")
+   size<-bytes
+   base=addr(unix allocate(bytes))
+   %unless base#0 %then reject("cannot allocate input")
+   n=unix read at(fd,byteinteger(base),size,0)
+   flag=unix close(fd)
+   %unless n=size %and flag=0 %then reject("cannot read ".path)
+   %result=base
+%end
+
+%routine connectfile(%string(255) path,%integer mode,hole,prot,%c
+   %byteintegername address,
+   %integername kind,start,end,flag)
+%integer map,i,offset,length,ldata
+   %unless mode=0 %and hole=0 %and prot=0 %then reject("unsupported connect mode")
+   inputbase=readfile(path,inputsize)
+   end=beword(inputbase,0);start=beword(inputbase,4);kind=beword(inputbase,12)
+   %unless start=32 %and start<=end<=inputsize %and kind=1 %then reject("invalid object header")
+   map=beword(inputbase,28)
+   %unless 32<=map<=end-124 %and map&3=0 %then reject("invalid object map")
+   %unless beword(inputbase,map)=10 %then reject("expected ten-area object")
+   %for i=1,1,10 %cycle
+      offset=beword(inputbase,map+4+12*(i-1))
+      length=beword(inputbase,map+8+12*(i-1))
+      %unless 0<=length<=map %and 0<=offset<=map-length %then reject("invalid object area")
+      %if (i=3 %or i=7 %or i=8 %or i=9) %and length#0 %then reject("SUBFIX requires consolidated GLA")
+   %repeat
+   marknames(inputbase,end,0)
+   ldata=beword(inputbase,24)
+   %for i=1,1,14 %cycle
+      %if i=1 %or i=4 %or i=7 %or i=9 %or i=14 %then %continue
+      %if beword(inputbase,ldata+4*i)#0 %then reject("unsupported load-data list")
+   %repeat
+   convert(inputbase,inputsize)
+%if XIMPLP64=1 %start
+   longinteger(addr(address))=inputbase
+%finish %else %start
+   integer(addr(address))<-inputbase
+%finish
+   flag=0
+%end
+
+%routine outputfile(%string(255) path,%integer size,hole,prot,
+   %byteintegername address,%integername flag)
+   %unless 32<=size<=maximum %and hole=0 %and prot=0 %then reject("invalid output size")
+   outputpath=path;outputsize=size
+   outputbase=addr(unix allocate(size))
+   %if outputbase=0 %then reject("cannot allocate output")
+   unix zero(byteinteger(outputbase),size)
+   integer(outputbase)=32;integer(outputbase+4)=32;integer(outputbase+8)=size
+%if XIMPLP64=1 %start
+   longinteger(addr(address))=outputbase
+%finish %else %start
+   integer(addr(address))<-outputbase
+%finish
+   flag=0
+%end
+
+%if XIMPLP64=1 %start
+%externalroutine subfixconnect %alias "SUBFIX#CONNECT"(%string(255) path,%integer mode,hole,prot,
+   %longintegername address,%integername kind,start,end,flag)
+   connectfile(path,mode,hole,prot,byteinteger(addr(address)),kind,start,end,flag)
+%end
+%externalroutine subfixoutfile %alias "SUBFIX#OUTFILE"(%string(255) path,%integer size,hole,prot,
+   %longintegername address,%integername flag)
+   outputfile(path,size,hole,prot,byteinteger(addr(address)),flag)
+%end
+%finish
+%if XIMPLP64=0 %start
+%externalroutine subfixconnect %alias "SUBFIX#CONNECT"(%string(255) path,%integer mode,hole,prot,
+   %integername address,%integername kind,start,end,flag)
+   connectfile(path,mode,hole,prot,byteinteger(addr(address)),kind,start,end,flag)
+%end
+%externalroutine subfixoutfile %alias "SUBFIX#OUTFILE"(%string(255) path,%integer size,hole,prot,
+   %integername address,%integername flag)
+   outputfile(path,size,hole,prot,byteinteger(addr(address)),flag)
+%end
+%finish
+
+%externalroutine subfixtrim %alias "SUBFIX#TRIM"(%string(255) path,%integername flag)
+%integer size
+   %unless path=outputpath %and outputbase#0 %then reject("invalid trim")
+   size=(integer(outputbase)+4095)&\4095
+   %unless 32<=size<=outputsize %and size<=1<<20 %then reject("basefile exceeds 256-page segment")
+   outputsize=size;flag=0
+%end
+
+%externalroutine subfixdisconnect %alias "SUBFIX#DISCONNECT"(%string(255) path,%integername flag)
+%integer end,table,i,link,pos,next,n,fd
+   %unless path=outputpath %and outputbase#0 %then reject("invalid disconnect")
+   end=integer(outputbase)
+   marknames(outputbase,end,1)
+   table=integer(outputbase+end-4)
+   %unless 32<=table<=end-1020 %and table&3=0 %then reject("invalid loader table")
+   %for i=0,1,251 %cycle
+      link=integer(outputbase+table+4*i);n=0
+      %while link>0 %cycle
+         pos=table+link
+         marktext(outputbase,pos,end)
+         pos=pos+(byteinteger(outputbase+pos)+4)&\3
+         %unless pos<=end-8 %then reject("invalid loader entry")
+         next=integer(outputbase+pos+4)
+         link=next;n=n+1
+         %if n>end//8 %then reject("cyclic loader table")
+      %repeat
+   %repeat
+   convert(outputbase,outputsize)
+   fd=unix open(path,1)
+   %if fd<0 %then reject("cannot create ".path)
+   n=unix write at(fd,byteinteger(outputbase),outputsize,0)
+   flag=unix truncate(fd,outputsize)
+   i=unix close(fd)
+   %unless n=outputsize %and flag=0 %and i=0 %then reject("cannot write ".path)
+   flag=0
+%end
+
+%externalintegerfn subfix searchscl(%string(31) entry,%integername code,gla,ep,pword)
+%integer lo,hi,i,pos
+   lo=0;hi=sctcount-1
+   %while lo<=hi %cycle
+      i=(lo+hi)>>1;pos=sctstart+48*i
+      %if string(directorbase+pos)=entry %start
+         code=beword(directorbase,pos+32);gla=beword(directorbase,pos+36)
+         ep=beword(directorbase,pos+40);pword=beword(directorbase,pos+44)
+         %result=32
+      %finish
+      %if string(directorbase+pos)>entry %then hi=i-1 %else lo=i+1
+   %repeat
+   code=0;gla=0;ep=0;pword=0
+   %result=0
+%end
+
+%externalintegerfn subfix director stamp
+   %result=stamp
+%end
+
+%externalintegerfn main %alias "main"(%integer argc,%byteintegername argv)
+%integer status,flag,sct,i,pos
+%string(255) source,director,destination
+   %unless argc=4 %start
+      printstring("usage: subfix object director output");newline
+      %result=2
+   %finish
+   status=-1
+   %begin
+      %on %event 1,4,6,9 %start
+         selectoutput(0);printstring("SUBFIX host event ");write(event,1);newline
+         status=1
+      %finish
+      %if status=-1 %start
+      source=unix argument(argv,argc,1);director=unix argument(argv,argc,2)
+      destination=unix argument(argv,argc,3)
+      %if source=destination %or director=destination %then reject("output must differ from inputs")
+      flag=hostbegin
+      %if flag#0 %then reject("cannot initialize host services")
+      directorbase=readfile(director,directorsize)
+      sct=beword(directorbase,12)
+      %unless 32<=sct<=directorsize-32 %then reject("invalid Director SCT")
+      sctcount=beword(directorbase,sct)-1
+      sctstart=sct+beword(directorbase,sct+8)
+      stamp=beword(directorbase,sct+12)
+      %unless 0<sctcount<=256 %and 32<=sctstart<=directorsize-48*sctcount %then reject("invalid Director entries")
+      %for i=0,1,sctcount-1 %cycle
+         pos=sctstart+48*i
+         %unless 0<byteinteger(directorbase+pos)<=31 %then reject("invalid Director name")
+         %if i>0 %and string(directorbase+pos-48)>=string(directorbase+pos) %then reject("unordered Director entries")
+      %repeat
+      flag=hostparameter("file",source)
+      flag=flag!hostparameter("outfile",destination)
+      flag=flag!hostparameter("list",destination.".log")
+      %if flag#0 %then reject("cannot set command parameters")
+      subfix
+      status=1
+      %if hostcomregmap(24)=0 %then status=0
+      %finish
+   %end
+   unix free(byteinteger(inputbase));unix free(byteinteger(outputbase))
+   unix free(byteinteger(directorbase))
+   flag=hostend
+   %if flag#0 %then status=1
+   %result=status
+%end
+%endoffile
