@@ -1060,7 +1060,7 @@ l1:
 
 !................................. strip printing .............................
 
-%routine strip(%integer framesize, striplength, stripn)
+%routine format strips(%integer framesize, striplength, stripn)
 %byte %integer %array frame(0:framesize)
 %integer frameadr
 %integer stripwidth, stripsize
@@ -1227,7 +1227,7 @@ l1:
          ! cumulative totals already printed if p set
          j = uinfi(15)//max print length; ! stripn to accomodate widest name
          j = 1 %if j<1
-         strip(max strip length*uinfi(15), max strip length-pos, j)
+         format strips(max strip length*uinfi(15), max strip length-pos, j)
       %finish
    %finish
 %end;                                    ! generate names

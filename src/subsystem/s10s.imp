@@ -370,7 +370,7 @@ W, I, N, D, O, W, '(', i, r, s, r, i, r, i, r, i, r, i, r, i, r, i, w, ')',
 
 !-----------------------------------------------------------------------
 
-%integerfn type(%string(255)file)
+%integerfn file type(%string(255)file)
 
 %integer j, type
 
@@ -1939,7 +1939,7 @@ sw(20):   { pop }
    %result = 0
 
 sw(21):   { filetype }
-   w_i = type(parm(1)_s)
+   w_i = file type(parm(1)_s)
    %result = 0
 
 sw(22):   { intpt }

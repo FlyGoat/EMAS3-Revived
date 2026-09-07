@@ -211,7 +211,7 @@
 
 !-------------------------------- ALIAS ----------------------------------------
 
-%external %routine alias %alias "EMAS#ALIAS"
+%external %routine alias command %alias "EMAS#ALIAS"
 
 %integer flag
 %string (255) name, alias
