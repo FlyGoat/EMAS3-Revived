@@ -44,6 +44,7 @@ The outputs are:
 | `build/executives/imailer` | Mailer image |
 | `build/executives/iftrans` | File-transfer image |
 | `build/fixers/fix-image` | Shared tool for all archived IMP image fixers |
+| `build/subsystem/basefile` | Interactive subsystem with built-in command aliases |
 
 `make host-driver` builds the hosted compiler. To compile your own
 IMP source to an IBM object file, use:

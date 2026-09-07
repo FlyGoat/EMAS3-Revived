@@ -60,6 +60,7 @@ def run_session(
     expected=(),
     breakpoint=None,
     inspections=(),
+    screen_callback=None,
 ):
     if command_wait is None:
         command_wait = wait
@@ -111,10 +112,14 @@ def run_session(
             process.stdin.flush()
             console.receive(wait)
             screens.append("IPL\n" + console.text())
+            if screen_callback is not None:
+                screen_callback("IPL", console.text())
             for command in commands:
                 console.enter(command)
                 console.receive(command_wait)
                 screens.append(command + "\n" + console.text())
+                if screen_callback is not None:
+                    screen_callback(command, console.text())
         finally:
             try:
                 if console is not None:

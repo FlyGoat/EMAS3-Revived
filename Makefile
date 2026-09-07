@@ -25,4 +25,4 @@ include mk/subsystem.mk
 include mk/disks.mk
 
 .PHONY: system-images
-system-images: supervisor-image loader-image director-image executive-images
+system-images: supervisor-image loader-image director-image executive-images subsystem-image
