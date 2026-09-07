@@ -136,8 +136,10 @@
 %constantinteger execute    = x'0030000c'
 %constantinteger exreply    = (my sno<<16)!3
 !
-%constinteger xxshift=6
-%constinteger xxmask=x'3f'
+! Use 14-bit binary SBA addresses. Raw six-bit pairs are interpreted as
+! binary addresses by standard TN3270 terminals (1840 became 7216).
+%constinteger xxshift=8
+%constinteger xxmask=x'ff'
 %constantinteger maxbottom = 5
 %constantbyteintegerarray bottom(1:maxbottom) = %c
 wcc0,sba,rba>>xxshift,rba&xxmask,ic

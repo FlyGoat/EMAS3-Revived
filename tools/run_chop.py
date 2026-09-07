@@ -98,7 +98,7 @@ def run_session(
                         f"Hercules exited; see {directory / f'{name}.log'}"
                     )
                 try:
-                    console = Console(port=port, legacy_12bit=True)
+                    console = Console(port=port)
                     break
                 except ConnectionRefusedError:
                     if time.monotonic() >= deadline:

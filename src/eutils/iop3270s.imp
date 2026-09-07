@@ -42,8 +42,9 @@
 !
 ! 3270 data stream orders
 !
-%constinteger xxshift=6
-%constinteger xxmask=x'3f'
+! Standard 14-bit binary SBA addresses
+%constinteger xxshift=8
+%constinteger xxmask=x'ff'
 %constantbyteinteger ic     = x'13';    ! Insert Cursor
 %constantbyteinteger sba    = x'11';    ! Set Buffer Address
 %constantbyteinteger sf     = x'1d';    ! Start Field
