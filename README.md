@@ -15,13 +15,8 @@ Extract it into a new directory and start Hercules from that directory so the
 configuration can find the disks:
 
 ```sh
-mkdir emas3-release
-tar -xzf emas3-revived.tar.gz -C emas3-release
-cd emas3-release
-HERCULES_RC=/dev/null "${HERCULES:-hercules}" -f hercules.cnf
+hercules -f hercules.cnf
 ```
-
-If Hercules is not on PATH, set `HERCULES` to its executable path first.
 
 1. Connect your TN3270 terminal to `127.0.0.1:3272`.
 2. Enter `ipl 150` at the Hercules console.
