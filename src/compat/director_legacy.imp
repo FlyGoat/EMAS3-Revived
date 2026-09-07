@@ -1,0 +1,12 @@
+! SPDX-License-Identifier: MIT
+! Copyright (c) 2026 Jiaxun Yang <jiaxun.yang@flygoat.com>
+
+! Compatibility for older executives on the newer Director/supervisor pair.
+! director/new/b01conn.imp retains the retired DMOVETOFILE implementation
+! as comments. It returns flag 93 when COM_SUPVSN > "11A", before any write.
+! Our supervisor is newer than that boundary. Do not silently write through
+! a read-only connection or claim that the obsolete picture update succeeded.
+%externalintegerfn dmovetofile(%integername length,from,to)
+  %result=93
+%end
+%endoffile

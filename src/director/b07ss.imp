@@ -1,0 +1,2411 @@
+!TITLE  Director version of SS
+%endoflist
+%include "C03FORMATS"
+!
+!
+%CONSTINTEGER TOPNNT = 1364
+%CONSTINTEGER TOPSI = 32
+!
+!
+!
+%CONSTINTEGERARRAY LEN(1:6) = 255, 39, 26, 19, 15, 12
+!
+!
+!
+      %RECORDFORMAT %C
+PRMSF(%STRING(6)USER, %BYTEINTEGER PRM)
+      %RECORDFORMAT %C
+PRMF(%INTEGER N, OWNP, EEP, S, %RECORD(PRMSF)%ARRAY PRMS(0:15))
+!
+!
+!
+      %externalintegerfnspec %c
+decode pgs(%integer code)
+      %EXTERNALINTEGERFNSPEC %C
+DAVFSYS(%INTEGERNAME N, %INTEGERARRAYNAME A)
+      %EXTERNALINTEGERFNSPEC %C
+DCHACCESS(%STRINGNAME FILE INDEX, FILE, %INTEGERNAME FSYS, NEWMODE)
+      %EXTERNALINTEGERFNSPEC %C
+DCHSIZE(%STRINGNAME FILE INDEX, FILE, %INTEGERNAME FSYS, NKB)
+      %EXTERNALINTEGERFNSPEC %C
+DCONNECT(%STRINGNAME FILE INDEX, FILE, %INTEGERNAME FSYS, MODE, SEG, GAP)
+      %EXTERNALINTEGERFNSPEC %C
+DCREATE(%STRINGNAME FILE INDEX, FILE, %INTEGERNAME FSYS, NKB, TYPE, DA)
+      %EXTERNALINTEGERFNSPEC %C
+DDELUSER(%STRINGNAME FILE INDEX, %INTEGERNAME FSYS)
+      %EXTERNALINTEGERFNSPEC %C
+DDESTROY(%STRINGNAME FILE INDEX, FILE, DATE, %INTEGERNAME FSYS, TYPE)
+      %EXTERNALINTEGERFNSPEC %C
+DDISCONNECT(%STRINGNAME FILE INDEX, FILE, %INTEGERNAME FSYS, DSTRY)
+      %EXTERNALINTEGERFNSPEC %C
+DDONATE(%STRINGNAME USER, %INTEGERNAME FSYS, UNITS)
+      %EXTERNALINTEGERFNSPEC %C
+DERROR(%STRINGNAME TEXT)
+      %EXTERNALINTEGERFNSPEC %C
+DFILENAMES(%STRINGNAME GROUP, %INTEGERNAME FILENO, MAXREC, NFILES, FSYS, TYPE, %RECORD(OINFF)%ARRAYNAME INF)
+      %EXTERNALINTEGERFNSPEC %C
+DFINFO(%STRINGNAME FILE INDEX, FILE, %INTEGERNAME FSYS, %STRINGNAME S, %INTEGERARRAYNAME I)
+      %EXTERNALINTEGERFNSPEC %C
+DFSTATUS(%STRINGNAME FILE INDEX, FILE, %INTEGERNAME FSYS, ACT, VALUE)
+      %EXTERNALINTEGERFNSPEC %C
+DFSYS(%stringname fileindex, %INTEGERNAME FSYS)
+      %EXTERNALINTEGERFNSPEC %C
+DGETDA(%STRINGNAME FILE INDEX, FILE, %INTEGERNAME FSYS, %INTEGERARRAYNAME I)
+      %EXTERNALINTEGERFNSPEC %C
+DGETINDEXES(%INTEGERNAME FSYS, N, %STRING(19)%ARRAYNAME S)
+      %EXTERNALINTEGERFNSPEC %C
+DGETINDEXES2(%INTEGERNAME FSYS, N, %RECORD(GETINDEXF)%ARRAYNAME INDEX)
+      %EXTERNALINTEGERFNSPEC %C
+DNEWARCHINDEX(%STRINGNAME FILE INDEX, %INTEGERNAME FSYS, NKB)
+      %EXTERNALINTEGERFNSPEC %C
+DNEWGEN(%STRINGNAME FILE INDEX, FILE, NEWGEN, %INTEGERNAME FSYS)
+      %EXTERNALINTEGERFNSPEC %C
+DNEWUSER(%STRINGNAME FILE INDEX, %INTEGERNAME FSYS, NKB)
+      %EXTERNALINTEGERFNSPEC %C
+DOFFER(%STRINGNAME FILE INDEX, OFFER TO, FILE, %INTEGERNAME FSYS)
+      %EXTERNALINTEGERFNSPEC %C
+DPERMISSION(%STRINGNAME FILE INDEX, USER, DATE, FILE, %INTEGERNAME FSYS, TYPE, ADR)
+      %EXTERNALINTEGERFNSPEC %C
+DPRG(%STRINGNAME FILE INDEX, FILE, %INTEGERNAME FSYS, %STRINGNAME LABEL, %INTEGERNAME SITE)
+      %EXTERNALINTEGERFNSPEC %C
+DPROCS(%INTEGERNAME N, %INTEGER ADR)
+      %EXTERNALINTEGERFNSPEC %C
+DRENAME(%STRINGNAME FILE INDEX, OLDNAME, NEWNAME, %INTEGERNAME FSYS)
+      %EXTERNALINTEGERFNSPEC %C
+DRENAMEINDEX(%STRINGNAME OLDNAME, NEWNAME, %INTEGERNAME FSYS)
+      %EXTERNALINTEGERFNSPEC %C
+DRESTORE(%STRINGNAME FILE INDEX, FILE, DATE, %INTEGERNAME FSYS, TYPE)
+      %EXTERNALINTEGERFNSPEC %C
+DSFI(%STRINGNAME FILE INDEX, %INTEGERNAME FSYS, TYPE, SET, %STRINGNAME S, %INTEGERARRAYNAME I)
+      %EXTERNALINTEGERFNSPEC %C
+DSYSAD(%INTEGERNAME FSYS, TYPE, ADR, RW)
+      %EXTERNALINTEGERFNSPEC %C
+DTRANSFER(%STRINGNAME FILE INDEX1, FILE INDEX2, FILE1, FILE2, %INTEGERNAME FSYS1, FSYS2, TYPE)
+      %EXTERNALINTEGERFNSPEC %C
+DUNPRG(%STRINGNAME FILE INDEX, FILE, %INTEGERNAME FSYS, %STRINGNAME LABEL, %INTEGERNAME SITE)
+      %EXTERNALINTEGERFNSPEC %C
+DUSERINDEXES(%STRINGNAME USER, %INTEGERNAME FSYS, N, %RECORD(USERINDEXF)%ARRAYNAME INDEX)
+!
+!
+!
+      %EXTERNALINTEGERFNSPEC %C
+CREATE AND CONNECT(%STRING(19)FINDEX, %STRING(255)FILE,
+      %INTEGER FSYS, NKB, ALLOC, MODE,
+      %INTEGERNAME SEG, GAP)
+      %EXTERNALINTEGERFNSPEC %C
+FBASE2(%INTEGER FSYS, ADR)
+      %EXTERNALINTEGERFNSPEC %C
+FINDA(%STRING(19)INDEX, %INTEGERNAME FSYS, FINDAD, %INTEGER TYPE)
+      %EXTERNALSTRINGFNSPEC %C
+ITOTSN(%INTEGER I)
+      %EXTERNALINTEGERFNSPEC %C
+MAP FILE INDEX(%STRINGNAME INDEX, %INTEGERNAME FSYS, FINDAD, %STRING(63)TXT)
+      %EXTERNALROUTINESPEC %C
+PRINTSTRING(%STRING(255)S)
+      %EXTERNALROUTINESPEC %C
+PRINTSYMBOL(%INTEGER N)
+      %EXTERNALROUTINESPEC %C
+REPLY TO(%INTEGER SRCE, %STRING(255)S)
+      %EXTERNALINTEGERFNSPEC %C
+STOI2(%STRING(255)S, %INTEGERNAME I2)
+      %EXTERNALSTRINGFNSPEC %C
+UNPACKD(%INTEGER D)
+      %EXTERNALSTRINGFNSPEC %C
+UNPACKDT(%INTEGER DT)
+      %EXTERNALROUTINESPEC %C
+VV(%INTEGER SEMADDR, SEMANO)
+      %EXTERNALROUTINESPEC %C
+WRITE(%INTEGER N, L)
+!
+!
+!
+      %EXTERNALINTEGERFNSPEC %C
+DBITMAP2(%INTEGERNAME LO, HI, %INTEGER FSYS)
+      %EXTERNALROUTINESPEC %C
+DDUMP(%INTEGER A, B, C, D)
+      %EXTERNALSTRINGFNSPEC %C
+DERRS(%INTEGER I)
+      %EXTERNALROUTINESPEC %C
+MOVE(%INTEGER LENGTH, FROM, TO)
+      %EXTERNALSTRINGFNSPEC %C
+ITOS(%INTEGER VALUE)
+      %EXTERNALSTRINGFNSPEC %C
+HTOS(%INTEGER VALUE, PLACES)
+      %EXTERNALROUTINESPEC %C
+UCTRANSLATE(%INTEGER AD, LEN)
+%EXTERNALINTEGERFNSPEC S11OK(%STRINGNAME S11)
+
+!-----------------------------------------------------------------
+
+%INTEGERFN GNOK(%STRINGNAME GN)
+%INTEGER J, CH
+      %RESULT = 11 %UNLESS LENGTH(GN) = 6
+      UCTRANSLATE(ADDR(GN)+1, 6)
+      %CYCLE J = 1, 1, 6
+         CH = CHARNO(GN, J)
+         %RESULT = 11 %UNLESS 'A' <= CH <= 'Z' %OR '0' <= CH <= '9' %OR CH = '?'
+      %REPEAT
+      %RESULT = 0
+%END; ! GNOK
+!
+!-----------------------------------------------------------------------
+!
+%EXTERNALINTEGERFNSPEC UNOK(%STRINGNAME USER)
+%EXTERNALINTEGERFNSPEC UI(%STRINGNAME S, UNA, INA)
+%EXTERNALINTEGERFNSPEC FORGOK(%STRINGNAME S, TERM)
+%EXTERNALINTEGERFNSPEC FNOK(%STRINGNAME F, TERM)
+%EXTERNALINTEGERFNSPEC UIG(%STRINGNAME S, UNAME, INDEX, GRP)
+%EXTERNALROUTINESPEC WRSNT(%STRING(255)S, %INTEGER N, TYPE)
+%EXTERNALROUTINESPEC WRS(%STRING (255) S1)
+%EXTERNALROUTINESPEC WRSS(%STRING (255) S1, S2)
+%EXTERNALROUTINESPEC WRSN(%STRING (255) S1, %INTEGER N)
+%ROUTINE WRSNS(%STRING (255) S1, %INTEGER N, %STRING (255) S2)
+      WRSNT(S1, N, 5)
+      WRS(S2)
+%END
+!
+!
+!
+%CONSTSTRING(80)%ARRAY PARAMETER TABLE(1:65) = %C
+
+{ each entry gives: prompt ! default ! helptext ! template }
+
+      { the templates work as follows:                   }
+      {  for integers:                                   }
+      {   101, -1 <= n <= 99                             }
+      {   102, 0 <= n <= 99                              }
+      {   103, n >= 0                                    }
+      {   104, any number                                }
+
+      {  for strings:                                    }
+      {     1, a user name                               }
+      {     2, an 11 ch file name                        }
+      {     3, an upper case string                      }
+      {     4, a file index                              }
+      {     5, a full file name                          }
+      {     6, a file or group name                      }
+      {     7, a full group name (starting with user     }
+      {     8, file, group or null                       }
+      {     9, a user 'group', eg ERCC??                 }
+      {    10, any string                                }
+      {    11, the FUNCTION                              }
+      {    12, 'last' user                               }
+
+{01}  "Function: !!*1!11",                       {complicated HELP info}
+{02}  "User: !?!6 character user name!1",
+{03}  "File: !?!!5",
+{04}  "Fsys: !-1!0 <= Fsys < 100!101",           { -1 to 99 }
+{05}  "Mode: !1!*2!104",
+{06}  "NKB: !4!Number of Kbytes!103",
+{07}  "APF: !0!X'EWR'!104",
+{08}  "Seg: !0!seg < 256!103",
+{09}  "Gap: !0!no of segs to reserve!103",
+{10}  "Type: !0!1=temp 2=Vtemp 4=0@create 8=cherish!103",  {for create}
+{11}  "Type: !0!0=on-line 1=archive 2=backup!103",         {for dfilenames and destroy}
+{12}  "Date: !!reqd only if file not on-line!10",
+{13}  "Destroy: !0!1 for DESTROY after disconnecting!103",
+{14}  "Units: !10000!hundredths of pence, default 1 pound!103",
+{15}  "Filenum: !0!from where to start (off-line files)!103",
+{16}  "Act: !!*3!103",         {for dfstatus}
+{17}  "Value: !0!Depends on Act!104",
+{18}  "From Index: !?!!4",
+{19}  "To   Index: !?!!4",
+{20}  "From File: !?!!5",
+{21}  "To   File: !?!!5",
+{22}  "From Fsys: !-1!!101",
+{23}  "To   Fsys: !!!102",
+{24}  "Offer to: !!!10",
+{25}  "Type: !!*4!103",         {for dpermission}
+{26}  "Type: !!0=Accept,1=Transfer,2=Transfer & resite,3=Copy!103",
+{27}  "Type: !!*5!103",          {for DSFI}
+{28}  "Permission: !5!1=read,2=write,4=execute!104",
+{29}  "Set: !0!0=Get, 1=Set!103",
+{30}  "Option file: !SS#OPT!!10",
+{31}  "Type: !0!0=archive!103",       {for drestore}
+{32}  "Label: !!6 character disc label!10",
+{33}  "Site: !1!disc site eg X2C0!103",
+{34}  "Oldname: !!!10",
+{35}  "Newname: !!!10",
+{36}  "Press return: !-999!just press it! !10",
+{37}  "Full: !*!non-asterisk for less output!10",
+{38}  "Fsys: !?!0<= Fsys <= 99!102",
+{39}  "Index Kb: !4!4 <= NKB <= 32!103",
+{40}  "Max File: !1024!max file size in Kb!103",
+{41}  "Max Kb: !2048!max perm space!103",
+{42}  "Max I procs: !1!no of interactive procs!103",
+{43}  "Max B procs: !1!no of background procs!103",
+{44}  "Max T procs: !2!total inter+back!103",
+{45}  "New index Kb: !4!2 <= Kb <= 32!103",
+{46}  "How many: !1!1 <= n <= 100!102",
+{47}  "O/p file or device: !.OUT!!10",
+{48}  "What: !?!name of dsfi field!103",
+{49}  "Page no: !?!positive number!103",
+{50}  "Users: !?!user name with ?s!9",
+{51}  "Options: !CG!C, G or CG!10",
+{52}  "File index: !?!user or user{index}!4",
+{53}  "File or Group: !?!A:B or A:B:!6",
+{54}  "From: !?!!6",
+{55}  "To:   !?!!6",
+{56}  "Group: !?!!7",
+{57}  "File or Group: !!!8",
+{58}  "To: !?!user or user group!9",
+{59}  "!?!no help!104",  { special for DSFI }
+{60}  "First user: !?!ABCDnn!12",
+{61}  "Last user:  !?!ABCDpp!13",
+{62}  "Surname: !?!Inits.Surname!10",
+{63}  "Fpass: !FORE!4 chs!14",
+{64}  "Bpass: !BACK!4 chs!14",
+{65}  "Delivery: !?!!10"
+!
+!
+!
+%CONSTINTEGER FUNCTION = 1
+%CONSTINTEGER USER = 2
+%CONSTINTEGER FILE = 3
+%CONSTINTEGER FSYS = 4
+%CONSTINTEGER MODE = 5
+%CONSTINTEGER NKB = 6
+%CONSTINTEGER APF = 7
+%CONSTINTEGER SEG = 8
+%CONSTINTEGER GAP = 9
+%CONSTINTEGER TYPECR = 10
+%CONSTINTEGER TYPEDE = 11
+%CONSTINTEGER SSDATE = 12
+%CONSTINTEGER DSTROY = 13
+%CONSTINTEGER FUNDS = 14
+%CONSTINTEGER FILENUM = 15
+%CONSTINTEGER ACTFSTAT = 16
+%CONSTINTEGER VALUE = 17
+%CONSTINTEGER FROM U = 18
+%CONSTINTEGER TO U = 19
+%CONSTINTEGER FROM F = 20
+%CONSTINTEGER TO F = 21
+%CONSTINTEGER FROM FSYS = 22
+%CONSTINTEGER TO FSYS = 23
+%CONSTINTEGER OFFER TO = 24
+%CONSTINTEGER TYPE PRM = 25
+%CONSTINTEGER TYPE TR = 26
+%CONSTINTEGER TYPE DSFI = 27
+%CONSTINTEGER PERMISSION = 28
+%CONSTINTEGER SETDSFI = 29
+%CONSTINTEGER OPTNFILE = 30
+%CONSTINTEGER TYPE REST = 31
+%CONSTINTEGER LABEL = 32
+%CONSTINTEGER SITEQ = 33
+%CONSTINTEGER OLDNAME = 34
+%CONSTINTEGER NEWNAME = 35
+%CONSTINTEGER PRESS RETURN = 36
+%CONSTINTEGER FULLQ = 37
+%CONSTINTEGER FSYSQ = 38
+%CONSTINTEGER INDEXKBQ = 39
+%CONSTINTEGER MAXFILEQ = 40
+%CONSTINTEGER MAXKBQ = 41
+%CONSTINTEGER MAXIQ = 42
+%CONSTINTEGER MAXBQ = 43
+%CONSTINTEGER MAXTQ = 44
+%CONSTINTEGER NEWINDEXKBQ = 45
+%CONSTINTEGER HOWMANYQ = 46
+%CONSTINTEGER OUTPUTQ = 47
+%CONSTINTEGER WHATSFIQ = 48
+%CONSTINTEGER PAGENOQ = 49
+%CONSTINTEGER USERSQ = 50
+%CONSTINTEGER OPTIONSQ = 51
+%CONSTINTEGER FILE INDEX = 52
+%CONSTINTEGER FILE OR GROUP = 53
+%CONSTINTEGER FROMFG = 54
+%CONSTINTEGER TOFG = 55
+%CONSTINTEGER GROUP = 56
+%CONSTINTEGER FILEORGRPQ = 57
+%CONSTINTEGER TOQ = 58
+%CONSTINTEGER FIRSTUQ = 60
+%CONSTINTEGER LASTUQ = 61
+%CONSTINTEGER SURNAMEQ = 62
+%CONSTINTEGER FPASSQ = 63
+%CONSTINTEGER BPASSQ = 64
+%CONSTINTEGER DELIVERYQ = 65
+
+
+
+%CONSTINTEGER TOPFN = 38
+%CONSTSTRING(31)%ARRAY AVAILABLE FN(1:TOPFN) = %C
+"CHACCESS",
+"CHSIZE",
+"CONNECT",
+"CREATE",
+"DELUSER",
+"DEREGISTER",
+"DESTROY",
+"DISCONNECT",
+"DISCS",
+"DONATE",
+"DUMPI",
+"FBASE",
+"FILENAMES",
+"FINFO",
+"FSTATUS",
+"FSYS",
+"GETDA",
+"NEWGEN",
+"NEWUSER",
+"OFFER",
+"OPTIONS",
+"OPTNNT",
+"PERMISSION",
+"PERMS",
+"PRG",
+"PROBE",
+"PROCS",
+"REGISTER",
+"RENAME",
+"RENAMEINDEX",
+"RESTORE",
+"SETPASSWORD",
+"SFI",
+"SUBMIT",
+"TRANSFER",
+"UNPRG",
+"USERS",
+"WHO"
+!
+!
+!
+%CONSTBYTEINTEGERARRAY PARAM REQD(1:16, 1:TOPFN) = %C
+FILEINDEX, FILE, FSYS, MODE, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, { 1 DCHACCESS }
+FILEINDEX, FILE, FSYS, NKB, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, { 2 DCHSIZE }
+FILEINDEX, FILE, FSYS, MODE, SEG, GAP, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, { 3 DCONNECT }
+FILEINDEX, FILEORGROUP, FSYS, NKB, TYPECR, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, { 4 DCREATE }
+USER, FSYS, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, { 5 DELUSER }
+FIRSTUQ, LASTUQ, FSYS, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, { 6 DEREGISTER }
+FILEINDEX, FILEORGROUP, SSDATE, FSYS, TYPEDE, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, { 7 DESTROY }
+FILEINDEX, FILE, FSYS, DSTROY, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, { 8 DISCO }
+FSYS, FULLQ, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, { 9 DISCS }
+USER, FSYS, FUNDS, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, { 10 DONATE }
+FILEINDEX, FSYS, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, { 11 DUMPI }
+FSYS, 0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, { 12 FBASE }
+GROUP, FSYS, TYPEDE, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, { 13 FILENAMES }
+FILEINDEX, FILEORGROUP, FSYS, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, { 14 FINFO }
+FILEINDEX, FILEORGROUP, FSYS, ACTFSTAT, VALUE, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, { 15 FSTATUS }
+FILEINDEX, 0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, { 16 FSYS }
+FILEINDEX, FILE, FSYS, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, { 17 DGETDA }
+FILEINDEX, TOF, FROMF, FSYS, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, { 18 NEWGEN }
+FILEINDEX, FSYS, NKB, SURNAMEQ, FPASSQ, BPASSQ, DELIVERYQ, MAXFILEQ,  MAXKBQ, MAXIQ, MAXBQ, MAXTQ, 0, 0, 0, 0, { 19 NEWUSER }
+FILEINDEX, OFFERTO, FILE, FSYS, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, { 20 OFFER }
+0, 0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, { 21 OPTIONS }
+FSYS, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, { 22 OPTNNT }
+FILEINDEX, TOQ, SSDATE, FILEORGRPQ, FSYS, TYPEPRM, PERMISSION, 0,  0, 0, 0, 0, 0, 0, 0, 0, { 23 PERMISSION }
+FILEINDEX, 0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, { 24 PERMS }
+USER, FILE, FSYS, LABEL, SITEQ, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, { 25 PRG }
+FILEINDEX, FSYS, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, { 26 PROBE }
+0, 0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, { 27 PROCS }
+FIRSTUQ, LASTUQ, FSYS, NKB, SURNAMEQ, FPASSQ, BPASSQ, DELIVERYQ, MAXFILEQ, MAXKBQ, MAXIQ, MAXBQ, MAXTQ, 0, 0, 0, { 28 REGISTER }
+FILEINDEX, FROMFG, TOFG, FSYS, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, { 29 RENAME }
+OLDNAME, NEWNAME, FSYS, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, { 30 RENAME INDEX }
+USER, FILE, SSDATE, FSYS, TYPEREST, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, { 31 RESTORE }
+0, 0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, { 32 SETPASSSWORD }
+FILEINDEX, FSYS, TYPEDSFI, SETDSFI, 59, 59, 59, 59,  0, 0, 0, 0, 0, 0, 0, 0, { 33 DSFI }
+0, 0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, { 34 SUBMIT }
+FROMU, FROMF, FROMFSYS, TOU, TOF, TOFSYS, TYPETR, 0,  0, 0, 0, 0, 0, 0, 0, 0, { 35 TRANSFER }
+USER, FILE, FSYS, LABEL, SITEQ, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, { 36 UNPRG }
+FSYS, 0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, { 37 USERS }
+USER, 0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0 { 38 WHO }
+!
+!
+!
+%CONSTINTEGER TOPDSFI = 44
+!
+%CONSTINTEGERARRAY NI(0:TOPDSFI) = %C   { 0 = string }
+       0, 0, 0, 0,-8,-2,-1, 1, 1,-9,    { >0 so many integers }
+       1, 1, 1,-2, 3, 1, 1, 1, 0, 0,    { <0 .......... but cannot reset }
+       2, 1,-1, 2, 1, 1, 1, 2, 1, 1,
+      -6, 2, 1, 1, 1, 0, 0, 0, 1, 0,
+       2, 1,-16,1, 0
+!
+%CONSTBYTEINTEGERARRAY T(0:TOPDSFI) = %C
+       0, 1, 2, 3, 4,16,18,19,20,21,
+      33,34,35,36,38,41,42,43,44,45,
+      46,48,49,50,52,53,54,55,57,58,
+      59,65,67,68,69,70,71,72,73,74,
+      75,77,78,94,95
+!
+%CONSTSTRING(15)%ARRAY TXT(0:95) = %C
+"Basefile",
+"Delivery",
+"Control file",
+"Data",
+"No of files",
+"FDs in use ",
+"Free FDs   ",
+"Index size ",
+"No SDs     ",
+"Free SDs   ",
+"No PDs     ",
+"Free PDs   ",
+"","","","",
+"","",
+"Last log-on",
+"ACR",
+"Dirvsn",
+"No of A files",
+"A Kbytes     ",
+"No of B files",
+"B Kbytes     ",
+"#ARCH Kb     ",
+"No FDs       ",
+"Free FDs     ",
+"No PDs       ",
+"Free PDs     ",
+"","","",
+"Stacksize",
+"MaxKb",
+"Max file size",
+"Cur I procs",
+"Cur B procs",
+"Imax",
+"Bmax",
+"Tmax",
+"Privacy",
+"Dirmon",
+"Sigmon",
+"I.Surname",
+"Logfile",
+"Kinstrs(int)  ",
+"Kinstrs(batch)",
+"Kinstrs(cur)",
+"Kinstrs(Dir)",
+"Ptrns(int)",
+"Ptrns(batch)",
+"Ptrns(cur)",
+"Kbytes(output)",
+"Kbytes(input) ",
+"Msecs(int)",
+"Msecs(batch)",
+"Msecs(cur)",
+"Connect time",
+"No of files",
+"Disc Kbytes",
+"Cherfiles  ",
+"CherKbytes ",
+"Tempfiles  ",
+"TempKbytes ",
+"Archfiles ",
+"ArchKbytes",
+"Session length",
+"Funds",
+"Gp Hldrs fsys",
+"Test SS",
+"Batch SS",
+"Group Holder",
+"Privileges",
+"Default LP",
+"Fdate",
+"Bdate",
+"Junk",
+"Iinstrs  ",
+"Binstrs  ",
+"Iptrns   ",
+"Bptrns   ",
+"Nkbout   ",
+"Nkbin    ",
+"Imsecs   ",
+"Bmsecs   ",
+"Connectt ",
+"Afiles   ",
+"Atotkb   ",
+"Files    ",
+"Totkb    ",
+"Cherfiles",
+"Cherkb   ",
+"Dapsecs  ",
+"Mailcount",
+"Supervisor"
+!
+!
+!
+!
+!
+!
+!-----------------------------------------------------------------------
+!
+%INTEGERFN HXSTOBIN(%STRING (29) S)
+! RESULT IS VALUE REPRESENTED BY UP TO 8 HEX DIGITS IN THE PARAM.
+! ERROR RESULT IS X80308030
+%INTEGER I, Q, L, AS, CH
+      AS = ADDR(S)
+      L = LENGTH(S)
+      %RESULT = X'80308030' %IF L > 8 %OR L = 0
+      I = 0
+      %CYCLE Q = 1, 1, L
+         CH = BYTEINTEGER(AS + Q)
+         CH = CH - 32 %IF CH >= 'a'
+         %RESULT = X'80308030' %UNLESS '0' <= CH <= '9' %OR 'A' <= CH <= 'F'
+         %IF CH > '9' %THEN CH = CH - 55 %ELSE CH = CH - 48
+         I = I << 4 ! CH
+      %REPEAT
+      %RESULT = I
+%END; ! HXSTOBIN
+!
+!-----------------------------------------------------------------------
+!
+%ROUTINE GIVEHELP(%INTEGER SRCE, %STRING(255)S, D)
+%INTEGER J, N
+%string(63)item
+%STRING(255)W
+%CONSTINTEGER TOPSW = 5
+%SWITCH SW(1:TOPSW)
+      %IF S = "" %OR CHARNO(S, 1) # '*' %START
+         W = S
+         %IF D = "" %THEN W = W . " the default is null" %C
+         %ELSEIF D = "?" %THEN W = W . " there is no default" %C
+         %ELSE W = W . " default is " . D
+         REPLY TO(SRCE, W)
+         %RETURN
+      %FINISH
+!
+      S -> ("*") . W
+      J = STOI2(W, N)
+      %RETURN %UNLESS J = 0 %AND 0 < N <= TOPSW
+      -> SW(N)
+SW(1):
+      W = ""
+      %CYCLE J = 1, 1, TOPFN
+         ITEM = AVAILABLE FN(J)
+         %IF W = "" %C
+         %THEN W = ITEM %C
+         %ELSE %IF LENGTH(W) + LENGTH(ITEM) < 39 %C
+         %THEN W = W . " " . ITEM %C
+         %ELSE REPLY TO(SRCE, W) %AND W = ITEM
+      %REPEAT
+      REPLY TO(SRCE, W)
+      %RETURN
+SW(2):
+      REPLY TO(SRCE, "The bits in MODE:")
+      REPLY TO(SRCE, "1=read   2=write")
+      REPLY TO(SRCE, "4=exec  8=wr shared")
+      REPLY TO(SRCE, "16=newcopy")
+      REPLY TO(SRCE, "128=process stack")
+      REPLY TO(SRCE, "256=Disco etc N/A")
+      REPLY TO(SRCE, "512=advisory seq")
+      REPLY TO(SRCE, "2**31=non-slaved")
+      %RETURN
+SW(3):              ! DFSTATUS
+      REPLY TO(SRCE, "Values for Act:")
+      REPLY TO(SRCE,"0 = Hazard  1 = Cherish")
+      REPLY TO(SRCE,"2 = Clear 'to-be-archived'")
+      REPLY TO(SRCE,"3 = Set   'to-be-archived'")
+      REPLY TO(SRCE,"4 = Make Perm 5 = Temp 6 = Vtemp")
+      REPLY TO(SRCE,"7 = Clear Private  8 = Set Private")
+      REPLY TO(SRCE,"16= Clear 'archive-inhibit'")
+      REPLY TO(SRCE,"17= Set   'archive-inhibit'")
+      REPLY TO(SRCE,"18= Set SS byte")
+      %RETURN
+SW(4):      ! DPERMISSION
+      REPLY TO(SRCE, "Type: 0=OWNP 1=EEP")
+      REPLY TO(SRCE, " 2=user to FILE list")
+      REPLY TO(SRCE, " 3=remove")
+      REPLY TO(SRCE, " 4=return list")
+      REPLY TO(SRCE, " 5=destroy")
+      REPLY TO(SRCE, " 6=user to INDX list")
+      REPLY TO(SRCE, " 7     8    9 etc")
+      REPLY TO(SRCE, "10=user's access")
+      %RETURN
+SW(5):      ! DSFI
+      W = ""
+      %CYCLE J = 0, 1, TOPDSFI
+         ITEM = ITOS(J)."=".TXT(T(J))
+         %IF W = "" %C
+         %THEN W = ITEM %C
+         %ELSE %IF LENGTH(W) + LENGTH(ITEM) < 39 %C
+         %THEN W = W . " " . ITEM %C
+         %ELSE REPLY TO(SRCE, W) %AND W = ITEM
+      %REPEAT
+      REPLY TO(SRCE, W)
+%END; ! GIVE HELP
+!
+!-----------------------------------------------------------------------
+!
+%ROUTINE ERROR(%STRING(255)TXT)
+%INTEGER J
+%STRING(255)MSG
+      J = DERROR(MSG)
+      WRSS(TXT, MSG)
+%END; ! ERROR
+!
+!-----------------------------------------------------------------------
+!
+%STRINGFN INTERPRET(%INTEGER B, %STRING(255)TEXTS, SEP)
+%STRING(31)TEXT
+%STRING(255)W
+      %IF B = 0 %C
+      %THEN W = "0" %C
+      %ELSE %START
+         W = ""
+         %CYCLE
+            TEXT = TEXTS %AND TEXTS = "" %UNLESS TEXTS -> TEXT . ("/") . TEXTS
+            %IF B < 0 %START
+               W = W . SEP %UNLESS W = ""
+               W = W . TEXT
+            %FINISH
+            B = B << 1
+         %REPEAT %UNTIL B = 0
+      %FINISH
+      %RESULT = W
+%END; ! INTERPRET
+!
+!-----------------------------------------------------------------------
+!
+%STRINGFN SWRITE(%INTEGER N, PLACES)
+%STRING(31)S
+      S = ITOS(N)
+      S = " " . S %WHILE LENGTH(S) <= PLACES
+      %RESULT = S
+%END; ! SWRITE
+!
+!-----------------------------------------------------------------------
+!
+%ROUTINE WRSU(%STRING (255) S, %INTEGER N)
+      PRINTSTRING(S)
+      WRSS(" FLAG =", DERRS(N))
+%END
+!
+!-----------------------------------------------------------------------
+!
+%INTEGERFN FILENAMES(%STRING(255)S, %RECORD(OINFF)%ARRAYNAME A,
+      %INTEGERARRAYNAME X, %INTEGERNAME TOTAL, PER, %INTEGER FSYS, TOP)
+!
+%CONSTINTEGER MASK = X'FFFF'
+!
+%ROUTINE SORT(%INTEGER XB, B, N)
+%INTEGER I, J, K, M, PJ, PK
+%STRING(255)SJ, SK
+!
+      %CYCLE I = 1, 1, N
+         X(XB+I) = (XB << 16) ! (B+I)
+      %REPEAT
+!
+      M = 1
+      M = M << 1 %WHILE M <= N
+      M = M - 1
+!
+      %CYCLE
+         M = M >> 1
+         %EXIT %IF M = 0
+         %CYCLE I = 1, 1, N-M
+            K = I
+            %WHILE K > 0 %CYCLE
+               J = K + M
+               PK = X(XB+K)
+               PJ = X(XB+J)
+               SJ = A(PJ & MASK)_NAME
+               UCTRANSLATE(ADDR(SJ)+1, LENGTH(SJ))
+               SK = A(PK & MASK)_NAME
+               UCTRANSLATE(ADDR(SK)+1, LENGTH(SK))
+               %EXIT %IF SK <= SJ
+               X(XB+K) = PJ
+               X(XB+J) = PK
+               K = K - M
+            %REPEAT
+         %REPEAT
+      %REPEAT
+%END
+!
+!
+%INTEGER I, MAX, J, NUM, N, P, NAME LEN
+%STRING(255)GROUP, W, STEM
+%RECORD(OINFF)%ARRAYNAME AX
+%RECORD(OINFF)%ARRAYFORMAT AXF(0 : TOP)
+%RECORD(OINFF)%NAME AW
+!
+!
+!
+      TOTAL = 0  { no of names in all }
+      %RESULT = 8 %IF S = ""
+      STEM = S
+      STEM = S . USEP %UNLESS CHARNO(S, LENGTH(S)) = GSEPCH
+!
+      NAME LEN = 0  { max length encountered }
+      I = 1  { to count through filenames }
+      GROUP = S  { for which files are required }
+L:
+      MAX = TOP - TOTAL
+      AX == ARRAY(ADDR(A(TOTAL+1)), AXF)
+      NUM = 0
+      J = DFILENAMES(GROUP, NUM, MAX, N, FSYS, 0, AX)
+      %RESULT = J %UNLESS J = 0
+!
+      %IF N > 0 %START  { make a hole }
+         P = TOTAL
+         %WHILE P >= I %CYCLE
+            X(P+N) = X(P)
+            P = P - 1
+         %REPEAT
+!
+         SORT(I-1, TOTAL, N)
+!
+         P = N  { and check name lengths }
+         %WHILE P > 0 %CYCLE
+            P = P - 1
+            J = LENGTH(AX(P)_NAME) + LENGTH(GROUP)
+            NAME LEN = J %IF NAME LEN < J
+         %REPEAT
+      %FINISH
+      TOTAL = TOTAL + N
+CHECK:
+      -> OUT %IF I > TOTAL
+!
+      AW == A(X(I)&MASK)
+      P = I
+      I = I + 1
+      -> CHECK %IF AW_GROUP = 0
+      W = ""
+      %CYCLE
+         W = AW_NAME . GSEP . W
+         P = X(P)>>16
+         %EXIT %IF P = 0
+         AW == A(X(P)&MASK)
+      %REPEAT
+      GROUP = STEM . W
+      -> L
+OUT:
+      NAME LEN = NAME LEN - LENGTH(S) + 1  { for the occasional : }
+      PER = 6
+      %CYCLE
+         %EXIT %UNLESS NAME LEN > LEN(PER)
+         PER = PER - 1
+      %REPEAT
+      %RESULT = 0
+%END; ! FILENAMES
+!
+!-----------------------------------------------------------------------
+!
+%ROUTINE INCU(%STRINGNAME USER)
+      CHARNO(USER, 6) = CHARNO(USER, 6) + 1
+      %IF CHARNO(USER, 6) > '9' %START
+         CHARNO(USER, 6) = '0'
+         CHARNO(USER, 5) = CHARNO(USER, 5) + 1
+      %FINISH
+%END; ! INCU
+!
+!-------------------------------------------------------------------------------
+!
+%INTEGERFN DO NEWUSERS(%STRING(19)USER, LASTU, %INTEGER FSYS, NKB,
+      %STRING(255)SURNAME, %STRING(4)FPASS, BPASS, %STRING(255)DELIV,
+      %INTEGER MAXFILE, MAXKB, MAXPROI, MAXPROB, MAXPROT)
+%INTEGER J, FILE INDEX
+%INTEGER N, DEFAULTFUNDS, D
+%INTEGERARRAY I(0 : 7)
+%STRING(255)S
+      MOVE(4, ADDR(FPASS) + 1, ADDR(I(0)))
+      MOVE(4, ADDR(BPASS) + 1, ADDR(I(1)))
+!
+      FILE INDEX = 0
+      FILE INDEX = 1 %IF LENGTH(USER) > 6
+!
+      %CYCLE
+         PRINTSTRING("User: ".USER)
+         PRINTSTRING("  ")
+            J = DNEWUSER(USER, FSYS, NKB)
+            ERROR(USER) %AND %RESULT = J %UNLESS J = 0
+!
+         J = DNEWARCHINDEX(USER, FSYS, 4)
+         ERROR(USER) %UNLESS J = 0
+!
+   %IF FILE INDEX = 0 %START
+         S = SURNAME
+         J = DSFI(USER, FSYS, 18, 1, S, I)
+         ERROR(USER) %UNLESS J = 0
+!
+         S = DELIV
+         J = DSFI(USER, FSYS, 1, 1, S, I)
+         ERROR(USER) %UNLESS J = 0
+!
+         J = DSFI(USER, FSYS, 5, 1, S, I)
+         ERROR(USER) %UNLESS J = 0
+!
+         I(0) = MAXPROI
+         I(1) = MAXPROB
+         I(2) = MAXPROT
+         J = DSFI(USER, FSYS, 14, 1, S, I)
+         ERROR(USER) %UNLESS J = 0
+!
+         I(0) = 50000  { default funds }
+         J = DSFI(USER, FSYS, 33, 1, S, I)
+         ERROR(USER) %UNLESS J = 0
+   %FINISH
+         I(0) = MAXFILE
+         J = DSFI(USER, FSYS, 12, 1, S, I)
+         ERROR(USER) %UNLESS J = 0
+!
+         I(0) = MAXKB
+         J = DSFI(USER, FSYS, 11, 1, S, I)
+         ERROR(USER) %UNLESS J = 0
+!
+         WRS(" Completed")
+         %RESULT = 0 %IF USER = LASTU
+         INCU(USER)
+      %REPEAT
+%END; ! DO NEWUSERS
+!
+!-------------------------------------------------------------------------------
+!
+%INTEGERFN HASH(%STRING (6) USER, %INTEGER NNTHASH)
+%INTEGER A, J, W
+%CONSTINTEGERARRAY P(1:6)=157,257,367,599, 467,709
+      A = ADDR(USER)
+      W = 0
+      %CYCLE J = 1, 1, 6
+         W = W + (BYTEINTEGER(A + J) - 47) * P(J)
+      %REPEAT
+      %RESULT = W - (W // NNTHASH) * NNTHASH
+%END; ! HASH
+!
+!-----------------------------------------------------------------------
+!
+%INTEGERFN INIT(%INTEGERNAME FSYS, ANNT, %RECORD(DISCDATAF)%NAME DATA)
+%INTEGER FLAG, LO, HI
+      FSYS = 0  {  IPROMPT(38) }
+!
+      FLAG = FBASE2(FSYS, ADDR(DATA)); ! get characteristics of disc
+      ->FAIL %UNLESS FLAG = 0
+!
+      FLAG = DBITMAP2(LO, HI, FSYS)
+      -> FAIL %UNLESS FLAG = 0
+      ANNT = LO >> SEG SHIFT << SEG SHIFT + DATA_NNTSTART
+FAIL:
+      %RESULT = FLAG
+%END; ! INIT
+!
+!-----------------------------------------------------------------------
+!
+%INTEGERFN DEREGISTER(%STRING(19)USER, LASTU, %INTEGER FSYS)
+%INTEGER J
+      %CYCLE
+         J = DDELUSER(USER, FSYS)
+         %RESULT = J %UNLESS J = 0
+         %RESULT = 0 %IF USER = LASTU
+         INCU(USER)
+      %REPEAT
+%END; ! DEREGISTER
+!
+!-----------------------------------------------------------------------
+!
+%INTEGERFN OPTNNT(%INTEGER FSYS)
+%INTEGER J, I, NUSERS, PATH, NEWI, A, NNTTOP, ANNT, NNTHASH
+%INTEGER SEG, GAP, DA
+%RECORD (DISCDATAF) DATA
+%RECORD (NNF) %ARRAY AUX(0:1364)
+%RECORD(NNF)%ARRAY NEWNNT(0:1364)
+%RECORD (NNF) %ARRAYNAME OLDNNT
+%RECORD(NNF)%ARRAYFORMAT NNAF(0:1364)
+%STRING(6)USER
+%STRING(11)FILE
+      A =  0; ! POSITION ON AUXTAB
+      NUSERS = 0
+      PATH = 0
+!
+      J = INIT(FSYS, ANNT, DATA)
+      -> FAIL %UNLESS J = 0
+!
+      USER = "VOLUMS"
+      FILE = "N#NT" . ITOS(FSYS)
+      NNTTOP = DATA_NNTTOP
+      NNTHASH = DATA_NNTHASH
+      %CYCLE I = 0, 1, NNTTOP; ! clear own array
+         NEWNNT(I) = 0
+      %REPEAT
+!
+!
+      J = DCREATE(USER, FILE, -1, 20, 0, DA); ! big enough for a 4-page NNT and hdr
+      -> FAIL %UNLESS J = 0
+!
+      SEG = 0
+      GAP = 0
+      J = DCONNECT(USER, FILE, -1, 3, SEG, GAP)
+      -> FAIL %UNLESS J = 0
+!
+      OLDNNT == ARRAY(SEG<<SEGSHIFT + 4096, NNAF)
+!
+      MOVE(DATA_NNTSIZE, ANNT, ADDR(OLDNNT(0)))
+!
+      %CYCLE I = 0, 1, NNTTOP
+         %IF LENGTH(OLDNNT(I)_NAME) = 6 %START
+            NUSERS = NUSERS + 1
+            NEWI = HASH(OLDNNT(I)_NAME, NNTHASH)
+            %IF NEWNNT(NEWI)_NAME = "" %C
+            %THEN NEWNNT(NEWI) = OLDNNT(I) %C
+            %ELSESTART
+               AUX(A) = OLDNNT(I)
+               A = A + 1
+            %FINISH
+         %FINISH
+      %REPEAT
+!
+      J = DDISCONNECT(USER, FILE, -1, 0)
+      -> FAIL %UNLESS J = 0
+!
+      WRSN("No of users:", NUSERS)
+      WRSN("No of clashes:", A)
+!
+      %WHILE A > 0 %CYCLE
+         A = A - 1
+         NEWI = HASH(AUX(A)_NAME, NNTHASH)
+         %CYCLE
+            PATH = PATH + 1
+            NEWI = NEWI + 1
+            NEWI = 0 %IF NEWI > NNTTOP
+            %IF NEWNNT(NEWI)_NAME = "" %C
+            %THEN NEWNNT(NEWI) = AUX(A) %AND %EXIT
+         %REPEAT
+      %REPEAT
+      WRSN("Path length:", PATH)
+!
+      MOVE(DATA_NNTSIZE, ADDR(NEWNNT(0)), ANNT)
+FAIL:
+      %RESULT = J
+%END; ! OPTNNT
+!
+!-----------------------------------------------------------------------
+!
+%INTEGERFN PROBE(%STRING(19)USER, %INTEGER FSYS)
+!
+!
+!
+%RECORD(PDF)%ARRAYNAME PDS
+%RECORD(FDF)%ARRAYNAME FDS
+%RECORD(AGRPF)%ARRAYNAME AGRPS
+%INTEGERARRAYNAME SDS
+%STRING(31)WSTRING
+!
+!
+%INTEGER J, NPDS, NSDS
+!
+!
+%ROUTINE NL
+      PRINTSYMBOL(10)
+%END
+!
+!
+!
+%ROUTINE WSS(%STRING(255)S1, S2)
+      PRINTSTRING(S1)
+      PRINTSTRING(": ")
+      PRINTSTRING(S2)
+      PRINTSTRING("  ")
+%END
+!
+!
+%ROUTINE WSN(%STRING(255)S1, %INTEGER N, P)
+!
+                                        ! P=0 decimal
+                                        !  >0 hex to P places
+      PRINTSTRING(S1)
+      PRINTSTRING(": ")
+      %IF P = 0 %C
+      %THEN WRITE(N, 1) %C
+      %ELSE PRINTSTRING("X".HTOS(N, P))
+      PRINTSTRING("  ")
+%END
+!
+!
+!
+%ROUTINE WN(%INTEGER N, P)
+      PRINTSTRING(" X" . HTOS(N, P))
+%END
+!
+!
+!
+%ROUTINE PERMS(%INTEGER P, NPD, ARCH)
+%INTEGER N
+%INTEGER PERM, LINK
+%STRING(255)NAME
+%RECORD(PDF)PD
+      %RETURN %IF P = 0; ! no permissions
+      WSS("permissions","")
+      NL
+      N = 0
+      %WHILE P > 0 %CYCLE
+         N = N + 1; ! count perms
+         NPDS = NPDS + 1
+         %IF P < NPD %START
+            PD = PDS(P)
+            NAME = PD_NAME
+            %if arch = 0 %start
+               perm = pd_bp&15
+               link = pd_bl
+            %else
+               perm = pd_bp&15
+               link = (pd_bp>>4<<8) ! pd_bl
+            %finish
+            WSS("      name", NAME)
+            WSN(" perm", PERM, 0)
+            P = LINK
+         %FINISH %ELSE %START
+            WSN("------INVALID LINK", P, 0)
+            P = 0
+         %FINISH
+         PRINTSTRING("**** > 16 permissions") %IF N > 16
+         NL
+         %RETURN %IF N > 16
+      %REPEAT
+%END
+!
+!
+!
+%INTEGER ARCH, SEG, GAP
+%INTEGER I, FINDAD, NFD, NSD, NPD, D, NON NULL, N, E
+%RECORD(HF)%NAME H
+%RECORD(FF)%NAME F
+%RECORD(FDF)%NAME FD
+%RECORD(AFDF)%NAME AFD
+%INTEGER INDAD, INDNO, FN
+%CONSTSTRING(255)FHDR = "     Name         PRE         SD  Pgs   C  C2 Day Use  Own  Eep   P Arch CCT"
+%CONSTSTRING(255)AHDR = "     Name         PRE    Kb Date     LastRest TSN    Chap Cnt Eep T"
+      ARCH = 0
+      FN = 2
+      J = MAP FILE INDEX(USER, FSYS, INDAD, "PROBE")
+      -> OUT %UNLESS J = 0
+!
+      FINDAD = INDAD
+      -> AGAIN %IF CHARNO(USER, LENGTH(USER)) = ISEPCHR
+      INDAD = INDAD - 512
+!
+      H == RECORD(INDAD)
+      WSS("PROCESS INDEX FOR", H_OWNER)
+      WSN("MARK", H_MARK, 0)
+      NL
+!
+      -> CLOSE %UNLESS H_MARK = 1
+!
+      WSN("MSGSEMA", H_MSGSEMA, 0)
+      NL
+!
+      WSN("INUTS", H_INUTS, 0)
+      NL
+!
+      WSN("   ACR", H_ACR, 0)
+      WSN("DIRVSN", H_DIRVSN, 0)
+      WSN("SIGMON", H_SIGMON, 8)
+      WSN("PASSFAILS", H_PASSFAILS, 0)
+      NL
+!
+      WSN("   IMAX", H_IMAX, 0)
+      WSN("BMAX", H_BMAX, 0)
+      WSN("TMAX", H_TMAX, 0)
+      NL
+!
+      WSN("   IUSE", H_IUSE, 0)
+      WSN("BUSE", H_BUSE, 0)
+      WSN("ISESSM", H_ISESSM, 0)
+      WSN("GPFSYS", H_GPFSYS, 0)
+      NL
+!
+      WSN("   TOP", H_TOP, 0)
+      NL
+!
+      WSN("   TRYING", H_TRYING, 8)
+      WSN("IPTRNS", H_IPTRNS, 0)
+      WSN("BPTRNS", H_BPTRNS, 0)
+      NL
+!
+      WSN("   IMSECS", H_IMSECS, 0)
+      WSN("BMSECS", H_BMSECS, 0)
+      WSN("NKBIN", H_NKBIN, 0)
+      WSN("NKBOUT", H_NKBOUT, 0)
+      NL
+!
+      WSN("   CONNECTT", H_CONNECTT, 0)
+      WSN("DIRMON", H_DIRMON, 8)
+      WSS("LASTLOGON", UNPACKDT(H_LASTLOGON))
+      NL
+!
+      WSS("   GPHOLDR", H_GPHOLDR); NL
+      WSS("   SURNAME", H_SURNAME); NL
+      WSS("   DELIVERY", H_DELIVERY); NL
+      WSS("   BATCHSS", H_BATCHSS); NL
+      WSS("   BASEFILE", H_BASEFILE); NL
+      WSS("   RULE1", H_RULE1); NL
+      WSS("   TESTSS", H_TESTSS); NL
+      WSS("   LOGFILE", H_LOGFILE); NL
+      WSS("   MAIN", H_MAIN); NL
+      WSS("   DATA", H_DATA); NL
+!
+      FINDAD = INDAD + 512
+AGAIN:
+      F == RECORD(FINDAD)
+!
+      J = F_SIZE << 9
+      J = F_MAXFILE %IF ARCH = 1
+      NFD = (J - F_FDSTART) >> 5
+      NSD = (F_FDSTART - F_SDSTART) >> 2
+      NSD = NSD >> 2 %IF ARCH = 1
+      NPD = (F_SDSTART - F_PDSTART) // 9
+!
+      PDS == ARRAY(FINDAD + F_PDSTART, PDSF)
+      SDS == ARRAY(FINDAD + F_SDSTART, SDSF)
+      AGRPS == ARRAY(FINDAD + F_SDSTART, AGRPSF)
+      FDS == ARRAY(FINDAD + F_FDSTART, FDSF)
+      NPDS = 0
+      NSDS = 0
+!
+      WSS("FILE INDEX FOR", F_OWNER)
+      WSN("SIZE", F_SIZE, 0)
+      WSS("NAME", F_NAME)
+      NL
+!
+      WSN("   FSYS", F_FSYS, 0)
+      WSN("FIPHEAD", F_FIPHEAD, 0) %IF ARCH = 0
+      WSN("TEMPFILES", F_TEMPFILES, 0) %IF ARCH = 0
+      WSN("EEP", F_EEP, 2)
+      NL
+!
+      WSN("   PDSTART", F_PDSTART, 0)
+      WSN("SDSTART", F_SDSTART, 0)
+      WSN("FDSTART", F_FDSTART, 0)
+      WSN("FILES", F_FILES, 0)
+      NL
+!
+      WSN("   MAXFILE", F_MAXFILE, 0)
+      WSN("MAXKB", F_MAXKB, 0)
+      WSN("CHERFILES", F_CHERFILES, 0)
+      WSN("CHERKB", F_CHERKB, 0)
+      NL
+!
+      WSN("   TOTKB", F_TOTKB, 0)
+      WSN("TEMPKB", F_TEMPKB, 0)
+      WSN("RESTORES", F_RESTORES, 0)
+      WSN("CHKSUM", F_CHKSUM, 0)
+      NL
+!
+      WSN("   FILES0", F_FILES0, 0)
+      WSN("FILES1", F_FILES1, 0)
+      NL
+!
+      WSN("   NFD", NFD, 0)
+      WSN("NSD", NSD, 0)
+      WSN("NPD", NPD, 0)
+      NL
+!
+      PERMS(F_FIPHEAD, NPD, 0) %IF ARCH = 0
+!
+      NL
+      NL
+!
+      %IF ARCH = 1 %AND NSD > 0 %START
+         WRS("Group name      Prefix Count")
+         %CYCLE I = 1, 1, NSD
+            %UNLESS AGRPS(I)_NAME = "" %START
+               WRITE(I, 4)
+               WSTRING = " " . AGRPS(I)_NAME
+               WSTRING = WSTRING . " " %WHILE LENGTH(WSTRING) < 12
+               PRINTSTRING(WSTRING)
+               WRITE(AGRPS(I)_PREFIX, 4)
+               WRITE(AGRPS(I)_COUNT, 5)
+               NL
+            %FINISH
+         %REPEAT
+         NL
+      %FINISH
+!
+      %IF ARCH = 0 %THEN WRS(FHDR) %ELSE WRS(AHDR)
+!
+      %CYCLE I = 1, 1, NFD
+         FD == FDS(I)
+         %EXIT %IF FD_NAME = ""
+         %CONTINUE %IF FD_NAME = ".NULL"
+         WRITE(I, 3)
+         WSTRING = " " . FD_NAME
+         WSTRING = WSTRING . " " %WHILE LENGTH(WSTRING) < 12
+         PRINTSTRING(WSTRING)
+!
+         %IF ARCH = 1 %START
+            AFD == RECORD(ADDR(FD))
+            WRITE(AFD_PREFIX, 4)
+            PRINTSYMBOL(' ')
+            WRITE(decode pgs(AFD_PGS)<<2, 4)
+            PRINTSYMBOL(' ')
+            PRINTSTRING(UNPACKD(AFD_DATE))
+            PRINTSYMBOL(' ')
+            %IF AFD_LAST RESTORE = 0 %C
+            %THEN PRINTSTRING("        ") %C
+            %ELSE PRINTSTRING(UNPACKD(AFD_LAST RESTORE))
+            PRINTSYMBOL(' ')
+            PRINTSTRING(I TO TSN(AFD_TSN))
+            WRITE(AFD_CHAP, 4)
+            WRITE(AFD_COUNT, 3)
+            WN(AFD_EEP, 2)
+            PRINTSYMBOL(' ')
+            PRINTSYMBOL('A' + AFD_TYPE)
+            NL
+         %FINISH %ELSE %START
+            WRITE(FD_PREFIX, 4)
+         PRINTSYMBOL(' ')
+         WN(FD_SD, 8)
+!
+      N = FD_SD >> 19; ! link
+      %WHILE N > 0 %CYCLE
+         %IF N > NSD %START
+            PRINTSTRING("!!!!!! invalid SD link !!!!!!")
+            %EXIT
+         %FINISH
+         NSDS = NSDS + 1
+         N = SDS(N) >> 19
+      %REPEAT
+!
+            WRITE(decode pgs(FD_PGS), 4)
+            WN(FD_CODES, 2)
+            WN(FD_CODES2, 2)
+            WRITE(FD_DAYNO, 3)
+            WRITE(FD_USEcount, 3)
+            PRINTSYMBOL(' ')
+            WN(FD_OWNP, 2)
+            PRINTSYMBOL(' ')
+            WN(FD_EEP, 2)
+            WRITE(FD_PHEAD, 3)
+            PRINTSYMBOL(' ')
+            WN(FD_ARCH, 2)
+            WRITE(FD_CCT, 3)
+            NL
+         %FINISH
+         J = FD_PHEAD
+         J = ((FD_EEP & X'F0') << 4) ! J %IF ARCH = 1
+         PERMS(J, NPD, ARCH)
+      %REPEAT
+!
+      NON NULL = 0
+      N = 0
+      E = 0
+      %CYCLE I = NFD, -1, 1
+         FD == FDS(I)
+         %IF FD_NAME = "" %START
+            E = E + 1 %IF NON NULL > 0
+         %FINISH %ELSE %START
+            NON NULL = NON NULL + 1
+            N = N + 1 %UNLESS FD_NAME = ".NULL"
+         %FINISH
+      %REPEAT
+!
+      WSN("FDs used", N, 0)
+      %IF E = 0 %THEN PRINTSTRING(" no errors") %ELSE WSN("errors!!!!", E, 0)
+      NL
+!
+      N = 0; ! now do a PD check
+      %CYCLE I = 1, 1, NPD
+         N = N + 1 %IF PDS(I)_NAME = ""
+      %REPEAT
+      %IF NPD = N + NPDS %START
+         PRINTSTRING("PDs OK")
+         WRITE(NPDS, 4)
+         PRINTSTRING(" used")
+      %FINISH %ELSE PRINTSTRING("PD errors !!!!")
+      NL
+!
+      %IF ARCH = 0 %START
+         N = 0; ! SD check
+         %CYCLE I = 1, 1, NSD
+            N = N + 1 %IF SDS(I) = 0
+         %REPEAT
+         %IF NSD = N + NSDS %START
+            PRINTSTRING("SDs OK")
+            WRITE(NSDS, 4)
+            PRINTSTRING(" used")
+         %FINISH %ELSE PRINTSTRING("SD errors !!!!")
+         NL
+!
+         PRINTSTRING("End of main file index")
+         NL
+         VV(ADDR(F_SEMA), F_SEMANO)
+!
+         SEG = 0
+         GAP = 0
+         J = DCONNECT(USER, "#ARCH", FSYS, 1, SEG, GAP)
+         %IF J = 0 %OR J = 34 %START
+            FINDAD = SEG << SEGSHIFT
+            ARCH = 1
+            -> AGAIN
+         %FINISH
+         WSN("Connect #ARCH gives ", J, 0)
+         NL
+      %FINISH %ELSE J = DDISCONNECT(USER, "#ARCH", FSYS, 0)
+!
+CLOSE:
+      WRS("PROBE complete")
+      %RESULT = 0
+OUT:
+      %RESULT = J
+%END; ! PROBE
+!
+!-----------------------------------------------------------------------
+!
+%EXTERNALINTEGERFN SS(%INTEGER CNSL, %STRINGNAME PARM)
+%STRING(11)UNA, INA, GRP, TERM
+%INTEGER J, ISEG, IGAP
+!
+%RECORDFORMAT RF(%STRING(31)LINE, %INTEGER STATE, PARAMS, RETURN, TYPE,
+      J, K, T, TEMPLATE,
+      %STRING(31)PTXT, DTXT, %STRING(63)HTXT,
+      %INTEGERARRAY I(0:16), %STRING(31)%ARRAY S(0:16),
+      %INTEGERARRAY XP(0:400),
+      %INTEGERARRAY DSFI(0:31), %STRING(127)DSFS,
+      (%RECORD(OINFF)%ARRAY OS(1:400) %OR %RECORD(AINFF)%ARRAY AS(0:400)))
+%SWITCH RETSWITCH(0:10)
+%SWITCH FNSWITCH(1:TOPFN)
+%RECORD(RF)%NAME R
+!
+%SWITCH SW(-4 : 14)
+%SWITCH STATESW(0:5)
+%INTEGER L, FINDAD
+%RECORD(FF)%NAME F
+!
+!
+!
+!
+%STRING(80)WSTRING
+%STRING(31)TEMP
+%INTEGER RSEG, RGAP, ON, PER
+%INTEGER LO, HI
+%INTEGER TYPEV, EXPLICIT, X, PX
+%INTEGER FSYSV
+%STRING(63)W
+%STRING(63)USERV
+%INTEGER NFILES, NUM, MAX
+%INTEGER ADR, ADDRDSFI
+%INTEGERARRAY I(0 : 255)
+%STRING(255)S
+%RECORD(PRMF) PRM
+%RECORD(AINFF)%NAME A
+%RECORD(OINFF)%NAME AW
+%INTEGER RESULT
+%INTEGERARRAYNAME IAN
+%INTEGERARRAYFORMAT IFT(0 : 31)
+!
+!
+!
+%INTEGERFN IDFSYS(%STRING(19)USER, %INTEGER CNSL)
+%INTEGER FOUND, N, I, J
+%INTEGERARRAY F(0:99)
+      FOUND = 37
+      J = D AV FSYS(N, F)
+      %CYCLE I = 0, 1, N-1
+         J = DFSYS(USER, F(I))
+         %RESULT = J %IF 0 # J # 37
+         REPLY TO(CNSL, "Fsys".ITOS(F(I))) %AND FOUND = 0 %IF J = 0
+      %REPEAT
+      %RESULT = FOUND
+%END
+!
+!
+!
+%ROUTINE IDISCS(%INTEGER FSYS, CNSL, %STRING(255)P)
+%INTEGER F0, F1, J, LO, HI, N, W, A, LOW
+%INTEGER AU, NU, AF, U, K
+%INTEGERARRAY BITS(0:5119)
+%CONSTINTEGER TOPC = 5
+%INTEGERARRAY DS(1:TOPC)
+%STRING(6)%ARRAY US(1:TOPC)
+%INTEGERARRAY FLD(0:15)
+%STRING(31)S
+%STRINGNAME U1
+%INTEGERNAME I1
+%RECORDFORMAT RF(%STRING(19)NAME, %BYTEINTEGER KB, SP, %SHORTINTEGER INDNO)
+%RECORD(RF)%ARRAY UNAMES(0 : 1364)
+%STRING(255)LINE
+!
+      %IF FSYS = -1 %C
+      %THEN F0 = 0 %AND F1 = 99 %C
+      %ELSE F0 = FSYS %AND F1 = FSYS
+!
+      %CYCLE FSYS = F0, 1, F1
+         J = FBASE2(FSYS, ADDR(FLD(0)))
+         %IF J = 0 %START
+   LO=FLD(0)
+   HI=FLD(8)
+            LINE = ITOS(FSYS)
+            LINE = " " . LINE %IF FSYS < 10
+!
+            %IF LO > X'40' %C
+            %THEN LINE = LINE . "*" %C
+            %ELSE LINE = LINE . " "
+!
+            LINE = LINE . "370/VM" %IF HI = X'20CF'
+            LINE = LINE . " 80 Mb" %IF HI = X'3F1F'
+            LINE = LINE . "100 Mb" %IF HI = X'59F3'
+            LINE = LINE . "160 Mb" %IF HI = X'8F6F'
+            LINE = LINE . "200 Mb" %IF HI = X'B3E7'
+            LINE = LINE . "AMDAHL" %IF HI = X'2068D'
+            LINE = LINE . "640 Mb" %IF HI = X'24797'
+!
+            A = ADDR(BITS(0))
+            AU = ADDR(UNAMES(0))
+            J = DGETINDEXES2(FSYS, NU, UNAMES)
+            %IF J = 0 %START
+               LINE = LINE . " " %IF NU < 100
+               LINE = LINE . " " %IF NU < 10
+               LINE = LINE . " " . ITOS(NU)
+            %FINISH %ELSE LINE = LINE . "  ??"
+            LINE = LINE . " users "
+!
+            J = DSYSAD(FSYS, 0, A, 0)
+            %IF J = 0 %START
+               LOW = (LO + X'100') >> 5
+               HI = HI >> 5
+               N = 0
+               %CYCLE J = LOW, 1, HI
+                  W = BITS(J)
+                  %WHILE W # 0 %CYCLE
+                     N = N + 100
+                     %IF W < 0 %C
+                     %THEN W = (W << 1) >> 1 %C
+                     %ELSE W = W & (W - 1)
+                  %REPEAT
+               %REPEAT
+               J = N//(HI-LOW+1)<<5
+               LINE = LINE . " " %IF J < 10
+               LINE = LINE . ITOS(J) . "%"
+            %FINISH
+!
+      %IF P = "*" %START
+            I1 == FLD(1)
+!
+            %CYCLE J = 1, 1, TOPC
+               DS(J) = 0
+               US(J) = ""
+            %REPEAT
+!
+            %CYCLE U = 0, 1, NU-1
+               U1 == UNAMES(U)_NAME
+               K = DSFI(U1, FSYS, 30, 0, S, FLD)
+               %IF K = 0 %START
+                  W = I1 // 1000
+                  %CYCLE J = 1, 1, TOPC
+                     %IF W > DS(J) %START
+                        K = TOPC
+                        %WHILE K > J %CYCLE
+                           DS(K) = DS(K-1)
+                           US(K) = US(K-1)
+                           K = K - 1
+                        %REPEAT
+                        DS(J) = W
+                        US(J) = U1
+                        %EXIT
+                     %FINISH
+                  %REPEAT
+               %FINISH
+            %REPEAT; ! through users
+!
+            %CYCLE J = 1, 1, TOPC
+               %EXIT %IF DS(J) = 0
+               LINE = LINE . " " . US(J) . " " . ITOS(DS(J))
+            %REPEAT
+      %FINISH
+            REPLY TO(CNSL, LINE)
+         %FINISH
+      %REPEAT
+%END
+!
+!-----------------------------------------------------------------------
+!
+%INTEGERFN IOPTIONS(%STRING(6)USER, %STRING(11)FILE)
+      %RESULT = 0
+%END
+!
+!-----------------------------------------------------------------------
+!
+%INTEGERFN OPERMS(%STRING(19)INDEX, %INTEGER CNSL)
+%INTEGER J, A, N, JUNK, NFILES, I, PX
+%STRING(127)LINE
+!
+%RECORD(PRMF)P
+%RECORD(PRMSF)%NAME IP
+%RECORD(OINFF)%NAME FL
+      REPLY TO(CNSL, "On-line files:")
+      A = ADDR(P)
+      J = DPERMISSION(INDEX, "", "", "", -1, 8, A)
+      -> OUT %UNLESS J = 0
+!
+      N = P_N-24
+      %UNLESS N < 0 %START
+         N = N // 8
+         REPLY TO(CNSL, "Index list: ")
+         %CYCLE J = N, -1, 0
+            IP == P_PRMS(J)
+            REPLY TO(CNSL, "..." . IP_USER . ":" . INTERPRET(IP_PRM << 28, "P/E/W/R", ""))
+         %REPEAT
+      %FINISH
+!
+      JUNK = 0
+      N = 1024
+      J = FILENAMES(INDEX, R_OS, R_XP, NFILES, PER, -1, 400)
+      -> OUT %UNLESS J = 0
+      REPLY TO(CNSL, ITOS(NFILES) . " names returned")
+!
+      %CYCLE I = 1, 1, NFILES
+         PX = I
+         FL == R_OS(R_XP(PX) & X'FFFF')
+         AW == FL
+         W = AW_NAME
+         W = W . GSEP %IF AW_GROUP = 1
+         %CYCLE
+            PX = R_XP(PX) >> 16
+            %EXIT %IF PX = 0
+            AW == R_OS(R_XP(PX) & X'FFFF')
+            W = AW_NAME . GSEP . W
+         %REPEAT
+         P_N = 16
+         J = DPERMISSION(INDEX, "", "", W, -1, 4, A) %UNLESS FL_PHEAD = 0
+         %IF J = 0 %AND W#"#MSG" %START
+            %UNLESS %C
+                    FL_OWNP = 7 %C
+                    %ANDC
+                    FL_EEP = 0 %C
+                    %ANDC
+                    P_N = 16 %C
+            %START
+               LINE = W
+               LINE = LINE . "  OWNP:" . INTERPRET(FL_OWNP << 28, "P/E/W/R", "") %UNLESS FL_OWNP = 7
+               LINE = LINE . "  EEP:" . INTERPRET(FL_EEP << 28, "P/E/W/R", "") %UNLESS FL_EEP = 0
+               REPLY TO(CNSL, LINE)
+!
+               %IF P_N > 16 %START
+                  %CYCLE J = (P_N-24)//8, -1, 0
+                     IP == P_PRMS(J)
+                     REPLY TO(CNSL, "....".IP_USER . ":" . INTERPRET(IP_PRM << 28, "P/E/W/R", ""))
+                  %REPEAT
+               %FINISH
+            %FINISH
+         %FINISH
+      %REPEAT
+!
+      J = 0
+OUT:
+      %RESULT = J
+%END
+!
+!-----------------------------------------------------------------------
+!
+%INTEGERFN APERMS(%STRING(19)INDEX, %INTEGER CNSL)
+%INTEGER J, ADDR P, N, JUNK, NFILES, I, TYPE, PX, NAME LEN
+%STRING(127)LINE
+%RECORD(PRMF)P
+%RECORD(PRMSF)%NAME IP
+%RECORD(AINFF)%NAME FL
+      ADDR P = ADDR(P)
+      %CYCLE TYPE = 1, 1, 2
+         NUM = 0
+         MAX = 32
+         J = DFILENAMES(INDEX, NUM, MAX, NFILES, -1, TYPE, R_AS)
+         -> OUT %UNLESS J = 0
+!
+         WRITE(NFILES, 1)
+         %IF TYPE = 1 %C
+         %THEN WRS(" files on archive") %C
+         %ELSE WRS(" files on backup")
+!
+         %CONTINUE %IF MAX = 0
+         MAX = MAX - 1
+         %CYCLE I = 0, 1, MAX
+            PX = I
+            FL == R_AS(PX)
+!
+            %UNLESS FL_PHEAD = 0 = FL_EEP %START  { report this file }
+               A == FL
+               W = A_NAME
+               %CYCLE
+                  PX = A_PREFIX
+                  %EXIT %IF PX = 0
+                  A == R_AS(PX)
+                  W = A_NAME . GSEP . W
+               %REPEAT
+               P_N = 16
+               J = DPERMISSION(INDEX, "", FL_DATE, W, -1, 20, ADDR P) %UNLESS FL_PHEAD = 0
+               LINE = W
+               LINE = LINE . "  " . FL_DATE
+!
+               LINE = LINE . "  EEP: " . INTERPRET(FL_EEP<<29, "E/W/R", "") %UNLESS FL_EEP = 0
+!
+               %CYCLE J = (P_N-24)//8, -1, 0
+                  IP == P_PRMS(J)
+                  LINE = LINE . " ....".IP_USER . ":" . INTERPRET(IP_PRM<<28, "P/E/W/R", "")
+                  WRS(LINE) %AND LINE = "" %IF LENGTH(LINE) > 56
+               %REPEAT
+               WRS(LINE) %UNLESS LINE = ""
+            %FINISH
+         %REPEAT
+      %REPEAT
+!
+      J = 0
+OUT:
+      %RESULT = J
+%END
+!
+!
+!
+%INTEGERFN IPERMS(%STRING(19)INDEX, %INTEGER CNSL)
+%INTEGER J
+      J = OPERMS(INDEX, CNSL)
+      J = APERMS(INDEX, CNSL) %IF J = 0
+      %RESULT = J
+%END
+!
+!
+!
+%INTEGERFN IDPROCS(%INTEGER CNSL)
+%INTEGER J, MAX, ADR, L, K
+%BYTEINTEGERARRAY PLIST(0:32*256)
+%STRINGNAME USER
+%STRING(31)LINE
+      LINE = ""
+      ADR = ADDR(PLIST(0))
+      J = DPROCS(MAX, ADR)
+      -> OUT %UNLESS J = 0
+      L = 0
+      %CYCLE K = 0, 1, MAX-1
+         USER == STRING(ADDR(PLIST(32*K)))
+         %UNLESS USER = "" %START
+            LINE = LINE . " " %IF K < 100
+            LINE = LINE . " " %IF K < 10
+            LINE = LINE . " " . ITOS(K) . " " . USER
+            L = L + 1
+            L = 0 %AND REPLY TO(CNSL, LINE) %IF L = 2
+         %FINISH
+      %REPEAT
+      REPLY TO(CNSL, LINE) %UNLESS L = 0
+OUT:
+      %RESULT = J
+%END
+!
+!
+!
+%INTEGERFN IUSERS(%INTEGER FSYS, CNSL)
+%INTEGER ADR, N, J, P
+%STRING(19)%ARRAY NAME(0 : 1364)
+%STRING(31)LINE
+      P = 0
+      LINE = ""
+      ADR = ADDR(NAME(0))
+      N = 0
+      J = DGETINDEXES(FSYS, N, NAME)
+      %IF N > 0 = J %START
+         REPLY TO(CNSL, "No of users is " . ITOS(N))
+         %CYCLE
+            LINE = LINE . NAME(P)
+            %IF J = 2 %C
+            %THEN J = 0 %AND REPLY TO(CNSL, LINE) %AND LINE = "" %C
+            %ELSE J = J + 1 %AND LINE = LINE . " "
+            P = P + 1
+            %EXIT %IF P = N
+         %REPEAT
+         REPLY TO(CNSL, LINE) %IF J > 0
+         J = 0
+      %FINISH
+      %RESULT = J
+%END
+!
+!-----------------------------------------------------------------------
+!
+%INTEGERFN IWHO(%STRING(6)USER, %INTEGER CNSL)
+%STRING(255)LINE
+!
+%ROUTINE WRITE(%INTEGER N, L)
+%STRING(31)W
+%STRING(1)SIGN
+      SIGN = " "
+      SIGN = "-" %AND N = -N %IF N < 0
+      W = SIGN . ITOS(N)
+      W = " " . W %WHILE LENGTH(W) <= L
+      LINE = LINE . W
+%END
+!
+!
+!
+%ROUTINE ERROR(%INTEGER N)
+      LINE = LINE . "Flag = " . DERRS(N)
+%END
+!
+!
+!
+%INTEGER J, T, FSYS, AI0, K, NI, I, I0, TYPE
+%RECORD(USERINDEXF)%ARRAY INDX(0 : 31)
+%INTEGERARRAY INT(0:15)
+%STRING(15)W
+%STRING(19)INDEX
+%STRING(31)WT
+%STRING(1)NLSTRING
+%REAL R
+%STRINGNAME INA
+%STRING(255)S
+%BYTEINTEGERARRAY IS(0:255)
+%CONSTINTEGER TYPES = 17
+%CONSTBYTEINTEGERARRAY TYP(1:TYPES) = %C
+      18, 1, 0, 44, 4, 30, 11, 12, 38, 5, 13, 14, 33, 37, 40, 6, 9
+%CONSTBYTEINTEGERARRAY HONLY(1:TYPES) = %C
+      1,1,1,1,0,0,0,0,1,1,1,1,1,1,1,1,0
+%CONSTBYTEINTEGERARRAY L(1:TYPES) = %C
+      1,1,1,1,2,3,4,4,11,5,6,7,8,1,9,9,10
+%CONSTSTRING(31)%ARRAY TAG(1:TYPES) = %C
+"Surname:  ", "
+Delivery: ", "
+Basefile: ", "   Supervisor: ", "
+Index use: ", "
+Files: ", "
+Limits: MaxKb",
+"  Maxfilesize", "
+Privs: ", "  ", "
+Current procs: ", "   max procs: ", "
+Funds: ", " Gpholder: ", "
+Dates passwords changed: ", "
+Last log on: ", "
+#ARCH use: index size"
+%SWITCH SW(1:TYPES)
+!
+      J = DUSERINDEXES(USER, -1, NI, INDX)
+      %RESULT = J %UNLESS J = 0
+!
+      NLSTRING = TOSTRING(10)
+      AI0 = ADDR(INT(0))
+!
+      %CYCLE I = 0, 1, NI-1
+         INA == INDX(I)_NAME
+         FSYS = INDX(I)_FSYS
+!
+         %IF I > 0 %START
+            LINE = "User also has "
+            %IF INA = "" %C
+            %THEN LINE = LINE . "an index" %C
+            %ELSE LINE = LINE . "a file index " . INA
+            LINE = LINE . " on fsys " . ITOS(FSYS)
+            REPLY TO(CNSL, LINE)
+         %FINISH
+!
+         LINE = "User: " . USER
+         LINE = LINE . "  Index: " . INA %UNLESS INA = ""
+         LINE = LINE . " on fsys " . ITOS(FSYS)
+         REPLY TO(CNSL, LINE)
+         LINE = ""
+!
+         INDEX = USER
+         INDEX = USER . ISEPL . INA . ISEPR %UNLESS INA = ""
+!
+         %CYCLE T = 1, 1, TYPES
+            -> NEXT %IF INA # "" %AND HONLY(T) = 1
+            TYPE = TYP(T)
+            J = DSFI(INDEX, FSYS, TYPE, 0, S, INT)
+            %IF J = 0 %START
+               WT = TAG(T)
+               REPLY TO(CNSL, LINE) %AND LINE = "" %IF WT -> (NLSTRING) . WT
+               LINE = LINE . WT
+               -> SW(L(T))
+            %FINISH
+
+            -> NEXT %IF T = 10; ! password stuff
+            %IF T=17 %AND J=32 %C
+            %THEN LINE = LINE . "No #ARCH" %C
+            %ELSE ERROR(J)
+            -> NEXTI
+SW(1):
+      LINE = LINE . S
+      -> NEXT
+SW(2):
+      LINE = LINE . " " . ITOS(INT(0))
+      LINE = LINE . " files, index size "
+      LINE = LINE . ITOS(INT(3))
+      LINE = LINE . "Kb"
+      REPLY TO(CNSL, LINE)
+      LINE = ""
+!
+      WRITE(INT(1), 3); LINE = LINE . " FDs used"
+      WRITE(INT(4)-INT(5), 3); LINE = LINE . " SDs used"
+      WRITE(INT(6)-INT(7), 3); LINE = LINE . " PDs used"
+      REPLY TO(CNSL, LINE)
+      LINE = ""
+!
+      WRITE(INT(2), 3); LINE = LINE . " FDs free"
+      WRITE(INT(5), 3); LINE = LINE . " SDs free"
+      WRITE(INT(7), 3); LINE = LINE . " PDs free"
+      -> NEXT
+SW(3):
+      WRITE(INT(0), 1)
+      LINE = LINE . " disc files,"
+      WRITE(INT(1), 1)
+      LINE = LINE . " Kb,"
+      WRITE(INT(4), 1)
+      LINE = LINE . " Temp files,"
+      WRITE(INT(5), 1)
+      LINE = LINE . " Temp Kb"
+      -> NEXT
+SW(4):
+      WRITE(INT(0), 1)
+      -> NEXT
+SW(5):
+      W = "----, ++++"
+      MOVE(4, AI0, ADDR(W)+1)
+      MOVE(4, AI0+4, ADDR(W)+7)
+      LINE = LINE . W
+      -> NEXT
+SW(6):
+      WRITE(INT(0), 3)
+      WRITE(INT(1), 3)
+      -> NEXT
+SW(7):
+      WRITE(INT(0), 3)
+      WRITE(INT(1), 3)
+      WRITE(INT(2), 3)
+      -> NEXT
+SW(8):
+      WRITE(INT(0), 1)
+      -> NEXT
+SW(9):
+      %CYCLE J = 0, 1, 1
+         K = INT(J)
+         %IF K = 0 %C
+         %THEN LINE = LINE . "????" %C
+         %ELSE LINE = LINE . UNPACKDT(K)
+         LINE = LINE . "  /  " %IF J = 0
+      %REPEAT
+      -> NEXT
+SW(10):
+      WRITE(INT(4), 1)
+      REPLY TO(CNSL, LINE)
+      LINE = ""
+      WRITE(INT(0), 6); LINE = LINE . " A files "
+      WRITE(INT(2), 6); LINE = LINE . " B files "
+      WRITE(INT(5)-INT(6), 4); LINE = LINE . " FDs used"
+      WRITE(INT(7)-INT(8), 4); LINE = LINE . " PDs used"
+      REPLY TO(CNSL, LINE)
+      LINE = ""
+      WRITE(INT(1), 6); LINE = LINE . " A Kbytes"
+      WRITE(INT(3), 6); LINE = LINE . " B Kbytes"
+      WRITE(INT(6), 4); LINE = LINE . " FDs free"
+      WRITE(INT(8), 4); LINE = LINE . " PDs free"
+      -> NEXT
+SW(11):
+      LINE = LINE . "X'" . HTOS(INT(0), 8)
+NEXT:
+         %REPEAT
+NEXTI:
+         REPLY TO(CNSL, LINE)
+      LINE = ""
+      %REPEAT
+      %RESULT = 0
+%END
+!
+!-------------------------------------------------- START OF MAIN PROGRAM ------
+!
+      %IF D_XOPER MSTATE = 0 %START  { first time in - initialise }
+         ISEG = 0
+         IGAP = 0
+         J = CREATE AND CONNECT("VOLUMS", "SS#WRK", -1, 32 {Kb},
+          X'03000045' { EEP=3, temp}, 3 {RW}, ISEG, IGAP)
+         %RESULT = J %UNLESS J = 0
+         D_NEWPAGE STATE = ISEG << SEG SHIFT  { remember address of record }
+         R == RECORD(D_NEWPAGE STATE)
+         PARM = "" %IF PARM = "-1"
+         R_LINE = PARM  { whatever supplied }
+         R_PARAMS = 0  { count of parameters }
+         R_TYPE = 1  { parameter type required first - the function }
+         %CYCLE
+            R_RETURN = 0  { in lieu of subroutines }
+            -> PROMPT
+RETSWITCH(0):
+            R_TYPE = PARAM REQD(R_PARAMS, R_I(0))  { type of next param }
+            -> FNSWITCH(R_I(0)) %IF R_TYPE = 0  { got enough }
+!
+            %IF R_TYPE = 59 %AND R_PARAMS > 5 %START
+               { DSFI special, may now have enough params }
+               -> FNSWITCH(R_I(0)) %UNLESS R_K > R_PARAMS - 5
+            %FINISH
+         %REPEAT
+      %FINISH
+!
+      R == RECORD(D_NEWPAGE STATE)
+      -> STATESW(R_STATE)
+
+
+
+FNSWITCH(1):
+      %RESULT = DCHACCESS(R_S(1), R_S(2), R_I(3), R_I(4))
+
+
+
+FNSWITCH(2):
+      %RESULT = DCHSIZE(R_S(1), R_S(2), R_I(3), R_I(4))
+
+
+
+FNSWITCH(3):
+      J = DCONNECT(R_S(1), R_S(2), R_I(3), R_I(4), R_I(5), R_I(6))
+!
+      %IF J = 0 %OR J = 34 %START
+         REPLY TO(CNSL, "Conn at ".HTOS(R_I(5)<<SEG SHIFT, 8)." Seg".ITOS(R_I(5)))
+      %FINISH
+      %RESULT = J
+
+
+
+FNSWITCH(4):
+      %RESULT = DCREATE(R_S(1), R_S(2), R_I(3), R_I(4), R_I(5), R_I(6))
+
+
+
+FNSWITCH(5):      ! DELUSER
+      %RESULT = DDELUSER(R_S(1), R_I(2))
+
+
+
+FNSWITCH(6):      ! DEREGISTER
+      %RESULT = DEREGISTER(R_S(1), R_S(2), R_I(3))
+
+
+
+FNSWITCH(7):      ! DESTROY
+      %RESULT = DDESTROY(R_S(1), R_S(2), R_S(3), R_I(4), R_I(5))
+
+
+
+FNSWITCH(8):      ! DISCONNECT
+      %RESULT = DDISCONNECT(R_S(1), R_S(2), R_I(3), R_I(4))
+
+
+
+FNSWITCH(9):      ! DISCS
+      IDISCS(R_I(1), CNSL, R_S(2))
+      %RESULT = 0
+
+
+
+FNSWITCH(10):      ! DONATE
+      %RESULT = DDONATE(R_S(1), R_I(2), R_I(3))
+
+
+
+FNSWITCH(11):     ! DUMPI
+      J = FINDA(R_S(1), R_I(2), FINDAD, 0)
+      %IF J = 0 %START
+         F == RECORD(FINDAD)
+         L = F_SIZE << 9
+         %IF F_NAME = "" %START
+            FINDAD = FINDAD - 512
+            L = L + 512
+         %FINISH
+         DDUMP(FINDAD, FINDAD+L-1, 0, 0)
+      %FINISH
+      %RESULT = J
+
+
+
+FNSWITCH(12):      ! FBASE
+      J = FBASE2(R_I(1), ADDR(I(0)))
+      %RESULT = J %UNLESS J = 0
+      REPLY TO(CNSL, "LO=".HTOS(I(0),4)." HI=".HTOS(I(8),8))
+      %RESULT = 0
+
+
+
+FNSWITCH(13):      ! FILENAMES
+      %IF R_I(3) = 0 %START
+         J = FILENAMES(R_S(1), R_OS, R_XP, NFILES, PER, R_I(2), 400)
+         %RESULT = J %UNLESS J = 0
+         %IF 0 < NFILES %START
+            ON = 0
+            WSTRING = ""
+            %CYCLE J = 1, 1, NFILES
+               PX = J
+               AW == R_OS(R_XP(PX)&X'FFFF')
+               W = AW_NAME
+               W = W . GSEP %IF AW_GROUP = 1
+               %CYCLE
+                  PX = R_XP(PX)>>16
+                  %EXIT %IF PX = 0
+                  AW == R_OS(R_XP(PX)&X'FFFF')
+                  W = AW_NAME . GSEP . W
+               %REPEAT
+               ON = ON + 1
+               %IF ON < PER %START
+                  W = W . " " %WHILE LENGTH(W) < LEN(PER)
+                  W = W . " "
+               %FINISH
+               WSTRING = WSTRING . W
+               %IF ON = PER %START
+                  REPLY TO(CNSL, WSTRING)
+                  ON = 0
+                  WSTRING = ""
+               %FINISH
+            %REPEAT
+         %FINISH
+         REPLY TO(CNSL, WSTRING) %UNLESS WSTRING = ""
+         %RESULT = 0
+      %FINISH
+!
+      NUM = 0
+      MAX = 400
+      J = DFILENAMES(R_S(1), NUM, MAX, NFILES, R_I(2), R_I(3), R_AS)
+      %RESULT = J %UNLESS J = 0
+!
+      REPLY TO(CNSL, "Nfiles=".ITOS(NFILES))
+      %RESULT = 0 %IF NFILES = 0
+!
+      REPLYTO(CNSL, "  NKB     Date  Tape Chap File")
+      MAX = MAX-1
+      %CYCLE J = 0, 1, MAX
+         PX = J
+         A == R_AS(PX)
+%IF A_NKB > 0 %START  { a file, not a group or empty }
+         S = SWRITE(A_NKB, 4)
+         S = S . " " . A_DATE
+         S = S . " " . A_TAPE
+         S = S . SWRITE(A_CHAP, 4)
+         S = S . " "
+         W = A_NAME
+         %CYCLE
+            PX = A_PREFIX
+            %EXIT %IF PX = 0
+            A == R_AS(PX)
+            W = A_NAME . GSEP . W
+         %REPEAT
+         REPLYTO(CNSL, S . W)
+%FINISH
+      %REPEAT
+      %RESULT = 0
+
+
+
+FNSWITCH(14):      ! FINFO
+      J = DFINFO(R_S(1), R_S(2), R_I(3), S, I)
+      %RESULT = J %UNLESS J = 0
+!
+      %IF I(0) = 0 %START
+         REPLY TO(CNSL, "A Group, RUP " . ITOS(I(1)))
+         REPLY TO(CNSL, " EEP " . ITOS(I(2)))
+         REPLY TO(CNSL, " FSYS " . ITOS(I(6)))
+      %FINISH %ELSE %START
+         REPLY TO(CNSL, "NKB " . ITOS(I(0)))
+         REPLY TO(CNSL, "RUP " . ITOS(I(1)))
+         REPLY TO(CNSL, "EEP " . ITOS(I(2)))
+         REPLY TO(CNSL, "USE " . ITOS(I(4)))
+!
+         REPLY TO(CNSL, "ARCH  " . HTOS(I(5), 2))
+         REPLY TO(CNSL, "FSYS " . ITOS(I(6)))
+         REPLY TO(CNSL, "SEG " . ITOS(I(7)))
+         REPLY TO(CNSL, "CCT " . ITOS(I(8)))
+         REPLY TO(CNSL, "CODES: " . INTERPRET(I(9)<<24, "Noarch/Violat/Privat/Chersh/Vtemp/Temp/Offer/Unava", "/"))
+!
+         REPLY TO(CNSL, "DAY " . ITOS(I(10)))
+         REPLY TO(CNSL, "SS " . ITOS(I(12)))
+         REPLY TO(CNSL, "ON OFFER TO " . S)
+         REPLY TO(CNSL, "CODES2: " . INTERPRET(I(11)<<24, "?/?/?/?/WSallow/Oldgen/?/WRconn", "/"))
+      %FINISH
+      %RESULT = 0
+
+
+
+FNSWITCH(15):      ! FSTATUS
+      %RESULT = DFSTATUS(R_S(1), R_S(2), R_I(3), R_I(4), R_I(5))
+
+
+
+FNSWITCH(16):     ! FSYS
+      %RESULT = IDFSYS(R_S(1), CNSL)
+
+
+
+FNSWITCH(17):      ! GETDA
+      J = DGETDA(R_S(1), R_S(2), R_I(3), I)
+      %RESULT = J %UNLESS J = 0
+!
+      REPLY TO(CNSL, "Sectsi " . ITOS(I(0)))
+      REPLY TO(CNSL, "   Nsects " . ITOS(I(1)))
+      REPLY TO(CNSL, "   PGS in last sect " . ITOS(I(2)))
+!
+      J = 0
+      %WHILE J < I(1) %CYCLE
+         REPLY TO(CNSL, "DA " . ITOS(J+1) . " " . HTOS(I(J + 3), 8))
+         J = J + 1
+      %REPEAT
+      %RESULT = 0
+
+
+
+FNSWITCH(18):      ! NEWGEN
+      %RESULT = DNEWGEN(R_S(1), R_S(2), R_S(3), R_I(4))
+
+
+
+FNSWITCH(19):      ! NEWUSER
+      %RESULT = DO NEWUSERS(R_S(1), R_S(1), R_I(2), R_I(3), R_S(4), R_S(5), R_S(6), R_S(7), R_I(8),
+         R_I(9), R_I(10), R_I(11), R_I(12))
+
+
+
+FNSWITCH(20):      ! OFFER
+      %RESULT = DOFFER(R_S(1), R_S(2), R_S(3), R_I(4))
+
+
+
+FNSWITCH(21):      ! OPTIONS
+      %RESULT = 0
+
+
+
+FNSWITCH(22):     ! OPTNNT
+      %RESULT = OPTNNT(R_I(1))
+
+
+
+FNSWITCH(23):      ! PERMISSION
+      J = DPERMISSION(R_S(1), R_S(2), R_S(3), R_S(4), R_I(5), R_I(6), R_I(7))
+      %RESULT = J %UNLESS J = 0
+!
+      J = R_I(6) & 15
+      %IF J = 10 %START
+         REPLY TO(CNSL, "PERM=" . HTOS(PRM_N, 3))
+      %FINISH %ELSE %START
+         %IF J = 4 %START
+            REPLY TO(CNSL, "OWNP=" . HTOS(PRM_OWNP, 3))
+            REPLY TO(CNSL, "EEP=" . HTOS(PRM_EEP,  3))
+         %FINISH
+         %IF J = 4 %OR J = 8 %START
+            J = (PRM_N-16)>>3
+            %IF J > 0 %START
+               %CYCLE X = 0, 1, J-1
+                  REPLY TO(CNSL, PRM_PRMS(X)_USER . " " . HTOS(PRM_PRMS(X)_PRM, 3))
+               %REPEAT
+            %FINISH
+         %FINISH
+      %FINISH
+      %RESULT = 0
+
+
+
+FNSWITCH(24):      ! PERMS
+      %RESULT = IPERMS(R_S(1), CNSL)
+
+
+
+FNSWITCH(25):       ! PRG
+      %RESULT = DPRG(R_S(1), R_S(2), R_I(3), R_S(4), R_I(5))
+
+
+
+FNSWITCH(26):     ! PROBE
+      %RESULT = PROBE(R_S(1), R_I(2))
+
+
+
+FNSWITCH(27):           ! PROCS
+      %RESULT = IDPROCS(CNSL)
+
+
+
+FNSWITCH(28):     ! REGISTER
+      %RESULT = DO NEWUSERS(R_S(1), R_S(2), R_I(3), R_I(4), R_S(5), R_S(6),
+         R_S(7), R_S(8), R_I(9), R_I(10), R_I(11), R_I(12), R_I(13))
+
+
+
+FNSWITCH(29):      ! RENAME
+      %RESULT = DRENAME(R_S(1), R_S(2), R_S(3), R_I(4))
+
+
+
+FNSWITCH(30):        ! RENAME INDEX
+      %RESULT = DRENAMEINDEX(R_S(1), R_S(2), R_I(3))
+
+
+
+FNSWITCH(31):          ! RESTORE
+      %RESULT = DRESTORE(R_S(1), R_S(2), R_S(3), R_I(4), R_I(5))
+
+
+
+FNSWITCH(32):          ! SET PASSWORD
+      %RESULT = 0
+
+
+
+FNSWITCH(33):      ! SFI
+      %IF R_I(4) = 0 {get} %START
+         J = DSFI(R_S(1), R_I(2), R_I(3), 0, R_DSFS, R_DSFI)
+      %FINISH %ELSE %START
+         IAN == ARRAY(ADDR(R_I(5)), IFT)
+         J = DSFI(R_S(1), R_I(2), R_I(3), 1, R_S(5), IAN)
+      %FINISH
+!
+      %RESULT = J %UNLESS J = 0
+      %IF R_I(4) = 0 %START
+         X = R_K
+         %IF X = 0 %START
+            REPLY TO(CNSL, TXT(T(R_I(3))) . ": " . R_DSFS)
+         %FINISH %ELSE %START
+            X = -X %IF X < 0; ! X is the number of integers to print
+            %CYCLE J = 0, 1, X-1
+               REPLY TO(CNSL, TXT(T(R_I(3))+J).":".ITOS(R_DSFI(J)) . ", X'" . HTOS(R_DSFI(J),8))
+            %REPEAT
+         %FINISH
+      %FINISH
+      %RESULT = 0
+
+
+
+FNSWITCH(34):         ! SUBMIT
+      %RESULT = 0
+
+
+
+FNSWITCH(35):      ! TRANSFER
+      %RESULT = DTRANSFER(R_S(1), R_S(4), R_S(2), R_S(5), R_I(3), R_I(6), R_I(7))
+
+
+
+FNSWITCH(36):           ! UNPRG
+      %RESULT = DUNPRG(R_S(1), R_S(2), R_I(3), R_S(4), R_I(5))
+
+
+
+FNSWITCH(37):           ! USERS
+      %RESULT = IUSERS(R_I(1), CNSL)
+
+
+
+FNSWITCH(38):         ! WHO
+      %RESULT = IWHO(R_S(1), CNSL)
+
+
+
+!
+!
+PROMPT:
+      WSTRING = PARAMETER TABLE(R_TYPE)      
+      WSTRING -> R_PTXT . ("!") . R_DTXT . ("!") . R_HTXT . ("!") . TEMP
+      J = STOI2(TEMP, R_TEMPLATE)
+!
+      %IF R_LINE -> WSTRING . (",") . R_LINE %C
+      %THEN EXPLICIT = 1 %C
+      %ELSE %START
+         EXPLICIT = 0
+         WSTRING = R_LINE
+         R_LINE = ""
+      %FINISH
+!
+      %CYCLE
+!
+         %IF R_TYPE = PERMISSION %START
+            J = R_I(6) & 15  { type }
+            NUM = ADDR(PRM) %AND %EXIT %UNLESS 0 <= J <= 2 %OR J = 6
+         %FINISH
+!
+         %IF R_TYPE = 59 { DSFI } %START
+            NUM = ADDR(R_DSFI(0))
+            R_T = R_I(3)  { type }
+            R_K = NI(R_T)
+            %EXIT %IF R_I(4) = 0 { get } %OR R_T < 0 %OR R_T > TOPDSFI %OR R_K < 0
+            %IF R_K = 0 %START
+               R_PTXT = TXT(T(R_T)) . ": "
+               R_DTXT = ""
+               R_TEMPLATE = 10  { any string }
+            %FINISH %ELSE %START
+               R_PTXT = TXT(T(R_T) + R_PARAMS - 5) . ":- "
+            %FINISH
+         %FINISH
+!
+         %IF WSTRING = "" %AND EXPLICIT = 0 %START
+            R_STATE = 1
+            PARM = R_PTXT
+            %RESULT = -1  { issues prompt PTXT then comes back here }
+STATESW(1):
+            WSTRING = PARM
+         %FINISH
+         EXPLICIT = 0
+!
+         %IF WSTRING = "" %START
+            WSTRING = R_DTXT
+            REPLY TO(CNSL, "^" . WSTRING . "^")
+         %FINISH
+!
+         %IF WSTRING = "?" %START
+            GIVE HELP(CNSL, R_HTXT, R_DTXT)
+            WSTRING = ""
+            %CONTINUE
+         %FINISH
+!
+         -> SW(R_TEMPLATE) %IF R_TEMPLATE < 100  { want some kind of string }
+         J = STOI2(WSTRING, NUM)
+         -> L %UNLESS J = 0  { not an integer at all }
+         -> SW(-(R_TEMPLATE-100))
+SW(-1):
+         %EXIT %IF -1 <= NUM <= 99
+         -> L
+SW(-2):
+         %EXIT %IF 0 <= NUM <= 99
+         -> L
+SW(-3):
+         %EXIT %IF NUM >= 0
+         -> L
+SW(-4):
+         %EXIT
+SW(1):            { a user name }
+         -> L %UNLESS UNOK(WSTRING) = 0
+         %EXIT
+SW(2):            { an 11 ch file name }
+         -> L %UNLESS S11OK(WSTRING) = 0
+         %EXIT
+SW(3):            { an upper case string }
+         UCTRANSLATE(ADDR(WSTRING)+1, LENGTH(WSTRING)) %UNLESS WSTRING = ""
+         %EXIT
+SW(4):              { file index }
+         -> L %UNLESS UI(WSTRING, UNA, INA) = 0
+         %EXIT
+SW(5):                 { file }
+         -> L %UNLESS FNOK(WSTRING, TERM) = 0
+         %EXIT
+SW(6):                 { file or group }
+         -> L %UNLESS FORGOK(WSTRING, TERM) = 0
+         %EXIT
+SW(7):                 { full group name }
+         -> L %UNLESS UIG(WSTRING, UNA, INA, GRP) = 0
+         %EXIT
+SW(8):                { file or group or null }
+         -> L %UNLESS WSTRING = "" %OR FORGOK(WSTRING, TERM) = 0
+         %EXIT
+SW(9):                  { user or group for perms }
+         -> L %UNLESS GNOK(WSTRING) = 0
+         %EXIT
+SW(10):
+         %EXIT
+SW(11):
+         UCTRANSLATE(ADDR(WSTRING)+1, LENGTH(WSTRING)) %UNLESS WSTRING = ""
+         R_I(0) = 0
+         %CYCLE J = 1, 1, TOPFN
+            R_I(0) = J %AND %EXIT %IF WSTRING = AVAILABLE FN(J)
+         %REPEAT
+         %RESULT = 8 %UNLESS R_I(0) > 0
+         %EXIT
+SW(12):      { 'first' user }
+SW(13):     { 'last' user }
+         -> L %UNLESS UNOK(WSTRING) = 0  { checks length, does UCT and checks chs }
+         -> L %UNLESS '0' <= CHARNO(WSTRING, 5) <= '9'
+         -> L %UNLESS '0' <= CHARNO(WSTRING, 6) <= '9'
+         %EXIT %IF R_TEMPLATE = 12  { a good name with two digits at end }
+         %CYCLE J = 1, 1, 4
+            -> L %UNLESS CHARNO(R_S(1), J) = CHARNO(WSTRING, J)
+         %REPEAT  { first 4 chs are the same }
+         LO = 10 * (CHARNO(R_S(1), 5)-'0') + (CHARNO(R_S(1), 6)-'0')
+         HI = 10 * (CHARNO(WSTRING,5)-'0') + (CHARNO(WSTRING,6)-'0')
+         -> L %IF LO > HI  { range wrong way round }
+         %EXIT
+SW(14):      { a 4 character string - passwords }
+         %EXIT %IF LENGTH(WSTRING) = 4
+         -> L
+L:
+         WSTRING = ""  { to force a read }
+         EXPLICIT = 0
+      %REPEAT
+!
+      %IF R_TEMPLATE < 100 %C
+      %THEN R_S(R_PARAMS) = WSTRING %C
+      %ELSE R_I(R_PARAMS) = NUM
+      R_PARAMS = R_PARAMS + 1
+      -> RETSWITCH(R_RETURN)
+!
+%END; ! SS
+!
+!-----------------------------------------------------------------------
+!
+%ENDOFFILE

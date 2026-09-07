@@ -1,0 +1,102 @@
+! SPDX-License-Identifier: MIT
+! Copyright (c) 2026 Jiaxun Yang <jiaxun.yang@flygoat.com>
+
+! Unix command wrapper for the hosted icl9cezibmimp; ordinary IMP/C ABI throughout.
+%constinteger XIMPLP64=0
+%externalintegerfnspec hostbegin
+%externalintegerfnspec hostend
+%externalstring(255)%fnspec unix argument(%byteintegername argv,%integer argc,index)
+%externalintegerfnspec hostsourcealias(%string(255) name,path)
+%externalroutinespec hostfreesourceareas
+%externalroutinespec hostclearsourcealiases
+%externalroutinespec hostdisconnect(%string(255) file,%integername flag)
+%externalintegerfnspec hostuinfi(%integer item)
+%externalroutinespec icl9cezibmimp
+%if XIMPLP64=1 %start
+%externallongintegermapspec hostcomregmap(%integer item)
+%externalroutinespec hostoutfile(%string(255) file,%integer size,hole,prot,%longintegername address,%integername flag)
+%finish %else %start
+%externalintegermapspec hostcomregmap(%integer item)
+%externalroutinespec hostoutfile(%string(255) file,%integer size,hole,prot,%integername address,%integername flag)
+%finish
+
+%externalintegerfn main %alias "main"(%integer argc,%byteintegername argv)
+%integer first,status,error,flag,options,handled
+%string(255) option,input,output,name,path
+%conststring(6) work="T#WORK"
+%if XIMPLP64=1 %start
+%longinteger address
+%finish %else %start
+%integer address
+%finish
+
+%routine diagnostic(%string(255) text,%integer code)
+   printstring(text); write(code,1); newline
+%end
+
+%integerfn run
+   first=1
+   %if argc>1 %and unix argument(argv,argc,1)="imp" %then first=2
+   options<-hostcomregmap(27)
+   %while first<argc %cycle
+      option=unix argument(argv,argc,first)
+      handled=1
+      %if option="-fno-check" %then options=options!16 %else %c
+      %if option="-fno-array-check" %then options=options!32 %else %c
+      %if option="-fno-line" %then options=options!X'800000' %else %c
+      %if option="-fno-diag" %then options=options!4 %else %c
+      %if option="-O" %then options=options!X'10000' %else %c
+      %if option="-O0" %then options=options&\X'10000' %else handled=0
+      %if handled=1 %then first=first+1 %and %continue
+      %exit %unless option="--include" %and first+1<argc
+      option=unix argument(argv,argc,first+1)
+      %unless option->name.("=").path %and name#"" %start
+         printstring("include binding must be NAME=PATH");newline
+         %result=2
+      %finish
+      error=hostsourcealias(name,path)
+      %if error#0 %then diagnostic("include binding: ",error) %and %result=2
+      first=first+2
+   %repeat
+   %if argc-first#2 %start
+      printstring("usage: emas-imp [-O|-O0] [-fno-check] [-fno-array-check] [-fno-line] [-fno-diag] [--include NAME=PATH ...] input.imp output-file")
+      newline
+      %result=2
+   %finish
+   input=unix argument(argv,argc,first)
+   output=unix argument(argv,argc,first+1)
+   openinput(1,input);selectinput(1)
+   hostoutfile(work,hostuinfi(28),0,X'20000000',address,flag)
+   %if flag#0 %then diagnostic("work buffer: ",flag) %and closeinput %and %result=1
+   hostcomregmap(14)=address
+   hostcomregmap(27)=options
+   hostcomregmap(46)=0
+   hostcomregmap(52)=addr(output)
+   icl9cezibmimp
+   hostfreesourceareas
+   hostclearsourcealiases
+   status=0
+   %if hostcomregmap(24)#0 %then status=1
+   hostdisconnect(output,flag)
+   %if status=0 %and flag#0 %then diagnostic("output hostdisconnect: ",flag) %and status=1
+   hostdisconnect(work,flag)
+   closeinput
+   %result=status
+%end
+
+   error=hostbegin
+   %if error#0 %then diagnostic("host settings: ",error) %and %result=2
+   ! Keep cleanup on host language errors, including overlong argv strings.
+   status=-1
+   %begin
+      %on %event 1,4,6,9 %start
+         diagnostic("host command event: ",event)
+         status=2
+      %finish
+      %if status=-1 %then status=run
+   %end
+   error=hostend
+   %if error#0 %then diagnostic("host cleanup: ",error) %and %result=2
+   %result=status
+%end
+%endoffile

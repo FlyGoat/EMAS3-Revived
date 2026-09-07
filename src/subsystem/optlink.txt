@@ -1,0 +1,31 @@
+ start = time
+link ,map
+s01opty
+S02opty
+s30opty
+s31opty
+s32opty
+s33opty
+s34opty
+s05opty
+s51opty
+s52opty
+S06opty
+S07opty
+s10opty
+s11opty
+s14opty
+s15opty
+s22opty
+s24opty
+s25opty
+s26opty
+s27opty
+s88opty
+.END
+OPT402z
+SUBFIX OPT402Z,OPT402G,OPT402L
+regen opt402g,optsubsys
+permit optsubsys
+cherish optsubsys
+ say 'Started'-start-'finished'-time

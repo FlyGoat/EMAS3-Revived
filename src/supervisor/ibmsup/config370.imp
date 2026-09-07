@@ -1,0 +1,15 @@
+!
+!     4341 configuration
+!
+%constinteger cf entry size=32
+%constinteger cfentries=8
+%constintegerarray config file(0:cfentries*(cf entry size//4)-1)= %c
+      cfentries*cf entry size,1,1,6,x'282',1,500,0,
+      3,m'FD00',x'193',0,3,0,0,0,
+      mt<<16!x'ff',10,512,0,0,x'281',m'M60',x'00ff0000',
+      mt<<16!x'ff',10,512,0,0,x'282',m'M60',x'00000100',
+      op<<16!x'ff',10,512+oper screen size,0,0,x'9',m'OP0',0,
+      lp<<16!x'ff',60,2048,0,0,x'e',m'LP0',0,
+      cr<<16!x'ff',300,512,0,0,x'c',m'CR0',0,
+      cp<<16!x'ff',300,512,0,0,x'd',m'CP0',0
+!

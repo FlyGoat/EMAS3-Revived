@@ -1,0 +1,93 @@
+%EXTERNALROUTINESPEC ETOI %ALIAS "S#ETOI"(%INTEGER AD,L)
+%EXTERNALROUTINESPEC ITOE %ALIAS "S#ITOE" (%INTEGER AD,L)
+
+%EXTERNALSTRING(255)%FN EXTRACT VALUE(%STRING(*)%NAME REF,%INTEGERNAME FLAG)
+!***********************************************************************
+!*    RETURNS THE VALUE OF REF ALTERING STRING FORMATS TO IMP          *
+!***********************************************************************
+%INTEGER I,J,K,SP,AD
+%SHORTINTEGER L,F
+%SWITCH SW(0:5)
+%STRING(255)RES
+      *LM_0,1,REF
+      *ST_1,AD
+      *STH_0,L
+      *SRL_0,16
+      *STH_0,F
+      FLAG=0
+      %IF F<5 %THEN ->SW(F)
+SW(1):                                  ! IMP LONGSTRING
+      FLAG=1
+INV:  %RESULT="INVALID M-L STRING FOR EXTRACT VALUE"
+SW(0):                                  ! NORMAL IMP
+      %RESULT=REF
+SW(2):                                  ! ASCII FORTRAN
+      SP=' '; ->FCOM
+SW(3):                                  ! EBCDIC FORTRAN
+      SP=64
+FCOM:
+      %WHILE L>0 %CYCLE
+         I=BYTEINTEGER(AD+L-1);         ! LAST BYTE
+         %EXIT %IF I#SP
+         L=L-1
+      %REPEAT
+      %IF L>255 %THEN FLAG=2 %AND ->INV
+      LENGTH(RES)=L
+      %FOR I=0,1,L-1 %CYCLE
+         CHARNO(RES,I+1)=BYTEINTEGER(AD+I)
+      %REPEAT
+      %IF F=3 %THEN ETOI(ADDR(RES)+1,L)
+      %RESULT=RES
+SW(4):                                  ! 'C' STRING ASCII ZERO TERMINATED
+      LENGTH(RES)=255
+      %FOR I=0,1,L-1 %CYCLE
+         J=BYTEINTEGER(AD+I)
+         %IF J=0 %THEN %EXIT
+         %IF I>=255 %THEN FLAG=2 %AND ->INV
+         CHARNO(RES,I+1)=J
+      %REPEAT
+      LENGTH(RES)=I
+      %RESULT=RES
+%END
+
+%EXTERNALROUTINE STORE VALUE(%STRING(*)%NAME REF,%STRING(255)VALUE,
+      %INTEGERNAME FLAG)
+!***********************************************************************
+!*    STORES THE VALUE INTO REF ALTERING STRING FORMATS FROM IMP       *
+!***********************************************************************
+%INTEGER I,J,K,LV,AD
+%SHORTINTEGER L,F
+%SWITCH SW(0:5)
+      *LM_0,1,REF
+      *ST_1,AD
+      *STH_0,L
+      *SRL_0,16
+      *STH_0,F
+      FLAG=0
+      LV=LENGTH(VALUE)
+      %IF LV>L %THEN ->INV
+      %IF F<5 %THEN ->SW(F)
+SW(1):                                  ! IMP LONGSTRING
+      FLAG=1
+      %RETURN
+INV:
+      FLAG=2
+      %RETURN
+SW(0):                                  ! NORMAL IMP
+      REF=VALUE
+      %RETURN
+SW(2):                                  ! ASCII FORTRAN
+SW(3):                                  ! EBCDIC FORTRAN
+      %FOR I=0,1,LV-1 %CYCLE
+         BYTEINTEGER(AD+I)=CHARNO(VALUE,I+1)
+      %REPEAT
+      BYTEINTEGER(AD+I)=' ' %FOR I=LV,1,L-1
+      %IF F=3 %THEN ITOE(AD,L)
+      %RETURN
+SW(4):                                  ! 'C' STRING ASCII ZERO TERMINATED
+      %FOR I=0,1,LV-1 %CYCLE
+         BYTEINTEGER(AD+I)=CHARNO(VALUE,I+1)
+      %REPEAT
+      BYTEINTEGER(AD+LV)=0 %IF LV<L
+%END
+%ENDOFFILE

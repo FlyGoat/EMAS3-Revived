@@ -1,0 +1,2648 @@
+! S14 Parameter Acquisition Mechanism
+%end %oflist
+%include "subarc:ssownf3"
+%list
+%record %format e4f(%integer code, gla, ep, pword)
+!
+!
+!
+!
+%external %routine %spec shout %alias "s#shout"(%string (255) s)
+%external %integer %fn %spec jobspace vtoi %alias "s#jobspacevtoi"(%record (jobspace varf) %name v, %integer %name i)
+%external %string %fn %spec jobspace vtos %alias "s#jobspacevtos"(%record (jobspace varf) %name v)
+%external %integer %fn %spec jobspace expression %alias "s#jobspaceexpression"(%string %name line,
+   %record (jobspace varf) %name w)
+%external %integer %fn %spec devcode %alias "s#devcode"(%string (16) dev)
+%external %routine %spec ssenter %alias "s#ssenter"(%string %name s, %integer %name i, %string %name t)
+%external %routine %spec ssexit %alias "s#ssexit"(%string %name s, %integer %name i, %string %name t)
+%external %integer %fn %spec starts %alias "s#starts"(%string %name line, first)
+%external %integer %fn %spec compare %alias "s#compare"(%string (255) a, b)
+%external %routine %spec top n tail %alias "s#topntail"(%string %name s)
+%external %routine %spec pamhelp %alias "s#pamhelp"(%string %name file, command, key)
+%external %routine %spec pamjoin %alias "s#pamjoin"(%string (255) files, %string %name concfile, %integer %name flag)
+%external %integer %fn %spec stor %alias "s#stor"(%string (255) s, %long %real %name r)
+%external %integer %fn %spec stoi %alias "s#stoi"(%string (255) s, %integer %name i)
+%external %integer %fn %spec s11ok %alias "s#s11ok"(%string %name s)
+%external %integer %fn %spec unok %alias "s#unok"(%string %name s)
+%external %integer %fn %spec uiok %alias "s#uiok"(%string %name s)
+%external %string %fn %spec lcstring %alias "s#lcstring"(%string (255) s)
+%external %routine %spec lctranslate %alias "s#lctranslate"(%integer adr, len)
+%external %string %fn %spec ucstring %alias "s#ucstring"(%string (255) s)
+%external %routine %spec uctranslate %alias "s#uctranslate"(%integer adr, len)
+%external %routine %spec printline %alias "s#printline"(%string (255) s)
+%external %integer %fn %spec checkname %alias "s#checkname"(%string %name name, %integer %name tye, qualifier)
+%externalroutinespec clear %alias "S#CLEAR"(%integer channel, %integername flag)
+%external %integer %fn %spec close %alias "S#CLOSE"(%integer channel)
+%external %routine %spec monparams %alias "s#monparams"(%string (255) template)
+%external %string %fn %spec itos %alias "S#ITOS"(%integer i)
+%external %routine %spec move %alias "S#MOVE"(%integer len, from, to)
+%external %routine %spec set con level %alias "s#setconlevel"(%string (255) file, %integer level, %integer %name flag)
+%external %routine %spec setreturncode %alias "s#setreturncode"(%integer code)
+%external %string %fn %spec failuremessage %alias "s#failuremessage"(%integer n)
+%external %routine %spec psysmess %alias "s#psysmess"(%string (255) caller, %integer flag)
+%external %routine %spec connect %alias "S#CONNECT"(%string (255) file, %integer mode, hole, prot,
+   %integer %name adr, type, start, end, flag)
+%external %integer %fn %spec dfsys(%string %name fileindex, %integer %name fsys)
+%external %routine %spec define %alias "S#IDEFINE"(%integer channel, %string (255) id, %integer %name afd, flag)
+%external %routine %spec emas3(%string %name command, param, %integer %name flag)
+%external %routine %spec emas3h(%string %name command, param, %integer %name flag)
+%external %integer %fn %spec shistory %alias "S#HISTORY"(%string %name arg, command, param, %integer type)
+%external %string %fn %spec htos %alias "s#htos"(%integer h, places)
+%external %integer %fn %spec currentll %alias "S#CURRENTLL"
+%external %integer %fn %spec loadep %alias "S#LOADEP"(%string (31) entry, %integer %name type, flag,
+   %record (e4f) %name e4, %integer loc11)
+%external %routine %spec unload2 %alias "S#UNLOAD2"(%integer loc11, fail)
+!%external %integer %map %spec comreg %alias "S#COMREGMAP"(%integer n)
+%external %routine %spec prompt %alias "s#prompt"(%string (255) s)
+%external %string %fn %spec substring %alias "s#substring"(%string %name s, %integer i, j)
+%external %routine %spec outfile %alias "S#OUTFILE"(%string (255) file, %integer size, hole, prot,
+   %integer %name conad, flag)
+%external %routine %spec changefilesize %alias "S#CHANGEFILESIZE"(%string (255) file, %integer newsize,
+   %integer %name flag)
+%external %integer %fn %spec outstream %alias "s#outstream"
+%external %routine %spec emas3claimchannel(%integer %name chan)
+%external %integer %fn %spec ssetmode %alias "s#setmode"(%string (255) s)
+%external %routine %spec journal off %alias "S#JOURNALOFF"
+%external %routine %spec journal on %alias "S#JOURNALON"
+%external %routine %spec terminate %alias "s#terminate"
+%external %integer %function %spec outpos %alias "s#outpos"
+
+%string %fn %spec tokens to string(%string %name tokens, %integer pt)
+
+%external %routine %spec select names %alias "s#select names"(%string (255) node, pattern,
+   %record (mff) %array %name mfs, %integer %name mfn, %integer options, qualifier, days unused, %integer %name flag)
+%external %routine %spec generate names %alias "s#generate names"(%string (255) node, pattern,
+   %record (mff) %array %name mfs, %integer mfn, options, %integer %name flag)
+
+!  PAM Implementation
+!  ==================
+!
+!  Start with routine COMMAND.  A local record PAM is declared and is current
+!  during this invocation.  If we execute another command, COMMAND is called
+!  recursively, the address of the previous PAM is saved and a new record used.
+!  In COMMAND we start with a single parameter and repeatedly call PAMINIT and
+!  ENTER2 in a loop until it is exhausted.  The parameter may be "@file", in
+!  which case the first call of PAMINIT expands it (pam_filept/end pointers).
+!  Every call of PAMINIT then reads the next line and analyses it, placing
+!  details of the line in the PAM record ready for use in the subsequent entry
+!  to the called command.  So PAM hold details to control each individual
+!  call of the command (tokens, tokenpt, help) plus information which persists
+!  between calls (filept/end, control, command).   Once ENTERed, the command
+!  may make calls to the GET routines to deliver up each parameter in the
+!  current line (uses PAM tokens, tokenpt).
+!
+!  For an embedded "@anotherfile" parameter line, the current pointers in PAM
+!  (filept/end) are stacked and the new file is opened - this may be repeated.
+!  An old file is popped when a newer one finishes.
+!
+!  For wildcard expansion more is required: a  SELECT NAMES recordarray for
+!  the first wild parameter is saved.  This is needed to generate subsequent
+!  wild params in the current line.  All parameters are saved during this
+!  first execution, both of statics (non-wild) and expanded lists (wild).
+!  Each has a parameter descriptor record, starting with the pointer
+!  PAM_HEAD, and chained together.  An additional pointer PAM_TAIL indicates
+!  the (current) latest.  Only when all the GETs have been executed is the
+!  complete file of expanded parameter lines generated.  This happens on the
+!  SECOND call of PAMINIT.   Within GET PARAM, a purported parameter within
+!  a wild parameter line uses the local record GET as its parameter descriptor.
+!  Only when the parameter is validated is it linked with the previous
+!  descriptors.
+!
+
+%routine pamstop
+
+!   ssown_sscomreg(36) = ssown_savecom36
+   %stop
+%end;                                    ! pamstop
+
+!-----------------------------------------------------------------------
+
+%const %integer maxparms= 63
+%const %long %integer defaultparm= 0
+
+%const %string (10) %array parm words(0:maxparms)= %c
+   "",          "I8",         "L8",         "R8",                 {! COMREG(28)} %c
+   "OPTEXT",     "NOCOMMENTS", "NOWARNINGS", "STANDARD",
+   "MAXDICT",    "ANSI",           "",           "",
+   "",           "",           "MINSTACK",   "",
+   "",           "",           "",           "",
+   "OPT1",       "OPT2",       "",           "",
+   "",           "",           "",           "",
+   "",           "",           "",           "",
+   "QUOTES",     "NOLIST",     "NODIAG",     "STACK",              {! COMREG(27)} %c
+   "NOCHECK",    "NOARRAY",    "NOTRACE",    "PROFILE",
+   "NORANGE",    "INHIBIOF",   "ZERO",       "XREF",
+   "LABELS",     "LET",        "CODE",       "ATTR",
+   "OPT",        "MAP",        "DEBUG",      ""{was FIXED},
+   "DYNAMIC",    "",           "EBCDIC",     "NOLINE",
+   "",           "NOMAIN",     "PARMZ",      "PARMY",
+   "PARMX",      "MISMATCH",    "",           ""
+
+
+
+%external %string %fn printparms %alias "S#PRINTPARMS"(%long %integer p)
+   %string (255) t
+   %integer i
+   t = ""
+   p = p!!defaultparm
+   %for i = 0, 1, maxparms %cycle
+      %if p&1=1 %and parm words(i)#"" %start; ! IGNORE BLANK PARMS
+         %if t#"" %then t = t.","
+         t = t.parm words(i)
+      %finish
+      p = p>>1
+   %repeat
+   %if t="" %then t = "DEFAULTS"
+   %result = t
+%end;                                    ! of PRINTPARMS
+!
+!-----------------------------------------------------------------------
+!
+
+!%external %routine stoli %alias "s#stringtolonginteger"(%string (255) s,
+%long %integer %name l, %integer %name flag)
+!   %integer j, b
+!   %long %integer i
+!   %integer %name i0, i1
+!   l = 0
+!   i = 0
+!   i0 == integer(addr(i))
+!   i1 == integer(addr(i)+4)
+!
+!   flag = 0
+!   %return %if s=""
+!
+!   j = length(s)
+!   %while j>0 %cycle
+!      b = charno(s, j)
+!      %if b>63 %then flag = 1 %and %return %else %if b>31 %then i0 = i0!(1<<(b-32)) %else i1 = i1!(1<<b)
+!      j = j-1
+!   %repeat
+!   l = i
+!%end;                                    ! string to long integer
+!
+!-----------------------------------------------------------------------
+!
+!%external %routine print string array %alias "s#printstringarray"(%string %array %name s)
+!   %integer lo, hi, j
+!   *lm_0,2,s
+!   *lm_0,1,12(2)
+!   *stm_0,1,lo
+!   %cycle j = lo, 1, hi
+!      printstring(s(j))
+!      newline
+!   %repeat
+!%end;                                    ! print string array
+!
+!-----------------------------------------------------------------------
+!
+!%external %integer %fn getbit %alias "s#getbit"(%integer adr, n)
+!   %integer x, y, w
+!   x = (n>>5)<<2
+!   y = 31-(n&31)
+!   w = integer(adr+x)
+!   %result = (w>>y)&1
+!%end;                                    ! GETBIT
+!
+!-----------------------------------------------------------------------
+!
+!%external %integer %fn setbit %alias "s#setbit"(%integer adr, n, value)
+!   %integer x, y, original
+!   %integer %name w
+!   x = (n>>5)<<2
+!   y = 31-(n&31)
+!   w == integer(adr+x)
+!   original = (w>>y)&1
+!!
+!   %if value=0 %then w = w&(\(1<<y)) %else w = w!(1<<y)
+!!
+!   %result = original
+!%end;                                    ! SETBIT
+!
+!-----------------------------------------------------------------------
+!
+!
+!%string %fn i to tsn(%integer tsn)
+!   %integer j, ch
+!   %long %integer ltsn, t, w1, w2
+!   %string (6) s
+!   s = "      "
+!   ltsn = 0
+!   integer(addr(ltsn)+4) = tsn
+!   %cycle j = 6, -1, 1
+!      t = ltsn//36
+!      w1 = 36*t
+!      w2 = ltsn-w1
+!      ch = shorteni(w2)
+!      %cycle
+!         %exit %if 0<=ch<36
+!         ch = ch+36 %and t = t-1 %if ch<0
+!         ch = ch-36 %and t = t+1 %if ch>35
+!      %repeat
+!      %if ch<10 %then ch = ch+'0' %else ch = ch+55
+!      charno(s, j) = ch
+!      ltsn = t
+!   %repeat
+!   %result = s
+!%end;                                    ! I TO TSN
+!
+!-----------------------------------------------------------------------
+!
+%routine read any string(%string %name s)
+   %integer i
+   s = ""
+   %cycle
+      readsymbol(i)
+      %return %if i=nl
+      s = s.tostring(i)
+   %repeat
+%end
+!
+!-----------------------------------------------------------------------
+!
+%integer %fn fnok(%string %name f)
+   %integer j
+   %string (255) w, s11
+   w = f.gsep
+!
+   %cycle
+      w -> s11.(gsep).w
+      j = s11ok(s11)
+      ->out %unless j=0
+      %result = 0 %if w=""
+   %repeat
+out:
+   j = 380 %unless w=""
+   %result = j
+%end;                                    ! FNOK
+!
+!-----------------------------------------------------------------------
+!
+%integer %fn forgok(%string %name s)
+   %integer j
+   %string (255) w, s11
+   w = s.gsep
+   %cycle
+      w -> s11.(gsep).w
+      j = s11ok(s11)
+      ->out %unless j=0
+      %result = 0 %if length(w)<2
+   %repeat
+out:
+   j = 380 %unless w=""
+   %result = j
+%end;                                    ! FORGOK
+!
+!-----------------------------------------------------------------------
+!
+%external %integer %fn uig %alias "s#uig"(%string %name s)
+   { this for the files command }
+   %integer j
+   %string (255) g, w, i
+   %unless s->(usep) %start
+      s = ssown_path to be used.s
+   %finish
+
+   %if s->i.(usep).s %start
+      j = uiok(i)
+      %result = j %unless j=0
+   %finish %else i = ssown_ssowner
+!
+   i = i.usep
+   s = i %and ->out %if s=""
+!
+   g = ""
+   g = g.w.gsep %while s->w.(gsep).s
+   %unless g="" %start
+      j = forgok(g)
+      %result = j %unless j=0
+   %finish
+!
+   { s is now the bit at the end, null, *, a*b }
+   s = i.g.s
+out:
+   s = ucstring(s)
+   %result = 0
+%end;                                    ! UIG
+!
+!-----------------------------------------------------------------------
+!
+%integer %fn nameok(%string %name s, %integer maxlen)
+   %integer j, k, ch
+
+   k = length(s)
+   %result = 129 %if k=0 { no filename specified }
+   %result = 224 %if k>maxlen { filename too long }
+
+   %cycle j = 1, 1, k
+      ch = charno(s, j)
+      %result = 167 %unless 'A'<=ch<='Z' %or { invalid filename & }'a'<=ch<='z' %or ('0'<=ch<='9' %and j>1)
+   %repeat
+   %result = 0
+%end;                                    ! nameok
+
+!-----------------------------------------------------------------------
+
+%integer %fn dateok(%string %name s)
+   %integer i, j
+   %string (8) d, m, y
+   %result = 381 %unless length(s)=8 %and s->d.("/").m.("/").y
+   j = stoi(d, i)
+   %result = 381 %unless j=0 %and 1<=i<=31
+   j = stoi(m, i)
+   %result = 381 %unless j=0 %and 1<=i<=12
+   j = stoi(y, i)
+   %result = 381 %unless j=0 %and 60<=i<=99
+   %result = 0
+%end;                                    ! dateok
+%list
+!
+!-----------------------------------------------------------------------
+!
+%routine clean key(%string %name key)
+   %string (255) a, b
+   key = a.b %while key->a.(" ").b
+   key = a.b %while key->a.(tostring(nl)).b
+   key = ucstring(key)
+%end;                                    ! clean key
+!
+!-----------------------------------------------------------------------
+!
+!%routine dequote(%string %name line)
+!   %integer state, l, j, k, this, next, x
+!   l = length(line)
+!   %return %if l=0
+!   state = 0
+!   k = 0 { output pointer }
+!   j = 2
+!   next = charno(line, 1)
+!   %cycle
+!      this = next
+!      %if j>l %then next = 256 %else next = charno(line, j)
+!      j = j+1
+!      %if this='"' %start
+!         x = state
+!         x = x+1 %if next='"'
+!         %if x=3 %start
+!            k = k+1; charno(line, k) = this { save }
+!            %if j>l %then next = 256 %else next = charno(line, j) { skip }
+!            j = j+1
+!            %continue
+!         %finish
+!         state = 2-state; %continue
+!      %finish
+!      length(line) = k %and %return %if this=256
+!      k = k+1; charno(line, k) = this
+!   %repeat
+!%end;                                    ! dequote
+!
+!-----------------------------------------------------------------------
+!
+%routine split on(%string %name line, piece, %integer character)
+   %integer s, j, this, next, type, l, skip
+   %byte %integer %array state(0:31)
+   %const %byte %integer %array ch(1:5)= '"', '(', '[', ')', ']'
+   l = length(line)
+   piece = "" %and %return %if l=0
+   skip = 0
+   s = 0
+   state(0) = 0
+   j = 2
+   next = charno(line, 1)
+   %cycle
+      this = next
+      %if j>l %then next = 256 %else next = charno(line, j)
+      j = j+1
+      skip = 0 %and %continue %if skip>0
+      piece = line %and line = "" %and %return %if this=256
+      %if this=character %and s=0 %start
+         piece = substring(line, 1, j-3)
+         line = substring(line, j-1, l)
+         %return
+      %finish
+      %if state(s)=1 %start { mid quoted string }
+         %if this='"' %start
+            s = s-1 %and %continue %if next#'"'
+            skip = 1
+         %finish
+      %else
+         type = 5
+         %cycle
+            %exit %if this=ch(type)
+            type = type-1
+         %repeat %until type=0
+         %if 1<=type<=3 %start
+            s = s+1
+            state(s) = type
+         %else
+            %if 4<=type<=5 %start
+               s = s-1 %if state(s)=type-2 { matching bracket }
+            %finish
+         %finish
+      %finish
+   %repeat
+%end;                                    ! split on
+!
+!-----------------------------------------------------------------------
+!
+%external %string %fn amend surname %alias "s#amendsurname"(%string (255) name)
+
+!     Renders an sfi surname in a (near) standard form.  Does less if the
+!     name is already in mixed case or is presented in quotes.
+!     Does not truncate to 31 chars
+   %integer i, j, k, case
+   %string (255) s1, s2, newname
+   %external %routine %spec lctranslate %alias "s#lctranslate"(%integer ad, len)
+!     0=illegal, 1=legal, 2=alphanumeric (# treated as alphanumeric)
+   %const %byte %integer %array legal(0:127) = 0 (32),1(2),0,2{#},1,0,1(2),0(2),1(2),0,
+ 1(3),2(10),0(3),1,0,1,0,2(26),0(3),1(3),2(26),1(4),0
+   %const %integer nseps= 5
+   %const %string (1) %array sep(1:nseps) = " ", ".", "-", "_", "/"
+
+   %integer %fn alphanumeric(%integer char)
+      %if legal(char)=2 %then %result = 1
+      %result = 0
+   %end;                                 !of alphanumeric
+
+   %if length(name)>2 %and charno(name, 1)='"'=charno(name, length(name)) %then case = 3 {leave alone} %else case = 0
+   %for i = 1, 1, length(name) %cycle
+      charno(name, i) = charno(name, i)&127
+      %if legal(charno(name, i))=0 %then charno(name, i) = 0
+   %repeat
+   name = name.s1 %while name->name.(tostring(0)).s1
+
+   i = 1;                                !remove leading and trailing junk
+   j = length(name)
+   i = i+1 %while i<=j %and alphanumeric(charno(name, i))=0
+   j = j-1 %while i<=j %and alphanumeric(charno(name, j))=0
+   %if i>j %then %result = ""
+   name = substring(name, i, j)
+   %for i = 1, 1, nseps %cycle;          !remove redundant spaces
+      name = s1.sep(i).s2 %while name->s1.(sep(i)." ").s2
+      name = s1.sep(i).s2 %while name->s1.(" ".sep(i)).s2
+   %repeat
+
+   %for i = 1, 1, length(name) %cycle;   !mono case or mixed case?
+      %if 'A'<=charno(name, i)<='Z' %then case = case!1
+      %if 'a'<=charno(name, i)<='z' %then case = case!2
+      %if case=3 %then %exit
+   %repeat
+
+   %if case#3 %and %not (length(name)<=4 %and case=1 {initials?}) %start; !mono case
+      lctranslate(addr(name)+1, length(name))
+      %for i = 1, 1, nseps %cycle
+         newname = ""
+         name = name.sep(i)
+         %while name->s1.(sep(i)).name %cycle; !each fragment
+            %if s1="" %then %continue
+            %if 'a'<=charno(s1, 1)<='z' %then charno(s1, 1) = charno(s1, 1)-32
+            %if name="" %and length(s1)>5 %and (s1->("Mac").s2 %or s1->("Mc").s2) %start
+               k = length(s1)-length(s2)+1
+               %if "kie"#"key" %and 'a'<=charno(s1, k)<='z' %then charno(s1, k) = charno(s1, k)-32
+            %finish
+            newname = newname.s1
+            %if name#"" %start
+               %if length(s1)=1 %and i=1 {sep is space} %and name#"" %then newname = newname."." %else %c
+                  newname = newname.sep(i)
+            %finish
+         %repeat
+         name = newname
+      %repeat
+      %if name->s1.("O'").s2 %and 'a'<=charno(s2, 1)<='z' %start
+         charno(s2, 1) = charno(s2, 1)-32
+         name = s1."O'".s2
+      %finish
+   %finish
+   %if name->(" ") %start
+      %if name->(".") %then s1 = "." %else s1 = "_"
+      name = name.s1.s2 %while name->name.(" ").s2
+   %finish
+   %result = name
+%end;                                    !of amend surname
+
+!---------------------------------------------------------------------------
+
+%external %integer %fn lookup %alias "s#lookup"(%string (255) qtxt, %string %name piece)
+   %integer j, k, hits
+   %string (255) word, save
+
+   %if qtxt#"" %and charno(qtxt, length(qtxt))#',' %then qtxt = qtxt.","
+   j = -1
+   hits = 0
+   %cycle
+      j = j+1
+      split on(qtxt, word, ',')
+      top n tail(word)
+      %if starts(word, piece)=1 %start { a candidate }
+         %if length(word)=length(piece) %start
+            %result = -383 %if hits>0 %and k>32767 { two exacts ! }
+            k = j+32768
+            save = word
+         %else
+            k = j %and save = word %unless hits>0 %and k>32767
+         %finish
+         hits = hits+1
+      %else
+         %if word=""=piece %then %result = j
+      %finish
+      %exit %if qtxt=""
+   %repeat
+   %result = -382 %if hits=0 { not found }
+   %result = -383 %if hits>1 %and k<32768 { more than one partial }
+   piece = save
+   %result = k&32767
+%end;                                    ! look up
+!
+!-----------------------------------------------------------------------
+!
+%external %integer %fn lookup array %alias "s#lookuparray"(%string %array %name s, %string %name piece)
+   %integer lo, hi, j, k, hits
+
+   *lm_0,2,s
+   *lm_0,1,12(2)
+   *stm_0,1,lo
+
+   hits = 0
+   %cycle j = lo, 1, hi
+      %if s(j)#"" %and starts(s(j), piece)=1 %start
+         %if length(s(j))=length(piece) %start { exact }
+            %result = -383 %if hits>0 %and k>32767 { two exact }
+            k = j+32768
+         %else
+            k = j %unless hits>0 %and k>32767
+         %finish
+         hits = hits+1
+      %finish
+   %repeat
+
+   %result = -382 %if hits=0
+   %result = -383 %if hits>1 %and k<32768
+   k = k&32767
+   piece = s(k)
+   %result = k
+%end;                                    ! lookup array
+!
+!-----------------------------------------------------------------------
+!
+%integer %fn translate list(%string (255) qtxt, %string %name piece)
+   %integer lp, n, j
+   %string (255) item
+   %byte %integer %array b(0:255)
+
+   lp = length(piece)
+   %if lp>2 %and charno(piece, 1)='(' %and charno(piece, lp)=')' %start
+      length(piece) = lp-1
+      piece -> ("(").piece
+   %finish { removing optional brackets }
+
+   n = 0 { number of items found }
+   %cycle
+      split on(piece, item, ',')
+      top n tail(item)
+      j = look up(qtxt, item)
+      %result = -j %if j<0 { ambiguous or not found }
+      n = n+1
+      b(n) = j
+      %exit %if piece=""
+   %repeat
+
+   b(0) = n
+   piece = string(addr(b(0)))
+   %result = 0
+%end;                                    ! translate list
+!
+!-----------------------------------------------------------------------
+!
+%const %string (1) sep= ";"
+!
+!%const %string (12) dfile= ":SS#DEFAULTS"
+
+!
+!
+%integer %fn set tags(%string %name w, %string %array %name tag, %integer toptag)
+   %integer tags, j
+   %string (255) key
+
+   tags = 0
+   w = w . key %while w -> w . (" ") . key
+   w = lcstring(w)
+   w = w.","
+   %while w#"" %cycle
+      w -> key.(",").w
+      %cycle j = 0, 1, toptag
+         %if key=tag(j) %then tags = tags!(1<<j) %and %exit
+      %repeat
+   %repeat
+   %result = tags
+%end;                                    ! set tags
+!
+!-----------------------------------------------------------------------
+!
+%routine fatality(%string %name text)
+   select output(0)
+   printline(text)
+   pamstop
+%end
+!
+!-----------------------------------------------------------------------
+!
+%routine callhelp(%string %name command, key, %string (31) entry)
+   %integer j, type, lflag, level
+   %record (e4f) e4
+   entry = ucstring(entry)
+   type = 2
+   level = currentll+1
+   j = loadep(entry, type, lflag, e4, level)
+   %if j=0 %start
+      j = 1
+      unload2(level, j)
+      fatality("Failed to load ".entry." lflag ".itos(lflag))
+   %finish
+   fatality("Procedure ".entry." has wrong parameters") %unless e4_pword=X'00020010'
+   *mvc_64(16,11),64(10)
+   *stm_4,14,16(11)
+   *la_1,e4
+   *lm_12,14,0(1)
+   *basr_15,14
+%end;                                    ! callhelp
+!
+!-----------------------------------------------------------------------
+!
+%routine callicheck(%string %name command, key, piece, %integer %name value, flag, %string (31) entry)
+   %integer j, type, lflag, level
+   %record (e4f) e4
+   entry = ucstring(entry)
+   type = 2
+   level = currentll+1
+   j = loadep(entry, type, lflag, e4, level)
+   %if j=0 %start { report error }
+      j = 1
+      unload2(level, j)
+      fatality("Failed to load ".entry." lflag ".itos(lflag))
+   %finish
+   fatality("Procedure ".entry." has wrong parameters") %unless e4_pword=x'00050020'
+   *mvc_64(32,11),64(10)
+   *stm_4,14,16(11)
+   *la_1,e4
+   *lm_12,14,0(1)
+   *basr_15,14
+%end;                                    ! callicheck
+!
+!-----------------------------------------------------------------------
+!
+%routine callscheck(%string %name command, key, piece, %string %name value, %integer %name flag, %string (31) entry)
+   %integer j, type, lflag, level
+   %record (e4f) e4
+   entry = ucstring(entry)
+   type = 2
+   level = currentll+1
+   j = loadep(entry, type, lflag, e4, level)
+   %if j=0 %start { report error }
+      j = 1
+      unload2(level, j)
+      fatality("Failed to load ".entry." lflag ".itos(lflag))
+   %finish
+   fatality("Procedure ".entry." has wrong parameters") %if e4_pword#X'00050024'
+   *mvc_64(36,11),64(10)
+   *stm_4,14,16(11)
+   *la_1,e4
+   *lm_12,14,0(1)
+   *basr_15,14
+%end;                                    ! callscheck
+!
+!-----------------------------------------------------------------------
+!
+%routine callrcheck(%string %name command, key, piece, %long %real %name value, %integer %name flag,
+   %string (31) entry)
+   %integer j, type, lflag, level
+   %record (e4f) e4
+   entry = ucstring(entry)
+   type = 2
+   level = currentll+1
+   j = loadep(entry, type, lflag, e4, level)
+   %if j=0 %start { report error }
+      j = 1
+      unload2(level, j)
+      fatality("Failed to load ".entry." lflag ".itos(lflag))
+   %finish
+   fatality("Procedure ".entry." has wrong parameters") %if e4_pword#X'00050020'
+   *mvc_64(16,11),64(10)
+   *stm_4,14,16(11)
+   *la_1,e4
+   *lm_12,14,0(1)
+   *basr_15,14
+%end;                                    ! callrcheck
+!
+!-----------------------------------------------------------------------
+!
+
+
+%const %integer itop= 10
+%const %string (11) %array iquals(0:itop)= %c
+{0}  "any",
+     "options",
+{2}  "out1",
+     "permission",
+{4}  "wordornull",
+     "word",
+{6}  "route",
+     "options2",
+{8}  "parm",
+     "expression",
+{10} "literal"
+
+%const %integer itoptag= 14
+%const %string (11) %array itag(0:itoptag)= %c
+"preset",
+ "in",
+ "out",
+ "c",
+ "", {dont remove, places filetype bits correcly for checkname}
+ "object",
+ "nonst",
+ "char",
+ "data",
+ "corrupt",
+ "",
+ "",  {leave these here}
+ "noamp",
+ "nowild",
+ "cowild"
+
+%integer %fn icheck(%string (255) piece, qtxt, %integer %name i)
+   %integer j, lo, hi, num, ch, afd, tags, flag, error flag, qualno
+   %string (15) los, his
+   %string (15) size, recfm
+   %string (255) w, r, rest
+   %record (fdf) %name fd
+   %record (jobspace varf) jsv
+!
+   %switch sw(0:itop)
+   %const %integer presettag= 1<<0
+   %const %integer intag=1<<1
+   %const %integer outtag=1<<2
+   %const %integer ctag=1<<3
+   %const %integer objecttag=1<<5
+   %const %integer nonstandardtag=1<<6
+   %const %integer charactertag=1<<7
+   %const %integer datatag=1<<8
+   %const %integer corrupttag=1<<9
+   %const %integer noamptag=1<<12
+   %const %integer nowildtag=1<<13
+   %const %integer cowildtag=1<<14
+
+   %const %integer filenametags= objecttag ! nonstandardtag ! charactertag ! datatag ! corrupttag
+
+
+   qtxt = lcstring(qtxt)
+   tags = 0
+   w = qtxt %and r = "" %unless qtxt->w.(",").r
+   %cycle qualno = 0, 1, itop
+      %if w=iquals(qualno) %start
+         ->sw(qualno) %if qualno=4 %or qualno=5 { word } %or qualno=7 { options2 } %or qualno=6 {route} %or %c
+            qualno=3 {permission}
+         %if qualno=10 %then qtxt = r %and %exit
+         tags = set tags(r, itag, itoptag) %unless r=""
+         ->sw(qualno)
+      %finish
+   %repeat
+
+   %if qtxt->w.("null=").r %start
+      %if r->r.(",").rest %then qtxt = w.rest %else qtxt = w
+      length(qtxt) = length(qtxt)-1 %if qtxt#"" %and charno(qtxt, length(qtxt))=','
+      %if piece="" %start
+         j = stoi(r, num)
+         %if j=0 %then ->iout;           !skip all range checks
+      %finish
+   %finish
+   %result = 371 %if piece=""
+!
+   j = stoi(piece, num)
+   %result = j %unless j=0 { not a number at all }
+   w = qtxt
+   error flag = 384 {number not in range}
+   ssown_ssfname = w
+checkrange:
+   %while w#"" %cycle
+      r = w %and w = "" %unless w->r.(",").w
+      %if r->los.(":").his %start
+         %if los#"" %start
+            j = stoi(los, lo)
+            %result = -1 %unless j=0
+            %result = error flag %if num<lo
+         %finish
+         %if his#"" %start
+            j = stoi(his, hi)
+            %result = -1 %unless j=0
+            %continue %if num>hi
+         %finish
+         ->iout { within range }
+      %else
+         j = stoi(r, lo)
+         %result = -1 %unless j=0
+         ->iout %if num=lo
+         %result = error flag %if num<lo
+      %finish
+   %repeat
+   %result = error flag
+sw(0): { any }
+   j = stoi(piece, num)
+   ->iout %if j=0
+   %result = j
+sw(1): { options }
+   w = piece
+   num = 0 %and ->iout %if w=""
+   w = ucstring(w)
+   num = -1 %and ->iout %if w="*"
+   num = 0
+   %cycle j = 1, 1, length(w)
+      ch = charno(w, j)
+      %if 'A'<=ch<='Z' %then num = num!(1<<(ch-'A')) %else %start
+         ssown_ssfname = tostring(ch)
+         %result = 385
+      %finish
+   %repeat
+   ->iout
+sw(2): { out1 for analyse etc }
+!   move OUT to ROUTE
+   num = 0 %and ->iout %if piece=""
+   r = "out"
+   ->sw(6)
+!   piece = ucstring(piece)
+!   define(-82, piece, afd, j)
+!   %result = j %unless j=0
+!   num = -82
+!   ->iout
+sw(4): { wordornull }
+   num = -1 %and ->iout %if piece=""
+sw(5): { word }
+   num = lookup(r, piece)
+   %result = -num %if num<0
+   ->iout
+sw(6): { route }
+   %if piece="" %then %result = 129;     !no filename specified
+   %if piece=".CURRENT" %then num = 0 %and -> iout
+   w = r.","
+   size = ""; recfm = ""
+   %while w#"" %cycle
+      w -> qtxt.(",").w
+      %if qtxt->("size=").rest %then size <- rest %and %continue
+      %if length(qtxt)>1 %and (charno(qtxt, 1)='f' %or charno(qtxt, 1)='v') %start
+         rest = substring(qtxt, 2, length(qtxt))
+         flag = stoi(rest, lo)
+         %if flag=0 %then recfm <- qtxt
+      %finish
+   %repeat
+   tags = settags(r, itag, itoptag)
+   ssown_ssfname = piece
+   %if tags&ctag#0 %then recfm = "C"
+   %if tags&intag#0 %start
+      %if charno(piece, 1)='.' %start;   !input device
+         %if ".IN"#piece#".NULL" %then %result = 388; !invalid device
+      %else;                             !input file
+         flag = checkname(piece, 1, (tags&filenametags)!5); !read+exis t+fileormem
+         %if flag#0 %then %result = flag
+      %finish
+   %else
+      %if tags&outtag#0 %start
+         %if charno(piece, 1)='.' %start; !output device
+            %if piece=".IN" %then %result = 388; !invalid device
+         %else
+            %unless piece->w.("-MOD") %then w = piece
+            flag = checkname(w, 2, (tags&filenametags)!x'4002'); !file+writeable+ownfile
+            %if flag#0 %then %result = flag
+         %finish
+      %finish
+   %finish
+   %if tags&preset tag>0 %then num = i %else emas3claimchannel(num)
+
+   emas3("define", itos(num).",".piece.",".size.",".recfm, flag)
+   i = num
+   %result = flag
+sw(3):                                   !permission
+sw(7): { options2,characs,permitted values }
+   w = "" %unless r->r.(",").w
+   piece = lcstring(piece)
+   num = 0
+   j = 0
+   %cycle
+      j = j+1
+      %exit %if j>length(piece)
+      los = tostring(charno(piece, j))
+      %if r->(los).his %start
+         num = num!(1<<length(his))
+      %else
+         ssown_ssfname = ucstring(los)
+         %if qualno=7 %then %result = 385 {invalid option} %else %result = 332 {invalid permission}
+      %finish
+   %repeat
+   ->iout %if w="" { no checks on value }
+   %if qualno=7 %then error flag = 399 {inconsistent options selected} %else %c
+      error flag = 413 {inconsistent perm} %and ssown_ssfname = ucstring(piece)
+   ->check range
+sw(8): { parm }
+   num = -2 %and ->iout %if piece="="
+   num = -1 %and ->iout %if piece=""
+   piece = "standard" %if compare(piece, "strict")=yes
+   num = lookup array(parm words, piece)
+   %result = -num %if num<0
+   ->iout
+sw(9): { expression }
+   ssown_loadlevel = ssown_loadlevel-2
+   j = jobspace expression(piece, jsv)
+   ssown_loadlevel = ssown_loadlevel+2
+   j = jobspace vtoi(jsv, num) %if j=0
+   %result = j %unless j=0
+   ->iout
+iout:
+   i = num
+   %result = 0
+%end;                                    ! icheck
+!
+!-----------------------------------------------------------------------
+!
+%integer %fn devok(%string %name dev)
+   %integer j
+   %string (16) s
+
+   %result = 264 %if length(dev)>16
+   s = ucstring(dev)
+   %result = 0 %if s=".IN" %or s=".OUT"
+   j = devcode(s)
+   %if j<0 %then %result = 264 %else %result = 0
+%end;                                    ! devok
+
+!-----------------------------------------------------------------------
+
+%const %integer top= 25
+%const %string (11) %array ps(0:top)= %c
+{0}  "any",
+     "fileindex",
+{2}  "dfilename",
+     "fileormem",
+{4}  "firstuser",
+     "forgorm",
+{6}  "pattern",
+     "docorqueue",
+{8}  "document",
+     "group",
+{10} "lastuser",
+     "file",
+{12} "user",
+     "date",
+{14} "word",
+     "device",
+{16} "filelist",
+     "fileorgroup",
+{18} "fileordev",
+     "lcword",
+{20} "list",
+     "path",
+{22} "usermask",
+     "literal",
+{24} "name31",
+     "expression"
+
+%const %integer any filegroupmember qual= 1<<2 !1<<3 !1<<5 !1<<9 !1<<11 !1<<16 !1<<17
+
+%const %integer squal without tags= 1<<14 ! 1<<19 ! 1<<20; !word, lcword and list have no tags
+
+%const %integer topx= 3
+%const %byte %integer %array px(1:topx)= 14, 19, 20  { bits after , not tags }
+
+
+%const %integer toptag= 30
+%const %string (11) %array tag(0:toptag)= %c
+ "read",
+ "write",
+ "exist",
+ "notexist",
+ "join",
+ "object",
+ "nonst",
+ "char",
+ "data",
+ "corrupt",
+ "pdfile",
+ "dir",
+ "",  {spare}
+ "ignoreuser",
+ "own",
+ "noamp",
+ "nowild",
+ "cowild",
+ "uc",
+ "lc",
+ "secret",
+ "or.all",
+ "or.end",
+ "or.null",
+ "orequals",
+ "ornull",
+ "verbatim",
+ "history",
+ "list",
+ "useonce",
+ "keepquotes"
+
+
+%const %integer rtag=1<<0
+%const %integer wtag=1<<1
+%const %integer existtag=1<<2
+%const %integer notexisttag=1<<3
+%const %integer jointag=1<<4
+%const %integer objecttag=1<<5
+%const %integer nonstandardtag=1<<6
+%const %integer charactertag=1<<7
+%const %integer datatag=1<<8
+%const %integer corrupttag=1<<9
+%const %integer pdfiletag=1<<10
+%const %integer directorytag=1<<11
+{%constinteger  spare=1<<12}
+%const %integer ignoreusertag=1<<13
+%const %integer owntag=1<<14
+%const %integer noamptag=1<<15
+%const %integer nowildtag=1<<16
+%const %integer cowildtag=1<<17
+%const %integer uctag=1<<18
+%const %integer lctag=1<<19
+%const %integer secrettag=1<<20
+%const %integer ordotalltag=1<<21
+%const %integer ordotendtag=1<<22
+%const %integer ordotnulltag=1<<23
+%const %integer orequalstag=1<<24
+%const %integer ornulltag=1<<25
+%const %integer verbatimtag=1<<26
+%const %integer historytag=1<<27
+%const %integer listtag=1<<28
+%const %integer useoncetag=1<<29
+%const %integer keepquotestag=1<<30
+
+%const %integer checkname tags= rtag ! wtag ! existtag ! notexisttag ! objecttag ! nonstandardtag ! charactertag %c
+                  !datatag ! corrupttag ! pdfiletag ! directorytag ! ignoreusertag ! owntag
+
+%const %integer or somethingtags= ordotalltag ! ordotendtag ! ordotnulltag ! orequalstag ! ornulltag
+
+%const %integer select names tags= rtag ! wtag ! objecttag ! nonstandardtag ! charactertag %c
+                  !datatag ! corrupttag ! pdfiletag ! directorytag
+
+%integer %fn scheck(%string (255) piece, qtxt, %string %name s)
+   %integer j, k, t, l, d, fsys, tags, low, high, expand
+   %string (255) w, f
+   %record (jobspace varf) jsv
+
+   %switch sw(0:top)
+   j = 0 { anticipate success ! }
+   tags = 0
+   %if qtxt->qtxt.(",").w %start
+      qtxt = lcstring(qtxt)
+      %cycle k = 1, 1, topx
+         t = px(k)
+         ->sw(t) %if qtxt=ps(t)
+      %repeat { deal with lists }
+      tags = set tags(w, tag, toptag)
+      %if tags&or somethingtags#0 %start
+         %if tags&ornulltag>0 %and piece="" %then ->sout
+         %if tags&ordotalltag>0 %and compare(piece, ".all")=1 %then ->sout
+         %if tags&orequalstag>0 %and piece="=" %then ->sout
+         %if tags&ordotendtag>0 %and compare(piece, ".end")=1 %then ->sout
+         %if tags&ordotnulltag>0 %and compare(piece, ".null")=1 %then ->sout
+      %finish
+   %finish %else qtxt = lcstring(qtxt)
+
+   %cycle k = 0, 1, top
+      ->sw(k) %if qtxt=ps(k)
+   %repeat
+   j = -1
+   ->sout
+sw(0): { any }
+   j = 365 %if piece=""
+   ->sout
+sw(1): { fileindex }
+   j = uiok(piece)
+   ->sout
+sw(2): { filename }
+   j = fnok(piece)
+   ->sout
+sw(3): { fileormem }
+   j = checkname(piece, 1, tags&checkname tags)
+   ->sout
+sw(4): { firstuser }
+   j = unok(piece)
+   ->sout %unless j=0
+   j = 375 %and ->sout %unless '0'<=charno(piece, 5)<='9' %and '0'<=charno(piece, 6)<='9'
+   ssown_firstuser = piece %and ->sout %if k=4
+
+   w = piece
+   length(w) = 4
+   j = 375 %unless starts(ssown_firstuser, w)=1
+   low = 10*(charno(ssown_firstuser, 5)-'0')+charno(ssown_firstuser, 6)-'0'
+   high = 10*(charno(piece, 5)-'0')+charno(piece, 6)-'0'
+   j = 375 %if low>high
+   ->sout
+sw(5): { forgorm }
+   j = checkname(piece, 4, tags&checkname tags); !group
+   %if j#0 %then j = checkname(piece, 1, tags&checkname tags); !file
+   ->sout
+sw(6): { pattern }
+   j = uig(piece)
+   ->sout
+sw(7): { docorqueue }
+   %result = 1 %if piece=""
+   piece = lcstring(piece)
+   %if charno(piece, 1)='.' %and length(piece)>2 %start
+      j = devok(piece)
+      ->sout
+   %finish
+   { -> sw(8) }
+sw(8): { document }
+   %result = 1 %if piece=""
+   piece = lcstring(piece)
+   t = 0
+   t = 1 %and piece -> ("t").piece %if charno(piece, 1)='t'
+   l = length(piece)
+   %result = 386 %unless 0<l<8
+   j = stoi(piece, d)
+   %result = 386 %unless j=0 %and 0<d<80000
+   piece = itos(d)
+   piece = "0".piece %while length(piece)<4
+   piece = itos(ssown_ssownfsys).piece %if length(piece)=4
+   piece = "0".piece %while length(piece)<6
+   piece = "t".piece %unless t=0
+   ->sout
+sw(9): { group }
+   j = 365 %and ->sout %if piece=""
+   j = checkname(piece, 4, tags&checkname tags)
+   ->sout
+sw(10): { last user }
+   ->sw(4)
+sw(11): { file }
+   j = checkname(piece, 2, tags&checkname tags)
+   ->sout
+sw(12): { user }
+   j = unok(piece)
+   %if j=0 %and tags&ignoreusertag=0 %start { check existence }
+      fsys = -1
+      j = dfsys(piece, fsys)
+      j = 387 %unless j=0
+   %finish
+   ->sout
+sw(13): { date }
+   j = dateok(piece)
+   ->sout
+sw(14): { word }
+sw(19): { lcword }
+   j = lookup(w, piece)
+   %if j<0 %then j = -j %else j = 0
+   %if px(k)=19 {lcword} %then piece = lcstring(piece) %else piece = ucstring(piece)
+   ->sout
+sw(15): { device }
+   ->sout %if piece=""
+   piece = ucstring(piece)
+   j = devok(piece)
+   ->sout
+sw(16): { filelist }
+   s = piece;                            !in case expanded names are >255
+   expand = yes
+   w = piece
+   piece = ""
+   %if w->("+") %and tags&jointag#0 %then tags = tags!charactertag; !list must be char type
+   %cycle
+      f = w %and w = "" %unless w->f.("+").w
+      %if f=".IN" %then j = 0 %else j = checkname(f, 1, (tags&checkname tags)!rtag!existtag)
+      %if j=0 %start
+         %if piece="" %then piece = f %else %start
+            %if length(piece)+length(f)>254 %then expand = no %else piece = piece."+".f
+         %finish
+      %finish
+      ->sout %if j#0
+      %if w="" %start
+         %if expand=no %then piece = s;  !use short form
+         %if (piece->("+") %or compare(piece, ".in")=1) %and tags&jointag#0 %then pamjoin(piece, piece, j)
+         ->sout
+      %finish
+   %repeat
+sw(17): { fileorgroup }
+   j = checkname(piece, 4, tags&checknametags); !group
+   %if j#0 %then j = checkname(piece, 2, tags&checknametags)
+   ->sout
+sw(18): { fileordev }
+   %if piece->w.("-MOD") %then s = "-MOD" %else s = "" %and w = piece
+   %if w="" %then j = 129 %else %start;  !no filename
+      %unless length(w)>2 %and charno(w, 1)='.' %start
+         %if tags&wtag#0 %then k = 2 {file} %and t=x'4000' {ownfile} %else k = 1 {file or mem} %and t=0
+         j = checkname(w, k, (tags&checkname tags)!t)
+         %if j=0 %then piece = w.s
+      %else
+         %if tags&rtag#0 %and w=".OUT" %then j = 388
+         %if tags&wtag#0 %and w=".IN" %then j = 388
+         j = devok(w) %if j=0
+      %finish
+   %finish
+   ->sout
+sw(20): { list }
+   j = translate list(qtxt, piece)
+   ->sout
+sw(21): { path }
+   %if piece="" %then piece = ssown_ssowner.usep %else j = checkname(piece, 32 {path}, tags&checkname tags)
+   ->sout
+sw(22): { usermask }
+   %if piece->w.("*").f %start
+      %if w->("*") %or f->("*") %or length(piece)>6 %then %result = 201; !invalid username
+      s = "??????"
+      length(s) = 6-length(w)-length(f)
+      piece = w.s.f
+   %finish
+   %result = 389 %unless length(piece)=6
+   %cycle j = 1, 1, 6
+      k = charno(piece, j)
+      %result = 390 %unless 'A'<=k<='Z' %or 'a'<=k<='z' %or '0'<=k<='9' %or '?'=k
+   %repeat
+   j = 0
+   ->sout
+sw(24): { name31 }
+   j = nameok(piece, 31)
+   ->sout
+sw(25): { expression }
+!  printline("Expr ".itos(ssown_loadlevel))
+   ssown_loadlevel = ssown_loadlevel-2
+   j = jobspace expression(piece, jsv)
+   ssown_loadlevel = ssown_loadlevel+2
+   ->sout %unless j=0
+   piece = jobspace vtos(jsv)
+   ->sout
+sw(*):
+sout:
+   %if j=0 %start { success }
+      s = piece
+      s = ucstring(s) %if tags&uc tag>0
+      s = lcstring(s) %if tags&lc tag>0
+   %finish
+   %result = j
+%end;                                    ! scheck
+!
+!-----------------------------------------------------------------------
+!
+%integer %fn rcheck(%string %name piece, qtxt, %long %real %name r)
+   %integer j
+   %long %real w
+   %const %integer top= 0
+   %switch sw(0:top)
+   %const %string (11) %array p(0:top)= %c
+"any"
+
+   %cycle j = 0, 1, top
+      ->sw(j) %if compare(qtxt, p(j))=1
+   %repeat
+   %result = -1
+sw(0):
+   j = stor(piece, w)
+   r = w %if j=0
+   %result = j
+%end;                                    ! rcheck
+!
+!-----------------------------------------------------------------------
+!
+%integer %fn echeck(%string %name piece, qtxt, %record (jobspace varf) %name w)
+   %integer j
+   %const %integer top= 0
+   %switch sw(0:top)
+   %const %string (11) %array p(0:top)= %c
+"any"
+
+   %cycle j = 0, 1, top
+      ->sw(j) %if compare(qtxt, p(j))=1
+   %repeat
+   %result = -1
+sw(0):
+   ssown_loadlevel = ssown_loadlevel-1
+   j = jobspace expression(piece, w)
+   ssown_loadlevel = ssown_loadlevel+1
+   %result = j
+%end;                                    ! echeck
+
+!-----------------------------------------------------------------------
+
+!%string %fn give default(%string %name dtxt)
+!   %integer j, n
+!   %string (255) w, res
+!   %const %integer top= 1
+!   %switch sw(1:top)
+!   res = dtxt
+!   ->out %unless length(dtxt)>1 %and charno(dtxt, 1)='*'
+!   dtxt -> ("*").w
+!   j = stoi(w, n)
+!   res = ""
+!   ->out %unless j=0 %and 0<n<=top
+!   ->sw(n)
+!sw(1):res = ssown_ssowner; ->out;            ! procuser
+!out:
+!   %result = res
+!%end;                                    ! GIVE DEFAULT
+!
+!-----------------------------------------------------------------------
+!
+%routine givehelp(%string %name command, ktxt, htxt)
+   %string (255) w
+   %integer savestream
+   savestream=outstream
+   selectoutput(0)
+   w = htxt
+   %if starts(htxt, "call ")=0 %start { simple text }
+      printline(w)
+      -> out
+   %finish
+!
+   w = substring(htxt, 6, length(htxt))
+   %if starts(w, "pamhelp")=0 %start { private routine }
+      topntail(w)
+      callhelp(command, ktxt, w)
+      -> out
+   %finish
+!
+   w = substring(w, 8, length(w))
+   w = "" %unless w->("(").w.(")")
+   topntail(w)
+   pamhelp(w, command, ktxt)
+out:
+   selectoutput(savestream)
+%end;                                    ! GIVE HELP
+!
+!-----------------------------------------------------------------------
+!
+%const %string (10) pamworkfile=":T#PAMWRK"
+%const %string (27) does not allow ampersanding="does not allow ampersanding"
+%const %string (24) inconsistent wildcarding="inconsistent wildcarding"
+%const %string (24) too many wildcard files="too many wildcard files"
+%const %string (19) no files match="   - no files match"
+
+
+%const %integer pstarting=1<<0
+%const %integer promptrequested=1<<1;    !user entered "?"
+%const %integer helprequested=1<<2;      !user entered "??"
+%const %integer consolecall=1<<3;        !not batch or obey or emas3(..) call,
+                                         - Command!!
+%const %integer keypresent=1<<4;         !at least one key=value param present
+%const %integer keywordonly=1<<5;        !no more positional params allowed
+%const %integer wildcarding=1<<6;        !builing a file of expanded wildcard expressions
+%const %integer amppresent=1<<7;         !param line contains at least one ampersand
+%const %integer cowildtame=1<<8;         !a non-wild cowild param has been given
+%const %integer cowildwild=1<<9;         !a wild cowild param has been given
+%const %integer pstarted=1<<10;          !set after the first param passed through
+%const %integer commandhistory=1<<11;    !we prompted for params, so hist needs updating
+%const %integer tidyrequired=1<<12;      !DEFINEs to be cleared next time in COMMAND LOOP
+
+
+
+%routine ppam(%record (pamf) %name pam)
+!   shout("pt=".htos(pam_wild1_pt, 8).", end=".htos(pam_wild1_end,
+!      8).", wtype=".itos(pam_wild1_type).", frag1=".pam_wild1_frag1.",%c
+!frag2=".pam_wild1_frag2)
+   shout("pt=".htos(pam_filept, 8).", end=".htos(pam_fileend, 8).", nextpt=".htos(pam_nextfilept,
+      8).", control=".htos(pam_control, 8).", tokenpt=".htos(pam_tokenpt, 8))
+   shout(pam_tokens)
+%end
+
+
+%routine tostream0(%string (255) text)
+   %integer savestream
+   savestream = outstream
+   selectoutput(0)
+   printstring(text)
+   selectoutput(savestream)
+%end;                                    !of tostream0
+
+
+%routine pamfail(%record (pamf) %name pam, %string (255) text)
+   ssown_ssfname = text
+   psysmess(pam_command, 100) %if text#""
+   pam_filept = 0
+   pam_mfn = 0
+   pam_history = ""
+   pamstop
+%end
+
+
+%routine analyse qualifier(%string (255) vqualifier, %integer type, %integer %name qual, tags)
+   %string (255) s1
+   %integer k
+   vqualifier = lcstring(vqualifier)
+   qual = 0; tags = 0
+   %if %not vqualifier->vqualifier.(",").s1 %then s1 = ""
+   %if type=0 %start
+      %for k = 1, 1, top %cycle
+         %if vqualifier=ps(k) %then qual = k %and %exit
+      %repeat
+      %if 1<<qual&squal without tags=0 %then tags = set tags(s1, tag, toptag)
+   %else
+      %if type=1 %start
+         %for k = 1, 1, itop %cycle
+            %if vqualifier=iquals(k) %then qual = k %and %exit
+         %repeat
+         %if 4#qual#5 {word} %then tags = set tags(s1, itag, itoptag)
+      %finish
+   %finish
+%end;                                    !of analyse s qualifier
+
+
+%string %fn totoken(%string %name param, %integer %name control)
+!   Returns a string RESULT composed of substrings, one for each param, with spaces
+!   + newlines removed and uppercased.  Plugs each significant comma in PARAM
+!   with the length of the substring till the next param (should a verbatim
+!   copy be asked for).  The syntax rules are:  within quoted string, parentheses
+!   commas and & are not significant - quotes do not nest.  Within parentheses
+!   (which do nest) quotes, & and commas are not significant.  No complaint is
+!   made about unmatched or badly matched strings.  Outermost parentheses
+!   are removed.
+!   Keyword params (key=value) are marked by setting the top bit of the first
+!   char of key.  Ampersands within ordinary strings are marked by replacing them with 1.
+
+   %integer paren, outstart, outpt, cl, act, state, pt, end, lastpt, removelb
+   %byte %integer %array out(0:255)
+   %switch sw(0:8)
+   %const %byte %integer %array class(33:126)= %c
+      1, 4, 1(3), 9, 10, 5, 6, 1(2), 3, 1(16), 8, 1(35), 2(26), 1(4)
+   %const %byte %integer %array table(0:10, 0:4)= %c
+   16_00,  16_33,  16_36,  16_04,  16_13,  16_22,  16_23,  16_f5,  16_33,  16_38,  16_43,  {scanning}
+   16_13,  16_13,  16_13,  16_13,  16_33,  16_13,  16_13,  16_f4,  16_13,  16_13,  16_13,  {building quoted string}
+   16_20,  16_23,  16_26,  16_23,  16_23,  16_22,  16_21,  16_f4,  16_23,  16_23,  16_23,  {building paren string}
+   16_30,  16_33,  16_36,  16_04,  16_13,  16_22,  16_33,  16_f4,  16_37,  16_38,  16_43,  {building string}
+   16_43,  16_43,  16_43,  16_43,  16_43,  16_43,  16_43,  16_f4,  16_43,  16_43,  16_33   {building squoted string}
+!  space    char  lc char     ,       "       (       )     end       =       &
+
+   paren = 0;                            !indicates level of nesting
+   outstart = 1;                         !for RESULT
+   outpt = 1;                            !for RESULT
+   pt = addr(param)+1
+   lastpt = pt
+   end = pt+length(param)-1
+   removelb = no
+   state = 0
+   control = 0
+   %cycle
+      pt = pt+1
+      %if pt>end %then cl = 7 %else %start
+         %if 33<=byteinteger(pt)<=126 %then cl = class(byteinteger(pt)) %else cl = 0
+      %finish
+      act = table(cl, state)&15
+      state = table(cl, state)>>4
+      ->sw(act)
+
+sw(0):                                   !do nothing
+      %continue
+sw(1):                                   !decrement parenthesis level
+      paren = paren-1
+      %if paren=0 %then state = 3 {building string}
+      ->sw(3)
+sw(2):                                   !increment parenthesis level
+      paren = paren+1
+      %if outpt=outstart %then removelb = yes %and %continue; !skip leading paren
+sw(3):                                   !add to output
+      outpt = outpt+1
+      out(outpt) = byteinteger(pt)
+      %continue
+sw(4):                                   !return string
+      %if state=15 %and byteinteger(pt-1)=nl %then pt = pt-1; !remove trailing nl
+      byteinteger(lastpt) = pt-lastpt-1; !plug input string
+      lastpt = pt
+      %if outpt>outstart %and out(outpt)=')' %and removelb=yes %then outpt = outpt-1
+      !skip trailing paren
+      removelb = no
+      out(outstart) = outpt-outstart;    !plug output string
+      outpt = outpt+1
+      outstart = outpt
+sw(5):                                   !end
+      %if state=15 %then out(0) = outstart-1 %and %exit; !overall length
+      %continue
+sw(6):                                   !add uc'ed char to output
+      outpt = outpt+1
+      out(outpt) = byteinteger(pt)-32
+      %continue
+sw(7):                                   !key=value
+      %if outpt>outstart %then out(outstart+1) = out(outstart+1)!128 %and control = control!keypresent
+!mark it
+      ->sw(3);                           !add to string
+sw(8):                                   !a&b
+      %if outpt>outstart %and out(outstart+1)&128#0 %then ->sw(3); !noamp in key=value
+      control = control!amppresent
+      outpt = outpt+1
+      out(outpt) = 1
+      %continue
+   %repeat
+   out(0) = out(0)-1 %while out(0)>0=out(out(0)); !remove trailing null params
+   %result = string(addr(out(0)))
+%end;                                    !of totoken
+
+
+
+%integer %fn pam work space(%integer from, len)
+!   Copies LEN bytes to pam's work space and returns the  address
+   %integer flag, conad, newsize, to
+   %record %format fhf(%integer dataend, datastart, size, filetype)
+   %record (fhf) %name r
+   %if ssown_pamworkad=0 %start
+      outfile(pamworkfile, -4096, 0, 5 {dont disconnect+tempfile}, conad, flag)
+      %if flag#0 %then setreturncode(flag) %and pamstop
+      ssown_pamworkad = conad
+   %finish
+   r == record(ssown_pamworkad)
+   newsize = (r_dataend+len+4095)&(-4096)
+   %if newsize>r_size %start
+      changefilesize(pamworkfile, newsize, flag)
+      %if flag#0 %then setreturncode(flag) %and pamstop
+      r_size = newsize
+   %finish
+   to = ssown_pamworkad+r_dataend
+   move(len, from, to) %if from#0
+   r_dataend = r_dataend+len
+   %result = to
+%end;                                    !of pam work space
+
+
+%routine push file(%record (pamf) %name pam, %integer newstart, newend)
+!   If there is a currently open pam file, its 3 word descriptor is stacked.
+!   Details of the new file are placed in the pam record.
+   %if pam_filept#0 %or pam_nextfilept#0 %start
+      pam_nextfilept = pam work space(addr(pam_filept), 12); !put 12 byte descriptor in pamfile and set pointer to it
+   %finish
+   pam_filept = newstart
+   pam_fileend = newend
+%end;                                    !of push file
+
+
+%integer %fn nextpamline(%integer from, to, %string %name line)
+! Returns updated value of FROM
+   %integer first, last, pt, len
+   %string (255) s1, s2
+
+   %for first = from, 1, to %cycle
+      %if byteinteger(first)>32 %start
+         last = first+254
+         %if last>to %then last = to
+         %for pt = first, 1, last %cycle; !find end of line
+            %if byteinteger(pt)=nl %then pt = pt-1 %and %exit
+         %repeat
+         from = pt+1;                    !update pointer
+         %while from<=to %cycle
+            %if byteinteger(from)>32 %then %exit
+            from = from+1;               !update to first good char
+         %repeat
+         %if from>to %then from = 0;     !check if we have read the last line
+         len = pt-first+1
+         move(len, first, addr(line)+1)
+         length(line) = len
+         %if line->s1.(ssown_path to be used).s2 %and s1=""#s2 %then line = s2
+         %result = from
+      %finish
+   %repeat
+   line = ""
+   %result = 0
+%end;                                    !of nextpamline
+
+
+%integer %fn notefile(%string (255) file, %record (pamf) %name pam)
+!   Connect and check a file (from @file) and PUSH it (make it currently active)
+   %integer conad, type, st, end, flag, pt, len, i, newstart
+   %string (255) line, rest
+   %unless file->file.(",").rest %then rest = ""
+   connect(file, 0, 0, 0, conad, type, st, end, flag)
+   %if flag#0 %then %result = flag
+   %if type#3 %then %result = 267;       !invalid filetype
+   %if st<=end %start
+      end = conad+end-1
+      %for pt = conad+st, 1, end %cycle
+         %if byteinteger(pt)>32 %start;  !its got something in it
+            %if rest="" %start
+               len = end-pt+1
+               i = pamworkspace(pt, len)
+               push file(pam, i, i+len-1)
+            %else;                       !must append rest to each line of @file
+               newstart = pamworkspace(0, 0)
+               %cycle
+                  %if pt=0 %then %exit
+                  pt = nextpamline(pt, end, line)
+                  %if length(line)+length(rest)>253 %then %continue
+                  line = line.",".rest.snl
+                  i = pamworkspace(addr(line)+1, length(line))
+               %repeat
+               i = pamworkspace(0, 0)
+               push file(pam, newstart, i-1)
+            %finish
+            %result = 0
+         %finish
+      %repeat
+   %finish
+   %result = -1;                         !empty file
+%end;                                    !of notefile
+
+
+%routine traverse tree(%string (255) ampline, %integer %name fstart, fend)
+   %integer nodeend, i
+   %string (1) ampmarker
+
+   %routine traverse(%string (255) path, %integer node)
+      %string (255) s, s1
+      %if node>nodeend %start;           !reached a leaf
+         %if path#"," %start
+            path = path.snl
+            i = pam work space(addr(path)+2, length(path)-1); !skip first comma
+            %if fstart=0 %then fstart = i
+            fend = i+length(path)-2
+         %finish
+         %return
+      %finish
+      s = string(node);                  !next comma sep param
+      node = node+byteinteger(node)+1
+      %while s->s1.(ampmarker).s %cycle; !traverse each branch in turn
+         traverse(path.",".s1, node);    !on next amp separated param
+      %repeat
+      traverse(path.",".s, node);        !last branch of this param
+   %end
+
+   ampmarker = tostring(1)
+   nodeend = addr(ampline)+length(ampline)
+   fstart = 0
+   traverse("", addr(ampline)+1)
+%end;                                    !of traverse tree
+
+
+
+%routine join parameters(%integer %name newstart, newend, %record (pamf) %name pam)
+
+! From a sequence of linked parameter descriptors, creates a series of
+! complete parameter lines ready for execution.
+
+   %string (255) s, s1, pre, post
+   %integer i
+   %record (wildf) %name next
+
+   newstart = pam work space(0, 0);      !start of output
+   %cycle
+      next == pam_head
+      %if next_pt=0 %then %exit;         !finished
+      s = "";                            !build next line
+      %cycle;                            !once through the sequence of descriptors
+         i = next pam line(next_pt, next_end, s1)
+         %if next_type=1 {expanded list} %start
+            next_pt = i;                 !update pointer
+            %if length(next_prepost)>1 %then next_prepost -> pre.(",").post %and s1 = pre.s1.post
+         %finish
+         s = s.s1.","
+         %if next_next==record(0) %then %exit; !last descriptor?
+         next == next_next;              !chain on down
+      %repeat
+      charno(s, length(s)) = nl
+      i = pam work space(addr(s)+1, length(s))
+   %repeat
+   newend = pam work space(0, 0)-1;      !end of output
+%end;                                    !of join parameters
+
+
+
+%external %integer %fn paminit %alias "s#paminit"(%string %name p, %record (pamf) %name pam)
+   %integer state, flag, ad, tend, i, j
+   %string (255) s1, s2
+   %string (1) secretmark
+
+   ssown_currentpamad = addr(pam)
+   %cycle
+      %if pam_control&pstarting=0 %start; !first entry for this command
+         pam_control = pam_control!pstarting; !console call may be set
+         top n tail(p);                  !remove leading/trailing sp/nl
+         %if p="" %then %result = 0;     !go and do it
+         {         %if pam_control&consolecall#0 %start;  !this only applies interactively}
+         %if p="?" %then state = promptrequested %and %exit
+         {         %finish}
+         %if p="??" %then state = helprequested %and %exit
+      %else;                             !subsequent entry (or first line of @file)
+         %if pam_control&commandhistory#0 %and length(pam_history)>1 %start
+            length(pam_history) = length(pam_history)-1; !remove trailing comma
+            %unless ssown_ssreason=batchreason %start
+               i = shistory(lcstring(pam_command)." ".pam_history, "", "", 5); !replace last record
+            %finish
+            pam_control = pam_control&(~commandhistory)
+         %finish
+         pam_control = pam_control&(~consolecall)
+         %if pam_mfn>1 %start;           !we have just expanded a wildcard line
+            pam_mfn = 0
+            join parameters(i, j, pam);  !make a new file
+            push file(pam, i, j);        !push the old one
+            pam_filept = nextpamline(pam_filept, pam_fileend, p); !read and skip first line
+         %finish
+         %if pam_filept=0 %start;        !end of file
+            %if pam_nextfilept=0 %then %result = -1; !no pushed file to pop so END
+            move(12, pam_nextfilept, addr(pam_filept)); !pop the unfinished file
+            %continue
+         %finish
+         pam_filept = nextpamline(pam_filept, pam_fileend, p)
+         secretmark = tostring(127)
+         %if p->s1.(secretmark).s2 %and s2->(secretmark).s2 %then s1 = s1.s2 %else s1 = p
+         %for i = length(s1), -1, 1 %cycle; !remove trailing commas
+            %if charno(s1, i)#',' %then %exit
+            length(s1) = i-1
+         %repeat
+         tostream0(snl."(Calls):".lcstring(pam_command)." ".lcstring(s1).snl)
+      %finish
+      pam_verbatim = " ".p;              !leave room for 1st substring len
+      pam_tokens = totoken(pam_verbatim, state); !may set key
+      %if state&amppresent#0 %start;     !ampersands in this param line
+         traverse tree(pam_tokens, ad, tend)
+         push file(pam, ad, tend)
+         pam_control = (pam_control!amppresent)&(~consolecall)
+         %continue
+      %finish
+      %if length(p)>1 %and charno(p, 1)='@' %start; !input file
+         flag = notefile(substring(p, 2, length(p)), pam)
+         %if flag>0 %then pamfail(pam, failuremessage(flag))
+         %if flag#0 %then %result = flag; !and stop
+         pam_control = pam_control&(~consolecall); !to suppress prompting etc
+         %continue;                      !go and get first line
+      %finish
+      pam_tokenpt = addr(pam_tokens)+1
+      %exit
+   %repeat
+   pam_control = (pam_control&(consolecall!amppresent!keypresent!pstarting!pstarted))!state
+   %if monitoring possible=yes %and ssown_ssnote&64#0 %then monparams("=sb")
+   %result = 0
+%end;                                    !of paminit
+!
+!-----------------------------------------------------------------------
+!
+%routine get param(%string (255) vector, %string %name s param, %integer %name i param, %long %real %name r param,
+   %record (jobspace varf) %name v param, %integer type)
+   %string (255) vprompt, vprompt1, vqualifier, vdefault, vhelp, vkeyword, value, s1, token, saveprompt, vbstring
+   %string (255) pre, post, histvalue, hkeyword
+   %integer flag, qual, tags, state, loop, prompting, wild, vbpt, value supplied, condprompt, defaultused
+   %integer cowildstate, defaultcount, wild possible, i
+   %record (pamf) %name pam
+   %record (mff) %array %format mfaf(0:5000)
+   %const %integer top type= 3
+   %switch callsw, t(0:top type)
+   %record (wildf) next
+
+   %const %string (10) %array default prompt(0:top type)= "String", "Integer", "Longreal", "Expression"
+   %routine %spec resolve(%string %name s, %string (11) default)
+   %string %fn %spec keymatch(%string %name tokens, %string (255) keyword)
+   %routine %spec set help
+   %routine %spec extract next param
+   %string %fn %spec getverbatim
+   %string %fn %spec resolve wild file list(%string (255) value)
+   %integerfn %spec analyse wild pattern(%string %name node, pattern)
+   %routine %spec create wildfile(%string (255) node, pattern)
+   %integer %fn %spec select wild names(%string %name pattern)
+   %integerfn %spec generate next param set(%string %name pattern)
+   %routine %spec expurgate journal(%string (255) secret)
+
+
+   %on %event 9 %start
+      %if tags&secrettag#0 %then i = ssetmode("E") %and journal on
+      newline
+      pam_filept = 0
+      pam_mfn = 0
+      pam_history = ""
+      pamstop
+   %finish
+
+   pam == record(ssown_currentpamad)
+   %if ssown_ssnote&64#0 %start
+      monparams(">trswiw*type=".itos(type))
+      ppam(pam)
+   %finish
+   saveprompt = ssown_prompttext
+   %unless vector->v prompt.(sep).vector %then v prompt = vector %and vector = ""
+!leave spaces
+   %if v prompt="" %then v prompt = defaultprompt(type)
+   resolve(vqualifier, "any")
+   %if vector="" %then s1 = "?" %else s1 = ""
+   resolve(vdefault, s1)
+   %if length(vdefault)>1 %and charno(vdefault, 1)='(' %and charno(vdefault, length(vdefault))=')' %start
+      %if length(vdefault)>2 %then vdefault = substring(vdefault, 2, length(vdefault)-1) %else vdefault = ""
+      condprompt = yes
+   %finish %else condprompt = no
+   resolve(vhelp, "")
+   vkeyword = vector
+
+   vprompt1 = ""
+   vprompt1 = vprompt1.s1.snl %while vprompt->s1.(snl).vprompt; !get last line
+   %if vkeyword="" %start
+      vkeyword = vprompt;!last line of the prompt
+      hkeyword = vprompt %unless vprompt->hkeyword.(" ");!first word only
+   %finish %else hkeyword = vkeyword
+   %if pam_help="" %and starts(vhelp, "call ")=yes %then pam_help = vhelp
+   cleankey(vkeyword)
+   cleankey(hkeyword)
+
+   extract next param
+
+   %if pam_control&helprequested#0 %start; !for the whole command
+      pam_control = pam_control!!helprequested; !remove help
+      {      %if pam_control&consolecall#0 %then}pam_control = pam_control!promptrequested
+      !replace help with prompt
+      sethelp
+      %if starts(vhelp, "call ")=yes %then givehelp(pam_command, "", vhelp) %else %c
+         tostream0("    - no help information available".snl)
+   %finish
+
+   analyse qualifier(vqualifier, type, qual, tags)
+
+   %if value="" %and vdefault="?" %start; !value required
+      {      %if pam_control&consolecall=0 %then pamfail(pam, "missing parameter ".vkeyword)      !none available}
+      prompting = yes
+   %else
+      %if pam_control&promptrequested#0 %then prompting = yes %else %start
+         %if condprompt=yes %and value supplied=no {%and pam_control&consolecall#0} %then prompting = yes %else %c
+            prompting = no
+      %finish
+   %finish
+   defaultcount = 0
+
+   %for loop = 1, 1, 10 %cycle
+      cowildstate = 0
+      %if prompting=yes %or qual=23 { literal } %start
+         %if tags&secrettag#0 %then i = ssetmode("-E") %and journal off
+         %if vprompt1#"" %then printstring(vprompt1) %and vprompt1 = ""
+         %if vdefault="?" %or qual=23 %then s1 = "" %else %start
+            %if tags&secrettag#0 %then s1 = "(???)" %else s1 = "(".lcstring(vdefault).")"
+         %finish
+!%if ssown_verbosity = 2 %start
+!   printline(vprompt.s1.":")
+!   sethelp
+!   givehelp(pam_command, hkeyword, vhelp)
+!%finish
+         prompt(vprompt.s1.":")
+         read any string(vbstring)
+         %if tags&secrettag#0 %then i = ssetmode("E") %and journal on %and tostream0(snl)
+         %if qual=23 { literal } %start
+            value = vbstring
+         %else
+            %if length(vbstring)>1 %and charno(vbstring, 1)='!' %start; !command call
+               %for i = 2, 1, length(vbstring) %cycle
+                  %if charno(vbstring, i)#' ' %then %exit
+               %repeat
+               vbstring = substring(vbstring, i, length(vbstring)); !remove '!'
+               %unless vbstring->vbstring.(" ").s1 %then s1 = ""
+               %if vbstring="" %then %continue; !do nothing for "Prompt:!"
+               emas3h(vbstring, s1, flag)
+               %continue
+            %finish
+            %if tags&listtag#0 %and (vbstring->(",") %or vbstring->("&")) %then %c
+               pam_verbatim = " """.vbstring."""" %else %start
+               %if type=1 %and qual=10 {integer literal} %start
+                  topntail(vbstring)
+                  vbstring = vbstring." ".s1 %while vbstring->vbstring.("  ").s1
+                  vbstring = vbstring.",".s1 %while vbstring->vbstring.(" ").s1
+               %finish
+               pam_verbatim = " ".vbstring
+            %finish
+            s1 = tokens to string(pam_tokens, pam_tokenpt)
+            %if s1#"" %and length(s1)+length(pam_verbatim)<255 %then pam_verbatim = pam_verbatim.",".s1
+            pam_tokens = totoken(pam_verbatim, state)
+            pam_tokenpt = addr(pam_tokens)+1
+            pam_control = (pam_control!state)&(~keywordonly)
+
+            extract next param
+
+         %finish
+      %finish
+
+      %if value="" %start
+         defaultcount = defaultcount+1
+         %if defaultcount=3 %then pamfail(pam, "missing parameter ".vkeyword)
+         value = vdefault
+         value = ucstring(value); top n tail(value); !use TOTOKEN instead??
+         vbstring = vdefault
+         default used = yes
+      %finish %else default used = no
+
+      %if value="?" %start
+         sethelp
+         givehelp(pam_command, hkeyword, vhelp)
+         {         %if pam_control&consolecall=0 %then pamfail(pam, "missing parameter ".vkeyword) %else %c}
+         prompting = yes
+         %continue
+      %finish
+
+      pre = ""; post = "";               !for filelist,   pre + wild* + post
+      wild = no
+      wild possible = no;                !not for ".lp", ".null", "" etc
+      histvalue = value;                 !save "temp*" before its changed to "temp99"
+      %if qual=23 { literal } %start
+         sparam = value
+         flag = 0
+         ->out
+      %finish
+
+      %if length(value)>1 %and tags&keepquotestag=0 %start
+         i = charno(value, 1)
+         %if (i='"' %or i=39 {'}) %and i=charno(value, length(value)) %then %c
+            value = substring(value, 2, length(value)-1)
+      %finish
+
+      %if tags&noamptag#0 %and pam_control&amppresent#0 %then pamfail(pam, does not allow ampersanding)
+
+      %if value#"" %start
+         %if type=0 %start;              !string
+            %if 1<<qual&any filegroupmemberqual#0 %or (qual=18 {fileordev} %and (charno(value, 1)#'.' %or %c
+               (length(value)>1 %and charno(value, 2)='.'))) %then wild possible = yes
+         %else
+            %if type=1 {integer} %and qual=6 {route} %and (charno(value, 1)#'.' %or (length(value)>1 %and %c
+               charno(value, 2)='.')) %then wild possible = yes
+         %finish
+      %finish
+
+      %if wild possible=yes %start
+         %if (value->("*") %or value->("?") %or value->("..") %or value->("\")) %and tags&verbatimtag=0 %start
+            !its wild
+            %if tags&nowildtag#0 %then pamfail(pam, "no wildcarding of param ".vkeyword." allowed")
+            %if tags&cowildtag#0 %start
+               %if pam_control&cowildtame#0 %then pamfail(pam, inconsistent wildcarding)
+               cowildstate = cowildwild
+            %finish
+            %if qual=16 %then value = resolve wild filelist(value) {%and tags = tags!charactertag}
+            %if pam_control&wildcarding=0 %start; !first time in
+               %if pam_control&pstarted#0 %then pamfail(pam, inconsistent wildcarding)
+               flag = select wild names(value); !returns first name
+               %if flag#0 %start;        !select names fault
+                  s1 = failure message(flag)
+                  %if prompting=yes %then tostream0("   - ".s1) %and %continue
+                  pamfail(pam, s1)
+               %finish
+               %if value="" %start;      !bad selection
+                  %if prompting=yes %then tostream0(no files match.snl) %and %continue %else %exit
+               %finish
+            %else
+               flag = generate next param set(value); !subsequent wild param
+               %if flag#0 %start;        !generate names fault
+                  s1 = failure message(flag)
+                  %if prompting=yes %then tostream0("   - ".s1) %and %continue
+                  pamfail(pam, s1)
+               %finish
+            %finish
+            %if qual=16 {filelist} %start
+               next_prepost = pre.",".post
+               value = pre.value.post
+            %finish
+            wild = yes
+         %else;                          !not wild
+            %if tags&cowildtag#0 %start
+               %if pam_control&cowildwild#0 %then pamfail(pam, inconsistent wildcarding)
+               cowildstate = cowildtame
+            %finish
+            wild = no
+         %finish
+      %finish
+
+      ssown_ssfname = value
+      %if vqualifier->("call ").s1 %then ->callsw(type) %else ->t(type)
+
+callsw(0):
+      call s check(pam_command, vkeyword, value, s param, flag, s1)
+      ->out
+callsw(1):
+      call i check(pam_command, vkeyword, value, i param, flag, s1)
+      ->out
+callsw(2):
+      call r check(pam_command, vkeyword, value, r param, flag, s1)
+      ->out
+callsw(3):                               ! expressions
+      ->out
+
+t(0):                                    !strings
+      value = getverbatim %if qual=25 { expression }
+      flag = scheck(value, vqualifier, s param)
+      %if flag=0 %and tags&verbatimtag#0 %start
+         histvalue = getverbatim
+         s param = histvalue
+         %if tags&keepquotestag=0 %and length(histvalue)>1 %start
+            i = charno(histvalue, 1)
+            %if (i='"' %or i=39 {'}) %and i=charno(histvalue, length(histvalue)) %then %c
+               s param = substring(histvalue, 2, length(histvalue)-1)
+         %finish
+      %finish
+      ->out
+t(1):                                    !integers
+      flag = icheck(value, vqualifier, i param)
+      %if flag=0 %and (qual=2 {out 1} %or qual=6 {route}) %then pam_control = pam_control!tidyrequired
+      ->out
+t(2):                                    !longreals
+      flag = rcheck(value, vqualifier, r param)
+      ->out
+t(3):                                    ! expressions
+      flag = echeck(value, vqualifier, v param)
+      ->out
+
+out:
+      %if flag<0 %then pamfail(pam, "invalid qualifier ".vqualifier." for parameter ".vkeyword.snl)
+      %if flag=0 %start
+         ssown_prompt text = save prompt
+         %if pam_control&wildcarding#0 %or wild=yes %start; !chain param descriptor
+            integer(ssown_pamworkad) = (integer(ssown_pamworkad)+3)&x'fffffffc'
+            !word align
+            i = pam work space(addr(next), sizeof(next)); !copy desc to workfile
+            %if pam_control&wildcarding=0 %start; !first time in
+               pam_head == record(i);    !first param record maps to head
+               pam_control = pam_control!wildcarding
+               tostream0(snl."(Calls):".lcstring(pam_command)." ".lcstring(value).", . . . .".snl)
+            %finish %else pam_tail_next == record(i); !link to tail
+            pam_tail == record(i);       !new tail
+            %if wild=no %start;          !enter details in descriptor
+               pam_tail = 0;             !leaves _type=0 (static)
+               %if tags&useoncetag#0 %then pre = "" %else pre = histvalue
+               %if tags&secrettag#0 %then pam_tail_static = tostring(127).pre.tostring(127) %else %c
+                  pam_tail_static = pre {temp variable for histvalue}
+               !mark the secret so we can suppress printing in "(calls):"
+               pam_tail_pt = addr(pam_tail_static)+1
+               pam_tail_end = pam_tail_pt+length(pam_tail_static)-1
+            %finish
+         %finish
+         ssown_pam last param = value
+         %if pam_control&consolecall#0 %start; !history/recall relevant?
+            %if tags&secrettag#0 %and histvalue#"" %start; !remove all traces
+               %if prompting=no %then expurgate journal(histvalue) {recall also contains secret} %and %c
+                  pam_control = pam_control!commandhistory {record intent to rewrite history}
+               histvalue = "";           !null param to history
+            %else
+               %if tags&historytag#0 %and prompting=yes %and pam_control&promptrequested=0 %start
+                  !not secret case
+                  pam_control = pam_control!commandhistory; !will reassemble history
+               %finish
+               %if default used=yes %then histvalue = ""; !only store user supplied values
+            %finish
+            %unless tags&verbatimtag#0 %then lctranslate(addr(histvalue)+1, length(histvalue))
+            %if length(pam_history)+length(histvalue)<254 %then pam_history = pam_history.histvalue.","
+         %finish
+         pam_control = pam_control!pstarted!cowildstate
+         %if ssown_ssnote&64#0 %then monparams("<trswiw*for ".vprompt)
+         %return
+      %finish
+      %if flag=382 {word not in list} %start
+         %if type=1 %and qual=8 {parm} %then ssown_ssfname = value." is not a valid parm" %else %start
+            %unless vqualifier->(",").s1 %then s1 = vqualifier
+            %if s1#"" %start
+               uctranslate(addr(s1)+1, length(s1))
+               %if charno(s1, 1)=',' %then s1 = "<null>".s1 %else %start
+                  %if charno(s1, length(s1))=',' %then s1 = s1."<null>"
+               %finish
+            %finish
+            ssown_ssfname = vkeyword." only accepts values """.s1.""""
+         %finish
+         flag = 100
+      %else
+         %if flag=371 %or flag=372 %then flag = 400 %and ssown_ssfname = vkeyword
+      %finish
+      %if prompting=no %or pam_control&consolecall=0 %then pamfail(pam, failuremessage(flag))
+      tostream0("   -".failuremessage(flag))
+   %repeat
+   pamfail(pam, "");                     !tidy up and stop
+
+
+
+   %routine extract next param
+      %string (255) s
+      vbstring = ""; vbpt = 0
+      value supplied = no
+      %if pam_control&keypresent#0 %start; !param contains some keyword(s) - asked for here?
+         value = keymatch(pam_tokens, vkeyword)
+!  Even if we got a hit here, continue below to remove the current positional
+!  parameter which is superseded by this keyword param
+      %finish %else value = ""
+
+      {Keywordonly is equivalent to end-of-paramlist = no positional params left}
+      %if length(pam_tokens)>0 %and pam_control&keywordonly=0 %start
+         !use next param in list
+         s = string(pam_tokenpt)
+         %if length(s)>0 %and charno(s, 1)&128#0 %start
+            {value = "" unless we got a keyword hit}
+            pam_control = pam_control!keywordonly; !no good we already rejected this keyword param
+         %else
+            %if value="" {no keyword hit} %then vbpt = pam_tokenpt %and value = s
+            value supplied = yes
+            pam_tokenpt = pam_tokenpt+length(s)+1
+            %if pam_tokenpt>addr(pam_tokens)+length(pam_tokens) %then pam_tokens = ""
+         %finish
+      %finish
+      %if length(value)>1 %and charno(value, 1)=127 {secret mark}=charno(value, length(value)) %then %c
+         value = substring(value, 2, length(value)-1)
+   %end;                                 !of extract next param
+
+
+   %routine resolve(%string %name s, %string (11) default)
+      %unless vector->s.(sep).vector %then s = vector %and vector = ""
+      topntail(s)
+      %if s="" %then s = default
+   %end;                                 !of resolve
+
+   %string %fn keymatch(%string %name tokens, %string (255) keyword)
+!  Checks the keyword in the current vector against every param in the caller supplied list
+      %string (255) s1, s2, k
+      %integer i, j
+      keyword = ucstring(keyword)
+      k = keyword."="
+      byteinteger(addr(k)+1) = byteinteger(addr(k)+1)+128; !keyword marker
+      %for i = length(k), -1, 2 %cycle
+         %if tokens->s1.(k).s2 %start;   !found it
+            j = charno(s1, length(s1));  !length of the token
+            charno(tokens, length(s1)+1) = 255; !mark token as USED
+            vbpt = addr(tokens)+length(s1); !in case verbatim wanted
+            s1 = substring(s2, 1, j-length(k))
+            %if length(s1)>2 %and charno(s1, 1)='(' %and charno(s1, length(s1))=')' %start
+               %if length(s1)=2 %then s1 = """""" %else s1 = substring(s1, 2, length(s1)-1)
+            %finish
+            value supplied = yes
+            %result = s1
+         %finish
+         length(k) = length(k)-1
+         charno(k, length(k)) = '='
+      %repeat
+      %result = "";                      !no match
+   %end;                                 !of keymatch
+
+
+   %routine set help
+      %integer pos
+      %if vhelp="" %start
+         %if pam_help#"" %then vhelp = pam_help %else %start
+            pos = 0
+            %if starts(vqualifier, "word,")=yes %then pos = 6 %else %start
+               %if starts(vqualifier, "lcword,")=yes %then pos = 8 %else %start
+                  %if starts(vqualifier, "call ")=yes %then vqualifier -> (" ").vhelp %else %c
+                     vhelp = "(Param type: ".defaultprompt(type).", ".vqualifier.")"
+               %finish
+            %finish
+            %if pos#0 %then vhelp = "Choice: ".substring(vqualifier, pos, length(vqualifier))
+         %finish
+      %finish
+      top n tail(vhelp)
+   %end;                                 !of set help
+
+
+   %string %fn getverbatim
+      %integer vpt, pt
+      %string (255) res
+      res = value
+      %if vbstring#"" %then res = vbstring %else %start
+         %if vbpt#0 %start
+            vpt = addr(pam_verbatim)+1
+            pt = addr(pam_tokens)+1
+            %while vpt<vpt+length(pam_verbatim) %cycle
+               %if pt=vbpt %start
+                  %if byteinteger(pt+1)>128 %then string(vpt) -> ("=").res %else res = string(vpt)
+                  %exit
+               %finish
+               pt = pt+byteinteger(pt)+1
+               vpt = vpt+byteinteger(vpt)+1
+            %repeat
+         %finish
+      %finish
+      %if length(res)>1 %and charno(res, 1)=127 {secret mark}=charno(res, length(res)) %then %c
+         res = substring(res, 2, length(res)-1)
+      topntail(res)
+      %result = res
+   %end;                                 !of getverbatim
+
+   %string %fn resolve wild filelist(%string (255) value)
+      post = value."+"
+      %while post->value.("+").post %cycle
+         %if value->("*") %or value->("?") %or value->("..") %or value->("\") %start; !this one
+            %if post->("*") %or post->("?") %or post->("..") %or post->("\") %then pamfail(pam, too many wildcard files)
+            %if post#"" %then length(post) = length(post)-1 %and post = "+".post
+            %exit
+         %finish
+         pre = pre.value."+"
+      %repeat
+      %result = value
+   %end;                                 !of resolve wild filelist
+
+
+   %integerfn analyse wild pattern(%string %name node, pattern)
+      %string (255) s, s1, s2, fileindex
+      %integer j
+
+      %unless pattern->(usep) %start
+      %if starts(pattern, "T#")=yes %then s = ssown_ssowner.usep %else %start
+         s = ssown_path to be used
+         %while starts(pattern, "-")=yes %cycle
+            pattern -> ("-").pattern
+            %for j = length(s)-1, -1, 1 %cycle
+               %if charno(s, j)=gsepch %or charno(s, j)=usepch %then length(s) = j %and %exit
+            %repeat
+            %if j=1 %then ssown_ssfname = "-".pattern %and %result = 220; !too many "-"
+         %repeat
+      %finish
+      %if length(s)+length(pattern)>225 %then %result = 224 {too long}
+      pattern = s.pattern
+      %finish
+
+      pattern -> fileindex.(usep).pattern
+      pattern = "*" %if pattern="";      ! might still be if it was "ERCC15:" eg
+      %if fileindex="" %or charno(fileindex, 1)=isepchl %then fileindex = ssown_ssowner.fileindex
+      node = fileindex.usep
+      %while pattern->s1.(gsep).s2 %and s1#""#s2 %and %not (s1->("*") %or s1->("?") %or s1->("_") %or s1->("\")) %cycle
+         node = node.s1.gsep
+         pattern = s2
+      %repeat
+      %result = 0
+   %end;                                 !of analyse wild pattern
+
+
+   %routine create wildfile(%string (255) node, pattern)
+
+!   Creates a file of names using a pattern and a previously SELECTed set
+
+      %integer chan, flag, saveout, afd, ty, ds, de, flag1
+      %record (fdf) %name fd
+
+      emas3claimchannel(chan)
+      define(chan, pamworkfile, afd, flag)
+      %if flag=0 %start
+         next = 0
+         next_pt = ssown_pamworkad+integer(ssown_pamworkad); !note start of file
+         fd == record(afd)
+         fd_flags = fd_flags!8;          !MOD access to append to workfile
+         fd_maxsize = x'100000';         !1Mb hole to override defaultdefinesizemp
+         saveout = outstream
+         selectoutput(chan)
+         generate names(node, pattern, pam_mf, pam_mfn, 1<<25 {Z option}, flag)
+         selectoutput(saveout)
+         closestream(chan)
+         clear(chan, flag1)
+         ! Connect perm+conad nominated as file is disconnected by tidyfiles
+         %if flag=0 %then connect(pamworkfile, 3, 0, x'44', ssown_pamworkad, ty, ds, de, flag)
+      %finish
+      %if flag#0 %then pamfail(pam, failure message(flag)); !end of story
+      next_end = ssown_pamworkad+integer(ssown_pamworkad)-1
+      next_type = 1
+   %end;                                 !create wildfile
+
+
+   %integer %fn select wild names(%string %name pattern)
+
+!   Select a set of files/groups according to PATTERN into the workfile.
+!   Generates the set of names selected (appended to the workfile).  Maps the
+!   WILD record to describe the set to PAM_HEAD
+!   Returns the first wild name via PATTERN
+
+      %const %integer minimum mfn=20
+      %string (255) node
+      %integer options, mfn, initial mfn, flag, i
+      %record (mff) %name mf;            !only for use in sizeof
+
+      flag = analyse wild pattern(node, pattern); !may add path, then split off constant part
+      %if flag#0 %then %result=flag
+      %if qual=9 {group} %then options = 2 {groups} %else %start; !for restrictions on SELECT
+         %if qual=5 {forgorm} %or qual=17 {forg} %then options = 3 {either} %else options = 1 {files}
+      %finish
+      options = options<<5;              !for F and G options
+      %if pattern#"*" %then options = options!1<<4; !unless *, use E option (t#files)
+      %if ssown_pamworkad=0 %then mfn = (4096-32-sizeof(pam_head))//sizeof(mf) %else %start
+         integer(ssown_pamworkad) = (integer(ssown_pamworkad)+3)&x'fffffffc'
+         mfn = (integer(ssown_pamworkad+8)-integer(ssown_pamworkad))//sizeof(mf); !as many as fit
+         %if mfn<minimum mfn %then mfn = mfn+4096//sizeof(mf)
+      %finish
+      initial mfn = mfn
+      i = pam work space(0, mfn*sizeof(mf)); !reserve space for array
+      pam_mf == array(i, mfaf)
+      select names(node, pattern, pam_mf, mfn, options, tags&select names tags, 0, flag)
+      ! 0 days unused
+      %if flag#0 %then %result = flag
+      %if mfn>initial mfn %start;        !not enough space, try again
+         i = pam work space(0, (mfn-initial mfn)*sizeof(mf)); !get the exact size
+         select names(node, pattern, pam_mf, mfn, options, tags&select names tags, 0, flag)
+         %if flag#0 %then %result = flag
+      %finish %else integer(ssown_pamworkad) = integer(ssown_pamworkad)-(initial mfn-mfn)*sizeof(mf)
+      pam_mfn = mfn
+      %if mfn=0 %then pattern = "" {none selected} %else %start
+         create wildfile(node, "")
+         i = next pam line(next_pt, next_end, pattern); !return first name in pattern
+      %finish
+      %result = 0
+   %end;                                 !of select wild names
+
+   %integerfn generate next param set(%string %name pattern)
+      %integer i, flag
+      %string (255) node, s1, s2
+
+      {change '?' or '??' to '*' since this is not the first wild expression}
+      pattern = s1."?".s2 %while pattern -> s1.("??").s2
+      pattern = s1."*".s2 %while pattern -> s1.("?").s2
+      flag = analyse wild pattern(node, pattern)
+      %if flag#0 %then %result=flag
+      create wildfile("", node.pattern); !using the selected records
+      i = next pam line(next_pt, next_end, pattern); !first line to pattern)
+      %result=0
+   %end;                                 !of generate next param set
+
+
+   %routine expurgate journal(%string (255) secret)
+      %integer from, f, limit1, limit2, j, size, val
+
+      %return %if addr(ssown_it)=0 %or ssown_it_jnbase<=0; !nojournal
+      uctranslate(addr(secret)+1, length(secret))
+      from = ssown_it_jncur-length(secret); !starting point
+      size = integer(ssown_it_jnbase+8)-32
+      %for limit1 = 1, 1, 255 %cycle;    !to limit range of search
+         %if from<ssown_it_jnbase+32 %then from = from+size; !wrapround?
+         val = byteinteger(from)
+         %if 'a'<=val<='z' %then val = val-32
+         %if val=charno(secret, 1) %start; !first char match
+            f = from
+            %for j = 1, 1, length(secret) %cycle
+               %if f=ssown_it_jnmax %then f = f-size
+               val = byteinteger(f)
+               %if 'a'<=val<='z' %then val = val-32
+               %if val#charno(secret, j) %then %exit; !no match
+               f = f+1
+               %if j=length(secret) %start; !found it
+                  %if length(secret)>=3 %then limit2 = -3 %else limit2 = 0
+                  %for limit2 = limit2, 1, 255 %cycle; !to limit the copy
+                     %if limit2<0 %then byteinteger(from) = '?' %else %start
+                        byteinteger(from) = byteinteger(f)
+                        f = f+1
+                        f = f-size %if f=ssown_it_jnmax
+                     %finish
+                     %if byteinteger(from)=255 %then ssown_it_jncur = from %and %return
+                     from = from+1
+                     from = from-size %if from=ssown_it_jnmax
+                  %repeat
+               %finish
+            %repeat
+         %finish
+         from = from-1
+      %repeat
+   %end;                                 !of expurgate journal
+
+
+%end;                                    ! get param
+
+
+!
+!-----------------------------------------------------------------------
+!
+%external %routine get string %alias "s#getstring"(%string (255) vector, %string %name value)
+   %integer i
+   %long %real r
+   %record (jobspace varf) v
+   getparam(vector, value, i, r, v, 0)
+!%if ssown_sscomreg(25) = 3 %start
+!printline("input ".itos(ssown_sscomreg(22)))
+!printline("level ".itos(ssown_loadlevel))
+!printline("value ".value)
+!%finish
+%end;                                    ! get string
+!
+!-----------------------------------------------------------------------
+!
+%external %routine get integer %alias "s#getinteger"(%string (255) vector, %integer %name value)
+   %long %real r
+   %record (jobspace varf) v
+   getparam(vector, "", value, r, v, 1)
+%end;                                    ! get integer
+!
+!-----------------------------------------------------------------------
+!
+%external %routine get longreal %alias "s#getlongreal"(%string (255) vector, %long %real %name value)
+   %integer i
+   %record (jobspace varf) v
+   getparam(vector, "", i, value, v, 2)
+%end;                                    ! get longreal
+!
+!-----------------------------------------------------------------------
+!
+%external %routine get expression %alias "s#getexpression"(%string (255) vector, %record (jobspace varf) %name value)
+   %integer i
+   %long %real r
+   getparam(vector, "", i, r, value, 3)
+%end;                                    ! get expression
+
+!-----------------------------------------------------------------------
+
+%external %routine sethelp %alias "s#sethelp"(%string (255) helpfile)
+   %record (pamf) %name pam
+
+   %return %if ssown_currentpamad=0
+
+   pam == record(ssown_currentpamad)
+   top n tail(helpfile)
+   %if starts(helpfile, "call ")#0 %then helpfile = lcstring(helpfile)
+   pam_help = helpfile
+   %if pam_control&helprequested#0 %start
+      pam_control = pam_control!!helprequested
+      {      %if pam_control&consolecall#0 %then}pam_control = pam_control!prompt requested
+      givehelp(pam_command, "", helpfile)
+   %finish
+%end;                                    !of sethelp
+!
+!------------------------------------------------------------------------
+!
+%external %routine emas3helpinfo(%string %name xinfo)
+   %string (255) info
+
+   ssenter(info, 0, "sr")
+   sethelp(info)
+   ssexit(info, 0, "sr")
+%end;                                    !of emas3helpinfo
+!
+!-------------------------------------------------------------------------
+!
+%external %routine emas3lastparam(%string %name xparam)
+   %string (255) param
+
+   ssenter(param, 0, "sw")
+   param = ssown_pam last param
+   ssexit(param, 0, "sw")
+%end;                                    !of emas3lastparam
+!
+!--------------------------------------------------------------------------
+!
+%string %fn tokens to string(%string %name tokens, %integer pt)
+   %string (255) res, s
+   res = ""
+   %if addr(tokens)<pt %start
+      %while pt<addr(tokens)+length(tokens) %cycle
+         %if byteinteger(pt)>0 %and byteinteger(pt+1)=255 %then s = "" %else %start
+            !used up
+            s = string(pt)
+            %if s#"" %then byteinteger(addr(s)+1) = byteinteger(addr(s)+1)&127; !in case marked
+            res = res.s.","
+         %finish
+         pt = pt+byteinteger(pt)+1
+      %repeat
+   %finish
+   %if length(res)>0 %then length(res) = length(res)-1
+   %result = res
+%end;                                    !of tokens to string
+
+!---------------------------------------------------------
+
+%external %routine line %alias "s#line"(%string %name text)
+   %record (pamf) %name pam
+   pam == record(ssown_currentpamad)
+   text = tokenstostring(pam_tokens, pam_tokenpt)
+   pam_tokens = ""
+   pam_verbatim = ""
+%end
+!
+!---------------------------------------------------------------------
+!
+%external %routine lcline %alias "s#lcline"(%string %name text)
+   %record (pamf) %name pam
+   pam == record(ssown_currentpamad)
+   text = tokenstostring(pam_verbatim, addr(pam_verbatim)+1)
+   pam_verbatim = ""
+   pam_tokens = ""
+%end
+!
+!-----------------------------------------------------------------------
+!
+%external %routine setline %alias "s#setline"(%string (255) text)
+   %record (pamf) %name pam
+   %integer state, qstate
+   pam == record(ssown_currentpamad)
+   qstate = 0
+   %if text="?" %then text = "" %and qstate = prompt requested %else %start
+      %if text="??" %then text = "" %and qstate = help requested
+   %finish
+   pam_verbatim = " ".text
+   pam_tokens = totoken(pam_verbatim, state)
+   pam_tokenpt = addr(pam_tokens)+1
+   pam_control = (pam_control&consolecall)!state!pstarting!qstate; !preserve consolecall if set
+%end
+
+!------------------------------- GETRESTOFLINE --------------------------------------
+
+%external %routine get rest of line %alias "s#getrestofline"(%string %name text)
+   %record (pamf) %name pam
+   pam == record(ssown_currentpamad)
+   text = tokenstostring(pam_tokens, pam_tokenpt)
+%end;                                    ! get rest of line
+
+!-------------------------------------- EMAS3RESTOFLINE ------------------------------
+
+%external %routine emas3 get rest of line(%string %name xtext)
+! This entry name could be made an ALIAS to GETRESTOFLINE during modify. But it
+! is put here so that we can omit the HEAVY modify stage during testing.
+   %string (255) text
+   ssenter(text, 0, "sw")
+   get rest of line(text)
+   ssexit(text, 0, "sw")
+%end;                                    ! emas3 rest of line
+
+!------------------------------------EMAS3SETCNAME---------------------------
+
+%external %routine emas3 set cname(%string %name xcommand)
+   %string (255) command
+   %record (pamf) %name pam
+   ssenter(command, 0, "sr")
+   pam == record(ssown_currentpamad)
+   pam_command <- command
+   ssexit(command, 0, "sr")
+%end;                                    !of emas3 set cname
+
+!-----------------------------------------------------------------------
+
+%external %routine scheck string %alias "s#checkstring"(%string (255) text, qualifier, %string %name value,
+   %integer %name flag)
+   %string (255) qtxt
+   qtxt = qualifier
+   flag = scheck(text, qtxt, value)
+   %if flag<0 %then flag = 100 %and ssown_ssfname = "invalid qualifier ".qtxt
+%end;                                    ! scheck string
+!
+!-----------------------------------------------------------------------
+!
+%external %routine scheck integer %alias "s#checkinteger"(%string (255) text, qualifier, %integer %name value,
+   %integer %name flag)
+   %string (255) qtxt
+   qtxt = qualifier
+   flag = icheck(text, qtxt, value)
+   %if flag<0 %then flag = 100 %and ssown_ssfname = "invalid qualifier ".qtxt
+%end;                                    ! scheck integer
+!
+!-----------------------------------------------------------------------
+!
+%external %routine scheck longreal %alias "s#checklongreal"(%string (255) text, qualifier, %long %real %name value,
+   %integer %name flag)
+   %string (255) qtxt
+   qtxt = qualifier
+   flag = rcheck(text, qtxt, value)
+   %if flag<0 %then flag = 100 %and ssown_ssfname = "invalid qualifier ".qtxt
+%end;                                    ! scheck longreal
+!
+!-----------------------------------------------------------------------
+!
+%external %routine scheck expression %alias "s#checkexpression"(%string (255) text, qualifier,
+   %record (jobspace varf) %name value, %integer %name flag)
+   %string (255) qtxt
+   qtxt = qualifier
+   flag = echeck(text, qtxt, value)
+   %if flag<0 %then flag = 100 %and ssown_ssfname = "invalid qualifier ".qtxt
+%end;                                    ! scheck expression
+
+!-----------------------------------------------------------------------
+
+%external %routine displayhistoryrecord %alias "emas#displayhistoryrecord"
+   %integer j
+   j = shistory("", "", "", 2)
+%end;                                    ! displayhistoryrecord
+
+!-----------------------------------------------------------------------
+
+!%external %routine cnp %alias "s#checknoparams"
+!   %return %if parms=""
+!   fatality(clicomm." has not used ".parms."
+!")
+!%end;                                    ! cnp
+!!
+!!-----------------------------------------------------------------------
+!!
+!%integer %fn set defaultsi(%string %name previous command, previous parms)
+!
+!   %integer j, l, adr
+!   %string (11) s11
+!   %record %format hf(%integer end, start, type, size)
+!   %record (hf) %name h
+!   %external %routine %spec outfile %alias "S#OUTFILE"(%string (255) file,
+%integer size, hole, prot, !      %integer %name adr, flag)
+!   %external %routine %spec modpdfile %alias "S#MODPDFILE"(%integer act,
+%string (255) pd, %string (11) mem, !      % string (255) input, %integer %name flag)
+!   %external %integer %fn %spec exist %alias "s#exist"(%string (255) file)
+!   %external %routine %spec fstatus %alias "S#FSTATUS"(%string (255) file,
+%integer act, val, %integer %name flag)
+!
+!   %if exist(dfile)=0 %start
+!      modpdfile(4, dfile, "", "", j)
+!      ->err %unless j=0
+!      disconnect(dfile, j)
+!      fstatus(dfile, 1, 0, j) { set cherished bit }
+!   %finish
+!
+!   s11 <- previous command
+!   l = length(previous parms)
+!   %if l=0 %start
+!      modpdfile(2, dfile, s11, s11, j)
+!      ->err
+!   %finish
+!   outfile("T#DEFAULTS", 2048, 0, 0, adr, j)
+!   %if j=0 %start
+!      h == record(adr)
+!      h_type = 3 { character }
+!      move(l, addr(previous parms)+1, adr+h_end)
+!      h_end = h_end+l
+!      modpdfile(2, dfile, s11, s11, j)
+!      modpdfile(1, dfile, s11, "t#defaults", j)
+!   %finish
+!err:
+!   %result = j
+!%end;                                    ! set defaults
+!!
+!!-----------------------------------------------------------------------
+!!
+!%external %routine set defaults %alias "S#SETDEFAULTS"(%integer %name flag)
+!
+!   flag = set defaultsi(clicomm, save parms)
+!
+!%end;                                    ! of set ds
+!!
+!!-----------------------------------------------------------------------
+!!
+%end %of %file

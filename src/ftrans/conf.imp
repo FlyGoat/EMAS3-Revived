@@ -1,0 +1,344 @@
+
+%const %integer amdahl= 369
+%const %integer xa= 371
+%include "target"
+
+!---------------------------------------------------------------------------!
+
+%const %byte %integer no= 0
+%const %byte %integer yes= 1
+
+%const %integer read= 1
+%const %integer write= b'10'
+%const %integer shared= b'1000'
+
+%const %string (1) snl= "
+"
+%const %integer max hosts= 1024
+%const %integer max fep= 99
+
+%const %integer forward reverse breakpoint= 22
+
+!--------------------------------------------------------------------------!
+
+%const %integer max fsys= 99
+%const %integer hash table size= 1023
+%const %integer reverse lookup hash table size= 1023
+%const %integer n contexts= 42
+%const %byte %integer relevant reverse contexts start= 26
+%const %byte %integer relevant reverse contexts end= 29
+
+!--------------------------------------------------------------------------!
+
+%record %format fhf(%integer end, start, size, type, sp1, dt, sp2, sp3)
+%const %integer fh size= 32
+
+%record %format host f(%integer entry no, %string (127) long name, %integer check word,
+  %string (63) short name, %string (127) description,
+  %string (63) local contact, %byte %integer priv, vis, fep, flags, file concurrency, mail concurrency,
+  %byte %integer max lines, status, service, connect retry ptr, services, qlines, %integer file limit,
+  mail limit, (%integer last call, in service, last response, connect attempts, connect retry time,
+  last q response by us, p transfers, q transfers, p kb, q kb, p mail, q mail, bytes,
+  seconds %or %record (%integer lc, is, lr, ca, crt, lqr, pt, qt, pkb, qkb, pm, qm, b, s) statistics),
+  %integer %array addresses start(1:n contexts))
+
+  %record %format pointers f(%integer hash table displ, host entries start, hosts,
+    guest displ, control entry displ, %string (31) pss repl, ipss repl, janet repl, %integer %array reverse lookup table offset %c
+    (relevant reverse contexts start:relevant reverse contexts end), %string (63) dead letters, local contact,
+    %byte %integer %array discs(0:max fsys))
+  %const %integer pointers f size= 244 + 1 + max fsys + 4 * %c
+    ( 1 + relevant reverse contexts end - relevant reverse contexts start )
+
+  %record %format link f(%integer next, host entry pointer, %string (127) name)
+
+%record %format reverse address f(%integer next, host entry pointer, %string (63) address)
+%const %integer reverse address f size= 72
+
+!---------------------------------------------------------------------------!
+
+%record %format table pointers f(%integer link list displ, queues, queues displ, lines, lines displ)
+%const %integer table pointers f size= 20
+
+%const %integer max lines= 25
+
+%const %integer link list entries= 1000
+%const %integer link list entry size= 32
+
+!--------------------------------------------------------------------------!
+
+%own %integer %array %format hash table f(0:hash table size)
+
+!---------------------------------------------------------------------------!
+
+%external %routine connect cfile(%string (6) infile owner, outfile owner, %string (11) infile,
+  outfile, tablefile, %integer in fsys, out fsys, %integer %name database conad, tables conad, LINES)
+
+  %if target = 2900 %start
+    %const %string (1) sep= "."
+    %const %integer seg shift= 18
+  %finish %else %start
+    %if target = 370 %start
+      %const %integer seg shift= 16
+    %finish %else %start
+      %const %integer seg shift= 20
+    %finish
+    %const %string (1) sep= ":"
+  %finish
+
+
+  %external %integer %fn %spec current packed dt
+  %externalstringfnspec itos ( %integer i )
+
+  %if target = 2900 %start
+
+    %external %string %fn %spec derrs(%integer flag)
+    %external %integer %fn %spec dpermission(%string (6) owner, user, %string (8) date, %string (11) file,
+      %integer fsys, type, perm)
+    %external %integer %fn %spec dconnect(%string (6) user, %string (11) file, %integer fsys, mode, apf,
+      %integer %name seg, gap)
+    %external %integer %fn %spec dtransfer(%string (6) user1, user2, %string (11) file, newname, %integer fsys1,
+      fsys2, type)
+    %external %integer %fn %spec ddestroy(%string (6) user, %string (11) file, %string (8) date, %integer fsys,
+      type)
+    %external %integer %fn %spec drename(%string (6) user, %string (11) oldname, newname, %integer fsys)
+    %external %integer %fn %spec dnewgen(%string (6) user, %string (11) file, newgen of file, %integer fsys)
+    %external %integer %fn %spec ddisconnect(%string (6) user, %string (11) file, %integer fsys, destroy)
+
+  %finish %else %start {non 2900}
+
+
+    %external %integer %fn %spec dconnect(%string %name file index, file, %integer %name fsys, mode, seg, gap)
+    %external %integer %fn %spec ddestroy(%string %name file index, file, date, %integer %name fsys, type)
+    %external %integer %fn %spec ddisconnect(%string %name file index, file, %integer %name fsys, dstry)
+    %external %integer %fn %spec dflag(%integer %name flag, %string %name txt)
+    %external %integer %fn %spec dnewgen(%string %name file index, file, newgen, %integer %name fsys)
+    %external %integer %fn %spec dpermission(%string %name file index, user, date, file, %integer %name fsys,
+      type, adr)
+    %external %integer %fn %spec drename(%string %name file index, oldname, newname, %integer %name fsys)
+    %external %integer %fn %spec dtransfer(%string %name file index1, file index2, file1, file2,
+      %integer %name fsys1, fsys2, type)
+
+  %finish
+
+  %const %string (11) temp outfile= "tempcfile"
+
+  %const %integer doesnt exist= 32 { director flag }
+  %const %integer already connected= 34 { ditto }
+
+  !---------------------------------------------------------------------------!
+
+  %integer flag, seg, gap, i, j, k, conad, old conad, host entries start, old host entries start, perm, old hosts, hosts
+
+  %string(255) cck message
+
+  %byte %integer newgenning required
+
+  %record (fhf) %name fh
+  %record (pointers f) %name pointers
+%RECORD(TABLE POINTERS F) %NAME TABLES POINTERS
+  %record (host f) %name host, old host
+
+  %integerarrayformat hosts list f(1 : max hosts)
+  %integer %array %name hash table, old hosts list, hosts list
+
+  !---------------------------------------------------------------------------!
+
+%integer %fn hash(%string (255) s)
+
+  %integer i, h, a
+  %long %integer x
+  %const %byte %integer %array prime(1:7)= 23, 19, 11, 7, 5, 13, 17
+
+  x = 0
+  a = addr(s)
+  byteinteger(addr(x) + i & 7) = byteinteger(addr(x) + i & 7) !! byteinteger(a + i) %for i = 0, 1, length(s)
+  h = length(s) * 29
+  h = h + prime(i) * byteinteger(addr(x) + i) %for i = 1, 1, 7
+  %result = h
+
+%end
+
+!---------------------------------------------------------------------------!
+
+%integer %fn lookup by name(%string (127) name)
+
+  ! Gives back host entry pointer, which is offset from host entries start
+  ! Result is -1 if host not found ( since 0 is a valid result ).
+
+  %integer p
+  %record (link f) %name link
+
+  p = hash table(hash(name) & hash table size)
+  %while p <> -1 %cycle
+    link == record(conad + p)
+    %result = link_host entry pointer %if link_name = name
+    p = link_next
+  %repeat
+  %result = -1
+
+%end
+
+!---------------------------------------------------------------------------!
+
+  %integer %fn connect(%string (6) user, %string (11) file, %integer fsys, mode, %integer %name seg, gap)
+
+    seg = 0
+    gap = 0
+    %if target = 2900 %then %result = dconnect(user, file, fsys, mode, 0, seg, gap) %else %c
+      %result = dconnect(user, file, fsys, mode, seg, gap)
+
+  %end
+
+  !---------------------------------------------------------------------------!
+
+  %string %fn errs(%integer flag)
+    %integer i
+    %string (63) error
+    %if target = 2900 %then %result = derrs(flag) %else %start
+      i = dflag(flag, error)
+      %result = error
+    %finish
+  %end
+
+  !--------------------------------------------------------------------------!
+
+  database conad = 0
+  tables conad = 0
+  LINES = 0
+
+  newgenning required = no
+
+  flag = ddestroy(outfile owner, tablefile, "", out fsys, 0)
+  %if flag = 0 %or flag = doesnt exist %start
+    flag = dtransfer(infile owner, outfile owner, infile."TAB", tablefile, in fsys, out fsys, 3)
+    %if flag = 0 %start
+      ! make sure temp outfile doesn't exist
+      flag = ddestroy(outfile owner, temp outfile, "", out fsys, 0)
+      %if flag = 0 %or flag = doesnt exist %start
+        ! Copy infile to temp outfile
+        flag = dtransfer(infile owner, outfile owner, infile, temp outfile, in fsys, out fsys, 3)
+        %if flag = 0 %start
+          ! attempt to rename temp outfile to outfile
+          flag = drename(outfile owner, temp outfile, outfile, out fsys)
+          %unless flag = 0 %start { ie if outfile exists ... }
+            flag = connect(outfile owner, outfile, out fsys, read ! write ! shared, seg, gap)
+            %if flag = 0 %or flag = already connected %start
+              cck message = "ok"
+              old conad = seg << seg shift
+              pointers == record(old conad + fh size)
+              old hosts = pointers_hosts
+              %unless 2 <= old hosts <= max hosts %start
+                cck message = "number of hosts : ".itos(old hosts)
+                -> cck fail
+              %finish
+              old hosts list == array(old conad + fh size + pointers f size, hosts list f )
+              old host entries start = pointers_host entries start
+!              %unless fh size + pointers f size + 4 * hash table size <= old host entries start <= x'20000' %start
+!                cck message = "host entries start : ".itos(old host entries start)
+!                -> cck fail
+!              %finish
+              %cycle i = 1, 1, old hosts
+                %unless 0 <= old hosts list(i) <= pointers_reverse lookup table offset %c
+                  (relevant reverse contexts start) - old host entries start %start
+                  cck message = "hosts list for host no. ".itos(i)." : ".itos(old hosts list (i) )
+                  -> cck fail
+                %finish
+                old host == record(old conad + old host entries start + old hosts list(i) )
+                %unless 0 <= length(old host_long name) <= 127 %start
+                  cck message = "length of long name for host no. ".itos(i)
+                  -> cck fail
+                %finish
+                j = 0
+                j = j + byteinteger(addr(old host_long name)+k) %for k = 0, 1, length(old host_long name)
+                %unless j = old host_check word %start
+                  cck message = "host number ".itos(i)
+                  -> cck fail
+                %finish
+              %repeat
+cck fail:
+              %unless cck message = "ok" %start
+                printstring("**** FTRANS-DB Consistency check fails on ".cck message.snl)
+                flag = ddisconnect(outfile owner, outfile, out fsys, 0)
+                flag = dnewgen(outfile owner, "CrapCFile", outfile, out fsys)
+                flag = drename(outfile owner, outfile, temp outfile, out fsys)
+                -> cck failed
+              %finish
+              flag = connect(outfile owner, temp outfile, out fsys, read ! write, seg, gap)
+              %if flag = 0 %or flag = already connected %start
+                printstring("Copying statistics ...".snl)
+                conad = seg << seg shift
+                pointers == record(conad + fh size)
+                hosts = pointers_hosts
+                hosts list == array(conad + fh size + pointers f size, hosts list f)
+                host entries start = pointers_host entries start
+                hash table == array(conad + pointers_hash table displ, hash table f)
+                %cycle i = 1, 1, old hosts
+                  old host == record(old conad + old host entries start + old hosts list(i) )
+                      j = lookup by name(old host_long name)
+                      %unless j = -1 %start
+                        host == record(conad + host entries start + j)
+                        host_statistics = old host_statistics
+                      %finish %else printstring("Host ".old host_short name." no longer present".snl)
+                %repeat
+
+                j = current packed dt
+                %cycle i = 1, 1, hosts
+                      host == record(conad + host entries start + hosts list(i) )
+                      %if host_in service = 0 %start
+                        printstring("New host ".host_long name.snl)
+                        host_in service = j
+                      %finish
+                %repeat
+              %finish %else printstring("**** FTRANS-DB DISASTER Cannot connect ".temp outfile." : ".errs(flag). %c
+                snl)
+            %finish %else printstring("**** FTRANS-DB Cannot connect old database : ".errs(flag).snl)
+
+            flag = ddisconnect(outfile owner, outfile, out fsys, 0)
+            flag = ddisconnect(outfile owner, temp outfile, out fsys, 0)
+            ! Newgen temp outfile to outfile
+            flag = dnewgen(outfile owner, outfile, temp outfile, out fsys)
+            printstring("Newgen required".snl)
+            newgenning required = yes
+          %finish
+cck failed :
+          %if flag = 0 %start { cfile now in outfile }
+            ! connect outfile
+            flag = connect(outfile owner, outfile, out fsys, read ! write ! shared, seg, gap)
+            %if flag = 0 %or flag = already connected %start
+              database conad = seg << seg shift
+              fh == record(database conad)
+              fh_sp3 = x'AAAAAAAA' { to identify yet another new format ... }
+              pointers == record ( database conad + fh size )
+              hosts list == array(database conad + fh size + pointers f size, hosts list f)
+              %if newgenning required = no %start
+                j = current packed dt
+                %cycle i = 1, 1, pointers_hosts
+                    host == record(database conad + pointers_host entries start + hosts list(i) )
+                    host_in service = j
+                %repeat
+              %finish
+              %if target = 2900 %then perm = read %else perm = read ! write ! shared
+              flag = dpermission(outfile owner, "", "", outfile, out fsys, 1, perm)
+              printstring("**** FTRANS-DB failed to set CFILE permissions : ".errs(flag).snl) %unless flag = 0
+              flag = connect(outfile owner, tablefile, out fsys, read ! write ! shared, seg, gap)
+              %if flag = 0 %or flag = already connected %start
+                tables conad = seg << seg shift
+TABLES POINTERS == RECORD(TABLES CONAD + FH SIZE)
+LINES = TABLES POINTERS_LINES
+                flag = dpermission(outfile owner, "", "", tablefile, out fsys, 1, perm)
+                printstring("**** FTRANS-DB : Failed to set ".tablefile." permissions : ".errs(flag).snl) %c
+                  %unless flag = 0
+              %finish %else printstring("**** FTRANS-DB : Failed to connect ".outfile owner.sep.tablefile. %c
+                " : ".errs(flag).snl)
+            %finish %else printstring("**** FTRANS-DB : Failed to connect ".outfile owner.sep.outfile." : ". %c
+              errs(flag).snl)
+          %finish %else printstring("**** FTRANS-DB : Rename/Newgen ".temp outfile." fails : ".errs(flag).snl)
+        %finish %else printstring("**** FTRANS-DB : Transfer ".infile owner.sep.infile." to ".temp outfile. %c
+          " fails : ".errs(flag).snl)
+      %finish %else printstring("**** FTRANS-DB : Destroy ".temp outfile." fails : ".errs(flag).snl)
+    %finish %else printstring("**** FTRANS-DB : Transfer ".infile owner.sep.infile."TAB"." to ".tablefile. %c
+      " fails : ".errs(flag).snl)
+  %finish %else printstring("**** FTRANS-DB : Destroy ".tablefile." fails : ".errs(flag).snl)
+
+%end
+%end %of %file

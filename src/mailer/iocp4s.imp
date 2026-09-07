@@ -1,0 +1,604 @@
+%const %integer xa=1, non xa=2 {2900=2900}
+%const %integer target=xa
+
+%record %format comf(%integer ocptype, slipl, tops, sepgs, ndiscs, nsldevs, dlvnaddr, ditaddr, sldevtabad, steer int,
+   dirsite, dcodeda, suplvn, tojday, date0, date1, date2, time0, time1, time2, pagesize, users, cattad, servaad,
+   nocps, itint, ration, trans, %long %integer kmon, %integer supvsn, secsfrmn, secstocd, sync1dest, sync2dest,
+   asyncdest, maxprocs, inspersec, elaphead, commsreca, storeaad, procaad, tslice, feps, maxcbt, performad, curproc,
+   inptr, outptr, parm asla, kernelqa, runq1a, runq2a, channelq, end)
+%record %format fhf(%integer end, start, size, type, spare, datetime, s1, s2)
+%record %format inff(%string (11) name, %integer spare1, kbytes, %byte %integer arch, codes, cct, ownp, eep, use,
+   codes2, ssbyte, spare2, phead, dayno, group)
+%record %format pe(%integer dest, srce, p1, p2, p3, p4, p5, p6)
+
+%external %integer %fn %spec dchsize(%string %name file index, file, %integer %name fsys, nkb)
+%external %integer %fn %spec dconnect(%string %name file index, file, %integer %name fsys, mode, seg, gap)
+%external %integer %fn %spec dcreate(%string %name file index, file, %integer %name fsys, nkb, type, da)
+%external %integer %fn %spec ddestroy(%string %name file index, file, date, %integer %name fsys, type)
+%external %integer %fn %spec ddisconnect(%string %name file index, file, %integer %name fsys, dstry)
+%external %string %fn %spec derrs(%integer flag); !in mailer, not director
+%external %integer %fn %spec dexecmess(%string %name user, %integer %name sact, len, adr)
+%external %integer %fn %spec dfilenames(%string %name group, %integer %name fileno, maxrec, nfiles, fsys, type,
+   %record (inf f) %array %name inf)
+%external %integer %fn %spec doper(%string %name text)
+%external %integer %fn %spec dpon3(%string %name user, %record (pe) %name p, %integer %name invoc, msgtype, outno)
+%external %integer %fn %spec drename(%string %name file index, oldname, newname, %integer %name fsys)
+%external %integer %fn %spec dstop(%integer %name reason)
+%external %integer %fn %spec dvalidate(%integer %name adr, len, rw)
+
+%if target=xa %start
+   %const %integer seg shift=20;         !31 bit addressing, 1024k segment
+%else
+   %const %integer seg shift=16;         !24 bit addressing, 64k segment
+%finish
+%const %record (comf) %name com=31<<seg shift
+
+
+
+%extrinsic %string (6) my name
+%extrinsic %integer my service number
+%extrinsic %integer my fsys
+%extrinsic %integer oper no
+!!
+!!
+%constant %string (7) journal= "JOURNAL"; !SPOOLR QUEUE
+%constant %string (1) snl= "
+"
+%constant %integer not assigned= x'83838383'; !INTERNAL UNASSIGNED PATTERN
+%const %integer days70= 25567;           ! days from jan1 1900 to jan1 1970
+%const %integer secsin24hrs= 86400;      ! secs in day
+%constant %integer r= b'00000001';       !READ ACCESS
+%constant %integer w= b'00000010';       !WRITE ACCESS
+%constant %integer shared= b'00001000'
+%constant %integer file header size= 32; !STANDARD FILE HEADER SIZE
+%constant %integer max oper= 7;          !MAXIMUM OPER NUMBER
+%constant %integer max streams= 7;       !MAX NUMBER OF OUTPUT STREAMS
+%constant %integer prompt reply dact= 19; !ACTIVITY SHOULD REQUIRES REPLIES FROM PROMPT ON
+%constant %integer spoolr reply= 31
+%constant %integer oper prompt= x'320008'; !SERVICE NUMBER OF OPER PROMPT
+%const %string (1) sp=" "
+%constant %byte %integer %array hex(0:15)= %c
+'0','1','2','3','4','5','6','7',
+ '8','9','A','B','C','D','E','F'
+!!
+!!
+%routine %spec iocp(%integer ep, n)
+
+
+
+%own %integer current stream= 0;         !DEFAULT AND CURRENT OUTPUT STREAM
+%own %string (132) %array oper buffer(0:max oper)= %c
+     ""(max oper + 1)
+!OPER OUTPUT SAVED HERE UNTIL A NEWLINE OR FULL
+%own %integer %array conads(1:max streams)= %c
+                  0(max streams)
+!CONNECT ADDRESS OF OUTPUT STREAMS
+!!
+!!
+
+%external %integer %function validate(%integer adr, len, rw)
+   %integer flag
+
+!  function validates the area specified for read or write access
+!  result = 1  area ok (accessible)
+!  result = 0  area not ok (inaccessible)
+!  rw should be set  0  (read access)
+!                or  1  (write access)
+   flag = dvalidate(adr, len, rw)
+   %result = 1 %if flag=0
+   %result = 0
+%end;                                    !of integerfn validate
+!!
+!!
+
+%integer %function current packed dt
+
+!    gives current dt in new packed form
+
+   %result = ((com_tojday-days70)*secsin24hrs+com_secsfrmn)!x'80000000'
+%end
+
+
+%external %routine stop %alias "S#STOP"
+   %integer flag
+   flag = dstop(100)
+%end;                                    !OF ROUTINE STOP
+
+
+%external %routine move(%integer length, from, to)
+   %const %integer part=x'00F00000'
+   %integer j
+   from = from&X'7FFFFFFF'
+   to = to&X'7FFFFFFF'
+   %return %if length<=0 %or from=to
+   %while length&x'ff000000'#0 %cycle
+      !MVCL will not move more than x'ffffff'
+      !take care of order, in case overlapping
+      %if to>from %then %start
+         move(part, from+length-part, to+length-part)
+      %finish %else %start
+         move(part, from, to)
+         from = from+part
+         to = to+part
+      %finish
+      length = length-part
+   %repeat
+
+   *l_0, to
+   *l_2, from
+   *l_1, length
+   *lr_3, 1
+   *mvcl_0, 2
+   *basr_15, 0
+   *using_15
+   *bc_8, <out>
+   *drop_15
+
+   length = length-1 { overlapping so do it the hard way }
+   %if to>from %start
+      %cycle j = length, -1, 0
+         byteinteger(to+j) = byteinteger(from+j)
+      %repeat
+   %finish %else %start
+      %cycle j = 0, 1, length
+         byteinteger(to+j) = byteinteger(from+j)
+      %repeat
+   %finish
+out:
+%end;                                    ! of move
+
+
+%external %routine fill(%integer length, from, filler)
+
+!  fill "length" bytes "from" with character "filler"
+
+   %const %integer part=x'00f00000'
+   %return %if length<=0
+
+!   %while length > 0 %cycle
+!      length = length - 1
+!      byteinteger(from + length) = filler
+!   %repeat
+   %while length&x'ff000000'#0 %cycle
+      !MVCL will not do more than x'00ffffff' bytes
+      fill(part, from, filler)
+      from = from+part
+      length = length-part
+   %repeat
+
+   *l_0, from
+   *lr_2, 0
+   *l_1, length
+   *l_3, filler
+   *sll_3, 24
+   *mvcl_0, 2
+%end;                                    !OF ROUTINE FILL
+
+
+%external %string (15) %function i to s(%integer n)
+
+!  turns an integer into a string
+
+   %string (16) s
+   %integer sign, w, d
+   %result = "0" %if n=0
+   sign = 1
+   sign = -1 %and n = -n %if n<0;        ! which can overflow
+   s = ""
+   %while n>0 %cycle
+      w = n//10
+      d = n-w*10
+      s = tostring('0'+d).s
+      n = w
+   %repeat
+   s = "-".s %if sign<0
+   %result = s
+%end;                                    !OF STRINGFN I TO S
+!!
+!!
+
+%external %routine write %alias "S#WRITE"(%integer i, pl)
+   %string (31) s
+   %if i<0 %start
+      print string("-")
+      %if i=x'80000000' %then i = x'7FFFFFFF' %else i = -i
+   %finish %else print string(sp)
+   s = itos(i)
+   %if length(s)<pl %then spaces(pl-length(s))
+   printstring(s)
+%end;                                    !of routine write
+!!
+!!
+
+%external %string (8) %function h to s(%integer value, places)
+!!
+!  turns an integer into a hexidecimal string of given length
+
+   %string (8) s
+   places = 1 %if places<1
+   places = 8 %if places>8
+   s = ""
+   %cycle
+      s = tostring(hex(value&15)).s
+      places = places-1
+      %result = s %if places=0
+      value = value>>4
+   %repeat
+%end;                                    !of stringfn h to s
+
+
+%external %integer %function s to i(%string %name s)
+
+!  turns a string into an integer
+
+   %string (15) p, resl, resr
+   %integer total, sign, ad, i, j, hex
+   hex = 0; total = 0; sign = 1
+   ad = addr(p)
+   %if length(s)>15 %then %result = not assigned
+a: %if s->resl.(sp).resr %and resl="" %then s = resr %and ->a; !chop leading spaces
+   %if s->resl.("-").resr %and resl="" %then s = resr %and sign = -1
+   %if s->resl.("X").resr %and resl="" %start
+      s = resr
+      hex = 1
+      ->a
+   %finish
+   p = s
+   %unless s->p.(sp).s %then s = ""
+   i = 1
+   %while i<=byteinteger(ad) %cycle
+      j = byte integer(i+ad)
+      ->fault %unless '0'<=j<='9' %or (hex#0 %and 'A'<=j<='F')
+      %if hex=0 %then total = 10*total %else total = total<<4+9*j>>6
+      total = total+j&15; i = i+1
+   %repeat
+   %if hex#0 %and i>9 %then ->fault
+   %if i>1 %then %result = sign*total
+fault:
+   s = p.s
+   %result = not assigned
+%end;                                    !of integerfn s to i
+!!
+!!
+
+%external %routine dump(%integer start, finish, conad)
+
+!  dumps area specified by start and finish in hexidecimal
+!  accepts parameters as start, finish or as start,length with conad
+!  specifying the actual address of the area being dumped
+
+   %string (255) s
+   %integer i, j, above, actual start, prev start
+   finish = start+finish-1 %if finish<start; ! must mean start, length
+   start = start&x'FFFFFFFC'
+   actual start = start
+   conad = conad&x'FFFFFFFC'
+   finish = ((finish+4)&x'FFFFFFFC')-1
+   %return %if finish<start
+   above = 0
+   ->printline;                          !must print first line in full
+!
+nextline:
+   ->printline %if finish-start<32;      ! must print last line
+   prev start = start-32
+   %for i = 0, 1, 31 %cycle
+      %if byteinteger(start+i)#byteinteger(prev start+i) %then ->printline
+   %repeat
+   above = above+1
+   start = start+32
+   ->nextline
+!
+printline:
+   %if above#0 %start
+      spaces(50)
+      %if above=1 %then print string("  line ") %else printstring(i to s(above)." lines")
+      print string(" as above".snl)
+      above = 0
+   %finish
+   s = "*"
+   %for i = start, 1, start+31 %cycle
+      j = byteinteger(i)
+      %unless 32<=j<127 %then j = '_'
+      s = s.to string(j)
+   %repeat
+   s = s."*   (".h to s(conad+(start-actual start), 8).")   "
+   %for i = start, 4, start+28 %cycle
+      s = s.h to s(integer(i), 8)."  "
+   %repeat
+   start = start+32
+   print string(s.snl)
+   ->nextline %unless start>finish
+%end;                                    ! OF DUMP
+!!
+!!
+
+%external %routine printfl %alias "s#printfl"(%long %real xx, %integer n)
+
+   printstring("PRINTFL not implemented")
+%end;                                    !of printfl
+
+
+%external %routine pt rec(%record (pe) %name p)
+
+!  print record p as a string
+
+   %string (255) s
+   %integer i, j, k, char
+   s = ""
+   j = addr(p_dest)
+   k = 1
+   %cycle i = j, 1, j+31
+      s = s.h to s(byteinteger(i), 2);   !DONE THIS WAY TO AVOID UNASSIGNED CHECK
+      s = s." " %and k = 0 %if k=4
+      k = k+1
+   %repeat
+   s = s." "
+   j = addr(p_p1)
+   %cycle i = j, 1, j+23
+      char = byteinteger(i)
+      char = ' ' %unless 32<char<127
+      s = s.to string(char)
+   %repeat
+   print string(s.snl)
+%end;                                    !OF ROUTINE PT REC
+!!
+!!
+
+%external %routine prompt(%string (23) s)
+!!
+!!
+!!  PUT A PROMPT UP ON THE CURRENT OPER
+!!
+!!
+   %record %format pf(%integer dest, srce, %string (23) text)
+   %record (pf) p
+   %integer flag
+   p_dest = oper prompt!(oper no)<<8
+   p_srce = my service number!prompt reply dact
+   p_text = s
+   flag = dpon3("", p, 0, 0, 6)
+%end;                                    !OF ROUTINE PROMPT
+!!
+!!
+
+%routine send to spoolr(%string (11) file, %integer caddr, stream, %string (15) queue)
+!!
+!! Send a file to SPOOLR. If queue is LP, also send a copy to JOURNAL.
+!!
+   %record (pe) p
+   %string (11) newname, jfile
+   %integer flag, len, start, i, seg, gap, ccaddr, da
+   %string (255) s, t
+   %record (fhf) %name file header
+   file header == record(caddr)
+   start = file header_start
+   len = file header_end-start
+   %if queue="LP" %start
+      jfile = "J".file
+      flag = dcreate(myname, jfile, myfsys, (len+start+1023)>>10, 4, da)
+      %if flag=0 %start
+         seg = 0; gap = 0
+         flag = dconnect(myname, jfile, myfsys, r!w, seg, gap)
+         %if flag=0 %start
+            ccaddr = seg<<seg shift
+            move(len+start, caddr, ccaddr)
+            send to spoolr(jfile, ccaddr, 2, journal)
+         %finish %else printstring("Connect ".myname.".".jfile." fails: ".derrs(flag).snl)
+      %finish %else printstring("Create ".myname.".".jfile." fails: ".derrs(flag).snl)
+   %finish
+   %if queue="LPONLY" %then queue = "LP"
+   flag = ddisconnect(myname, file, myfsys, 0)
+   %if len>0 %start
+      %if stream=0 %then newname = file %else %start
+         s = string(addr(com_date0)+3)
+         length(s) = 2;                  !DAY ONLY
+         t = string(addr(com_time0)+3)
+         s = "M".s."#".t
+         length(s) = 6;                  !+HOURS
+         byteinteger(addr(t)+3) = 2
+         i = stoi(string(addr(t)+3))
+         %cycle i = i, 1, 99
+            %if i<10 %then newname = s."0".itos(i) %else newname = s.itos(i)
+            %if queue="LP" %then newname = newname."L"
+            flag = drename(myname, file, newname, myfsys)
+            print string("RENAME ".myname.".".file." TO ".myname.".".newname." FAILS ".derrs(flag).snl) %if flag#0
+            %exit %if flag=0
+         %repeat
+      %finish
+      s = "DOCUMENT DEST=".queue.",SRCE=".newname.",NAME=".newname.",USER=".myname.",START=".itos(start).",LENGTH=". %c
+         itos(len).",FSYS=".itos(myfsys)
+      len = length(s)
+      p = 0
+      flag = dexecmess("SPOOLR", spoolr reply, len, addr(s)+1)
+      %if flag#0 %then printstring("Dspool ".myname.".".newname." fails ".itos(flag).snl)
+   %finish %else flag = ddestroy(myname, file, "", myfsys, 0)
+%end;                                    !OF SEND TO SPOOLR
+!!
+!!
+
+%routine any extra logfiles(%string (15) q)
+   %record %format dff(%string (11) name, %integer sp12, kbytes, %byte %integer arch, codes, cct, ownp, eep, use,
+      codes2, ssbyte, flags, sp29, sp30, sp31)
+   %record (dff) %array df(0:512)
+   %integer filenum, maxrec, nfiles, i, flag, seg, gap
+   %string (11) f1, f2
+   maxrec = 512
+   filenum = 0
+   nfiles = 0
+   flag = dfilenames(myname, filenum, maxrec, nfiles, myfsys, 0, df)
+   %if flag=0 %start
+      i = 0
+      %while i<maxrec %cycle
+         %if charno(df(i)_name, 1)='M' %start
+            %if df(i)_name->("M").f1.("#").f2 %start
+               printstring("Extra logfile found".snl)
+               seg = 0; gap = 0
+               flag = dconnect(myname, df(i)_name, myfsys, r, seg, gap)
+               %if seg>0 %then send to spoolr(df(i)_name, seg<<seg shift, 0, q)
+            %finish
+         %finish
+         i = i+1
+      %repeat
+   %finish %else printstring("Dfilenames ".myname." ".itos(myfsys)." fails ".derrs(flag).snl)
+%end;                                    !OF ANY EXTRA LOGFILES
+!!
+!!
+
+%external %routine send and define(%integer stream, size, %string (15) q)
+!!
+!!  If the file "STREAMn" exists, send it to the specified queue.
+!!  Then create a new file "STREAMn" and associate it with the output stream.
+!!
+   %record (fhf) %name file header
+   %integer seg, gap, flag, caddr, da
+   %string (11) file
+   %string (255) failm
+   %if 1<=stream<=max streams %start;    !VALID STREAM NO?
+      %if 1<=length(q)<=15 %start;       !VALID QUEUE NAME?
+         file = "STREAM".i to s(stream)
+         conads(stream) = 0
+         any extra logfiles(journal)
+         seg = 0; gap = 0
+         flag = dconnect(myname, file, myfsys, r!w, seg, gap)
+         caddr = seg<<seg shift
+         %if caddr>0 %then send to spoolr(file, caddr, stream, q)
+         %unless 1<=size<=1024 %then %return
+         flag = dcreate(my name, file, my fsys, size, 4, da)
+         %if flag=0 %start
+            seg = 0; gap = 0;            !ANY SEGMENT MINIMUM GAP
+            flag = dconnect(my name, file, my fsys, r!w!shared, seg, gap)
+            %if flag=0 %start
+               conads(stream) = seg<<seg shift
+               file header == record(conads(stream))
+               file header_start = file header size
+               file header_end = file header size
+               file header_size = size<<10
+               file header_type = 3
+               file header_datetime = current packed dt
+               file header_s1 = x'FFFFFF07'
+               %return
+            %finish %else failm = "CONNECT ".myname.".".file." FAILS ".derrs(flag)
+         %finish %else failm = "CREATE ".myname.".".file." FAILS ".derrs(flag)
+      %finish %else failm = "INVALID OUTPUT QUEUE ".q
+   %finish %else failm = "INVALID STREAM NUMBER"
+   print string("DEFINE STREAM ".i to s(stream)." FAILS ".failm.snl)
+%end;                                    !OF ROUTINE SEND AND DEFINE
+!!
+!!
+
+%routine update output(%integer address, len)
+   %integer end, sym, size, stream, seg, gap, flag
+   %record (fhf) %name file header
+   %string (11) file
+   %if current stream=0 %start;          !OPER CONSOLE
+      end = address+len
+      %while address<end %cycle
+         sym = byteinteger(address)
+         %if sym=nl %or length(oper buffer(oper no))=132 %start
+            flag = doper(oper buffer(oper no)); !OUTPUT THE BUFFER
+            %if conads(1)#0 %start;      !IS THERE A MAINLOG
+               select output(1);         !MAIN LOG STREAM
+               print string("DT: ".string(addr(com_date0)+3)." ".string(addr(com_time0)+3)." TO OPER".i to s(oper no) %c
+                  ." ".oper buffer(oper no).snl)
+               select output(0)
+            %finish
+            oper buffer(oper no) = ""
+         %finish
+         oper buffer(oper no) = oper buffer(oper no).to string(sym) %if sym#nl
+         address = address+1
+      %repeat
+   %finish %else %start
+      file header == record(conads(current stream))
+      %if file header_end+len>file header_size %start
+         !END OF FILE
+         size = file header_size>>10;    !REMEMBER SIZE
+         stream = current stream
+         select output(0);               !IN CASE ANY FAILURES DURING FILE SIZE CHANGE
+         file = "STREAM".i to s(stream)
+         flag = ddisconnect(my name, file, my fsys, 0)
+         %if flag=0 %start
+            size = size+64;              !extend by 64kb
+            %if size>256 %then %start
+               !DO NOT ALLOW LOG TO EXCEED 256K.
+               send and define(stream, 64, journal)
+               file header == record(conads(stream))
+               select output(stream)
+            %finish %else %start
+               flag = dchsize(my name, file, my fsys, size)
+               %if flag=0 %start
+                  seg = 0; gap = 0
+                  flag = dconnect(myname, file, my fsys, r!w!shared, seg, gap)
+                  %if flag=0 %start
+                     conads(stream) = seg<<seg shift
+                     file header == record(conads(stream))
+                     file header_size = size<<10
+                     select output(stream)
+                  %finish %else print string("CONNECT ".myname.".".file." FAILS ".derrs(flag).snl)
+               %finish %else print string("CHSIZE ".myname.".".file." FAILS ".derrs(flag).snl)
+            %finish
+         %finish %else print string("DISCONNECT ".myname.".".file." FAILS ".derrs(flag).snl)
+         %return %if flag#0
+      %finish
+      move(len, address, file header_end+conads(current stream))
+      file header_end = file header_end+len
+   %finish
+%end;                                    !OF ROUTINE UPDATE OUTPUT
+!!
+!!
+%external %routine log print(%string (255) s)
+   %if conads(1)#0 %then current stream = 1
+   update output(addr(s)+1, length(s))
+   current stream = 0
+%end;                                    !OF PRINTTOLOG
+!!
+!!
+
+%external %routine iocp %alias "S#IOCP"(%integer ep, n)
+   %integer num, sym
+   %byte %integer %array s(0:255)
+   %switch io(0:17)
+   ->io(0) %unless 0<ep<=17
+   ->io(ep)
+io(3):                                   ! PRINTSYMBOL(N)
+io(5):                                   ! PRINTCH(N)
+   update output(addr(n)+3, 1)
+   %return
+io(7):                                   ! PRINTSTRING
+io(15):                                  ! PRINTSTRING (ONLY VALID CHARS ALLOWED)
+   update output(n+1, byteinteger(n))
+   %return
+io(17):                                  ! MULSYMBOL
+   num = (n>>8)&255
+   sym = n&255
+   fill(num, addr(s(0)), sym)
+   update output(addr(s(0)), num)
+   %return
+io(9):                                   !SELECT OUTPUT
+   %if 0<=n<=max streams %start
+      %if n#0 %start;                    !NOT OPER?
+         %if conads(n)=0 %start;         !NOT CONNECTED
+            print string("SELECT OUTPUT ".i to s(n)." FAILS STREAM NOT DEFINED".snl)
+            %return
+         %finish
+      %finish
+      current stream = n
+   %finish %else print string("SELECT OUTPUT ".i to s(n)." FAILS INVALID STREAM NUMBER".snl)
+   %return
+io(16):                                  !CLOSE STREAM
+io(0):                                   !INVALID
+io(1):                                   !READ SYMBOL
+io(2):                                   !NEXT SYMBOL
+io(4):                                   !READ CH
+io(6):                                   !RECONSTRUCT
+io(8):                                   !SELECT INPUT
+io(10):                                  !ISO CARD
+io(11):                                  !CHOP CURRENT OUTPUT
+io(12):                                  !SET INPUT MARGIN
+io(13):                                  !SET OUTPUT MARGIN
+io(14):                                  !SET READ ADDRESS
+   print string("ILLEGAL CALL ON IOCP EP = ")
+   write(ep, 2); newline
+%end;                                    !OF ROUTINE IOCP
+!!
+!!
+%end %of %file

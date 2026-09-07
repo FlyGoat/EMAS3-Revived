@@ -1,0 +1,11 @@
+disconnect .all
+link ,separeas,map
+ercc08:ichopn6y
+ercc08:idev22nry
+ercc08:ich3270nry
+ercc08:itapes7nry
+.end
+ichopz
+xachopfix 
+parm nocheck
+

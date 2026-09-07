@@ -1,0 +1,24 @@
+
+%CONSTINTEGER YES=1,NO=0
+            
+!
+! THESE CODE ARE ARBITARY BUT THE TOP DECIMAL DIGIT GIVES THE NO OF BYTES
+! IN THE UNIT OF ADDRESSABILITY. BYTE ADDRESSED HOSTS BEING 1N AND
+! 16 BIT WORD ADDRESSED HOSTS BEING 2N ETC
+%CONSTINTEGER EMAS=10;                  ! emas on 2900 (unsigned shorts)
+%CONSTINTEGER IBM=11;                   ! emas on 24 bit ibm hardware
+%CONSTINTEGER IBMXA=12;                 ! emas of XA 31 bit hardware
+%CONSTINTEGER WWC=13;                   ! WWc (Natsemi chip) completely swopped
+%CONSTINTEGER DRS=13;                   ! former name for WWC till ICL switched chips
+%CONSTINTEGER AMDAHL=14;                ! Emas on Amdahls guess at Xa Minor differences fron IBM)
+%CONSTINTEGER PERQ3=15;                 ! ICL packaged 68k chip Unix stack but not swopped
+%CONSTINTEGER GOULD=16;                 ! Gould unswopped forward stack. Needs 4&8 byte alined
+%CONSTINTEGER PERQ=20;                  ! Pos perq now obselete. Fully swopped forward stack
+%CONSTINTEGER PNX=21;                   ! ICL's perq2 Unix stack byte swopped (unsigned shorts)
+%CONSTINTEGER ACCENT=22;                ! Perq 1 under accent. obsolete now
+                                        ! ACCENT DIFFERS FROM PERQ ONLY IN
+                                        ! ASSEMBLES SEQUENCES&SYNTAX
+                                        ! AND GENERATOR
+%CONSTINTEGER UNSIGNEDSHORTS=1<<emas!1<<pnx
+%CONSTINTEGER LINTAVAIL=1<<IBM!1<<IBMXA!1<<amdahl!1<<EMAS
+%CONSTINTEGER LLREALAVAIL=1<<IBM!1<<IBMXA!1<<amdahl!1<<EMAS

@@ -1,0 +1,239 @@
+! Derived native PUT; address and file-service port remains incomplete.
+{* IBM XA Code Planting routinespecs *}
+
+{******** Monitoring *********}
+
+{ Parm CODE will cause a line by line decode of instructions }
+{ Monitoring of all non-code planting is turned on by PMonOn or bit 1 of }
+{ COMREG(26). Monitoring of code planting is turned on by bit 2 of COMREG(26) }
+{ COMREG(26)=128 causes decoding of each instruction as planted }
+{ COMREG(26)=256 causes decoding of the whole code area after fixups }
+
+{* The following routinespecs have been provided initially, corresponding to the *}
+{* formats given in the "Principles of Operation".                           *}
+
+   %externalroutinespec PIX RR  (%integer Op, R1, R2)
+      { Plant RR format instruction }
+
+   %externalroutinespec PIX RRE (%integer Op, R1, R2)
+      { Plant RRE format instruction }
+
+   %externalroutinespec PIX RX  (%integer Op, R1, X2, B2, D2)
+      { Plant RX format instruction }
+
+   %externalroutinespec PIX RS  (%integer Op, R1, R3, B2, D2)
+      { Plant RS format instruction }
+
+   %externalroutinespec PIX SI  (%integer Op, I2, B1, D1)
+      { Plant SI format instruction }
+
+   %externalroutinespec PIX S   (%integer Op, B2, D2)
+      { Plant S format instruction }
+
+   %externalroutinespec PIX SS  (%integer Op, L1, L2, B1, D1, B2, D2)
+      { Plant SS fromat instruction }
+      { If L1 is zero the effect is to plant the long L form }
+
+   %externalroutinespec PIX SSE (%integer Op, B1, D1, B2, D2)
+      { Plant SSE format instruction }
+
+{* Area initialisation *}
+
+   { All areas are buffered as the ten new areas. }
+
+   { The following consts represent these areas in this interface }
+
+   %constinteger Code   =  1,
+                 Gla    =  2,
+               { Unused =  3 }
+                 SST    =  4,
+                 UST    =  5,
+                 Diags  =  6,
+                 Static =  7,
+                 IoTab  =  8,
+                 ZGST   =  9,
+                 Cnst   = 10
+
+   %externalintegerfnspec PMarker (%integer HalfWords)
+      { Mark CA for future PSetOpd and reserve HalfWords of code for plugging }
+      { Also used to identify points in code to be used in PFix. }
+
+   %externalroutinespec PBReloc (%integer AreaLoc,BaseLoc)
+      { A satisfied relocation request in a bound file. }
+      { Binding has set word in AreaLoc>>24, displacement = (AreaLoc<<8)>>8, }
+      { the address of area BaseLoc>>24, displacement = (BaseLoc<<8)>>8.}
+
+   %externalroutinespec PSetOpD (%integer Mark, Offset, HalfWord)
+      { Plug HalfWord at Marked code address plus Offset halfwords }
+
+   %externalroutinespec PLabel (%integer LabelId)
+      { Note a label at CA, LabelId being assigned by the code generator }
+
+   %externalroutinespec PUsing (%integer Reg)
+      { Note that Reg has just been loaded with PC following BASR or BALR. }
+      { Where Reg is already Used, a implicit PDrop is performed. }
+
+   %externalroutinespec PDrop (%integer Reg)
+      { Note that PUsing of Reg no longer applies. }
+      { If Reg is not Used, a warning is printed, NOT an error. }
+
+   %externalroutinespec PJump (%integer Op, LabelId, Mask, Reg)
+      { Plant jump instruction, using LabelId to associate a label }
+      { Reg is a spare register if needed. }
+
+   %externalroutinespec PJIndex (%integer Op, Label, Reg1, Reg3)
+      { Plant instruction as if it was a Branch on Index type }
+      { No chacking of the Op is done, although a warning will be }
+      { generated if the expected format is not RS. It is the }
+      { responsibility of the code generator to do a PUsing within }
+      { range of the label and to preserve the Using register until }
+      { this jump. }
+
+{* Switch support *}
+
+   %externalroutinespec PSwitch (%integer SSTAd,Lower,Upper,Size)
+      { Note a switch table from Lower to Upper is at SSTAd }
+      { Element size in bytes is Size }
+
+   %externalroutinespec PSwitchVal (%integer SSTAd, Index, Label)
+      { Link Entry(Index) in switch table at SSTAd with Label }
+
+   %externalroutinespec PSLabel (%integer SSTAd, Index)
+      { Overwrite element no Index of switch at SSTAd with Ca }
+
+   %externalroutinespec PSDefault (%integer SSTAd, Label)
+      { Fill remaining elements of switch at SSTAd with Label's code offset }
+
+{* Put Interface Passing of Data   * *}
+
+   %externalroutinespec PCodeHalf (%integer Val)
+      { Write 2 bytes to Code area at Ca, checking for overflow }
+
+   %externalroutinespec PCodeWord (%integer Val)
+      { Write 4 bytes to Code area at Ca, with no validation }
+
+   %externalroutinespec PCodeBytes (%integer Len, Ad)
+      { Copy Len bytes from Ad into the Code area at Ca }
+
+
+   %externalroutinespec PDBytes (%integer Area, Disp, Len,%longinteger Ad)
+      { Pass Len bytes of data from Ad to be placed at Disp in Area }
+      { Areas used are the ten defined above }
+
+   %externalroutinespec PD4 (%integer Area, Disp, Value)
+      { Plant a 4 byte Value at Disp in Area, using buffered areas }
+
+   %externalroutinespec PDPattern (%integer Area, Disp, NCopies, Len,%longinteger Ad)
+      { Make NCopies of Len bytes from Ad at Disp in Area }
+
+{* Put Interface RELOCATION and REFERENCES    *}
+
+   %externalintegerfnspec PXname (%integer Typ,%string(255)%name S,%integer GlAd)
+      { Create an external code reference }
+      { Xrefs are used many times so establish mapping to integer ID early}
+      { and save on holding/passing of strings }
+      { GlAd holds location at which code generator has placed a descriptor }
+      { Type = 0 means normal spec, = 1 means dynamic spec }
+
+   %externalroutinespec Pfix (%integer Hostarea, HostDisp, TgtArea,TgtDisp)
+      { A relocation request: set word in HostArea at offset HostDisp bytes, }
+      { to the address of area TargetArea, displacement = TargetDisp.}
+      { If area is Code, TargetDisp is assumed to be a PMarker value, unless }
+      { TargetDisp is zero, when head of code is assumed. }
+
+   %externalroutinespec PDXRef (%integer Type,Area,Disp,%string(31)%name ExtName)
+      { Define an external data reference }
+      { Relocate word at Disp in Area by external data ref ExtName }
+      { Type holds min size in lowest byte }
+
+   %externalroutinespec PDataEntry (%string(255)%name Name,
+                                   %integer Area, Maxlen, Disp)
+      { Define a data entry in Area at Disp with Maxlen and called Name }
+
+{* The next five routinespecs deal with PROCEDURES *}
+
+   %externalroutinespec PEntry (%integer Index, %string(255)%name Iden)
+      { Note a sideways entry point. If Index is zero make this the main EP }
+
+   %externalroutinespec PProcEntry (%integer COffset,GOffset,EPOffset,ParamW, %c
+                                   %string(255)%name Name)
+      { Add a complete procedure entry. Used by LINK, MODIFY etc. }
+      { The 4 integers specify the four words of the external entry. }
+      { Name gives its identifier. }
+
+   %externalroutinespec PProc (%string(31)%name Name, %integer Props, ParamW,
+                                  %integername Id)
+      { Start a new procedure. If Id is <0 no spec has been given by PXName. }
+      { PROPS&1   = external }
+      { PROPS>>31 = Main entry }
+
+   %externalroutinespec PMinMultiples (%integer NMults)
+      { Specify a minimum number of 4k multiples to be planted at the }
+      { head of the current body of code. This routine should be }
+      { called immediately before PProcEnd if multiples are to be }
+      { added in front of each procedure body or before PTerminate }
+      { if multiples are only added once at the start of the whole }
+      { code area. Whether or not it is called, sufficient multiples }
+      { are planted to address the whole of the code area, if the }
+      { appropriate bit of Properties is set for PInitialise. }
+
+   %externalroutinespec PProcEnd 
+      { End of routine }
+
+{* Put Interface - Miscellaneous  *}
+
+   %externalroutinespec PNewArea (%string(255)%name Name, %integer Iin, Props)
+      { Note a new area identified by Iin with properties given by Props }
+
+   %externalroutinespec PEndArea (%integer Id,Length,Props)
+      { End a Fortran Common area }
+      { Not implemented on XA yet }
+
+   %externalroutinespec PHistory (%integer Type,%longinteger Ad)
+      { Add a history record to the linked list. }
+      { Type sets the type. Ad is the address of the information, }
+      { viewed as a string by PHistory. }
+
+   %externalroutinespec Pfaulty 
+     { Code generator has encountered a user error. Code requests should no }
+     { longer be checked and minimum work done in PUT }
+
+   %externalroutinespec PLineStart (%integer Line)
+      { Updates latest line number }
+
+   %externalroutinespec PLineDecode 
+      { Decodes from the last PLineStart or PLineDecode }
+
+   %externalroutinespec PInitialise (%integer Language, Properties,%longinteger SourceAd)
+      { Start code generation }
+      { If Language=-1 then SourceAd is compiler or other source string7s }
+      { string's address. Otherwise no source identifier for history records }
+      { Properties&1#0 means Put to add multiples at head of each code area. }
+      { Properties&2#0 means output a new code area at each PProcEnd. }
+
+   %externalintegerfnspec PTerminate (%longinteger AdAreaSizes,%integer MSize)
+      { Code generator closes with this call }
+      { Set Code size etc. }
+
+{* PGENERATE - FINAL PHASE OF COMPILATION IS CREATE OBJECT FILE *}
+
+   %externalroutinespec PGenerateObject (%string(255) %name  objfilename )
+      { Output object file for target system }
+      { No effect on Amdahl. Need not be called. }
+
+   %externalroutinespec PMonOn 
+      { Switches on internal Put tracing }
+
+   %externalroutinespec PMonOff 
+      { Switches off internal Put tracing }
+
+   %externalroutinespec PTraceOn 
+
+   %externalroutinespec PTraceOff 
+
+{*   Pseudo - Operations    *}
+
+   %externalroutinespec PCNOP (%integer I, J)
+      { Matches CNOP in assembler manual }
+
+%endoffile

@@ -1,0 +1,1796 @@
+! S34 Commands
+%end %oflist
+%include "subarc:SSOWNF3"
+   %list
+!
+!
+!***********************************************************************
+!*                                                                     *
+!*                           Record formats                            *
+!*                                                                     *
+!***********************************************************************
+!
+%record %format afrecf(%string (11) name, %integer kbytes, %string (8) date, %string (6) tape,
+   %short %integer prefix, chapter, %byte %integer eep, phead, spare, count)
+%record %format frecf(%string (11) name, %integer sp12, kbytes, %byte %integer arch, codes, cct,
+   ownp, eep, use, codes2, ssbyte, flags, phead, dayno, group)
+%record %format prmsf(%string (6) user, %byte %integer uprm)
+%record %format dpermf(%integer bytesreturned, ownp, eep, spare, %record (prmsf) %array prms(0:15))
+!
+!
+!***********************************************************************
+!*                                                                     *
+!*                              Constants                              *
+!*                                                                     *
+!***********************************************************************
+!
+%const %integer afrecsize=40
+%const %integer true=1,false=0
+%const %string (1) shortstem= "$"
+%const %integer ebcdicbit=x'20'
+%const %integer maxvrec= 65533;          !MAX USER DATA IN V FORMAT RECORD
+%const %integer fset= X'20'
+%const %integer gset= X'40'
+!
+!***********************************************************************
+!*                                                                     *
+!*            %external and internal routine/fn/map spec                     *
+!*                                                                     *
+!***********************************************************************
+!
+%externalintegerfnspec scarce %alias "s#scarce"
+%external %integer %fn %spec massage name %alias "s#massagename" (%stringname name)
+%external %routine %spec changeaccess %alias "s#changeaccess"(%string (255) file, %integer mode,
+   %integer %name flag)
+%external %routine %spec workspace %alias "s#workspace"(%integer bytes, %integer %name start, flag)
+%external %string %fn %spec failuremessage %alias "s#failuremessage"(%integer flag)
+%external %string %fn %spec suffixed %alias "s#suffixed"(%string %name file)
+%external %routine %spec clearllists %alias "s#clearllists"
+%external %routine %spec monparams %alias "s#monparams"(%string (255) template)
+%external %integer %fn %spec pmatch %alias "s#pmatch"(%string (255) name, pattern,
+   %record (matchrecf) %name m)
+%external %routine %spec select names %alias "s#select names"(%string (255) node, pattern,
+   %record (mff) %array %name mfs, %integer %name mfn, %integer options, qualifier, days unused,
+   %integer %name flag)
+%external %routine %spec generate names %alias "s#generate names"(%string (255) node, pattern,
+   %record (mff) %array %name mfs, %integer mfn, options, %integer %name flag)
+%external %routine %spec printline %alias "s#printline"(%string (255) s)
+%external %integer %fn %spec getheap %alias "S#GETHEAP"(%integer bytes)
+%external %routine %spec disposeheap %alias "s#disposeheap"(%integer ad)
+%external %routine %spec emas3(%string %name command, parms, %integer %name flag)
+%external %routine %spec console %alias "S#CONSOLE"(%integer ep, %integer %name start, len)
+%external %routine %spec get string %alias "s#getstring"(%string (255) vector, %string %name value)
+%external %routine %spec get integer %alias "s#getinteger"(%string (255) vector,
+   %integer %name value)
+%external %routine %spec getrestofline %alias "s#getrestofline"(%string %name s)
+%external %routine %spec line %alias "S#LINE"(%string %name s)
+%external %routine %spec sethelp %alias "s#sethelp"(%string (255) file)
+%external %routine %spec setline %alias "S#SETLINE"(%string (255) s)
+%external %integer %fn %spec dirtoss %alias "S#DIRTOSS"(%integer flag)
+%external %integer %fn %spec pstoi %alias "S#PSTOI"(%string (255) s)
+%external %routine %spec sclear %alias "S#CLEAR"(%integer chan, %integer %name flag)
+%external %routine %spec connect %alias "S#CONNECT"(%string (255) file, %integer mode, hole,
+   prot, %integer %name fconad, ffiletype, fdatastart, fdataend, flag)
+%external %routine %spec sdestroy %alias "S#DESTROY"(%string (255) file, %integer %name flag)
+%external %routine %spec sdisconnect %alias "S#DISCONNECT"(%string (255) file, %integer %name flag)
+%external %routine %spec moddirectory %alias "S#MODDIRECTORY"(%integer action,
+   %string (255) dirfile, %string (31) entry, %string (255) filename, %integer type,
+   %integer %name flag)
+%external %routine %spec modpdfile %alias "S#MODPDFILE"(%integer ep, %string (255) pdfile,
+   %string (11) member, %string (255) infile, %integer %name flag)
+%external %routine %spec setreturncode %alias "s#setreturncode"(%integer i)
+%external %string %fn %spec itos %alias "s#itos"(%integer n)
+%external %string %fn %spec printparms %alias "S#PRINTPARMS"(%long %integer p)
+%external %string %fn %spec substring %alias "S#SUBSTRING"(%string %name s, %integer i, j)
+%external %integer %fn %spec uinfi %alias "s#uinfi"(%integer n)
+%external %string %fn %spec uinfs %alias "s#uinfs"(%integer n)
+%routine %spec permit inner(%string (255) file, %string (11) date, %string (11) user,
+   %integer perm, mode, %integer %name flag)
+%external %string %fn %spec lcstring %alias "s#lcstring"(%string (255) s)
+%external %routine %spec createdir %alias "S#CREATEDIR"(%string (255) file, %integer epages,
+   %integer %name flag)
+   %if funds on#0 %then %start
+!   %external %routine %spec funds %alias "EMAS#FUNDS"
+   %finish
+%external %integer %fn %spec checkcommand %alias "S#CHECKCOMMAND"(%string %name s)
+%external %integer %fn %spec startswith %alias "S#STARTSWITH"(%string %name a, %string (255) b,
+   %integer chop)
+%external %integer %fn %spec findchan %alias "S#FINDCHAN"(%string (255) iden, %integer %name pos)
+%external %integer %fn %spec exist %alias "S#EXIST"(%string (255) file)
+%external %integer %fn %spec exist type %alias "S#EXISTTYPE"(%string (255) file)
+%external %routine %spec definfo %alias "s#definfo"(%integer chan, %string %name file,
+   %integer %name status)
+%external %routine %spec clearchan %alias "S#CLEARCHAN"(%integer chan)
+%external %routine %spec sdefine %alias "S#DEFINE"(%integer chan, %string (255) iden,
+   %integer %name afd, flag)
+%external %routine %spec snewgen %alias "S#NEWGEN"(%string (255) file, nnewfile,
+   %integer %name flag)
+%external %routine %spec srename %alias "S#RENAME"(%string (255) file, nnewfile,
+   %integer %name flag)
+%external %routine %spec sregen %alias "S#REGEN"(%string (255) oldfile, newfile,
+   %integer %name flag)
+!
+!***********************************************************************
+!*                                                                     *
+!*             DIRECTOR Routine/fn/map specs                           *
+!*                                                                     *
+!***********************************************************************
+
+%external %integer %fn %spec dfilenames(%string %name group, %integer %name filenum, maxrec,
+   nfiles, fsys, type, %record (frecf) %array %name inf)
+%external %integer %fn %spec dfinfo(%string %name fileindex, file, %integer %name fsys,
+   %string %name s, %integer %array %name i)
+%external %integer %fn %spec dpermission(%string %name fileindex, user, date, file,
+   %integer %name fsys, type, ad)
+%external %integer %fn %spec dsfi(%string %name fileindex, %integer %name fsys, type, set,
+   %string %name s, %integer %array %name i)
+%external %integer %fn %spec drestore(%string %name fileindex, file, date, %integer %name fsys,
+   type)
+%external %integer %fn %spec ddestroy(%string %name fileindex, file, date, %integer %name fsys,
+   type)
+%external %integer %fn %spec drename(%string %name fileindex, old, new, %integer %name flag)
+!
+!
+%external %routine consource %alias "S#CONSOURCE"(%string (255) file, %integer %name ad)
+!FOR USE BY INCLUDE FACILITY IN IMP COMPILER
+%integer flag
+%record (reportf) rr
+   connect(file, 0, 0, 0, rr_conad, rr_filetype, rr_datastart, rr_dataend, flag)
+   %if flag=0 %then %start
+      %if rr_filetype#sscharfiletype %then %start; !INVALID FILETYPE
+         flag = 267
+      %finish %else %start
+         ad = rr_conad
+         flag = -1
+         %return
+      %finish
+   %finish
+   %if ssown_sscomreg(23)#0 %then %start
+      select output(0)
+      setreturncode(flag)
+   %finish
+   %stop
+%end;                                    ! of CONSOURCE
+
+
+
+!----------------------------------- LOCALALIAS -----------------------------------
+
+%routine localalias(%integer c or p, %integer %name flag, %string (255) dirfile, current, new)
+
+! [The paramter CURRENT should not have any "=" on when this routine is called]
+
+%integer count
+%string (255) tmp
+
+   %if c or p=0 {A command} %then current = "C#".current
+   current = "=".current
+   %if new="" %start
+      moddirectory(3, dirfile, "", current, 8, flag)
+      tmp = ssown_ssfname
+      %if length(tmp)>1 %and charno(tmp, 1)='=' %then %c
+         ssown_ssfname = substring(tmp, 2, length(tmp))
+      %if flag=257 {not inserted} %then flag = 360 {no alias}
+
+   %finish %else %start
+
+      %if c or p=0 {A command} %and (checkcommand(new)#0 %or charno(new, 1)='#') %then %start
+         flag = 202
+         ssown_ssfname = "C#".new
+      %finish %else %start
+
+         %if c or p=0 %and new#"" %then new = "C#".new
+
+         count = 0
+         %cycle
+            count = count+1
+
+            ! We try twice, because MODDIRECTORY will expand the directory at the second call
+            ! for flag 291 or 292.
+            moddirectory(1, dirfile, new, current, 8, flag)
+            %unless (flag=291 %or flag=292) %and count<2 %then %exit
+         %repeat
+      %finish
+   %finish
+%end;                                    ! LOCALALIAS
+!
+!------------------------------- ALIASPROC -------------------------------------
+!
+%external %routine aliasproc %alias "EMAS#ALIASPROC"
+
+%integer flag
+%string (255) name, alias, dir
+
+   get string("Name;any,uc;?;call pamhelp(helper:one.one31)", name)
+   get string("Alias;any,uc,ornull;;", alias)
+   get string("Directory;file,directory;(".ssown_avd.");", dir)
+
+   localalias(1, flag, dir, name, alias)
+   setreturncode(flag)
+%end;                                    ! of ALIASPROC
+
+!-------------------------------- ALIAS ----------------------------------------
+
+%external %routine alias %alias "EMAS#ALIAS"
+
+%integer flag
+%string (255) name, alias
+
+   get string("Name;any,uc;?;call pamhelp(helper:one.one31)", name)
+   get string("Alias;any,uc,ornull;;", alias)
+
+   localalias(0, flag, ssown_avd, name, alias)
+   setreturncode(flag)
+%end;                                    ! of ALIAS
+
+!--------------------------------- SCLEAR -------------------------------------
+
+%external %routine clear %alias "EMAS#CLEAR"
+%integer flag, chan
+   get integer("Channel;-1:;-1;call pamhelp(helper:one.one55)", chan)
+   ! get integer("Channel;".itos(lofree).":".itos(hifree).",-1,1:;-1;call pamhelp", chan)
+   sclear(chan, flag)
+   setreturncode(flag)
+%end;                                    ! of CLEAR
+
+!------------------------------ DEFINE -----------------------------------------
+
+%external %routine define2 %alias "s#define2"(%string (255) schan, iden, skb, srecfm,
+   %integer %name flag)
+%integer chan, afd, i, j, ikb, reccount, pos, nchan, kk
+%record (fdf) %name f
+%record (fchanf) %name cur
+%string (9) swp
+%integer %array chans(1:maxfd)
+
+   monparams(">trtrtrtriw") %if ssown_ssnote&4>0
+   %if schan="=" %start
+      nchan = 0 {count of channel number put into array}
+      %for j = 0, 1, maxchan %cycle
+         %if ssown_chan(j)>0 %start
+            cur == record(ssown_chan(j))
+            afd = cur_afd
+            f == record(afd)
+            chan = f_dsnum
+            %if {chan>=lofree}chan>0 %or ssown_sscomreg(25)&(\256)#0 %start
+               ! Sort into array
+               kk = 0
+               %cycle
+                  kk = kk+1
+                  %exit %if kk>nchan
+                  %if chan<chans(kk) %start
+                     i = chan; chan = chans(kk); chans(kk) = i
+                  %finish
+               %repeat
+               nchan = nchan+1
+               chans(nchan) = chan
+            %finish
+         %finish
+      %repeat
+      ! And print
+      %for j = 1, 1, nchan %cycle
+         chan = chans(j)
+         write(chan, 2)
+         spaces(2)
+         definfo(chan, iden, i)
+         printline(iden)
+      %repeat
+      newline
+      flag = 0
+      ->out
+   %finish
+
+!--------------------
+
+   flag = 223 { invalid channel number }
+   %for i = 1, 1, length(schan) %cycle;  !SCHAN MIGHT CONTAIN ALPHA
+      ! CHARS AT FRONT - IGNORE THEM
+      j = charno(schan, i)
+      %continue %if 'A'<=j<='Z'
+      ->out %unless '0'<=j<='9'
+      schan = substring(schan, i, length(schan))
+      !TRUNCATE SCHAN
+      %exit
+   %repeat
+   chan = pstoi(schan)
+   ->out %unless chan>0
+
+   !MAX SIZE IN K BYTES
+   %if skb="" %then %start
+      ikb = 0;                           ! Use default
+      reccount = 0
+   %finish %else %start
+      swp = "R"
+      reccount = startswith(skb, swp, 1)
+      ikb = pstoi(skb);                  !INTEGER VALUE
+      %if ikb<=0 %start
+         flag = 202
+         ssown_ssfname = skb
+         ->out
+      %finish
+      %if reccount=0 %start
+         ikb = (ikb+1 {add an extra K for hdr}+3 {round to mult of 4 kbyte units})&(\3); !  Still in Kbytes
+         %if ikb&x'FFC00000'#0 %then flag = 295 %and ->out; ! Too large a file
+         ikb = ikb<<10;                  ! To bytes
+      %finish
+   %finish
+
+   sdefine(chan, iden, afd, flag)
+   ->out %unless flag=0
+
+   f == record(afd)
+   %if srecfm="C" %start
+      {Character output}
+      f_modeofuse = 1
+      ->checksize
+   %finish
+
+   swp = "E"
+   %if startswith(srecfm, swp, 1)#0 %then f_flags = f_flags!ebcdicbit
+   ->checksize %if srecfm=""
+
+   f_modeofuse = 2
+   j = charno(srecfm, 1)
+   ->clear %unless j='D' %or j='F' %or j='V'
+
+   %if j='D' %then %start
+      f_modeofuse = 3;                   ! Mark it DIRECT ACCESS
+      %if length(srecfm)=1 %then f_rectype = 1
+      ! "D" on its own is not a fault - it's useful
+      ! for FORTRAN with an existing file (but FORTRAN support
+      ! software will have to change F_MODE from 3 to 13).
+   %finish
+   ->checksize %if length(srecfm)=1
+
+   swp = substring(srecfm, 2, length(srecfm))
+   i = pstoi(swp)
+   ->clear %unless i>0 %and (i<=maxvrec %or j#'V')
+
+   f_maxrec = i
+   %if j='V' %start
+      %if reccount#0 %start
+         flag = 202
+         ->clear
+      %finish
+   %finish %else %start
+      f_rectype = 1;                     !FIXED FORMAT
+      f_minrec = i
+!         %if RECCOUNT#0 %then IKB = (I*IKB+4127)&(-4096)
+! That gave size rounded up to a page.  But it leaves no trace in the
+! the FD record of the number of records which the user requested.  So
+! for the time being I am trying
+      %if reccount#0 %then ikb = i*ikb+32
+   %finish
+
+checksize:
+   %if iden=".MP15" %or iden=".MP23" %start; !locally attached MPs
+      %if f_rectype#1 %or f_maxrec#132 %then flag = 482 {F132 reqd} %and ->out
+   %finish
+   %if ikb#0 %then f_maxsize = ikb %and f_size spec = yes; ! In BYTES
+   ->out %if ikb<=ssown_ssmaxfsize {these figures are in bytes}
+
+   flag = 348; ! Exceeds caller's max filesize
+
+clear:
+   %if flag=0 %start
+      flag = 202
+      ssown_ssfname = srecfm
+   %finish %else ssown_ssfname = skb
+   f_dsnum = 0
+   j = findchan(schan, pos)
+   %if j=0 %then clearchan(pos)
+
+out:
+   monparams("<trtrtrtriw") %if ssown_ssnote&4>0
+%end;                                    ! define2
+
+!-----------------------------------------------------------------------
+
+%external %routine define %alias "EMAS#DEFINE"
+
+! **** **** Allow DEFINE (unit,name,Rnn,Fnn) to define size in terms
+! **** **** of records.
+
+%integer flag
+%string (11) vec
+%string (255) schan, iden, skb, srecfm
+
+   get string("Channel;any;=;call pamhelp(helper:one.one55)", schan)
+   %if schan="=" %then vec = ",ornull;" %else vec = ";?"
+   get string("File;fileordev,nowild".vec.";", iden)
+   get string("Kbytes;any,uc,ornull;;", skb)
+   get string("Record format;any,uc,ornull;;", srecfm)
+   define2(schan, iden, skb, srecfm, flag)
+   setreturncode(flag)
+%end;                                    ! of DEFINE
+
+!--------------------------- REPORTDELIVERY ------------------------------------
+
+%routine report delivery(%integer type, from, %integer %name flag)
+! TYPE = 0   report permanent delivery        FROM = 0   called from command
+!        1   report temp delivery                    1   called from this rt
+%integer %array dsfipa(0:0)
+%string (15) insert
+%string (255) s
+   %if type=0 {perm} %start
+      %if from=0 %then insert = "" %else insert = "permanent "
+      flag = dsfi(ssown_ssowner, ssown_ssownfsys, 1, 0, s, dsfipa)
+      printline("Current ".insert."delivery information: ".s)
+      %if ssown_tempdelivery#0=from %then report delivery(1 {temp}, 1, flag)
+   %else {temp}
+      %if ssown_tempdelivery=0 %then printline("No temporary delivery information set") %else %c
+         printline("Temporary delivery information:".string(ssown_tempdelivery))
+      %if from=0 %then report delivery(0 {perm}, 1, flag)
+   %finish
+%end;                                    ! of REPORT DELIVERY
+
+!------------------------------- DELIVER ---------------------------------------
+
+%external %routine deliver %alias "EMAS#DELIVER"
+%integer flag
+%integer %array dsfipa(0:0)
+%string (255) s
+   get string("Delivery;any,verbatim;=;call pamhelp(helper:two.two5)", s)
+   %if s="=" %start;                     !GET DELIVERY INFO
+      report delivery(0, 0, flag)
+   %else;                                !ELSE SET DELIVERY INFO
+      %if length(s)>2 %and charno(s, 1)='"'=charno(s, length(s)) %then %c
+         s = substring(s, 2, length(s)-1)
+      %if length(s)>31 %then length(s) = 31
+      flag = dsfi(ssown_ssowner, ssown_ssownfsys, 1, 1, s, dsfipa)
+   %finish
+   setreturncode(flag)
+%end;                                    ! of DELIVER
+!
+!----------------------------- TEMPDELIVER -------------------------------------
+
+%external %routine tempdeliver %alias "EMAS#TEMPDELIVER"
+%integer flag, j
+%string (255) s
+   get string("Delivery;any,verbatim,ornull;;call pamhelp(helper:two.two5)", s)
+   flag = 0
+   %if s="=" %start;                     !GET DELIVERY INFO
+      report delivery(1, 0, flag)
+   %else;                                !ELSE SET TEMP DELIVERY INFO
+      %if s="" %or s="""" %start
+         ! Delete temp delivery (if any)
+         %if ssown_tempdelivery#0 %start
+            disposeheap(ssown_tempdelivery)
+            ssown_tempdelivery = 0
+         %finish
+      %else
+         %if length(s)>2 %and charno(s, 1)='"'=charno(s, length(s)) %then %c
+            s = substring(s, 2, length(s)-1)
+         %if length(s)>31 %then length(s) = 31
+         %for j = 1, 1, length(s) %cycle
+            %if charno(s, j)=',' %then charno(s, j) = ' '
+         %repeat
+         ! (SPOOLR does not like "DELIV=text" with commns in "text")
+         %if ssown_tempdelivery=0 %then ssown_tempdelivery = getheap(32)
+         string(ssown_tempdelivery) = s
+      %finish
+   %finish
+   setreturncode(flag)
+%end;                                    ! of TEMPDELIVER
+
+!-----------------------------------------------------------------------
+
+%external %routine destroygroup %alias "C#DESTROYGROUP"
+%integer flag, mode
+%string (19) index
+%string (255) group
+
+   ! Have a go at disconnecting contained files
+   emas3("DISCONNECT", ".ALL", flag)
+   get rest of line(group)
+   mode = 1
+   mode = 0 %if group="" { no parameters given }
+   %cycle
+      get rest of line(group)
+      %exit %if mode=1 %and group="" { all params processed }
+      get string("Group;group,nowild,ornull;();call pamhelp(helper:two.two6)", group)
+      %exit %if mode=0 %and group="" { finish prompting }
+      %continue %if group=""
+      group -> index.(":").group
+      flag = ddestroy(index, group, "", -1, 0)
+      flag = dirtoss(flag) %unless flag=0
+      setreturncode(flag)
+   %repeat
+%end;                                    ! of DESTROYGROUP
+!
+!----------------------------- destroyset -------------------------------------
+!
+%external %routine destroyset %alias "C#DESTROYSET"
+%integer flag
+%string (255) l
+   line(l)
+   emas3("DESTROY", l, flag)
+%end;                                    ! destroyset
+!
+!----------------------------- resolve pattern --------------------------------
+!
+%routine resolve pattern(%string %name pattern, node)
+%string (255) fileindex, s1, s2
+   %if pattern="" %or (pattern->s1.("_").s2 %and s1="") %then pattern = "*".pattern
+   %if pattern->s1.("T#").s2 %and s1="" %then pattern=":T#".s2
+   %unless pattern->(usep) %then pattern = ssown_path to be used.pattern
+   pattern -> fileindex.(usep).pattern
+   pattern = "*" %if pattern=""
+   %if fileindex="" %or charno(fileindex, 1)=isepchl %then fileindex = ssown_ssowner.fileindex
+   node = fileindex.usep
+   %while pattern->s1.(gsep).s2 %and s1#""#s2 %and %not (s1->("*") %or s1->("?") %or %c
+      s1->("\")) %cycle
+      node = node.s1.gsep
+      pattern = s2
+   %repeat
+%end;                                    ! resolve pattern
+!
+!
+!-------------------------------- destroyset ----------------------------
+!
+%integer %fn sdestroyset(%string (255) pattern)
+   %const %string (1) %array type(0:6)="O","N","C","D","","P","Y"
+%string (255) node, p1, p2, types
+%string (31) t
+%record (mff) %array mfs(0:511)
+%integer flag, mfc, mfn, mode, i, itype, opti, days unused
+!
+%integer %fn do next level(%string (255) prefix)
+! uses mfc,mfs and mfn free
+%integer previous level, filenum, maxrec, nfiles, flag, i
+%record (mff) %name mf
+%string (255) s, s1, com, node, prefi,fgname
+%string (19) fileindex
+%record (frecf) %array descs(0:0)
+%record (frf) rr
+%string (1) sep
+   prefi = substring(prefix, 1, length(prefix)-1); ! without . or _
+   prefix -> fileindex.(usep).node
+   previous level = 0
+   %while mfc<mfn %cycle
+      mf == mfs(mfc)
+      %if mf_level<previous level %then %result = 0
+      previous level = mf_level
+      mfc = mfc+1
+      s = mf_name
+      s = s.gsep %if mf_group=1
+      fgname = s
+      %if mf_level>0 %start
+         %if mf_group=2 %start;          ! pd member
+            s = "_".s
+            %if mf_level>1 %start
+               s = " ".s %for i = 0, 1, mf_level-2
+            %finish
+         %finish %else %start
+            s = ".".s %for i = 0, 1, mf_level-1
+         %finish
+      %finish
+      %if mfc<mfn %and mfs(mfc)_level>mf_level %start
+         ! there is a next and its a level up
+         printline(s)
+         %if mf_group=1 %then sep = gsep %else sep = "_"
+         %if do next level(prefix.mf_name.sep)<0 %then %result = -1
+         ! ie quit
+         ! now is this one empty, and so a candidate itself
+         %if mf_group=1 %start
+            filenum = 0
+            maxrec = 1
+            flag = dfilenames(prefix.mf_name, filenum, maxrec, nfiles, -1, 0, descs)
+         %finish %else %start;           ! must be pd file
+            connect(prefix.mf_name, 0, 0, 2, rr_conad, rr_filetype, rr_datastart, rr_dataend, flag)
+            %if flag=0 %start
+               nfiles = integer(rr_conad+28); ! number of mems
+               emas3("disconnect", prefix.mf_name, i)
+            %finish %else nfiles = -1
+         %finish
+         %if nfiles=0=flag %start
+            printline(s." is now empty.")
+         %finish %else %continue
+      %finish
+      %if mode#0 %start;                 ! query
+         %cycle
+            t = "                    "
+            %if length(s)<20 %then i = 20-length(s) %else i = 1
+            length(t) = i
+            getinteger(s.t.tostring(0)." ;word,yes,no,analyse,show,look,quit;?;;action2", i)
+            %unless 2<=i<=4 %then %exit
+            s1=""
+            %if i=2 %then com = "analyse" %and s1=",*" %else %if i=3 %then com = "show" %else com = "look"
+            emas3(com, prefix.mf_name.s1, flag)
+            emas3("disconnect", prefix.mf_name, flag) %if mf_group=0
+         %repeat
+      %finish %else i = 0
+      %if i=5 %then %result = -1
+      %if i=0 %start;                    ! destroy it
+         %if mf_group=2 %start
+            modpdfile(2, prefi, mf_name, mf_name, flag)
+         %finish %else %start
+            flag = ddestroy(fileindex, node.fgname, "", -1, 0)
+            %if flag#0 %start
+               ssown_ssfname = fgname
+               flag = dirtoss(flag)
+            %finish
+         %finish
+         %if flag#0 %start
+            printline("Destroy fails. ".failuremessage(flag))
+         %finish %else printstring(s." destroyed
+")
+      %finish
+   %repeat
+   %result = 0
+%end;                                    ! do next level
+!
+   resolve pattern(pattern, node)
+   %if pattern->p1.("__").p2 %then pattern = p1."_".p2
+   ! only first level of pd files whatever. modpdfile cannot do the destroy
+   ! for nested ones
+   get integer("Options;options;F;", opti)
+   %if opti&gset>0 %and opti&fset=0 %start
+      types = ""
+      days unused = 0
+   %finish %else %start
+      get string("Filetype;any,ornull;;call pamhelp(helper:two.two6)", types)
+      get integer("Unused;0:255;0;", days unused)
+   %finish
+   itype = 0
+   %if types#"" %start
+      %for i = 0, 1, 6 %cycle
+         %if types->(type(i)) %then itype = itype!(1<<i)
+      %repeat
+      itype = itype<<5
+   %finish
+   mfn = 512
+   select names(node, pattern, mfs, mfn, opti, itype, days unused, flag)
+   %result = flag %unless flag=0
+   %if mfn=0 %start
+      printline("There are no candidates.")
+      %result = 0
+   %finish
+   printline("The following are candidates :")
+   generate names(node, "", mfs, mfn, 0, flag)
+   getinteger("Do you wish ALL, SOME or NONE of these destroyed;word,all,some,none;?;;ACTION",
+      mode)
+   emas3("DISCONNECT", ".ALL", flag)
+! we may be destroying groups so disconnect contained files
+   mfc = 0
+   %result = do next level(node) %unless mode=2
+   %result = 0
+%end;                                    ! sdestroyset
+!
+!------------------------------ apply to arch ----------------------------------
+!
+%integer %fn apply to arch(%string %name fpattern, dpattern, %integer type, function)
+! applies restore, discard or permit to set of arch entries
+! defined by file pattern date pattern and type(0=archive, 2=recover, 4=fstore)
+%integer ad, skip, maxrec, nfiles, flag, i, j, count, mode, last included, last excluded
+%integer wildfile, wilddate, count2, perm, notmostrecent, hush, explicit, maxr
+%integer %name previous
+%string (255) name, s, s1, s2, fileindex, nnpattern, nn, savefpattern
+%string (255) newindex, part, negate, dd, extra
+%string (6) user
+%string %name procnnpattern
+%byte %integer %array pb(0:255)
+%const %integer max newnames=1023
+%string (63) %array newnames(0:max newnames); ! 16epages worth
+   %const %string (11) %array ffs(0:2)="RESTORE","DISCARD","PERMIT"
+   %const %string (11) %array ff1s(1:2)=" discarded"," permitted"
+%string (31) ff, ff1
+%record (matchrecf) m, m1
+%record (afrecf) %array descsa(0:255)
+%record (afrecf) %array %format descsaf(0:16383)
+%record (afrecf) %array %name descs
+%record (afrecf) %name desc, desc1
+%string (255) line
+%integer lines
+%switch cludesw(0:1)
+!
+%routine frameprintstring(%string (255) s)
+   line = line.s
+%end;                                    ! frameprintstring
+!
+%integer %fn framenewline
+%integer more
+   lines = lines+1
+   %if lines=24 %start
+      getinteger("more..;word,,quit;();quit, or null(to proceed);", more)
+      %if more#0 %then %result = 1
+      lines = 1
+   %finish
+   printline(line)
+   line = ""
+   %result = 0
+%end;                                    ! framenewline
+!
+%string %fn newname
+%const %integer max asks=15
+%string (255) %array asks(0:max asks)
+%integer i, j, askn, askc, c, from, to
+%string (255) s
+%byte %integer %array b(0:255)
+!
+%integer %fn number(%integer default)
+! uses i and b free
+%integer n, savei
+   savei = i
+   n = 0
+   %if b(i)='[' %start
+      i = i+1
+      %while '0'<=b(i)<='9' %cycle
+         n = n*10+b(i)-'0'
+         i = i+1
+      %repeat
+      %if b(i)=']' %start
+         i = i+1
+         %result = n
+      %finish
+      i = savei
+   %finish
+   %result = default
+%end;                                    !  fn number
+!
+   %if nnpattern="" %then %result = name
+   i = m_wilds-1
+   askn = 0
+   %unless i<0 %start
+      %for j = i, -1, 0 %cycle
+         from = length(name)-m_l to right wilds(j)-m_length wilds(j)+1
+         to = from+m_length wilds(j)-1
+         asks(askn) = substring(name, from, to)
+         askn = askn+1
+      %repeat
+   %finish
+! now generate new name uing these wild fields
+   s = ""
+   %if procnnpattern="" %start;          ! not been once through it yet
+      askc = 0
+      string(addr(b(0))) = nnpattern
+      i = 1
+      %while i<=b(0) %cycle
+         c = b(i)
+         %if c='*' %start
+            askc = number(askc)
+            %if askc<askn %start
+               procnnpattern = procnnpattern.tostring(askc)
+               s = s.asks(askc)
+               askc = askc+1
+            %finish
+         %finish %else %start
+            procnnpattern = procnnpattern.tostring(c)
+            s = s.tostring(c)
+         %finish
+         i = i+1
+      %repeat
+   %finish %else %start;                 ! been thru nnpattern once, so use pocessed form
+      %for i = 1, 1, pb(0) %cycle
+         c = pb(i)
+         %if c<=max asks %then s = s.asks(c) %else s = s.tostring(c)
+      %repeat
+   %finish
+   length(s) = 63 %if length(s)>63
+   %result = s
+%end;                                    ! newname
+!
+%string %fn generate full name
+%integer px
+%string (255) name
+%record (afrecf) %name d
+   name = desc_name
+   d == desc
+   %cycle
+      px = d_prefix
+      %exit %if px=0
+      d == descs(px)
+      name = d_name.gsep.name
+   %repeat
+   %result = name
+%end;                                    ! generate full name
+!
+   procnnpattern == string(addr(pb(0)))
+   procnnpattern = ""
+   %unless function=0 %and type=2 %then ff = ffs(function) %else ff = "RECOVER"
+   %if function>0 %then ff1 = ff1s(function)
+   hush = false
+
+   j = massage name(fpattern)
+   %result = j %unless j = 0
+
+   %unless fpattern->fileindex.(usep).fpattern %then fileindex = ssown_ssowner
+   %if fileindex="" %or charno(fileindex, 1)=isepchl %then fileindex = ssown_ssowner.fileindex
+   %if fpattern="" %then fpattern = "*"
+   s = fpattern
+   savefpattern = fpattern
+   notmostrecent = 0
+   %unless dpattern="" %start
+      ! first allow for absence of leading zeroes
+      %if charno(dpattern, 1)='\' %start
+         negate = "\"
+         dpattern -> ("\").dpattern
+         ! now in passing see if the whole date pattern was just "\", meaning
+         ! not the most recent
+         %if dpattern="" %start
+            notmostrecent = 1
+            ->nmrset
+         %finish
+      %finish %else negate = ""
+      dd = ""
+      %while dpattern->part.("/").dpattern %cycle
+         %if length(part)=1 %and "1"<=part<="9" %then part = "0".part
+         dd = dd.part."/"
+      %repeat
+      dpattern = negate.dd.dpattern
+      ! now check the whole thing for validity
+      %for i = 1, 1, length(dpattern) %cycle
+         j = charno(dpattern, i)
+         %unless '0'<=j<='9' %or j='/' %or j='*' %or j='?' %or j='\' %start
+            printline("Invalid date pattern - ".dpattern)
+            %result = 0
+         %finish
+      %repeat
+nmrset:
+   %finish
+   wilddate = 0;                         ! no
+   %if dpattern->("*") %or dpattern->("?") %or dpattern->("\") %then wilddate = 1
+   %if notmostrecent#0 %then wilddate=1; !added SH 29/08/90
+   wildfile = 0
+   %if fpattern->("*") %or fpattern->("?") %or fpattern->("\") %then wildfile = 1
+   %if wildfile=0=wilddate %then explicit = 1 %else %start
+      %if uinfi(2)#1 %start
+         ssown_ssfname = "Only explicit requests are accepted in non-interactive mode."
+         %result = 100
+      %finish
+      explicit = 0
+   %finish
+   %if function=0 %start;                ! restore or recover
+      ! get newname pattern
+      getstring("Newname(s);any,ornull;;", nnpattern)
+      %unless nnpattern->newindex.(usep).s %then newindex = ssown_ssowner
+      %if newindex="" %or charno(newindex, 1)=isepchl %then newindex = ssown_ssowner.newindex
+      %if (fileindex#ssown_ssowner %and nnpattern#"") %or %c
+         substring(newindex, 1, 6)#ssown_ssowner %start
+         flag = 100
+         ssown_ssfname = "You may not rename a file belonging to another user"
+         %result = flag
+      %finish
+   %finish %else %if function=2 %start;  ! permit
+      ! get user and permission
+      getstring("To user;usermask,or.all,uc;.ALL;call pamhelp;USER", user)
+      getinteger("Permission;permission,=NCP?WR,1:16,32,64;R;call pamhelp;", perm)
+      %if perm=16 %then ff1 = " permission cancelled" %else %if perm=64 %then hush = true
+   %finish
+! printline("fileindex=".fileindex.", patt=".fpattern)
+   maxr = 256
+   descs == descsa
+   %cycle
+      skip = 0
+      maxrec = maxr
+      flag = dfilenames(fileindex, skip, maxrec, nfiles, -1, type+1, descs)
+      %if flag=625 %or (flag=0 %and maxrec=maxr) %start
+         ! flag=625:
+         !   not enough space even for the group names.
+         ! flag=0 and maxrec=maxr:
+         !   maybe that was just exactly enough. more likely though that there
+         !   are more to come. we therefore need space for the file descs=nfiles
+         !   plus the group descs.
+         !   we know that all the latter fitted in this maxr, otherwise we would
+         !   have got a 625 flag. we could cycle through to find out how many
+         !   but its simpler just to assume its the whole lot.
+         %if flag=625 %then maxr = maxr<<1 %else maxr = maxr+nfiles
+         workspace(maxr*afrecsize+32, ad, flag)
+         %if flag=0 %start
+            descs == array(ad, descsaf)
+            %continue
+         %finish
+      %finish %else %exit
+   %repeat
+   %unless flag=0 %start
+      flag = dirtoss(flag)
+      %result = flag
+   %finish
+   count = 0
+   count2 = 0
+   %unless nfiles=0 %start
+again:
+      %if dpattern="" %start;            ! most recent or not most recent reqd
+         last included = -1
+         last excluded = -1
+         %if notmostrecent=0 %then previous == last included %else previous == last excluded
+      %finish
+      %for i = 0, 1, maxrec-1 %cycle
+         desc == descs(i)
+         desc_spare = 0
+         %if desc_kbytes>0 %start;       ! a file
+            name = generate full name
+            %if pmatch(name, fpattern, m)=true %start
+               %if dpattern="" %start;   ! most recent or not
+                  %if previous>=0 %start; ! there are some already in(ex)cluded
+                     %for j = previous, -1, 0 %cycle
+                        desc1 == descs(j)
+                        %if notmostrecent!!desc1_spare#0 %and desc1_name=desc_name %and %c
+                           desc1_prefix=desc_prefix %start
+                           ! most recent requd and this one is already in previously included so exclude
+                           ! or not most recent requd and this already in previously excluded so include
+                           ->cludesw(notmostrecent!!1)
+                           ! ie -> cludesw(0) for include, (1) for exclude
+                        %finish
+                     %repeat
+                  %finish
+                  !
+                  ! most recent requd and no previous or this not already there, so include
+                  ! etc for not most recent
+                  ->cludesw(notmostrecent); ! ie include if most recent
+               %finish %else %start;     ! dpattern not null
+                  %if pmatch(desc_date, dpattern, m1)=true %then ->include %else ->exclude
+               %finish
+               !
+include:
+cludesw(0):
+               desc_spare = 1
+               %if function=0 %start;    ! restore or recover, see if newname req
+                  nn = newname;          ! old name if nnpattern=""
+                  newnames(count) = nn %if count<=max newnames
+                  %if exist(fileindex.":".nn)#0 %start; ! exists
+                     desc_spare = 3
+                     count2 = count2+1
+                  %finish
+               %finish
+               count = count+1
+               last included = i
+               %continue
+               !
+exclude:
+cludesw(1):
+               last excluded = i
+            %finish;                     ! pmatch(name)=true
+         %finish;                        ! a file
+      %repeat
+      %if count=0=wildfile %and uinfi(2)=1 %start
+         ! he gave an explicit name and came up with nothing. maybe it was a group
+         ! name intended to be wild
+         fpattern = fpattern."*"
+         wildfile = 1
+         explicit = 0
+         ->again
+      %finish
+   %finish
+   %if count=0#explicit %start
+      ! explicit request not found
+      ssown_ssfname = savefpattern." ".dpattern
+      %result = dirtoss(32)
+   %finish
+   line = ""
+   lines = 0
+   %if function=0 %and count2#0 %start;  ! restore or recover and names clash
+      %if count=1 {and count2=1} %and explicit#0 %start
+         ! explicit request but the name or newname already exists
+         ssown_ssfname = nn
+         %result = dirtoss(16)
+      %finish
+      s = "The following would be candidates but the "
+      %if nnpattern#"" %then s = s."new name for the "
+      frameprintstring(s."files already exist:")
+      %result = 0 %if framenewline#0;    ! user said 'quit' to more.. prompt
+      j = 0
+      %for i = 0, 1, maxrec-1 %cycle
+         desc == descs(i)
+         %if desc_spare=3 %start
+            frameprintstring(desc_date)
+            frameprintstring(" ")
+            frameprintstring(generate full name)
+            %if nnpattern#"" %and j<=max newnames %then frameprintstring(" as ".newnames(j))
+            %result = 0 %if framenewline#0; ! user said 'quit' to more.. prompt
+         %finish
+         j = j+1 %if desc_spare#0
+      %repeat
+      %result = 0 %if framenewline#0;    ! user said 'quit' to more.. prompt
+      s = "so there "
+   %finish %else s = "There "
+   %unless count=1 %and wildfile=0=wilddate %start
+      ! ie not if it was all explicit and found
+      count = count-count2
+      %if count=0 %start
+         s = s."are no"
+      %finish %else %if count=1 %start
+         s = s."is 1"
+      %finish %else %start
+         s = s."are ".itos(count)
+      %finish
+      s = s." candidate"
+      s = s."s" %if count#1
+      s = s." matching ".fpattern.",".dpattern." for ".ff
+      %if count=0 %then s = s."." %else s = s.":"
+      frameprintstring(s)
+      %result = 0 %if framenewline#0;    ! user said 'quit' to more.. prompt
+      %result = 0 %if count=0
+      %for i = 0, 1, maxrec-1 %cycle
+         desc == descs(i)
+         %if desc_spare=1 %start
+            frameprintstring(desc_date)
+            frameprintstring(" ")
+            frameprintstring(generate full name)
+            %result = 0 %if framenewline#0; ! user said 'quit' to more.. prompt
+         %finish
+      %repeat
+      newline
+      getinteger("Do you wish ".ff. %c
+         " applied to ALL, SOME or NONE of these;word,all,some,none;?;call pamhelp;ACTION", mode)
+      %if mode=2 %then %result = 0
+   %finish %else %start
+      ! explicit spec for 1 only
+      mode = 0;                          ! ie do it without further comment
+   %finish
+   count = 0
+   %for i = 0, 1, maxrec-1 %cycle
+      desc == descs(i)
+      %if desc_spare=1 %start
+         name = generate full name
+         s = "                    "
+         %if length(name)<20 %then j = 20-length(name) %else j = 1
+         length(s) = j
+         %if mode#0 %then getinteger(desc_date." ".name.s.";word,yes,no,quit;?;Yes,no or quit",
+            j) %else j = 0
+         %if j=2 %then %exit
+         %if j=0 %start
+            %if function=0 %start;       ! restore or recover
+               %if count<=max newnames %then nn = newnames(count) %else nn = name
+               %if nn#name %start
+                  %if length(nn)+length(name)>255 %start
+                     ssown_ssfname = "File length(s) too long"
+                     flag = 100
+                     %result = flag
+                  %finish
+                  s = name.",".nn;       ! for drestore
+                  extra = " as ".nn;     ! for message
+               %finish %else %start
+                  s = name
+                  extra = ""
+               %finish
+%if ssown_loadmonitor & 1 > 0 %thenc
+printline("restore ".fileindex.", ".s.", type=".itos(type))
+               flag = drestore(fileindex, s, desc_date, -1, type)
+%if flag = -291 %start
+   ssown_ssfname = "No operator cover - please try later"
+   %result = 100
+%finish %else %start
+               %if flag=102 %then flag = 306 {duplicate req} %else %if flag=111 %then %c
+                  flag = 475 {too many requests} %else flag = dirtoss(flag)
+%finish
+            %finish %else %if function=1 %start; ! discard
+               flag = ddestroy(fileindex, name, desc_date, -1, type+1)
+               flag = dirtoss(flag) %if flag#0
+            %finish %else %start;        ! permit
+               ! only type=0(archive) and type=4(fstore)
+               permit inner(fileindex.usep.name, desc_date, user, perm, type<<2+16, flag)
+               ! type 16 for archive, 32 for fstore
+            %finish
+            %if explicit=0 %start
+               %if flag#0 %start
+                  printline(ff." ".name.",".desc_date." fails ".failuremessage(flag))
+                  %if flag=475 %then %exit; ! too many requests queued.
+               %finish %else %if hush=false %start
+                  %if function>0 %then s = name.",".desc_date.ff1 %else %c
+                     s = ff." request queued for ".name.",".desc_date.extra
+                  printline(s)
+               %finish
+            %finish %else %start;        ! explicit
+               %if flag#0 %then ssown_ssfname = name." ".desc_date
+               %result = flag
+            %finish
+         %finish
+      %finish
+      count = count+1 %if desc_spare#0
+   %repeat
+   %result = 0
+%end;                                    ! apply to arch
+!
+!------------------------------ discard ---------------------------------
+!
+%external %routine discard %alias "EMAS#discard"
+%string (255) fpattern, dpattern
+%integer type
+!
+   getstring("File(s);any,ornull;;call pamhelp(helper:two.two6)", fpattern)
+   getstring("Date(s);any,ornull;;", dpattern)
+   getinteger("Type;word,a,r,n;a;", type)
+   type = type<<1;                       ! 0=0,1=2,2=4
+   setreturncode(apply to arch(fpattern, dpattern, type, 1))
+%end;                                    ! discard
+!
+!--------------------------- display spools ---------------------------------
+!
+%integer %fn display spools(%integer type)
+! restore or recover
+   %const %string (11) %array types(0:4)=" restore",""," recover",""," nfsrestore"
+%integer flag, n
+%string (255) s
+%record (reportf) rr
+   flag = drestore(uinfs(1), "#display", "", -1, type)
+   %if flag=0 %start
+      connect(":ss#restores", 0, 0, 0, rr_conad, rr_filetype, rr_datastart, rr_dataend, flag)
+      %if flag=0 %start
+         n = integer(rr_conad+16);       ! how many
+         %if n=0 %then s = "no" %else s = itos(n)
+         s = "You have ".s.types(type)." request"
+         s = s."s" %unless n=1
+         printline(s)
+         emas3("LIST", ":ss#restores", flag) %unless n=0
+      %finish
+      emas3("DESTROY", ":ss#restores", flag)
+      %result = flag
+   %finish
+   ssown_ssfname = "Display file not available"
+   %result = 100
+%end;                                    ! display spools
+!
+!----------------------------------- do dpool ----------------------------------
+!
+%integer %fn do spool(%integer type)
+%string (255) fpattern, dpattern
+   getstring("File(s);any,ornull,orequals;*;call pamhelp(helper:two.two6);FILEPATTERN", fpattern)
+   %if fpattern="=" %start
+      %result = display spools(type)
+   %finish
+   getstring("Date(s);any,ornull;;;DATEPATTERN", dpattern)
+   %result = apply to arch(fpattern, dpattern, type, 0)
+%end;                                    ! do spool
+!
+!-----------------------------------RESTORE -----------------------------------
+!
+%external %routine restore %alias "EMAS#RESTORE"
+   setreturncode(do spool(0))
+%end;                                    ! restore
+!
+!-------------------------------- RECOVER ---------------------------------------------
+!
+%external %routine recover %alias "EMAS#RECOVER"
+   setreturncode(do spool(2))
+%end;                                    ! of RECOVER
+!
+!-------------------------------- NFSRESTORE -------------------------------------
+!
+%external %routine nfsrestore %alias "EMAS#NFSRESTORE"
+   %if ssown_ssowner # "MANAGR" %and "90" # substring(date, 7,8) %start
+      printline("The Network Filestore is no longer accessible")
+      %return
+   %finish
+   setreturncode(do spool(4))
+%end;                                    ! of NFSRESTORE
+!
+!------------------------------------------------------------------------
+!
+%integer %fn delete spool(%integer type)
+%integer flag
+%string (255) file
+%string (8) date
+%string (11) fileindex
+   get string("File;any;?;call pamhelp(helper:two.two6);FILE", file)
+   get string("Date;date;?;;DATE", date)
+   fileindex = ssown_ssowner %unless file->fileindex.(usep).file
+   flag = drestore(fileindex, file.",#delete", date, -1, type)
+   %if flag=1 %start
+      flag = 100
+      ssown_ssfname = "Request not found"
+   %finish %else %if flag=2 %start
+      flag = 100
+      ssown_ssfname = "Request already started"
+   %finish
+   %result = flag
+%end;                                    ! of delete spool
+!
+!-----------------------------------------------------------------------
+!
+%external %routine delete restore %alias "EMAS#DELETERESTORE"
+   setreturncode(delete spool(0))
+%end;                                    ! delete spool
+!
+!------------------------------------------------------------------------
+!
+%external %routine delete recover %alias "EMAS#DELETERECOVER"
+   setreturncode(delete spool(2))
+%end;                                    ! delete recover
+!
+!------------------------------------------------------------------------
+!
+%external %routine delete nfsrestore %alias "EMAS#DELETENFSRESTORE"
+   setreturncode(delete spool(4))
+%end;                                    ! delete nfsrestore
+!
+!------------------------------------------------------------------------
+!
+!
+%external %routine awaitrestores %alias "EMAS#AWAITRESTORES"
+%integer flag
+   sethelp("call pamhelp(helper:one.one71)")
+   %if uinfi(2)#2 %then %return {interactive use only}
+   flag = drestore(uinfs(1), "", "", uinfi(1), 0)
+   ssown_ssfname = ""
+   setreturncode(dirtoss(flag))
+%end
+!
+!-----------------------------------------------------------------------
+!
+%external %routine destroy %alias "C#DESTROY"
+%integer flag, mode, p1
+%string (255) file, name
+
+   sethelp("call pamhelp(helper:two.two6)")
+   p1 = 0
+   get rest of line(file)
+   mode = 1
+   mode = 0 %if file=""
+   %cycle
+      get rest of line(file)
+      %exit %if mode=1 %and file=""
+      p1 = p1+1
+      %if p1=1 %start
+         getstring("File/pattern;any;?;", file)
+         %if charno(file, 1)='.' %or file->("..") %or file->("*") %or file->("?") %or %c
+            file->("\") %or (file->("_").name %and name="") %start
+            setreturncode(sdestroyset(file))
+            %return
+         %finish
+         ! so not wild. put it back to try as a filename
+         getrestofline(name)
+         file = file.",".name %unless name=""
+         setline(file)
+      %finish
+      getstring("File;fileormem,ornull,nowild;();", file)
+      %exit %if mode=0 %and file=""
+      %continue %if file=""
+      sdestroy(file, flag)
+      setreturncode(flag)
+   %repeat
+%end;                                    ! of DESTROY
+
+!--------- ----------------------------------------------------------------------
+
+%external %routine disconnect %alias "C#DISCONNECT"
+%string (255) file
+%integer flag, i
+%record (conff) %name cur
+
+   getstring("File;fileormem,or.all,exist;?;call pamhelp(helper:two.two4);FILE", file)
+   %if file=".ALL" %start;               !DISCONNECT ALL FILES POSSIBLE
+      %for i = 0, 1, maxconf %cycle
+         %if ssown_conf(i)>0 %start
+            cur == record(ssown_conf(i))
+            %if cur_conlevel=0 %or ssown_loadlevel<=cur_conlevel<=toploadlevel %start
+               file = shortstem.itos(cur_pos)
+               sdisconnect(file, flag)
+            %finish
+         %finish
+      %repeat
+      clearllists
+      flag = 0;                          !Disconnect .ALL is ALWAYS ok
+   %finish %else sdisconnect(file, flag)
+   setreturncode(flag)
+%end;                                    ! of DISCONNECT
+
+!-----------------------------------------------------------------------
+
+%external %routine insert %alias "C#INSERT"
+%integer flag, count, entrytype, moddiract
+%string (255) file, directory, entry
+
+   getstring("File;fileormem,exist,char,object;?;call pamhelp(helper:one.one31)", file)
+   getstring("Directory;file,dir;".ssown_avd.";", directory)
+
+   entry = ""
+   %if existtype(file)=ssobjfiletype %start
+      moddiract = 5 {add object}
+      entrytype = 0 {dummy}
+   %else
+      moddiract = 1 {add macro}
+      entrytype = 4 {macro}
+      file = "=".file
+   %finish
+
+   count = 0
+   %cycle
+      count = count+1
+
+      ! If MODDIRECTORY fails 291 or 292,
+      the next INSERT will expand the directory.
+      ! That is why we do it twice.
+      moddirectory(moddiract, directory, entry, file, entrytype, flag)
+
+      %unless (flag=291 %or flag=292) %and count<2 %then %exit
+   %repeat
+
+   %if flag=267 {Invalid filetype} %and directory=ssown_avd %start
+      printstring("(Optional) second parameter for INSERT is now <directory file>
+Use INSERT A&B&C... to insert several object files.
+")
+   %finish
+   setreturncode(flag)
+%end;                                    ! of INSERT
+!
+!-----------------------------------------------------------------------
+!
+
+%external %routine messages %alias "EMAS#MESSAGES"
+%string (3) s
+%integer type, mask
+   %const %integer %array typevals(0:3)=4 {subsys}, 2{intt}, 1{operator}, 7{all}
+
+   %const %string (8) %array typestrs(0:2)="SUBSYS  ","INTT    ","OPERATOR"
+%string (255) savefname
+%string(15)default
+
+   %if ssown_ssreason=batchreason %then %return
+   savefname = ssown_ssfname;            !save..as get string overwrites (SH)
+   get string("On, off or =;lcword,on,off,=;?;call pamhelp(helper:six.six);SWITCH", s)
+
+   %if s="=" %start
+      %cycle type = 0, 1, 2
+         printstring(typestrs(type))
+         printstring(" messages ")
+         %if ssown_inhibitmessages&typevals(type)#0 %then printline("OFF") %else %c
+            printline("ON")
+      %repeat
+   %else
+      %if s="on" %then default="all" %else default="operator"
+      get integer("Type;word,subsys,intt,operator,all;".default, type)
+      mask = typevals(type)
+      %if s="on" %start
+         ssown_inhibitmessages = ssown_inhibitmessages&(-1-mask)
+
+         %if ssown_it_omwaiting#0 %then console(6, 0, 0)
+         %if ssown_it_inttwaiting#0 %then console(12, 0, 0)
+      %else
+         ssown_inhibitmessages = ssown_inhibitmessages!mask
+      %finish
+   %finish
+   ssown_ssfname = savefname;            !restore fname as on entry
+%end;                                    ! of MESSAGES
+
+!-------------------------------- SETMESSAGECONTROL ----------------------------------------
+
+%external %routine setmessagecontrol %alias "S#SETMESSAGECONTROL"(%integer value)
+   ssown_inhibitmessages = value&7;      ! Only three bits defined at present
+%end;                                    ! SETMESSAGECONTROL
+
+!-------------------------------- NEWDIRECTORY ----------------------------------------
+
+
+%external %routine newdirectory %alias "EMAS#NEWDIRECTORY"
+
+%integer flag, pages, f
+%string (255) file
+
+   get string("File;file,notexist,nowild;?;call pamhelp(helper:one.one31)", file)
+   get integer("Pages;1:32;1;", pages)
+
+   createdir(file, pages, flag)
+   ->err %if flag#0
+   changeaccess(file, 1, f)
+   printline("New directory '".file."' created")
+   ssown_dirdiscon = 1;                  ! Force re-build of directory list
+err:
+
+   setreturncode(flag)
+%end;                                    ! of NEWDIRECTORY
+!
+!-----------------------------------------------------------------------
+!
+%external %routine newgen %alias "C#NEWGEN"
+%string (255) new, exist
+%integer flag
+
+   get string("Newfile;file,exist,noamp,cowild;?;call pamhelp(helper:two.two4)", new)
+   get string("Oldfile;file,write,exist,noamp,cowild;?;", exist)
+
+   snewgen(new, exist, flag)
+
+   setreturncode(flag)
+%end;                                    ! of CNEWGEN
+!
+!-----------------------------------------------------------------------
+!
+%external %routine parm %alias "EMAS#PARM"
+%integer i, j, p
+
+   i = 0
+   j = 0
+   sethelp("call pamhelp(helper:three.three0)")
+   %cycle
+      getinteger("Parm;parm,noamp;;See HELP PARM for parms for the compiler you want to use", p)
+      %if p=-2 %start { =, report }
+         printstring("Parms set:")
+         printline(printparms(longinteger(addr(ssown_sscomreg(27)))))
+         setreturncode(0)
+         %return
+      %finish
+      %exit %if p<0
+      %if p<32 %then j = j!(1<<p) %else i = i!(1<<(p-32))
+   %repeat
+
+   ssown_sscomreg(27) = i
+   ssown_sscomreg(28) = j
+   setreturncode(0)
+%end;                                    ! of PARM
+!
+!------------------------------------------------------------------------
+!
+%external %routine regen %alias "EMAS#regen"
+!command to rename, newgen, or copy as appropriate
+%integer flag
+%string (255) file1, file2
+   getstring("Oldfile;file,exist,noamp,cowild;?;call pamhelp(helper:two.two4)", file1)
+   getstring("Newname;file,noamp,cowild;?;call pamhelp(helper:two.two4)", file2)
+   sregen(file1, file2, flag)
+   setreturncode(flag)
+%end;                                    ! of REGEN
+!
+!-----------------------------------------------------------------------
+!
+%external %routine remove %alias "C#REMOVE"
+%string (255) objfile, directory
+%integer flag
+
+   getstring("File;fileormem,ignoreuser;?;call pamhelp(helper:one.one31)", objfile)
+   getstring("Directory;file,dir,exist;".ssown_avd.";", directory)
+
+   moddirectory(3, directory, "", objfile, 0, flag)
+   setreturncode(flag)
+%end;                                    ! of REMOVE
+!
+!-----------------------------------------------------------------------
+!
+%external %routine renamegroup %alias "C#RENAMEGROUP"
+%integer flag
+%string (19) index
+%string (255) old, new, dnew
+
+   getstring("Group;group,exist,cowild,noamp;?;call pamhelp(helper:two.two6)", old)
+   old -> index.(":").old
+   getstring("Newname;group,notexist,cowild,noamp;?;", new)
+   new -> (":").dnew
+
+   flag = drename(index, old, dnew, -1)
+   ssown_ssfname = dnew %if flag=16
+   flag = dirtoss(flag) %unless flag=0
+   setreturncode(flag)
+%end;                                    ! of RENAMEGROUP
+!
+!-----------------------------------------------------------------------
+!
+%external %routine rename %alias "C#RENAME"
+%integer flag, j
+%string (255) old, new
+%string (11) oldmember, newmember
+
+   getstring("File or group;forgorm,cowild,noamp,exist;?;call pamhelp(helper:two.two6)", old)
+   ! File OR Group OR Member
+   %if charno(old, length(old))='.' %then new = "group" %else new = "fileormem"
+   getstring("Newname;".new.",notexist,write,cowild,noamp;?;", new)
+
+   %if old->("_") %start
+      j = length(old)
+      %cycle
+         j = j-1
+         %exit %if charno(old, j)='_'
+      %repeat
+      oldmember = substring(old, j+1, length(old))
+      length(old) = j-1
+
+      flag = 297
+      ->err %unless new->("_")
+      j = length(new)
+      %cycle
+         j = j-1
+         %exit %if charno(new, j)='_'
+      %repeat
+      newmember = substring(new, j+1, length(new))
+      length(new) = j-1
+      ->err %unless new=old
+      modpdfile(3, old, oldmember, newmember, flag)
+   %finish %else srename(old, new, flag)
+err:
+
+   setreturncode(flag)
+%end;                                    ! of RENAME
+!
+!-----------------------------------------------------------------------
+!
+%external %routine users %alias "EMAS#USERS"
+%integer pence
+
+   set help("call pamhelp(helper:one.one91)")
+   printstring("Users =")
+   write(com_users-uinf_top exec, 1)
+   %if funds on#0 %then %start
+      %if scarce = 1 %then %start
+         ! INTERACTIVE USERS > SCARCITY LIMIT
+         ssown_scarcityfound = 1
+         pence = 20
+         pence = uinfi(pence)
+         %if pence=0 %start
+            printstring("  Funds left : 0.00  You are liable to pre-emption.")
+         %finish %else %start
+            printstring("  Funds left : ")
+            print(pence/100, 1, 2)
+            printstring("  **Resources are Scarce.")
+         %finish
+      %finish
+   %finish
+   newline
+   ssown_rcode = 0
+%end;                                    ! of USERS
+!
+!-----------------------------------------------------------------------
+!
+%routine permit inner(%string (255) file, %string (11) date, %string (11) user, %integer perm,
+   mode, %integer %name flag)
+
+! mode = 0 for on-line files, 16 for off-line
+
+%integer type, f, pos
+%record (conff) %name cur
+%integer %array dfindata(0:12)
+%string (6) trans
+%string (6) owner
+%string (19) index
+%routine %spec show perms(%integer %name flag)
+
+   %if ssown_ssnote&4>0 %then monparams(">trvrvrjrjriw")
+   %unless file->(":T#") %start
+      sdisconnect(file, flag) { so not left connected in 'invalid' mode }
+      %if flag=0 %or flag=256 {not connected} %or flag=234 {lower ll} %then %c
+         pos = ssown_confpos %else pos = 0
+
+      %if perm=1 %then perm = 5;         !replace R with RE
+      flag = 0
+      user = "??????" %if user=".ALL" { a synonym }
+      perm = 13 {PER} %if perm=8 {P}
+
+      %if perm&2_1010=2_1010 %start
+         ! W not allowed with P{rotect}
+         flag = 332 {invalid prm}
+      %else
+         index = ssown_ssowner %unless file->index.(usep).file
+         owner = index %unless index->owner.(isepl)
+
+         %if user=owner %start { ownp }
+            type = 0 { ownp }
+            flag = 340 %if file=".ALL" { no index ownp }
+            flag = 341 %if perm&48 {NC}>0 { cant remove ownp }
+            flag = 343 %unless mode=0 { not on-line }
+         %else
+            %if user="??????" %start { eep }
+               type = 1 { eep for a file }
+               perm = 0 %if perm&48 {NC}>0
+               flag = 362 %if file=".ALL" %and perm#64 {= allowed, means give whole-index perms}
+            %else { some list }
+               type = 2 { add to list }
+               type = 3 %if perm=16 {C} { remove from list }
+               %if file=".ALL" %start
+                  flag = 342 %unless (mode=0 %or perm=64) {= allowed}
+                  type = type+4 { index list, not file list }
+               %finish
+               flag = 332 %if perm&8 {P}>0
+               perm = 0 %if perm=32 {N}
+            %finish
+         %finish
+
+         %if perm=64 %start
+            %if flag=340 %then printstring(snl."Own permission for all files is always RW".snl) %c
+               %else %start
+               %if flag=0 %start
+                  show perms(flag)
+                  flag = dirtoss(flag) %if flag#0
+               %finish
+            %finish
+         %else
+            %if flag=0 %start
+               type = type+mode
+               flag = dpermission(index, user, date, suffixed(file), -1, type, perm)
+               %if flag=0 %start
+                  %if user=ssown_ssowner %and mode=0 %and pos#0 %start; !to put cur_rup right
+                     cur == record(ssown_conf(pos))
+                     f = dfinfo(index, suffixed(file), cur_fsys, trans, dfindata)
+                     %if f=0 %then cur_rup = dfindata(1)
+                  %finish
+               %else
+                  flag = dirtoss(flag)
+                  flag = 258 %if flag=593 { no priv -> illegal use }
+               %finish
+            %finish
+         %finish
+      %finish
+   %finish %else flag = 414 {cannot permit T# files}
+
+   %if ssown_ssnote&4>0 %then monparams("<trvrvrjrjriw")
+
+%routine show perms(%integer %name flag)
+
+!   Shows the effective permission applying to FILE for USER, and the
+!   call of PERMIT which caused it.  Also shows other subordinate
+!   permissions in their order of effect.
+%record (dpermf) dperm
+%integer value, n, i, type, top, dotall file, fulluser
+%record %format storef(%string (63) file, %string (6) user, %byte %integer mode)
+%record (storef) %array store(1:100)
+! These permissions amended to omit reference to execute perm, since it doesnt
+! have a meaningful effect
+   %const %string (4) %array ptos(0:15)= "N   ","R   ","W   ","RW  ","E   ","R   ",
+ "W   ","RW  ",
+ "P   ","RP  ","WP  ","RWP ","P   ","RP  ","WP  ","RWP "
+%integer %fn %spec match(%string (6) list user, param user)
+%routine %spec note perm(%string (6) user, %integer mode)
+
+   %if user->("?") %then fulluser = no %else fulluser = yes
+   user = "" %if user="??????"
+   %if file=".ALL" %then file = "" %and dotall file = yes %else dotall file = no
+   newline
+   %if mode#0 %start
+      %if file#"" %and charno(file, length(file))='.' %then length(file) = length(file)-1
+   %else
+      %if ssown_ssowner#user %and fulluser=yes %and file#"" %start
+         flag = dpermission(index, user, date, file, -1, 10 {user prm for file}, addr(value))
+         %if flag#0 %then %return
+         printstring("Effective permission:    ".ptos(value&15).snl)
+      %finish
+   %finish
+   top = 0
+   %cycle
+      %if file="" %then type = 8 {index prm} %else type = mode+4 {file prm}
+      flag = dpermission(index, user, date, file, -1, type, addr(dperm))
+      %if flag#0 %then %return
+      n = (dperm_bytes returned-16)//8
+      %if user#ssown_ssowner %start;     !doesnt apply to self
+         %for i = 0, 1, n-1 %cycle
+            %if dperm_prms(i)_user#user %then %continue
+            note perm(user, dperm_prms(i)_uprm)
+            dperm_prms(i)_user = "xxxxxx"; !so we dont print twice
+            %exit
+         %repeat
+         %for i = 0, 1, n-1 %cycle
+            %if user="" %or match(dperm_prms(i)_user, user)=yes %start
+               note perm(dperm_prms(i)_user, dperm_prms(i)_uprm)
+            %finish
+         %repeat
+         %if dperm_eep&15#0 %then note perm("", dperm_eep)
+      %else
+         %if dperm_ownp&15#0 %and file#"" %then note perm(user, dperm_ownp)
+      %finish
+      %if file="" %then %exit
+      %if mode=16 {archive store} %then file = "" %and %continue
+      length(file) = length(file)-1
+      %if file->(".") %start
+         length(file) = length(file)-1 %while charno(file, length(file))#'.'
+      %finish %else file = "";           !do whole index prm
+   %repeat
+
+!   Now print the permissions
+   n = 0
+   %for i = 1, 1, top %cycle
+      %if store(i)_mode=255 %then %continue
+      %if fulluser=no %or dotall file=yes %start
+         %if n=0 %then printstring("The following calls of PERMIT are relevant:".snl.snl)
+         n = 1
+      %else
+         %if n=0 %start
+            n = 1
+            %if mode=16 %or ssown_ssowner=user %then %c
+               printstring("Effective permission:    ".ptos(store(i)_mode&15).snl)
+            %if ssown_ssowner=user %and store(i)_mode&11=3 {rw} %then %continue
+            printstring("Arising from call:".snl)
+         %else
+            %if n=1 %then printstring("The following calls have also been made:".snl) %and n = 2
+         %finish
+      %finish
+      %if store(i)_file="" %then store(i)_file = ".all"
+      printstring("      PERMIT ".lcstring(store(i)_file.", ".store(i)_user.", ".ptos(store(i) %c
+         _mode&15)).snl)
+   %repeat
+
+
+%integer %fn match(%string (6) list user, param user)
+%integer i
+   %for i = 1, 1, 6 %cycle
+      %if charno(param user, i)#'?' %and charno(param user, i)#charno(list user, i)#'?' %then %c
+         %result = 0
+   %repeat
+   %result = 1
+%end;                                    !of match
+
+%routine note perm(%string (6) user, %integer mode)
+!   This routine stores up the perm details discovered.  We successively
+!   remove rightmost components from the name until its empty (when we
+!   check whole-index permissions).  These are stored rather than printed
+!   because some permissions are simply there as a consequence of a
+!   setting on a superior group.  This routine removes these inherited
+!   details in order to report the set of calls on PERMIT (and so the
+!   required cancel operations to change them).
+%integer l, i
+%string (63) ffile
+   mode = mode&15
+   l = length(file)
+   %if l>63 %then ffile = "~".substring(file, l-61, l) %else ffile = file
+   %for i = top, -1, 1 %cycle
+      %if user=store(i)_user %and mode=store(i)_mode&15 %start
+         %if file=store(i)_file %then store(i)_mode = store(i)_mode!x'80' %and %return
+         %if user#"" %and store(i)_mode&x'80'=0 %then store(i)_mode = 255 %and %exit
+      %finish
+   %repeat
+   %if top=100 %then %return
+   top = top+1
+   store(top)_file = ffile
+   store(top)_user = user
+   store(top)_mode = mode&15
+%end;                                    !of note perm
+
+%end;                                    !of show perms
+
+%end;                                    ! of PERMIT INNER
+!
+!-----------------------------------------------------------------------
+!
+%external %routine archivepermit %alias "EMAS#ARCHIVEPERMIT"
+%string (255) fpattern, dpattern
+%integer type
+
+   getstring("File(s);any,ornull;;call pamhelp(helper:two.two6)", fpattern)
+   getstring("Date(s);any,ornull;;", dpattern)
+   getinteger("Type;word,a,n;a;", type)
+   type = 4 %if type=1
+   setreturncode(apply to arch(fpattern, dpattern, type, 2))
+%end;                                    ! of archivepermit
+!
+!-----------------------------------------------------------------------
+!
+%external %routine permit %alias "EMAS#PERMIT"
+%integer perm, flag
+%string (255) file
+%string (6) user
+%string (2) default
+
+   getstring("File or group or .ALL;fileorgroup,or.all,exist;?;call pamhelp(helper:two.two6)",
+      file)
+   getstring("User;usermask,or.all,uc;.ALL;", user)
+   %if user=ssown_ssowner %then default = "RW" %else default = "R"
+   getinteger("Permission;permission,=NCP?WR,1:16,32,64;".default.";", perm)
+   %if perm=8 %and user=".ALL" %then user = ssown_ssowner
+
+   permit inner(file, "", user, perm, 0, flag)
+   setreturncode(flag)
+%end;                                    ! of PERMIT
+!
+!-----------------------------------------------------------------------
+!
+%external %routine permit group %alias "EMAS#PERMITGROUP"
+%integer perm, flag
+%string (255) group
+%string (6) user
+%string (2) default
+
+   getstring("Group;group,exist;?;call pamhelp(helper:two.two6)", group)
+   getstring("To user;usermask,or.all,uc;.ALL;", user)
+   %if user=ssown_ssowner %then default = "RW" %else default = "R"
+   getinteger("Permission;permission,=NCP?WR,1:16,32,64;".default.";", perm)
+   %if perm=8 %and user=".ALL" %then user = ssown_ssowner
+
+   permit inner(group, "", user, perm, 0, flag)
+   setreturncode(flag)
+%end;                                    ! permit group
+!
+!-----------------------------------------------------------------------
+!
+%external %routine apermit %alias "S#ARCHIVEPERMIT"(%string (255) file, %string (8) date,
+   %string (6) user, %integer perm, %integer %name flag)
+
+   permit inner(file, date, user, perm, 16, flag)
+%end;                                    ! of ARCHIVEPERMIT
+!
+!-----------------------------------------------------------------------
+!
+%external %routine ipermit %alias "S#PERMIT"(%string (255) file, %string (6) user, %integer perm,
+   %integer %name flag)
+
+   user = uinfs(1) %if user="=";         !short form for self
+   permit inner(file, "", user, perm, 0, flag)
+%end;                                    ! of IPERMIT
+!
+!-----------------------------------------------------------------------
+!
+%end %of %file

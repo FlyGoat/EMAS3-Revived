@@ -1,0 +1,719 @@
+! SPDX-License-Identifier: MIT
+! Copyright (c) 2026 Jiaxun Yang <jiaxun.yang@flygoat.com>
+
+! Host EMAS host adapters. These are ordinary IMP procedures using the host phex ABI.
+%constinteger XIMPLP64=0
+%if XIMPLP64=1 %start
+%recordformat connection(%longinteger conad,%integer filetype,datastart,dataend)
+%finish %else %start
+%recordformat connection(%integer conad,filetype,datastart,dataend)
+%finish
+%external%routine adapter1 %alias "S#PHEX"(%integername p0)
+  %external%routine%spec host phex(%integer n0)
+  host phex(p0)
+%end
+%external%routine adapter2 %alias "s#phex"(%integername p0)
+  %external%routine%spec host phex(%integer n0)
+  host phex(p0)
+%end
+%external%integer%fn dsfi(%string(*)%name p0,%integername p1,%integername p2,%integername p3,%string(*)%name p4,%integerarrayname p5)
+  %external%integer%fn%spec host dsfi(%string(255) n0,%integer n1,%integer n2,%integer n3,%byteintegername n4,%integerarrayname n5)
+  %result=host dsfi(p0,p1,p2,p3,byteinteger(addr(p4)),p5)
+%end
+%external%integer%fn dprg(%string(*)%name p0,%string(*)%name p1,%integername p2,%string(*)%name p3,%integername p4)
+  %external%integer%fn%spec host dprg(%string(255) n0,%string(255) n1,%integer n2,%string(255) n3,%integer n4)
+  %result=host dprg(p0,p1,p2,p3,p4)
+%end
+%external%routine emas3(%string(*)%name p0,%string(*)%name p1,%integername p2)
+  %external%routine%spec host command(%string(255) n0,%string(255) n1,%integername n2)
+  host command(p0,p1,p2)
+%end
+%external%routine emas3string(%string(*)%name p0,%string(*)%name p1)
+  %external%routine%spec host string(%string(255) n0,%byteintegername n1,%integer cap1)
+  host string(p0,byteinteger(addr(p1)),sizeof(p1)-1)
+%end
+%external%routine emas3integer(%string(*)%name p0,%integername p1)
+  %external%routine%spec host integer(%string(255) n0,%integername n1)
+  host integer(p0,p1)
+%end
+%external%routine adapter8 %alias "EMAS3TRIM"(%string(*)%name p0,%integername p1)
+  %external%routine%spec host trim(%string(255) n0,%integername n1)
+  host trim(p0,p1)
+%end
+%external%routine adapter9 %alias "emas3trim"(%string(*)%name p0,%integername p1)
+  %external%routine%spec host trim(%string(255) n0,%integername n1)
+  host trim(p0,p1)
+%end
+%if XIMPLP64=1 %start
+%external%routine adapter10 %alias "EMAS3OUTFILE"(%string(*)%name p0,%integername p1,%integername p2,%integername p3,%longintegername p4,%integername p5)
+  %external%routine%spec host outfile(%string(255) n0,%integer n1,%integer n2,%integer n3,%longintegername n4,%integername n5)
+  host outfile(p0,p1,p2,p3,p4,p5)
+%end
+%finish %else %start
+%external%routine adapter10 %alias "EMAS3OUTFILE"(%string(*)%name p0,%integername p1,%integername p2,%integername p3,%integername p4,%integername p5)
+  %external%routine%spec host outfile(%string(255) n0,%integer n1,%integer n2,%integer n3,%integername n4,%integername n5)
+  host outfile(p0,p1,p2,p3,p4,p5)
+%end
+%finish
+%if XIMPLP64=1 %start
+%external%routine adapter11 %alias "emas3outfile"(%string(*)%name p0,%integername p1,%integername p2,%integername p3,%longintegername p4,%integername p5)
+  %external%routine%spec host outfile(%string(255) n0,%integer n1,%integer n2,%integer n3,%longintegername n4,%integername n5)
+  host outfile(p0,p1,p2,p3,p4,p5)
+%end
+%finish %else %start
+%external%routine adapter11 %alias "emas3outfile"(%string(*)%name p0,%integername p1,%integername p2,%integername p3,%integername p4,%integername p5)
+  %external%routine%spec host outfile(%string(255) n0,%integer n1,%integer n2,%integer n3,%integername n4,%integername n5)
+  host outfile(p0,p1,p2,p3,p4,p5)
+%end
+%finish
+%if XIMPLP64=1 %start
+%external%routine adapter12 %alias "EMAS3CONNECT"(%string(*)%name p0,%integername p1,%integername p2,%integername p3,%longintegername p4,%integername p5,%integername p6,%integername p7,%integername p8)
+  %external%routine%spec host connect(%string(255) n0,%integer n1,%integer n2,%integer n3,%longintegername n4,%integername n5,%integername n6,%integername n7,%integername n8)
+  host connect(p0,p1,p2,p3,p4,p5,p6,p7,p8)
+%end
+%finish %else %start
+%external%routine adapter12 %alias "EMAS3CONNECT"(%string(*)%name p0,%integername p1,%integername p2,%integername p3,%integername p4,%integername p5,%integername p6,%integername p7,%integername p8)
+  %external%routine%spec host connect(%string(255) n0,%integer n1,%integer n2,%integer n3,%integername n4,%integername n5,%integername n6,%integername n7,%integername n8)
+  host connect(p0,p1,p2,p3,p4,p5,p6,p7,p8)
+%end
+%finish
+%if XIMPLP64=1 %start
+%external%routine adapter13 %alias "emas3CONNECT"(%string(*)%name p0,%integername p1,%integername p2,%integername p3,%longintegername p4,%integername p5,%integername p6,%integername p7,%integername p8)
+  %external%routine%spec host connect(%string(255) n0,%integer n1,%integer n2,%integer n3,%longintegername n4,%integername n5,%integername n6,%integername n7,%integername n8)
+  host connect(p0,p1,p2,p3,p4,p5,p6,p7,p8)
+%end
+%finish %else %start
+%external%routine adapter13 %alias "emas3CONNECT"(%string(*)%name p0,%integername p1,%integername p2,%integername p3,%integername p4,%integername p5,%integername p6,%integername p7,%integername p8)
+  %external%routine%spec host connect(%string(255) n0,%integer n1,%integer n2,%integer n3,%integername n4,%integername n5,%integername n6,%integername n7,%integername n8)
+  host connect(p0,p1,p2,p3,p4,p5,p6,p7,p8)
+%end
+%finish
+%if XIMPLP64=1 %start
+%external%routine adapter14 %alias "emas3connect"(%string(*)%name p0,%integername p1,%integername p2,%integername p3,%longintegername p4,%integername p5,%integername p6,%integername p7,%integername p8)
+  %external%routine%spec host connect(%string(255) n0,%integer n1,%integer n2,%integer n3,%longintegername n4,%integername n5,%integername n6,%integername n7,%integername n8)
+  host connect(p0,p1,p2,p3,p4,p5,p6,p7,p8)
+%end
+%finish %else %start
+%external%routine adapter14 %alias "emas3connect"(%string(*)%name p0,%integername p1,%integername p2,%integername p3,%integername p4,%integername p5,%integername p6,%integername p7,%integername p8)
+  %external%routine%spec host connect(%string(255) n0,%integer n1,%integer n2,%integer n3,%integername n4,%integername n5,%integername n6,%integername n7,%integername n8)
+  host connect(p0,p1,p2,p3,p4,p5,p6,p7,p8)
+%end
+%finish
+%if XIMPLP64=1 %start
+%external%routine adapter15 %alias "EMAS3MOVE"(%integername p0,%longintegername p1,%longintegername p2)
+  %external%routine%spec host move(%integer n0,%longinteger n1,%longinteger n2)
+  host move(p0,p1,p2)
+%end
+%finish %else %start
+%external%routine adapter15 %alias "EMAS3MOVE"(%integername p0,%integername p1,%integername p2)
+  %external%routine%spec host move(%integer n0,%integer n1,%integer n2)
+  host move(p0,p1,p2)
+%end
+%finish
+%if XIMPLP64=1 %start
+%external%routine adapter16 %alias "emas3move"(%integername p0,%longintegername p1,%longintegername p2)
+  %external%routine%spec host move(%integer n0,%longinteger n1,%longinteger n2)
+  host move(p0,p1,p2)
+%end
+%finish %else %start
+%external%routine adapter16 %alias "emas3move"(%integername p0,%integername p1,%integername p2)
+  %external%routine%spec host move(%integer n0,%integer n1,%integer n2)
+  host move(p0,p1,p2)
+%end
+%finish
+%external%routine adapter17 %alias "EMAS3DISCONNECT"(%string(*)%name p0,%integername p1)
+  %external%routine%spec host disconnect(%string(255) n0,%integername n1)
+  host disconnect(p0,p1)
+%end
+%external%routine adapter18 %alias "emas3disconnect"(%string(*)%name p0,%integername p1)
+  %external%routine%spec host disconnect(%string(255) n0,%integername n1)
+  host disconnect(p0,p1)
+%end
+%external%routine adapter19 %alias "EMAS3PHEX"(%integername p0)
+  %external%routine%spec host phex(%integer n0)
+  host phex(p0)
+%end
+%external%routine adapter20 %alias "emas3phex"(%integername p0)
+  %external%routine%spec host phex(%integer n0)
+  host phex(p0)
+%end
+%external%integer%fn adapter21 %alias "S#CHECKNAME"(%string(*)%name p0,%integername p1,%integername p2)
+  %external%integer%fn%spec host checkname(%byteintegername n0,%integer cap0,%integer n1,%integer n2)
+  %result=host checkname(byteinteger(addr(p0)),sizeof(p0)-1,p1,p2)
+%end
+%external%integer%fn adapter22 %alias "s#checkname"(%string(*)%name p0,%integername p1,%integername p2)
+  %external%integer%fn%spec host checkname(%byteintegername n0,%integer cap0,%integer n1,%integer n2)
+  %result=host checkname(byteinteger(addr(p0)),sizeof(p0)-1,p1,p2)
+%end
+%external%routine adapter23 %alias "S#OLDCONNECT"(%string(255) p0,%integer p1,%integer p2,%integer p3,%record(connection)%name p4,%integername p5)
+  %external%routine%spec host oldconnect(%string(255) n0,%integer n1,%integer n2,%integer n3,%byteintegername n4,%integername n5)
+  host oldconnect(p0,p1,p2,p3,byteinteger(addr(p4)),p5)
+%end
+%external%routine adapter24 %alias "S#oldCONNECT"(%string(255) p0,%integer p1,%integer p2,%integer p3,%record(connection)%name p4,%integername p5)
+  %external%routine%spec host oldconnect(%string(255) n0,%integer n1,%integer n2,%integer n3,%byteintegername n4,%integername n5)
+  host oldconnect(p0,p1,p2,p3,byteinteger(addr(p4)),p5)
+%end
+%external%routine adapter25 %alias "s#oldconnect"(%string(255) p0,%integer p1,%integer p2,%integer p3,%record(connection)%name p4,%integername p5)
+  %external%routine%spec host oldconnect(%string(255) n0,%integer n1,%integer n2,%integer n3,%byteintegername n4,%integername n5)
+  host oldconnect(p0,p1,p2,p3,byteinteger(addr(p4)),p5)
+%end
+%external%routine adapter26 %alias "S#TRIM"(%string(255) p0,%integername p1)
+  %external%routine%spec host trim(%string(255) n0,%integername n1)
+  host trim(p0,p1)
+%end
+%external%routine adapter27 %alias "s#trim"(%string(255) p0,%integername p1)
+  %external%routine%spec host trim(%string(255) n0,%integername n1)
+  host trim(p0,p1)
+%end
+%external%routine adapter28 %alias "S#DEFINE"(%integer p0,%string(255) p1,%integername p2,%integername p3)
+  %external%routine%spec host definechannel(%integer n0,%string(255) n1,%integername n2,%integername n3)
+  host definechannel(p0,p1,p2,p3)
+%end
+%external%routine adapter29 %alias "s#define"(%integer p0,%string(255) p1,%integername p2,%integername p3)
+  %external%routine%spec host definechannel(%integer n0,%string(255) n1,%integername n2,%integername n3)
+  host definechannel(p0,p1,p2,p3)
+%end
+%external%routine adapter30 %alias "S#GETSTRING"(%string(255) p0,%string(*)%name p1)
+  %external%routine%spec host getstring(%string(255) n0,%byteintegername n1,%integer cap1)
+  host getstring(p0,byteinteger(addr(p1)),sizeof(p1)-1)
+%end
+%external%routine adapter31 %alias "s#getstring"(%string(255) p0,%string(*)%name p1)
+  %external%routine%spec host getstring(%string(255) n0,%byteintegername n1,%integer cap1)
+  host getstring(p0,byteinteger(addr(p1)),sizeof(p1)-1)
+%end
+%external%routine adapter32 %alias "S#GETINTEGER"(%string(255) p0,%integername p1)
+  %external%routine%spec host getinteger(%string(255) n0,%integername n1)
+  host getinteger(p0,p1)
+%end
+%external%routine adapter33 %alias "s#getinteger"(%string(255) p0,%integername p1)
+  %external%routine%spec host getinteger(%string(255) n0,%integername n1)
+  host getinteger(p0,p1)
+%end
+%external%routine adapter34 %alias "S#SETRETURNCODE"(%integer p0)
+  %external%routine%spec host setreturncode(%integer n0)
+  host setreturncode(p0)
+%end
+%external%routine adapter35 %alias "S#setreturncode"(%integer p0)
+  %external%routine%spec host setreturncode(%integer n0)
+  host setreturncode(p0)
+%end
+%external%routine adapter36 %alias "s#setreturncode"(%integer p0)
+  %external%routine%spec host setreturncode(%integer n0)
+  host setreturncode(p0)
+%end
+%external%string(255)%fn adapter37 %alias "S#ITOS"(%integer p0)
+  %external%string(255)%fn%spec host itos(%integer n0)
+  %result=host itos(p0)
+%end
+%external%string(255)%fn adapter38 %alias "s#itos"(%integer p0)
+  %external%string(255)%fn%spec host itos(%integer n0)
+  %result=host itos(p0)
+%end
+%external%integer%fn adapter39 %alias "S#CURRENTPACKEDDT"
+  %external%integer%fn%spec host currentpackeddt
+  %result=host currentpackeddt
+%end
+%external%integer%fn adapter40 %alias "s#currentpackeddt"
+  %external%integer%fn%spec host currentpackeddt
+  %result=host currentpackeddt
+%end
+%if XIMPLP64=1 %start
+%external%routine iocp(%integer p0,%longinteger p1)
+  %external%routine%spec host iocp(%integer n0,%longinteger n1)
+  host iocp(p0,p1)
+%end
+%finish %else %start
+%external%routine iocp(%integer p0,%integer p1)
+  %external%routine%spec host iocp(%integer n0,%integer n1)
+  host iocp(p0,p1)
+%end
+%finish
+%if XIMPLP64=1 %start
+%external%routine adapter42 %alias "S#IOCP"(%integer p0,%longinteger p1)
+  %external%routine%spec host iocp(%integer n0,%longinteger n1)
+  host iocp(p0,p1)
+%end
+%finish %else %start
+%external%routine adapter42 %alias "S#IOCP"(%integer p0,%integer p1)
+  %external%routine%spec host iocp(%integer n0,%integer n1)
+  host iocp(p0,p1)
+%end
+%finish
+%if XIMPLP64=1 %start
+%external%routine adapter43 %alias "s#iocp"(%integer p0,%longinteger p1)
+  %external%routine%spec host iocp(%integer n0,%longinteger n1)
+  host iocp(p0,p1)
+%end
+%finish %else %start
+%external%routine adapter43 %alias "s#iocp"(%integer p0,%integer p1)
+  %external%routine%spec host iocp(%integer n0,%integer n1)
+  host iocp(p0,p1)
+%end
+%finish
+%if XIMPLP64=1 %start
+%external%routine adapter44 %alias "S_IOCP"(%integer p0,%longinteger p1)
+  %external%routine%spec host iocp(%integer n0,%longinteger n1)
+  host iocp(p0,p1)
+%end
+%finish %else %start
+%external%routine adapter44 %alias "S_IOCP"(%integer p0,%integer p1)
+  %external%routine%spec host iocp(%integer n0,%integer n1)
+  host iocp(p0,p1)
+%end
+%finish
+%if XIMPLP64=1 %start
+%external%routine adapter45 %alias "s_iocp"(%integer p0,%longinteger p1)
+  %external%routine%spec host iocp(%integer n0,%longinteger n1)
+  host iocp(p0,p1)
+%end
+%finish %else %start
+%external%routine adapter45 %alias "s_iocp"(%integer p0,%integer p1)
+  %external%routine%spec host iocp(%integer n0,%integer n1)
+  host iocp(p0,p1)
+%end
+%finish
+%if XIMPLP64=1 %start
+%external%routine movebytes(%integer p0,%longinteger p1,%integer p2,%longinteger p3,%integer p4)
+  %external%routine%spec host movebytes(%integer n0,%longinteger n1,%integer n2,%longinteger n3,%integer n4)
+  host movebytes(p0,p1,p2,p3,p4)
+%end
+%finish %else %start
+%external%routine movebytes(%integer p0,%integer p1,%integer p2,%integer p3,%integer p4)
+  %external%routine%spec host movebytes(%integer n0,%integer n1,%integer n2,%integer n3,%integer n4)
+  host movebytes(p0,p1,p2,p3,p4)
+%end
+%finish
+%if XIMPLP64=1 %start
+%external%routine move(%integer p0,%longinteger p1,%longinteger p2)
+  %external%routine%spec host move(%integer n0,%longinteger n1,%longinteger n2)
+  host move(p0,p1,p2)
+%end
+%finish %else %start
+%external%routine move(%integer p0,%integer p1,%integer p2)
+  %external%routine%spec host move(%integer n0,%integer n1,%integer n2)
+  host move(p0,p1,p2)
+%end
+%finish
+%if XIMPLP64=1 %start
+%external%routine adapter48 %alias "S#MOVE"(%integer p0,%longinteger p1,%longinteger p2)
+  %external%routine%spec host move(%integer n0,%longinteger n1,%longinteger n2)
+  host move(p0,p1,p2)
+%end
+%finish %else %start
+%external%routine adapter48 %alias "S#MOVE"(%integer p0,%integer p1,%integer p2)
+  %external%routine%spec host move(%integer n0,%integer n1,%integer n2)
+  host move(p0,p1,p2)
+%end
+%finish
+%if XIMPLP64=1 %start
+%external%routine adapter49 %alias "s#MOVE"(%integer p0,%longinteger p1,%longinteger p2)
+  %external%routine%spec host move(%integer n0,%longinteger n1,%longinteger n2)
+  host move(p0,p1,p2)
+%end
+%finish %else %start
+%external%routine adapter49 %alias "s#MOVE"(%integer p0,%integer p1,%integer p2)
+  %external%routine%spec host move(%integer n0,%integer n1,%integer n2)
+  host move(p0,p1,p2)
+%end
+%finish
+%if XIMPLP64=1 %start
+%external%routine adapter50 %alias "s#move"(%integer p0,%longinteger p1,%longinteger p2)
+  %external%routine%spec host move(%integer n0,%longinteger n1,%longinteger n2)
+  host move(p0,p1,p2)
+%end
+%finish %else %start
+%external%routine adapter50 %alias "s#move"(%integer p0,%integer p1,%integer p2)
+  %external%routine%spec host move(%integer n0,%integer n1,%integer n2)
+  host move(p0,p1,p2)
+%end
+%finish
+%if XIMPLP64=1 %start
+%external%routine fill(%integer p0,%longinteger p1,%integer p2)
+  %external%routine%spec host fill(%integer n0,%longinteger n1,%integer n2)
+  host fill(p0,p1,p2)
+%end
+%finish %else %start
+%external%routine fill(%integer p0,%integer p1,%integer p2)
+  %external%routine%spec host fill(%integer n0,%integer n1,%integer n2)
+  host fill(p0,p1,p2)
+%end
+%finish
+%if XIMPLP64=1 %start
+%external%routine adapter52 %alias "S#FILL"(%integer p0,%longinteger p1,%integer p2)
+  %external%routine%spec host fill(%integer n0,%longinteger n1,%integer n2)
+  host fill(p0,p1,p2)
+%end
+%finish %else %start
+%external%routine adapter52 %alias "S#FILL"(%integer p0,%integer p1,%integer p2)
+  %external%routine%spec host fill(%integer n0,%integer n1,%integer n2)
+  host fill(p0,p1,p2)
+%end
+%finish
+%if XIMPLP64=1 %start
+%external%routine adapter53 %alias "s#FILL"(%integer p0,%longinteger p1,%integer p2)
+  %external%routine%spec host fill(%integer n0,%longinteger n1,%integer n2)
+  host fill(p0,p1,p2)
+%end
+%finish %else %start
+%external%routine adapter53 %alias "s#FILL"(%integer p0,%integer p1,%integer p2)
+  %external%routine%spec host fill(%integer n0,%integer n1,%integer n2)
+  host fill(p0,p1,p2)
+%end
+%finish
+%if XIMPLP64=1 %start
+%external%routine adapter54 %alias "s#fill"(%integer p0,%longinteger p1,%integer p2)
+  %external%routine%spec host fill(%integer n0,%longinteger n1,%integer n2)
+  host fill(p0,p1,p2)
+%end
+%finish %else %start
+%external%routine adapter54 %alias "s#fill"(%integer p0,%integer p1,%integer p2)
+  %external%routine%spec host fill(%integer n0,%integer n1,%integer n2)
+  host fill(p0,p1,p2)
+%end
+%finish
+%if XIMPLP64=1 %start
+%external%routine uctranslate(%longinteger p0,%integer p1)
+  %external%routine%spec host uctranslate(%longinteger n0,%integer n1)
+  host uctranslate(p0,p1)
+%end
+%finish %else %start
+%external%routine uctranslate(%integer p0,%integer p1)
+  %external%routine%spec host uctranslate(%integer n0,%integer n1)
+  host uctranslate(p0,p1)
+%end
+%finish
+%if XIMPLP64=1 %start
+%external%routine adapter56 %alias "S#UCTRANSLATE"(%longinteger p0,%integer p1)
+  %external%routine%spec host uctranslate(%longinteger n0,%integer n1)
+  host uctranslate(p0,p1)
+%end
+%finish %else %start
+%external%routine adapter56 %alias "S#UCTRANSLATE"(%integer p0,%integer p1)
+  %external%routine%spec host uctranslate(%integer n0,%integer n1)
+  host uctranslate(p0,p1)
+%end
+%finish
+%if XIMPLP64=1 %start
+%external%routine adapter57 %alias "s#UCTRANSLATE"(%longinteger p0,%integer p1)
+  %external%routine%spec host uctranslate(%longinteger n0,%integer n1)
+  host uctranslate(p0,p1)
+%end
+%finish %else %start
+%external%routine adapter57 %alias "s#UCTRANSLATE"(%integer p0,%integer p1)
+  %external%routine%spec host uctranslate(%integer n0,%integer n1)
+  host uctranslate(p0,p1)
+%end
+%finish
+%if XIMPLP64=1 %start
+%external%routine adapter58 %alias "s#uctranslate"(%longinteger p0,%integer p1)
+  %external%routine%spec host uctranslate(%longinteger n0,%integer n1)
+  host uctranslate(p0,p1)
+%end
+%finish %else %start
+%external%routine adapter58 %alias "s#uctranslate"(%integer p0,%integer p1)
+  %external%routine%spec host uctranslate(%integer n0,%integer n1)
+  host uctranslate(p0,p1)
+%end
+%finish
+%if XIMPLP64=1 %start
+%external%longinteger%map comreg(%integer p0)
+  %external%longinteger%map%spec host comregmap(%integer n0)
+  %result==host comregmap(p0)
+%end
+%finish %else %start
+%external%integer%map comreg(%integer p0)
+  %external%integer%map%spec host comregmap(%integer n0)
+  %result==host comregmap(p0)
+%end
+%finish
+%if XIMPLP64=1 %start
+%external%longinteger%map adapter60 %alias "S#COMREG"(%integer p0)
+  %external%longinteger%map%spec host comregmap(%integer n0)
+  %result==host comregmap(p0)
+%end
+%finish %else %start
+%external%integer%map adapter60 %alias "S#COMREG"(%integer p0)
+  %external%integer%map%spec host comregmap(%integer n0)
+  %result==host comregmap(p0)
+%end
+%finish
+%if XIMPLP64=1 %start
+%external%longinteger%map adapter61 %alias "s#comreg"(%integer p0)
+  %external%longinteger%map%spec host comregmap(%integer n0)
+  %result==host comregmap(p0)
+%end
+%finish %else %start
+%external%integer%map adapter61 %alias "s#comreg"(%integer p0)
+  %external%integer%map%spec host comregmap(%integer n0)
+  %result==host comregmap(p0)
+%end
+%finish
+%if XIMPLP64=1 %start
+%external%longinteger%map adapter62 %alias "S#COMREGMAP"(%integer p0)
+  %external%longinteger%map%spec host comregmap(%integer n0)
+  %result==host comregmap(p0)
+%end
+%finish %else %start
+%external%integer%map adapter62 %alias "S#COMREGMAP"(%integer p0)
+  %external%integer%map%spec host comregmap(%integer n0)
+  %result==host comregmap(p0)
+%end
+%finish
+%if XIMPLP64=1 %start
+%external%longinteger%map adapter63 %alias "S#COMREGmap"(%integer p0)
+  %external%longinteger%map%spec host comregmap(%integer n0)
+  %result==host comregmap(p0)
+%end
+%finish %else %start
+%external%integer%map adapter63 %alias "S#COMREGmap"(%integer p0)
+  %external%integer%map%spec host comregmap(%integer n0)
+  %result==host comregmap(p0)
+%end
+%finish
+%if XIMPLP64=1 %start
+%external%longinteger%map adapter64 %alias "s#comregmap"(%integer p0)
+  %external%longinteger%map%spec host comregmap(%integer n0)
+  %result==host comregmap(p0)
+%end
+%finish %else %start
+%external%integer%map adapter64 %alias "s#comregmap"(%integer p0)
+  %external%integer%map%spec host comregmap(%integer n0)
+  %result==host comregmap(p0)
+%end
+%finish
+%if XIMPLP64=1 %start
+%external%longinteger%map comregmap(%integer p0)
+  %external%longinteger%map%spec host comregmap(%integer n0)
+  %result==host comregmap(p0)
+%end
+%finish %else %start
+%external%integer%map comregmap(%integer p0)
+  %external%integer%map%spec host comregmap(%integer n0)
+  %result==host comregmap(p0)
+%end
+%finish
+%external%integer%fn uinfi(%integer p0)
+  %external%integer%fn%spec host uinfi(%integer n0)
+  %result=host uinfi(p0)
+%end
+%external%integer%fn adapter67 %alias "S#UINFI"(%integer p0)
+  %external%integer%fn%spec host uinfi(%integer n0)
+  %result=host uinfi(p0)
+%end
+%external%integer%fn adapter68 %alias "s#uinfi"(%integer p0)
+  %external%integer%fn%spec host uinfi(%integer n0)
+  %result=host uinfi(p0)
+%end
+%if XIMPLP64=1 %start
+%external%routine outfile(%string(255) p0,%integer p1,%integer p2,%integer p3,%longintegername p4,%integername p5)
+  %external%routine%spec host outfile(%string(255) n0,%integer n1,%integer n2,%integer n3,%longintegername n4,%integername n5)
+  host outfile(p0,p1,p2,p3,p4,p5)
+%end
+%finish %else %start
+%external%routine outfile(%string(255) p0,%integer p1,%integer p2,%integer p3,%integername p4,%integername p5)
+  %external%routine%spec host outfile(%string(255) n0,%integer n1,%integer n2,%integer n3,%integername n4,%integername n5)
+  host outfile(p0,p1,p2,p3,p4,p5)
+%end
+%finish
+%if XIMPLP64=1 %start
+%external%routine adapter70 %alias "S#OUTFILE"(%string(255) p0,%integer p1,%integer p2,%integer p3,%longintegername p4,%integername p5)
+  %external%routine%spec host outfile(%string(255) n0,%integer n1,%integer n2,%integer n3,%longintegername n4,%integername n5)
+  host outfile(p0,p1,p2,p3,p4,p5)
+%end
+%finish %else %start
+%external%routine adapter70 %alias "S#OUTFILE"(%string(255) p0,%integer p1,%integer p2,%integer p3,%integername p4,%integername p5)
+  %external%routine%spec host outfile(%string(255) n0,%integer n1,%integer n2,%integer n3,%integername n4,%integername n5)
+  host outfile(p0,p1,p2,p3,p4,p5)
+%end
+%finish
+%if XIMPLP64=1 %start
+%external%routine adapter71 %alias "s#outfile"(%string(255) p0,%integer p1,%integer p2,%integer p3,%longintegername p4,%integername p5)
+  %external%routine%spec host outfile(%string(255) n0,%integer n1,%integer n2,%integer n3,%longintegername n4,%integername n5)
+  host outfile(p0,p1,p2,p3,p4,p5)
+%end
+%finish %else %start
+%external%routine adapter71 %alias "s#outfile"(%string(255) p0,%integer p1,%integer p2,%integer p3,%integername p4,%integername p5)
+  %external%routine%spec host outfile(%string(255) n0,%integer n1,%integer n2,%integer n3,%integername n4,%integername n5)
+  host outfile(p0,p1,p2,p3,p4,p5)
+%end
+%finish
+%external%routine disconnect(%string(255) p0,%integername p1)
+  %external%routine%spec host disconnect(%string(255) n0,%integername n1)
+  host disconnect(p0,p1)
+%end
+%external%routine adapter73 %alias "S#DISCONNECT"(%string(255) p0,%integername p1)
+  %external%routine%spec host disconnect(%string(255) n0,%integername n1)
+  host disconnect(p0,p1)
+%end
+%external%routine adapter74 %alias "s#disconnect"(%string(255) p0,%integername p1)
+  %external%routine%spec host disconnect(%string(255) n0,%integername n1)
+  host disconnect(p0,p1)
+%end
+%external%routine newgen(%string(255) p0,%string(255) p1,%integername p2)
+  %external%routine%spec host newgen(%string(255) n0,%string(255) n1,%integername n2)
+  host newgen(p0,p1,p2)
+%end
+%external%routine adapter76 %alias "S#NEWGEN"(%string(255) p0,%string(255) p1,%integername p2)
+  %external%routine%spec host newgen(%string(255) n0,%string(255) n1,%integername n2)
+  host newgen(p0,p1,p2)
+%end
+%external%routine adapter77 %alias "s#newgen"(%string(255) p0,%string(255) p1,%integername p2)
+  %external%routine%spec host newgen(%string(255) n0,%string(255) n1,%integername n2)
+  host newgen(p0,p1,p2)
+%end
+%external%string(255)%fn failuremessage(%integer p0)
+  %external%string(255)%fn%spec host failuremessage(%integer n0)
+  %result=host failuremessage(p0)
+%end
+%external%string(255)%fn adapter79 %alias "S#FAILUREMESSAGE"(%integer p0)
+  %external%string(255)%fn%spec host failuremessage(%integer n0)
+  %result=host failuremessage(p0)
+%end
+%external%string(255)%fn adapter80 %alias "s#failuremessage"(%integer p0)
+  %external%string(255)%fn%spec host failuremessage(%integer n0)
+  %result=host failuremessage(p0)
+%end
+%external%routine define(%string(255) p0)
+  %external%routine%spec host define(%string(255) n0)
+  host define(p0)
+%end
+%external%routine adapter82 %alias "S#DEFINE"(%string(255) p0)
+  %external%routine%spec host define(%string(255) n0)
+  host define(p0)
+%end
+%external%routine adapter83 %alias "s#define"(%string(255) p0)
+  %external%routine%spec host define(%string(255) n0)
+  host define(p0)
+%end
+%external%string(255)%fn date
+  %external%string(255)%fn%spec host date
+  %result=host date
+%end
+%external%string(255)%fn adapter85 %alias "S#DATE"
+  %external%string(255)%fn%spec host date
+  %result=host date
+%end
+%external%string(255)%fn adapter86 %alias "s#date"
+  %external%string(255)%fn%spec host date
+  %result=host date
+%end
+%external%string(255)%fn time
+  %external%string(255)%fn%spec host time
+  %result=host time
+%end
+%external%string(255)%fn adapter88 %alias "S#TIME"
+  %external%string(255)%fn%spec host time
+  %result=host time
+%end
+%external%string(255)%fn adapter89 %alias "s#time"
+  %external%string(255)%fn%spec host time
+  %result=host time
+%end
+%external%integer%fn outstream
+  %external%integer%fn%spec host outstream
+  %result=host outstream
+%end
+%external%integer%fn adapter91 %alias "S#OUTSTREAM"
+  %external%integer%fn%spec host outstream
+  %result=host outstream
+%end
+%external%integer%fn adapter92 %alias "s#outstream"
+  %external%integer%fn%spec host outstream
+  %result=host outstream
+%end
+%external%integer%fn currentpackeddt
+  %external%integer%fn%spec host currentpackeddt
+  %result=host currentpackeddt
+%end
+%external%string(255)%fn htos(%integer p0,%integer p1)
+  %externalstring(255)%fnspec host htos(%integer value,places)
+  %result=host htos(p0,p1)
+%end
+%external%string(255)%fn adapter95 %alias "S#HTOS"(%integer p0,%integer p1)
+  %externalstring(255)%fnspec host htos(%integer value,places)
+  %result=host htos(p0,p1)
+%end
+%external%string(255)%fn adapter96 %alias "s#HTOS"(%integer p0,%integer p1)
+  %externalstring(255)%fnspec host htos(%integer value,places)
+  %result=host htos(p0,p1)
+%end
+%external%string(255)%fn adapter97 %alias "s#htos"(%integer p0,%integer p1)
+  %externalstring(255)%fnspec host htos(%integer value,places)
+  %result=host htos(p0,p1)
+%end
+%external%routine phex(%integer p0)
+  %external%routine%spec host phex(%integer n0)
+  host phex(p0)
+%end
+%external%routine adapter99 %alias "S#PHEX"(%integer p0)
+  %external%routine%spec host phex(%integer n0)
+  host phex(p0)
+%end
+%external%routine adapter100 %alias "s#phex"(%integer p0)
+  %external%routine%spec host phex(%integer n0)
+  host phex(p0)
+%end
+%if XIMPLP64=1 %start
+%external%longinteger%fn rdfilead(%string(255) p0)
+  %external%longinteger%fn%spec host rdfilead(%string(255) n0)
+  %result=host rdfilead(p0)
+%end
+%finish %else %start
+%external%integer%fn rdfilead(%string(255) p0)
+  %external%integer%fn%spec host rdfilead(%string(255) n0)
+  %result=host rdfilead(p0)
+%end
+%finish
+%if XIMPLP64=1 %start
+%external%longinteger%fn nwfilead(%string(255) p0,%integer p1)
+  %external%longinteger%fn%spec host nwfilead(%string(255) n0,%integer n1)
+  %result=host nwfilead(p0,p1)
+%end
+%finish %else %start
+%external%integer%fn nwfilead(%string(255) p0,%integer p1)
+  %external%integer%fn%spec host nwfilead(%string(255) n0,%integer n1)
+  %result=host nwfilead(p0,p1)
+%end
+%finish
+%if XIMPLP64=1 %start
+%external%routine consource(%string(255) p0,%longintegername p1)
+  %external%routine%spec host consource(%string(255) n0,%longintegername n1)
+  host consource(p0,p1)
+%end
+%finish %else %start
+%external%routine consource(%string(255) p0,%integername p1)
+  %external%routine%spec host consource(%string(255) n0,%integername n1)
+  host consource(p0,p1)
+%end
+%finish
+%if XIMPLP64=1 %start
+%external%routine adapter104 %alias "S#CONSOURCE"(%string(255) p0,%longintegername p1)
+  %external%routine%spec host consource(%string(255) n0,%longintegername n1)
+  host consource(p0,p1)
+%end
+%finish %else %start
+%external%routine adapter104 %alias "S#CONSOURCE"(%string(255) p0,%integername p1)
+  %external%routine%spec host consource(%string(255) n0,%integername n1)
+  host consource(p0,p1)
+%end
+%finish
+%if XIMPLP64=1 %start
+%external%routine adapter105 %alias "s#consource"(%string(255) p0,%longintegername p1)
+  %external%routine%spec host consource(%string(255) n0,%longintegername n1)
+  host consource(p0,p1)
+%end
+%finish %else %start
+%external%routine adapter105 %alias "s#consource"(%string(255) p0,%integername p1)
+  %external%routine%spec host consource(%string(255) n0,%integername n1)
+  host consource(p0,p1)
+%end
+%finish
+%external%routine freesourceareas
+  %external%routine%spec host freesourceareas
+  host freesourceareas
+%end
+%externalroutine setfname %alias "S#SETFNAME"(%string(255) name)
+  %externalroutinespec host setfname(%string(255) name)
+  host setfname(name)
+%end
+%endoffile

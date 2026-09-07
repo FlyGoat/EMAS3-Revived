@@ -1,0 +1,29 @@
+parm opt,maxdict,nolist
+imp ercc07:itrimp_ibmponeas+ercc07:poneb02s,ip1ox,l0
+imp ercc07:itrimp_ibmptwoas+timp03s,ip23ox,l1
+imp ercc07:itrimp_ibmoptas+opt03s,iopt3ox,l2
+imp cserv01s,cserv01ox,l4
+imp ibmgen05s,igen5ox,l5
+parm map
+LINK
+IP1oX
+IP23oX
+IOPT3oX
+IGEN5oX
+CSERV01oX
+.END
+P0Y
+MODIFY P0Y
+SATISFY REFS
+.ALL
+SATISFY DATA
+.ALL
+SUPPRESS
+.ALL
+RETAIN
+ICL9CEZIBMIMP
+SUPPRESS DATA
+.ALL
+CLOSE
+NEWGEN P0Y,IBMoX
+d .all

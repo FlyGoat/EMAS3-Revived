@@ -1,0 +1,25 @@
+ start = time
+parm nocheck,noarray
+imp s01.s,s01.y,s01.l
+imp s02.s,s02.y,s02.l
+imp s30.s,s30.y,s30.l
+imp s31.s,s31.y,s31.l
+imp s32.s,s32.y,s32.l
+imp s33.s,s33.y,s33.l
+imp s34.s,s34.y,s34.l
+imp s05.s,s05.y,s05.l
+imp s51.s,s51.y,s51.l
+imp s52.s,s52.y,s52.l
+imp s06.s,s06.y,s06.l
+imp s07.s,s07.y,s07.l
+imp s10.s,s10.y,s10.l
+imp s11.s,s11.y,s11.l
+imp s14.s,s14.y,s14.l
+imp s15.s,s15.y,s15.l
+imp s22.s,s22.y,s22.l
+imp s24.s,s24.y,s24.l
+imp s25.s,s25.y,s25.l
+imp s26.s,s26.y,s26.l
+imp s27.s,s27.y,s27.l
+imp s88.s,s88.y,s88.l
+ say 'Started'-start-'finished'-time

@@ -1,0 +1,488 @@
+!***********************************************************************
+!*
+!*               3270 operator console driver for CHOPSUPE
+!*
+!*              R.D. Eager   University of Kent   MCMLXXXVI
+!*
+!***********************************************************************
+!
+%include "ercc07:IBMSUP_COMF370"
+!
+%constantstring(18) version = "CH3270 1L 01/09/86"
+!
+%recordformat parmf(%integer dest,srce,(%integer p1,p2,p3,p4,p5,p6 %or %c
+                                        %string(23) text))
+!
+%externalroutinespec dumptable(%integer t,a,l)
+%externalroutinespec etoi(%integer a,s)
+%externalroutinespec itoe(%integer a,s)
+%externalroutinespec move(%integer s,from,to)
+%externalroutinespec parse com(%integer srce,%stringname s)
+%externalroutinespec pkmonrec(%string(23) s,%record(parmf)%name p)
+%externalroutinespec pon(%record(parmf)%name p)
+!
+%externallongintegerspec kmon
+!
+%constantinteger my sno = x'32'
+!
+!=======================================================================
+!
+%externalroutine oper(%record(parmf)%name p)
+!
+%routinespec display screen
+%routinespec fire(%integer ccwa)
+%routinespec update operlog(%string(63) text)
+!
+%if ccw format=0 %thenstart
+   %recordformat ccwf(%integer cmdad,%byteinteger flags,sp,%shortinteger len)
+%finishelseif ccw format=1 %thenstart
+   %recordformat ccwf(%byteinteger ccode,flags,%shortinteger len,%integer cmdad)
+%finish
+%include "ercc07:IBMSUP_DTFORM2S"
+%recordformat picture f(%integer length,updated,data)
+%recordformat screen f(%integer length,picture a,cursor,size,
+                       cntrl,cntrl2 {not used})
+%constinteger ulplus=88
+%recordformat unit f(%record(ccwf) wccw1,wccw2,wccw3,wccw4 {not used},
+                     rccw1,rccw2,rccw3,
+                     %integer buffer a,
+                     %byteinteger sno,state,sp1,sp2,
+                     %record(screen f) screen,
+                     %string(ulplus) input line)
+!
+! Format size for 'unit f' : 7*CCWs    (56) +
+!                            1*int     (4) +
+!                            4*byte    (4) +
+!                            1*screen  (24) +
+!                            input line(81) = 169
+! Maximum allowed is 504.
+!
+%constantinteger urec space = 250;      ! Allow safety margin
+!
+%ownrecord(picture f)%name operlog
+%record(dtform)%name dev
+%record(screen f)%name screen
+%record(unitf)%name u
+!
+%string(100) isotxt,ebcdictxt
+!
+! 3270 data stream orders
+!
+%constantbyteinteger ic     = x'13';    ! Insert Cursor
+%constantbyteinteger sba    = x'11';    ! Set Buffer Address
+%constantbyteinteger sf     = x'1d';    ! Start Field
+!
+! 3270 command codes
+!
+%constantbyteinteger eau    = x'0f';    ! Erase All Unprotected
+%constantbyteinteger ewrite = x'05';    ! Erase/Write
+%constantbyteinteger readm  = x'06';    ! Read Modified
+%constantbyteinteger write  = x'01';    ! Write
+!
+! 3270 AID bytes
+!
+%constantbyteinteger cleark = x'6d';    ! CLEAR key
+%constantbyteinteger enter  = x'7d';    ! ENTER key
+%constantbyteinteger pf7    = x'f7';    ! PF7 key
+%constantbyteinteger pf8    = x'f8';    ! PF8 key
+!
+%constantbyteinteger pgb    = pf7;      ! Page Back key
+%constantbyteinteger pgf    = pf8;      ! Page Forward key
+!
+! 3270 field attributes
+!
+%constantbyteinteger prot   = x'60';    ! Protected field
+%constantbyteinteger unprot = x'40';    ! Unprotected field
+!
+! 3270 Write Control Characters
+!
+%constantbyteinteger wcc0   = x'00';    ! No action
+%constantbyteinteger wcck   = x'c2';    ! Restore keyboard
+%constantbyteinteger wcckr  = x'43';    ! Restore keyboard and reset
+!
+! Screen and operlog geometry
+!
+%constantinteger ullen      = 80;       ! Line length of screen
+%constantinteger ollen      = 40;       ! Line length of subscreen
+%constantinteger ulines     = 21;       ! Number of lines used for display
+%constantinteger hdr s      = 8;        ! Size of operlog header
+!
+! Addresses for cursor
+!
+%constantshortinteger comba = 1760;     ! Start of COMMAND line (0,22)
+%constantshortinteger eifa  = 1919;     ! End of input field (79,23)
+%constantshortinteger rba   = 1840;     ! Start of read buffer area (0,23)
+%constantshortinteger sifa  = 1839;     ! Start of input field (79,22)
+%constantshortinteger wba   = 80;       ! Start of display area (0,1)
+!
+! Bits in SCSW 2/CSW2
+!
+%constantinteger attention  = x'80000000'
+!* %constantinteger normal     = x'0c000000'
+!* %constinteger shfunny       = x'08000000'; !funny termination status..channel end only
+!
+! OPER states
+!
+%constantbyteinteger accept issued  = 0
+%constantbyteinteger idle           = 1
+%constantbyteinteger init issued    = 2
+%constantbyteinteger read issued    = 3
+%constantbyteinteger redraw issued  = 4
+%constantbyteinteger redraw pending = 5
+%constantbyteinteger write issued   = 6
+!
+! Kernel services
+!
+%constantinteger execute    = x'0030000c'
+%constantinteger exreply    = (my sno<<16)!3
+!
+%constinteger xxshift=6
+%constinteger xxmask=x'3f'
+%constantinteger maxbottom = 5
+%constantbyteintegerarray bottom(1:maxbottom) = %c
+wcc0,sba,rba>>xxshift,rba&xxmask,ic
+%constantinteger maxclear = 31
+%constantbyteintegerarray clear(1:maxclear) = %c
+wcckr,sba,0,0,sf,prot,sba,comba>>xxshift,comba&xxmask,c'C',c'O',c'M',c'M',
+c'A',c'N',c'D',c':',sba,sifa>>xxshift,sifa&xxmask,sf,unprot,
+sba,eifa>>xxshift,eifa&xxmask,sf,prot,sba,rba>>xxshift,rba&xxmask,ic
+%constantbyteintegerarray blank line(1:ollen) = c' '(*)
+!
+%switch act(1:18)
+%switch intsw(accept issued:write issued)
+%owninteger base = 0
+%integer l,dact,flag,op,scursor,i,j,aid,ch
+!
+%if kmon >> my sno & 1 # 0 %then pkmonrec("Oper:",p)
+!
+dact = p_dest & x'ff'
+op = p_dest >> 8 & 7
+!
+! Check/perform initialisation
+!
+%if base = 0 %then %start
+   %if dact = 2 %then %start
+      printstring(version); newline
+      %if p_p1 = 0 %then %start
+         dev == record(p_p3)
+         base = dev_ua ad
+         u == record(base)
+         com == record(p_p4)
+         operlog == record(integer(com_sldev tabad+12))
+         operlog_updated = 0
+         i = addr(operlog_data)
+         j = i + operlog_length
+         %while i < j %cycle
+            move(ollen,addr(blank line(1)),i)
+            i = i + ollen
+         %repeat
+         screen == u_screen
+         u = 0
+         u_buffer a = base + urec space
+         u_sno = p_p2
+         !
+         ! WCCW1 clears and formats the screen, and moves the cursor to the
+         ! bottom line
+         !
+         u_wccw1_cmdad=addr(clear(1))
+         %if ccw format=0 %then u_wccw1_cmdad = u_wccw1_cmdad!(ewrite<<24) %c
+            %else u_wccw1_ccode=ewrite
+         u_wccw1_len = maxclear
+         u_wccw1_flags = x'20';         ! Suppress Length Indication
+         !
+         ! WCCW2 moves the cursor to the address specified in SCREEN_CNTRL
+         !
+         screen_cntrl = (wcc0<<24)!(sba<<16)
+!*          screen_cntrl2 = (ic<<24)
+         u_wccw2_cmdad = addr(screen_cntrl)
+         %if ccw format=0 %then u_wccw2_cmdad=u_wccw2_cmdad!(write<<24) %c
+	    %else u_wccw2_ccode=write
+         u_wccw2_flags = x'60';         ! Chain Command, Suppress Length Indication
+         u_wccw2_len = 4
+         !
+         ! WCCW3 is used for display output
+         ! The rest of the fields are filled in by 'display screen'
+         !
+         u_wccw3_flags = x'20';         ! Suppress Length Indication
+!*          !
+!*          ! WCCW4 returns the cursor to the input line
+!*          !
+!*          u_wccw4_cmdad = (write<<24)!addr(bottom(1))
+!*          u_wccw4_len = maxbottom
+!*          u_wccw4_flags = x'20';         ! Suppress Length Indication
+         !
+         ! RCCW1 reads modified screen areas to 'u_input line'+1
+         !
+         u_rccw1_cmdad=addr(u_input line)+1
+	 %if ccw format=0 %then u_rccw1_cmdad=u_rccw1_cmdad!(readm<<24) %c
+	    %else u_rccw1_ccode=readm
+         u_rccw1_flags = x'20';         ! Suppress Length Indication
+         u_rccw1_len = ulplus; ! 8 bytes spare..it needs some extra
+         !
+         ! RCCW2 blanks the input line area, resets Modified Data Tags
+         ! and restores the keyboard
+         !
+         u_rccw2_cmdad=addr(u_rccw2_cmdad)
+         %if ccw format=0 %then u_rccw2_cmdad=u_rccw2_cmdad!(eau<<24) %c
+	    %else u_rccw2_ccode=eau	  
+         u_rccw2_flags = x'60';         ! Chain command, Suppress Length Indication
+         u_rccw2_len = 1; !no data transferred. Length zero invalid.
+         !
+         ! RCCW3 moves the cursor to the start of the bottom line
+         !
+         u_rccw3_cmdad=addr(bottom(1))
+	 %if ccw format=0 %then u_rccw3_cmdad=u_rccw3_cmdad!(write<<24) %c
+	    %else u_rccw3_ccode=write
+         u_rccw3_len = maxbottom
+         u_rccw3_flags = x'20';         ! Suppress Length Indication
+         !
+         screen_length = operlog_length
+         screen_picture a = addr(operlog)
+         screen_size = ulines*ullen
+         screen_cursor = (operlog_length*(ullen//ollen)-screen_size)//(ullen//ollen)
+         %if screen_cursor < 0 %then screen_cursor = 0
+         fire(addr(u_wccw1));           ! Clear and format screen and move cursor to bottom line
+         u_state = init issued
+      %finish
+   %else
+      pkmonrec("Oper: Not initialised:",p)
+   %finish
+   %return
+%finish
+!
+u == record(base)
+screen == u_screen
+!
+%if dact = 5 %then %start;              ! Analyse interrupt response
+   flag = p_p2;                         ! SCSW word 2/CSW2
+   %if flag&x'7ffc0000'=x'08000000' %thenstart
+      ! channel end only
+      %return
+   %finishelseif flag&x'77fc0000'=x'04000000' %thenstart
+      !normal termination. Device end, maybe with channel end
+!*    dact=15
+      ->act(15)
+   %finishelseif flag = x'80000000' {attention} %then %start
+      fire(addr(u_rccw1))
+      u_state = read issued
+      -> look for work
+   %finishelsestart
+      ! invalid flag
+      ->act(5)
+   %finish
+%finish
+!
+-> act(dact)
+!
+act(*):
+   -> help
+   !
+   !--------------------------------------------------------------------
+   !
+act(3):                                 ! Execute failure
+   pkmonrec("Oper: Fire I/O fails:",p)
+   -> now idle
+   !
+   !--------------------------------------------------------------------
+   !
+act(5):                                 ! Abnormal termination
+   printstring("Oper: Abnormal termination")
+   newline
+   u_state = idle
+   -> help
+   !
+   !--------------------------------------------------------------------
+   !
+act(7):                                 ! Write line to operlog
+   isotxt = p_text
+   isotxt = " 0/ ".isotxt
+   update operlog(isotxt)
+   %return
+   !
+   !--------------------------------------------------------------------
+   !
+act(15):                                ! Normal termination
+   -> intsw(u_state)
+   !
+intsw(*):
+   pkmonrec("Oper: Invalid state:",p)
+   -> help
+   !
+intsw(idle):
+   pkmonrec("Oper: Surprise int:",p)
+   -> help
+   !
+intsw(init issued):
+intsw(write issued):
+intsw(accept issued):
+   -> now idle
+   !
+intsw(redraw pending):
+   fire(addr(u_wccw1));                 ! Reformat the screen
+   u_state = redraw issued
+   %return
+   !
+intsw(redraw issued):
+   display screen
+   %return
+   !
+intsw(read issued):
+   fire(addr(u_rccw2));                 ! Accept the input, clear input line
+   u_state = accept issued
+   l = flag & x'ffff';                  ! Residual length of transfer
+   l = ulplus - l;                       ! Actual length of transfer
+   %if l # 0 %then %start;              ! There is some input
+      length(u_input line) = l
+      aid = charno(u_input line,1);     ! Get the AID byte
+      %if aid = pgf %then %start;       ! Page Forward
+         p_p1 = 1
+         -> act(18)
+      %finish %else %c
+      %if aid = pgb %then %start;       ! Page Backward
+         p_p1 = -1
+          -> act(18)
+      %finish %else %c
+      %if aid = cleark %then %start;    ! Screen locally cleared - arrange to redraw it
+         u_state = redraw pending
+         %return
+      %finish %else %c
+      %if aid # enter %then %start
+         printstring("Oper: Strange AID")
+         newline
+         -> help
+      %finish
+      %if l <= 6 %then %start
+         printstring("Oper: Short transfer")
+         newline
+         -> help
+      %finish
+      %for i = 7,1,l %cycle
+         ch = charno(u_input line,i)
+         %exit %if 0 <= ch <= x'3f'
+         charno(u_input line,i-6) = ch
+      %repeat
+      %if 0 <= ch <= 31 %then %start
+         printstring("Oper: Extra data stream order")
+         newline
+         dumptable(1,addr(u),512)
+      %finish
+      l = l - 6
+      length(u_input line) = l
+   %else
+      printstring("Oper: Null input")
+      newline
+      -> help
+   %finish
+   etoi(addr(u_input line)+1,l)
+   parse com((my sno<<16)!(op<<8)!7,u_input line)
+   -> look for work
+   !
+   !--------------------------------------------------------------------
+   !
+act(18):                                ! Page Forward/Page Back
+   scursor = screen_cursor + p_p1*(screen_size//(ullen//ollen))
+   %if scursor < 0 %then scursor = 0
+   %if scursor + (screen_size//(ullen//ollen)) > screen_length %then %c
+      scursor = screen_length - (screen_size//(ullen//ollen))
+   operlog_updated = 1
+   screen_cursor = scursor
+   -> look for work
+   !
+   !--------------------------------------------------------------------
+   !
+help:
+   pkmonrec("** Oper: Rcvd:",p)
+   dumptable(2,addr(u),512)
+   %return
+   !
+now idle:
+   u_state = idle
+   !
+   !--------------------------------------------------------------------
+   !
+act(10):                                ! Clock tick
+look for work:
+   %return %unless u_state = idle
+   display screen %if operlog_updated # 0
+   %return
+!
+!-----------------------------------------------------------------------
+!
+%routine display screen
+%integer i,ad
+!
+operlog_updated = 0
+ad = screen_picture a + screen_cursor + hdr s
+%for i = 0,1,ulines-1 %cycle
+   move(ollen,ad+i*ollen,u_buffer a+i*ullen+1)
+                                        ! Allow for WCC
+%repeat
+byteinteger(u_buffer a) = wcc0
+u_wccw3_cmdad=u_buffer a
+%if ccw format=0 %then u_wccw3_cmdad=u_wccw3_cmdad!(write<<24) %c
+   %else u_wccw3_ccode=write
+u_wccw3_len = screen_size + 1;          ! Allow for WCC
+screen_cntrl = (screen_cntrl & x'ffff0000')!((wba>>xxshift)<<8)!(wba&xxmask)
+fire(addr(u_wccw2))
+u_state = write issued
+%end;   ! of display screen
+!
+!-----------------------------------------------------------------------
+!
+%routine fire(%integer ccwa)
+%record(parmf) q
+!
+q = 0
+q_dest = execute
+q_srce = ex reply
+q_p1 = ccwa
+q_p2 = u_sno
+pon(q)
+%end;   ! of fire
+!
+!-----------------------------------------------------------------------
+!
+%routine update operlog(%string(63) txt)
+%integer ad
+%string(80) isotxt
+%record(parmf) q
+!
+isotxt <- txt
+isotxt = isotxt." " %while length(isotxt) < ollen
+ebcdictxt = isotxt
+itoe(addr(ebcdictxt)+1,ollen)
+ad = addr(operlog)
+move(operlog_length-ollen,ad+hdr s+ollen,ad+hdr s)
+move(ollen,addr(ebcdictxt)+1,ad+hdr s+operlog_length-ollen)
+printstring(string(addr(com_time0)+3)." OPERLOG ".isotxt)
+newline
+%if operlog_updated = 0 %then %start
+   operlog_updated = 1
+   q = 0
+   q_dest = (my sno<<16)!10;            ! Look for work (pseudo clock tick)
+   pon(q)
+%finish
+%end;   ! of update operlog
+!
+%end;   ! of oper
+!
+!=======================================================================
+!
+%externalroutine opmess(%string(63) mess)
+%record(parmf) p
+%constantinteger mlen = 23
+!
+printstring("Opmess: ".mess)
+newline
+p_dest = (my sno<<16)!7;                ! Write line to operlog
+p_srce = 0
+%while length(mess) > mlen %cycle
+   p_text <- mess
+   mess -> (p_text).mess
+   length(p_text) = mlen
+   pon(p)
+%repeat
+p_text = mess
+pon(p)
+%end;   ! of opmess
+%endoffile

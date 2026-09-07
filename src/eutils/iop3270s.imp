@@ -1,0 +1,1962 @@
+%include "ercc07:ibmsup_comf370"
+%include "ercc07:ibmsup_dtform2s"
+!
+!***********************************************************************
+!*
+!*           3270 operator console driver for EMAS supervisor
+!*
+!*                      Drives up to eight 3270s
+!*
+!*             R.D. Eager   University of Kent   MCMLXXXVI
+!*             Updated S.Hayes Jun 88.
+!*
+!***********************************************************************
+!
+%constantstring(18) version = "OP3270 1a 17/06/88"
+!
+!
+!***********************************************************************
+!*
+!*          Constants
+!*
+!***********************************************************************
+!
+! Miscellaneous constants
+!
+%constantinteger bit0       = x'80000000'
+%constantinteger bit1       = x'40000000'
+%constantinteger d tickfreq = 1;        ! Default frequency of regular clock tick (seconds)
+%constantinteger max dact   = 21;       ! Highest OPER activity number
+%constantinteger max mlen   = 23;       ! Max length of single message
+%constinteger vbar=x'4f'
+!
+%constantstring(8) default prompt = e"COMMAND:"
+!
+! Kernel service numbers
+!
+%constantinteger cc sno     = x'37';    ! Comms controller
+%constantinteger my sno     = x'32';    ! OPER
+%constantinteger timer sno  = x'0a';    ! Timer
+!
+%constantinteger execute    = x'30000c';! DEVIO - execute chain
+!
+! 3270 data stream orders
+!
+%constinteger xxshift=6
+%constinteger xxmask=x'3f'
+%constantbyteinteger ic     = x'13';    ! Insert Cursor
+%constantbyteinteger sba    = x'11';    ! Set Buffer Address
+%constantbyteinteger sf     = x'1d';    ! Start Field
+!
+! 3270 command codes
+!
+%constantbyteinteger eau    = x'0f';    ! Erase All Unprotected
+%constantbyteinteger ewrite = x'05';    ! Erase/Write
+%constantbyteinteger readm  = x'06';    ! Read Modified
+%constantbyteinteger write  = x'01';    ! Write
+!
+! 3270 AID bytes
+!
+%constantbyteinteger cleark = x'6d';    ! CLEAR key
+%constantbyteinteger enter  = x'7d';    ! ENTER key
+%constantbyteinteger pf1    = x'f1';    ! PF1 key
+%constantbyteinteger pf2    = x'f2';    ! PF2 key
+%constantbyteinteger pf3    = x'f3';    ! PF3 key
+%constantbyteinteger pf4    = x'f4';    ! PF4 key
+%constantbyteinteger pf7    = x'f7';    ! PF7 key
+%constantbyteinteger pf8    = x'f8';    ! PF8 key
+!
+%constantbyteinteger helpkey= pf1;      ! Help key
+%constantbyteinteger cancel = pf2;      ! Cancel input line
+%constantbyteinteger command= pf3;      ! Force command prompt
+%constantbyteinteger salarm = pf4;      ! Stop alarm
+%constantbyteinteger pgb    = pf7;      ! Page Back key
+%constantbyteinteger pgf    = pf8;      ! Page Forward key
+!
+! 3270 field attributes
+!
+%constantbyteinteger prot   = x'60';    ! Protected field
+%constantbyteinteger unprot = x'40';    ! Unprotected field
+!
+! 3270 Write Control Characters
+!
+%constantbyteinteger wcc0   = x'00';    ! No action
+%constantbyteinteger wcca   = x'04';    ! Sound console alarm
+%constantbyteinteger wcckr  = x'43';    ! Restore keyboard and reset
+!
+! Screen and operlog geometry
+!
+%constantinteger hdr s      = 8;        ! Size of resident picture header
+%constantinteger hi screen  = 3;        ! Highest screen number (from 0)
+%constantinteger lprompt    = 35;       ! Prompt area length
+%constantinteger ollen      = 40;       ! Line length of subscreen
+%constantinteger rbuf hdr s = 6;        ! Size of input buffer header
+%constantinteger ullen      = 80;       ! Line length of screen
+%constantinteger ulines     = 21;       ! Number of lines used for display
+!
+! Addresses for cursor
+!
+%constantshortinteger ssa   = 0;        ! Start of screen area
+%constantshortinteger pba   = 1760;     ! Start of prompt line (0,22)
+%constantshortinteger eifa  = 1919;     ! End of input field (79,23)
+%constantshortinteger rba   = 1840;     ! Start of read buffer area (0,23)
+%constantshortinteger sifa  = 1839;     ! Start of input field (79,22)
+%constantshortinteger wba   = 0;       ! Start of display area (0,0)
+!
+! Resident picture types
+!
+%constantinteger olog       = 0;        ! Operlog picture
+%constantinteger plist      = 1;        ! Process list picture
+%constantinteger helplist   = 2;        ! Help screen
+!
+! Display codes
+!
+%constantinteger ebcdic     = 1
+%constantinteger iso        = 0
+!
+! Bits in SCSW 2/CSW 2
+!
+%constantinteger attention  = x'80000000'
+%constantinteger normal     = x'0c000000'
+!
+! OPER internal states
+!
+%constantbyteinteger accept issued   = 0
+%constantbyteinteger help pending    = 1
+%constantbyteinteger idle            = 2
+%constantbyteinteger init issued     = 3
+%constantbyteinteger prompt issued   = 4
+%constantbyteinteger prompt pending  = 5
+%constantbyteinteger read issued     = 6
+%constantbyteinteger redraw issued   = 7
+%constantbyteinteger redraw pending  = 8
+%constantbyteinteger write issued    = 9
+!
+! OPER input modes
+!
+%constantbyteinteger no input        = 0
+%constantbyteinteger requested       = 1;! D/NEWSTART input
+%constantbyteinteger prompted        = 2;! D/START input
+%constantbyteinteger prompt preempted= 3;! Prompt preempted by Command key
+!
+! Communications stream states
+!
+%constantinteger connecting          = 2
+%constantinteger disabling           = 4
+%constantinteger disconnecting       = 1
+%constantinteger enabling            = 7
+!
+! Communications buffer states
+!
+%constantbyteinteger being filled       = 4
+%constantbyteinteger empty              = 0
+%constantbyteinteger first part         = 1
+%constantbyteinteger full               = 3
+%constantbyteinteger second part        = 2
+%constantbyteinteger still being filled = 5
+!
+! Interactive stream states
+!
+%constantbyteinteger pidle          = 0
+%constantbyteinteger input          = 1
+%constantbyteinteger display        = 2
+!
+! ASCII character codes (in comms buffers)
+!
+%constantbyteinteger cr             = x'0d'
+%constantbyteinteger lf             = x'0a'
+!
+%constantbyteintegerarray blank line(1:ollen) = c' '(*)
+%constantstring(1) snl="
+"
+!
+!
+!***********************************************************************
+!*
+!*          Record formats
+!*
+!***********************************************************************
+!
+%recordformat buffer f(%integer stream no,external stream no,amtx,
+                       offset,length,real address,p5,p6,link)
+%if ccw format=0 %thenstart
+   %recordformat ccwf(%integer cmdad,%byteinteger flags,sp,%shortinteger len)
+%finishelseif ccw format=1 %thenstart
+   %recordformat ccwf(%byteinteger ccode,flags,%shortinteger len,%integer cmdad)
+%finish
+%recordformat parmf(%integer dest,srce,(%integer p1,p2,p3,p4,p5,p6 %or %c
+                                        %string(23) text %or %c
+                                        %byteinteger line,pos,spare,%string(20) txt))
+%recordformat parmxf(%integer dest,srce,p1,p2,p3,p4,p5,p6,link)
+%recordformat picture f(%integer length,updated,data)
+%recordformat pparmf(%integer in stream,in cell,out stream,out cell,cursor,
+                     pptr,iptr,%shortinteger state,oper,%integer link)
+%recordformat pqf(%record(parmf) p,%integer link)
+%recordformat screen f(%integer id,length,hl cursor,picture a,cursor,size,
+                       buffer a,%byteinteger lines,llen,code,write)
+%recordformat stream f(%shortinteger stream no,external stream no,
+                       %byteinteger state,mode,adaptor no,device no,
+                       %integer length,owner,caller,amtx,start,cursor,link)
+!
+%recordformat unit f(%record(ccwf) wccw1,wccw2,wccw3,wccw4,
+                     rccw1,rccw2,rccw3,
+                     %integer buffer a,caller,read q,prefix,
+                     %byteinteger attention,read,alarm,input enabled,
+                     input mode,preempt,buff state,sno,
+                     state,nss,alarming,tick,
+                     %record(screen f)%array screen(0:hi screen),
+                     %string(lprompt) prompt,
+                     %string(ullen+rbuf hdr s) input line,
+                     %string(ollen) lline,
+                     %byteintegerarray pbuf(1:lprompt+4))
+!
+! Format size for 'unit f' : 7*CCWs    (56) +
+!                            4*int     (16) +
+!                            12*byte   (12) +
+!                            4*screens (4*32 = 128) +
+!                            prompt    (36) +
+!                            input line(87) +
+!                            lline     (41) +
+!                            pbuf      (35) = 411
+! Maximum allowed is 504. 
+!
+%constantinteger urec space = 460;      ! Allow safety margin
+!
+!
+!***********************************************************************
+!*
+!*          External and forward references
+!*
+!***********************************************************************
+!
+%externalroutinespec dumptable(%integer type,ad,len)
+%externalroutinespec etoi(%integer ad,len)
+%externalroutinespec itoe(%integer ad,len)
+%externalroutinespec monitor(%string(63) s)
+%externalroutinespec move(%integer len,from,to)
+%externalintegerfunctionspec newppcell
+%externalroutinespec parse com(%integer srce,%stringname s)
+%externalroutinespec pkmonrec(%string(23) s,%record(parmf)%name p)
+%externalroutinespec pon(%record(parmf)%name p)
+%externalintegerfunctionspec realise(%integer virtad)
+%externalroutinespec returnppcell(%integer cell)
+%externalintegerfunctionspec rtv(%integer virtad)
+%externalstringfunctionspec strint(%integer i)
+%if multiocp=yes %start
+   %externalroutinespec reserve log
+   %externalroutinespec release log
+%finish
+!
+%if monlevel & 2 # 0 %then %start
+   %externallongintegerspec kmon
+%finish
+!
+%routinespec display text(%integer oper,line,pos,%string(ollen+1) txt)
+%routinespec opmess3(%string(63) s)
+!
+!
+!***********************************************************************
+!*
+!*          Own variables and constant record names
+!*
+!***********************************************************************
+!
+%owninteger pparmq        = 0;          ! Head of request queue
+%owninteger proc update   = yes;        ! Update process page on clock tick
+%owninteger tickfreq      = d tickfreq; ! Frequency of regular timer ticks
+%owninteger cominit       = no;         ! Flag for once-only initialisation
+%owninteger dump limit    = 1;          ! Max number of invalid character dumps
+%owninteger operlog length;             ! 'til corrupter caught
+%ownintegerarray context(0:7) = 0(8);   ! 'u' record bases for up to 8 OPERs
+!
+! 3270 control strings
+!
+%constantinteger maxalarm = 1
+%constantbyteintegerarray alarm(1:maxalarm) = %c
+wcca
+%constantinteger maxbottom = 5
+%ownbyteintegerarray bottom(1:maxbottom) = %c
+wcc0,sba,rba>>xxshift,rba&xxmask,ic
+%constantinteger maxclear = 20
+%constantbyteintegerarray clear(1:maxclear) = %c
+wcckr,sba,ssa>>xxshift,ssa&xxmask,sf,prot,sba,sifa>>xxshift,sifa&xxmask,
+sf,unprot,
+sba,eifa>>xxshift,eifa&xxmask,sf,prot,sba,rba>>xxshift,rba&xxmask,ic
+!
+! Help screen contents
+!
+%constantinteger maxhelp = ollen*ulines
+%ownbyteintegerarray helps(1:maxhelp+8) = %c
+maxhelp>>24,(maxhelp>>16)&x'ff',(maxhelp>>8)&x'ff',maxhelp&x'ff',0,0,0,0,
+' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ','O','P','E','R',
+' ','H','e','l','p',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',
+' '(20),
+' '(20),
+' ',' ',' ','P','F','1',' ',' ',' ',' ',' ','H','e','l','p',' ',' ',' ',' ',' ',
+' '(20),
+' ',' ',' ','P','F','2',' ',' ',' ',' ',' ','C','a','n','c','e','l',' ','i','n',
+'p','u','t',' ','l','i','n','e',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',
+' ',' ',' ','P','F','3',' ',' ',' ',' ',' ','F','o','r','c','e',' ','C','O','M',
+'M','A','N','D',' ','p','r','o','m','p','t',' ',' ',' ',' ',' ',' ',' ',' ',' ',
+' ',' ',' ','P','F','4',' ',' ',' ',' ',' ','S','t','o','p',' ','a','l','a','r',
+'m',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',
+' '(20),
+' '(20),
+' ',' ',' ','P','F','7',' ',' ',' ',' ',' ','P','a','g','e',' ','B','a','c','k',
+' '(20),
+' ',' ',' ','P','F','8',' ',' ',' ',' ',' ','P','a','g','e',' ','F','o','r','w',
+'a','r','d',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',
+' '(*)
+!
+%ownrecord(picture f)%name operlog,process list,help text
+!
+%constantrecord(buffer f)%arrayname buffers = parm0ad
+%constantrecord(parmxf)%arrayname parm = parm0ad
+%constantrecord(pparmf)%arrayname pparms = parm0ad
+%constantrecord(stream f)%arrayname streams = parm0ad
+!
+!
+!***********************************************************************
+!*
+!*          O P E R
+!*
+!***********************************************************************
+!
+%externalroutine oper(%record(parmf)%name p)
+!
+%routinespec clean buffer(%integer ad,len)
+%routinespec display console
+%routinespec display resident picture(%integer pic)
+%integerfunctionspec find pparm(%integer stream)
+%routinespec fire(%integer ccwa)
+%routinespec free pparm(%integer cell)
+%integerfunctionspec new pparm
+%routinespec process page
+%routinespec queue(%record(parmf)%name p)
+%routinespec set prompt(%string(lprompt) s)
+%routinespec tell picture owner
+%routinespec transfer complete(%integer stream,p2,p3,p6)
+%routinespec transfer request(%integername cursor)
+%routinespec update operlog(%stringname txt)
+!
+%integer i,j,k,l,cc state,cell,dact,flag,op,pcell,scursor,state,stream no
+%integer screen no,aid,ch,base
+%string(ullen+10) text,work1,work2
+%switch act(1:max dact)
+%switch intsw(accept issued:write issued)
+%record(buffer f)%name buffer
+%record(dtform)%name dev
+%record(picture f)%name picture
+%record(pparmf)%name pparm
+%record(pqf)%name pq
+%record(parmf) q
+%record(screenf) %name screen
+%record(stream f)%name stream
+%record(unit f)%name u
+!
+reenter:
+!
+%if monlevel & 2 # 0 %then %start
+   %if kmon >> my sno & 1 # 0 %then pkmonrec("Oper:",p)
+%finish
+!
+dact = p_dest & x'ff'
+-> help %unless 1 <= dact <= max dact
+!
+op = p_dest >> 8 & x'7';                ! OPER number
+!
+! Check/perform initialisation
+!
+base = context(op)
+!
+%if base = 0 %then %start
+   %if (p_srce >> 16) # cc sno %and dact = 2 %then %start
+      %if p_p1 = 0 %then %start
+         %if cominit = no %then %start;  ! Once-only initialisation
+            %if multiocp=yes %then reserve log
+            printstring(version); newline
+            %if multiocp=yes %then release log
+            process list == record(integer(com_sldev tabad+8))
+            i = addr(process list_data)
+            j = i + process list_length
+            %while i < j %cycle;        ! Blank the process list picture
+               move(ollen,addr(blank line(1)),i)
+               i = i + ollen
+            %repeat
+            operlog == record(integer(com_sldev tabad+12))
+            operlog length = operlog_length
+            help text == record(addr(helps(1)))
+            cominit = yes;              ! Mark as initialised now
+         %finish
+         dev == record(p_p3)
+         base = dev_ua ad
+         context(op) = base
+         u == record(base)
+         u = 0
+         u_buffer a = base + urec space + ulines*ullen + 4
+                                        ! Allow space for WCC and address bytes
+         byteinteger(u_buffer a)=x'60'; ! '-' to top line
+         i=u_buffer a
+	 *l_1,i; *la_2,1(1); *mvc_0(79,2),0(1);
+!         move(ullen-1,u_buffer a,u_buffer a+1); ! move wont allow o'lap
+         byteinteger(u_buffer a+ollen-1)=vbar
+
+         !
+         ! Set up the buffer header. This contains the control information
+         ! necessary to ensure that the output is positioned correctly
+         ! on the screen.
+         !
+         byteinteger(u_buffer a-4) = wcc0
+         byteinteger(u_buffer a-3) = sba
+         byteinteger(u_buffer a-2) = wba>>xxshift
+         byteinteger(u_buffer a-1) = wba&xxmask
+         !
+         u_sno = p_p2;                  ! DEVIO service number for this OPER
+         %if ccw format = 0 %thenstart
+            ! format zero ccws (24 bit addressable store)
+            !
+            ! WCCW1 clears and formats the screen, and moves the cursor to the
+            ! input line
+            !
+            u_wccw1_cmdad = (ewrite<<24)!realise(addr(clear(1)))
+            u_wccw1_len = maxclear
+            u_wccw1_flags = x'60';         ! Chain Command, Suppress Length Indication
+            !
+            ! WCCW2 outputs the prompt
+            !
+            u_pbuf(1) = wcc0;              ! Set up initial prompt and preamble
+            u_pbuf(2) = sba
+            u_pbuf(3) = pba >> xxshift
+            u_pbuf(4) = pba & xxmask
+            u_wccw2_cmdad = (write<<24)!realise(addr(u_pbuf(1)))
+                                           ! Length filled in later
+            u_wccw2_flags = x'20';         ! Suppress Length Indication
+            set prompt(default prompt)
+            !
+            ! WCCW3 is used for display output
+            !
+            u_wccw3_cmdad = (write<<24)!realise(u_buffer a-4)
+            u_wccw3_len = ullen*(ulines+1)+4;  ! Extra 4 bytes are for the buffer header
+            u_wccw3_flags = x'20';         ! Suppress Length Indication
+            !
+            ! WCCW4 sounds the console alarm
+            !
+            u_wccw4_cmdad = (write<<24)!realise(addr(alarm(1)))
+            u_wccw4_len = maxalarm
+            u_wccw4_flags = x'20';         ! Suppress Length Indication
+            !
+            ! RCCW1 reads modified screen areas to 'u_input line'+1
+            !
+            u_rccw1_cmdad = (readm<<24)!realise(addr(u_input line)+1)
+            u_rccw1_len = ullen + rbuf hdr s
+            u_rccw1_flags = x'20';         ! Suppress Length Indication
+            !
+            ! RCCW2 blanks the input line area, resets Modified Data Tags
+            ! and restores the keyboard
+            !
+            u_rccw2_cmdad = eau<<24 ! realise(addr(u_rccw2_cmdad)); ! no data transferred
+            u_rccw2_len = 1; !no data transferred
+            u_rccw2_flags = x'60';         ! Chain Command, Suppress Length Indication
+            !
+            ! RCCW3 moves the cursor to the start of the bottom line
+            !
+            u_rccw3_cmdad = (write<<24)!realise(addr(bottom(1)))
+            u_rccw3_len = maxbottom
+            u_rccw3_flags = x'20';         ! Suppress Length Indication
+            ! end of format zero ccws
+         %finishelsestart
+            ! format 1 ccws
+            !
+            ! WCCW1 clears and formats the screen, and moves the cursor to the
+            ! input line
+            !
+            u_wccw1_ccode = ewrite
+            u_wccw1_cmdad = realise(addr(clear(1)))
+            u_wccw1_len = maxclear
+            u_wccw1_flags = x'60';         ! Chain Command, Suppress Length Indication
+            !
+            ! WCCW2 outputs the prompt
+            !
+            u_pbuf(1) = wcc0;              ! Set up initial prompt and preamble
+            u_pbuf(2) = sba
+            u_pbuf(3) = pba >> xxshift
+            u_pbuf(4) = pba & xxmask
+            u_wccw2_ccode = write
+            u_wccw2_cmdad = realise(addr(u_pbuf(1)))
+                                           ! Length filled in later
+            u_wccw2_flags = x'20';         ! Suppress Length Indication
+            set prompt(default prompt)
+            !
+            ! WCCW3 is used for display output
+            !
+            u_wccw3_ccode = write
+            u_wccw3_cmdad = realise(u_buffer a-4)
+            u_wccw3_len = ullen*(ulines+1)+4;  ! Extra 4 bytes are for the buffer header
+            u_wccw3_flags = x'20';         ! Suppress Length Indication
+            !
+            ! WCCW4 sounds the console alarm
+            !
+            u_wccw4_ccode = write
+            u_wccw4_cmdad = realise(addr(alarm(1)))
+            u_wccw4_len = maxalarm
+            u_wccw4_flags = x'20';         ! Suppress Length Indication
+            !
+            ! RCCW1 reads modified screen areas to 'u_input line'+1
+            !
+            u_rccw1_ccode = readm
+            u_rccw1_cmdad = realise(addr(u_input line)+1)
+            u_rccw1_len = ullen + rbuf hdr s
+            u_rccw1_flags = x'20';         ! Suppress Length Indication
+            !
+            ! RCCW2 blanks the input line area, resets Modified Data Tags
+            ! and restores the keyboard
+            !
+            u_rccw2_ccode = eau
+            u_rccw2_cmdad = realise(addr(u_rccw2_cmdad)); ! no data transferred
+            u_rccw2_len = 1; !no data transferred
+            u_rccw2_flags = x'60';         ! Chain Command, Suppress Length Indication
+            !
+            ! RCCW3 moves the cursor to the start of the bottom line
+            !
+            u_rccw3_ccode = write
+            u_rccw3_cmdad = realise(addr(bottom(1)))
+            u_rccw3_len = maxbottom
+            u_rccw3_flags = x'20';         ! Suppress Length Indication
+            !
+            ! end of format 1 ccws
+         %finish
+         !
+         u_prefix = -1
+         u_lline = "";                  ! No partial output line yet
+         %for i = 0,1,hi screen %cycle
+            screen == u_screen(i)
+            screen = 0
+            %if i<2 %then screen_lines = ulines %c
+	       %else screen_lines=0;    ! 2 screens initially
+            screen_llen = ollen
+            screen_size = screen_lines*ollen
+            screen_hl cursor = -1
+            screen_buffer a = base + urec space + i*ollen*screen_lines
+         %repeat
+         q = 0
+         q_dest = (timer sno << 16)!1
+         q_p1 = (my sno << 16)!10!(op << 8)
+         q_p2 = tickfreq
+         pon(q);                        ! Request clock tick every 'tickfreq' seconds
+         u_state = init issued
+         fire(addr(u_wccw1));           ! Clear and format screen,
+                                        ! display prompt,
+                                        ! and move cursor to bottom line
+      %finish
+   %else
+      pkmonrec("Oper: not initialised:",p)
+   %finish
+   %return
+%finish
+!
+u == record(base)
+!
+!-----------------------------------------------------------------------
+!
+! Comms controller calls
+!
+%if p_srce >> 16 = cc sno %then %start; ! From comms controller
+   q = 0;                               ! Usually needed
+   !
+   %if dact = 8 %then %start;           ! Reply from picture disable
+      q_dest = (cc sno << 16)!5;        ! Disconnect
+      q_srce = (my sno << 16)!9
+      q_p1 = p_p1
+      pon(q)
+      %return
+   %finish
+   !
+   %if dact = 9 %then %return;          ! Reply from disconnect
+   !
+   stream no = p_p1 & x'ffff';          ! I/P = even, O/P = odd
+   pcell = -1
+   cc state = -1
+   !
+   %if p_p1 >> 16 # 0 %then %start;     ! Low level control
+      cc state = p_p2 >> 24
+      %if cc state = connecting %then %start
+         cell = p_p4
+         stream == streams(cell)
+         pcell = stream_external stream no >> 1
+         %if pcell = 0 %then pcell = new pparm
+         pparm == pparms(pcell)
+         %if stream no & 1 # 0 %then %start
+            pparm_out stream = stream no
+            pparm_out cell = cell
+         %else
+            pparm_in stream = stream no
+            pparm_in cell = cell
+         %finish
+         pparm_state = 0
+         pparm_oper = u_nss << 4;       ! Protem until Director indicates which screen for NEWSTART
+      %finish
+   %finish
+   !
+   %if pcell < 0 %then %start
+      pcell = find pparm(stream no)
+      pparm == pparms(pcell)
+      %if stream no & 1 # 0 %then %start
+         cell = pparm_out cell
+      %else
+         cell = pparm_in cell
+      %finish
+      stream == streams(cell)
+      %if cc state = enabling %and stream no & 1 # 0 %and pparm_in cell # 0 %then %start
+                                        ! Enforce 4K max IT buffer for NEWSTARTs
+         %if stream_start + stream_length > 4095 %then %start
+            opmess3(" 0/ NEWSTART - IT buffer too large")
+            q_p2 = -1;                  ! Fail request
+            -> rtocc
+         %finish
+      %finish
+   %finish
+   !
+   screen no = stream_device no >> 4
+   -> help %unless 0 <= screen no <= hi screen
+   screen == u_screen(screen no)
+   %if screen_llen=0 %start;            ! screen not active
+            q_p2 = -1;                  ! Fail request
+            -> rtocc
+   %finish
+   !
+   %if dact = 6 %then %start;           ! Go ahead
+      buffer == buffers(p_p2)
+      %if stream_external stream no = 0 %then %start
+                                        ! Picture
+         %if buffer_length = screen_size %then %start
+            state = full
+         %else
+            %if u_buff state = being filled %then state = first part %else state = second part
+         %finish
+         u_buff state = state!screen no << 4
+      %else;                            ! Interactive process
+         pparm_state = pparm_state & x'f0f'!((pparm_state & x'f0') << 4)
+                                        ! Waiting go ahead -> screen output required
+      %finish
+      -> look for work
+   %finish %else %c
+   %if dact = 7 %then %start;           ! Send control
+      %if cc state < 0 %then %start;    ! High level control
+         %if stream_external stream no = 0 %then %start
+                                        ! Picture
+            %return %if screen_hl cursor >= 0
+                                        ! Previous call still being processed
+            i = p_p6*screen_llen
+            %if i < 0 %then i = 0 %else %c
+            %if i + screen_size > screen_length %then i = screen_length - screen_size
+            screen_hl cursor = i;       ! Starting line for output
+         %else;                         ! Interactive process, input or output request
+            %if stream no & 1 = 0 %then %start
+                                        ! Input
+               pparm_pptr = p_p2
+               pparm_iptr = p_p3
+               pparm_state = pparm_state!input
+            %else
+               stream_cursor = p_p2
+               q_srce = p_dest
+               %if p_srce & x'ff' = 18 %then %start
+                                        ! Control message 6
+                  q_dest = stream_owner
+                  q_p5 = p_p2
+               %else
+                  q_dest = p_srce
+                  q_p1 = stream no
+               %finish
+               pon(q)
+               pparm_state = display %if pparm_state = pidle
+            %finish
+         %finish
+      %else;                            ! Low level control
+         %if cc state = disconnecting %then %start
+            %if stream no & 1 # 0 %then pparm_out stream = 0 %else pparm_in stream = 0
+            %if pparm_in stream = 0 = pparm_out stream %then %start
+               free pparm(pcell)
+               screen_id = 0 %if screen_id = pcell
+            %finish
+         %else
+            %if stream_external stream no = 0 %then %start
+                                        ! Picture
+               %if cc state = connecting %then %start
+                  %if screen_id > 0 %then tell picture owner
+                  screen_id = pcell
+                  screen_picture a = screen_buffer a
+               %else
+                  %if cc state = enabling %then %start
+                     screen_code = stream_mode >> 4
+                     screen_length = stream_length + 1
+                  %finish
+               %finish
+            %finish
+         %finish
+         !
+      rtocc:
+         q_dest = (cc sno << 16)!(p_p1 >> 16)
+         q_srce = p_dest
+         q_p1 = stream no
+         pon(q)
+      %finish
+      -> look for work
+   %finish %else -> help
+%finish
+!
+!-----------------------------------------------------------------------
+!
+! Normal calls
+!
+-> act(dact)
+!
+act(*):
+   -> help
+   !
+   !--------------------------------------------------------------------
+   !
+act(1):                                 ! NEWSTART entry from Director
+   q = 0
+   q_dest = p_srce
+   q_srce = p_dest
+   q_p1 = new pparm << 1;               ! OPER external stream number (first of pair)
+   pon(q)
+   %return
+   !
+   !--------------------------------------------------------------------
+   !
+act(2):                                 ! Initialisation - should not get here
+   pkmonrec("Oper: Bad initialisation:",p)
+   %return
+   !
+   !--------------------------------------------------------------------
+   !
+act(3):                                 ! Execute failure
+   pkmonrec("Oper: Fire I/O fails:",p)
+   -> now idle
+   !
+   !--------------------------------------------------------------------
+   !
+act(4):                                 ! Set OPER facilities bits
+   %return;                             ! No-op protem
+   !
+   !--------------------------------------------------------------------
+   !
+act(5):                                 ! I/O interrupt
+   flag = p_p2;                         ! SCSW 2/CSW2
+   !
+   ! Analyse interrupt response
+   !
+   %if flag = attention %then %start
+      u_attention = 1
+      -> look for work
+   %finish
+   !
+   %if flag & x'7ffc0000'= x'08000000' %thenstart
+      ! just channel end..no device end yet
+      %return
+   %finish
+   %unless flag & x'77fc0000' = x'04000000' %then %start
+      !ignore channel end, check device end set and others clear.
+                                        ! Abnormal
+      %if multiocp=yes %then reserve log
+      printstring("Oper: Abnormal termination")
+      newline
+      %if multiocp=yes %then release log
+      u_state = idle
+      -> help
+   %finish
+   !
+   -> intsw(u_state)
+   !
+intsw(*):
+   pkmonrec("Oper: Invalid state:",p)
+   -> help
+   !
+intsw(idle):
+   pkmonrec("Oper: Surprise int:",p)
+   -> help
+   !
+intsw(init issued):
+   %for screen no = 0,1,hi screen %cycle
+      screen == u_screen(screen no)
+      display resident picture(screen no)
+   %repeat
+   -> now idle
+   !
+intsw(write issued):
+intsw(accept issued):
+   -> now idle
+   !
+intsw(prompt pending):
+   clean buffer(addr(u_pbuf(5)),u_wccw2_len-4)
+   fire(addr(u_wccw2));                 ! Send the new prompt
+   u_state = write issued
+   %return
+   !
+intsw(redraw pending):
+   fire(addr(u_wccw1));                 ! Reformat the screen
+   u_state = redraw issued
+   %return
+   !
+intsw(redraw issued):
+   display console
+   %return
+   !
+intsw(help pending):
+   u_state = idle
+   p_p1 = helplist
+   p_p2 = 0
+   -> act(19)
+   !
+intsw(read issued):
+   fire(addr(u_rccw2));                 ! Accept the input, clear input line
+   u_state = accept issued
+   l = flag & x'ffff';                  ! Residual length of transfer
+   l = (ullen + rbuf hdr s) - l;        ! Actual length of transfer
+   %if l = 0 %then %start;              ! There is no input
+      %if multiocp=yes %then reserve log
+      printstring("Oper: Null input")
+      %if multiocp=yes %then release log
+   %else;                               ! There is some input
+      length(u_input line) = l
+      aid = charno(u_input line,1);     ! Get the AID byte
+      %if aid = pgf %then %start;       ! Page Forward
+         p_p1 = 1;                      ! Direction
+         p_p2 = 0;                      ! Screen 0
+         -> act(18)
+      %finish %else %c
+      %if aid = pgb %then %start;       ! Page Backward
+         p_p1 = -1;                     ! Direction
+         p_p2 = 0;                      ! Screen 0
+         -> act(18)
+      %finish %else %c
+      %if aid = cleark %then %start;    ! Screen locally cleared - arrange to redraw it
+         u_state = redraw pending
+         %return
+      %finish %else %c
+      %if aid = command %then %start;   ! COMMAND key
+         -> act(17)
+      %finish %else %c
+      %if aid = cancel %then %start;    ! CANCEL key
+         %return;                       ! Input line already being cleared
+      %finish %else %c
+      %if aid = helpkey %then %start;   ! Request for help
+         u_state = help pending
+         %return
+      %finish %else %c
+      %if aid = salarm %then %start;    ! Stop alarm
+         u_alarm = 0
+         u_alarming = 0
+         %return
+      %finish %else %c
+      %if aid = enter %then %start;     ! ENTER key - some input
+         l = rbuf hdr s %if l = 3;      ! Special case - null line sends no address
+         %if l < rbuf hdr s %then %start
+            %if multiocp=yes %then reserve log
+            printstring("Oper: Short transfer")
+            newline
+            %if multiocp=yes %then release log
+            -> help
+         %finish
+         %if l > rbuf hdr s %then %start
+            %for i = rbuf hdr s + 1,1,l %cycle
+               ch = charno(u_input line,i)
+               %exit %if 0 <= ch <= x'3f'
+               charno(u_input line,i-rbuf hdr s) = ch
+            %repeat
+            %if 0 <= ch <= x'3f' %then %start
+               %if multiocp=yes %then reserve log
+               printstring("Oper: Extra data stream order")
+               newline
+               %if multiocp=yes %then release log
+               dumptable(1,addr(u),512)
+            %finish
+         %finish
+         l = l - rbuf hdr s
+         length(u_input line) = l
+         u_input enabled = 0
+         etoi(addr(u_input line)+1,l)
+         %if u_input mode = requested %then %start
+                                        ! Interactive process via D/NEWSTART
+            u_input mode = no input
+            %return %if u_caller = 0;   ! May have gone
+            u_input line = u_input line.tostring(cr)
+                                        ! Add carriage return for Subsystem
+            pparm == pparms(u_caller)
+            u_caller = 0
+            stream == streams(pparm_in cell)
+            buffer == buffers(stream_link)
+            j = rtv(buffer_real address+stream_start)
+                                        ! Map real address to virtual page for access
+            k = j + stream_length
+            scursor = j + pparm_iptr;   ! Input start
+            *ipk  _0;                   ! Get current PSW key
+            *st   _2,l;                 ! Save it
+            *spka _0;                   ! Set key 0 for access
+            %for i = 1,1,length(u_input line) %cycle
+               byteinteger(scursor) = charno(u_input line,i)
+               %if scursor = k %then scursor = j %else scursor = scursor + 1
+            %repeat
+            j = rtv(-1)
+            *l    _2,l;                 ! Get saved PSW key 
+            *spka _0(2);                ! Reset key
+            transfer complete(pparm_in stream,4,length(u_input line),0)
+            set prompt(default prompt)
+            u_state = prompt pending
+         %finish %else %c
+         %if u_input mode = prompted %then %start
+                                        ! As result of activity 8 (via D/START process, including executives)
+            q_dest = u_caller
+            q_srce = (my sno<<16)!7!(op<<8)
+            i = (u_caller >> 16-locsn0) & (maxprocs-1)
+            text = strint(i)."< ".u_input line
+            text = " ".text %if i < 10
+            update operlog(text)
+            text = u_input line.snl
+            %cycle
+               q_text <- text
+               pon(q)
+               pkmonrec("To caller:",q)
+               l = length(text) - max mlen
+               %exit %if l <= 0
+               move(l,addr(text)+max mlen+1,addr(text)+1)
+               length(text) = l
+            %repeat
+            u_caller = 0
+            u_input mode = no input
+            set prompt(default prompt)
+            u_state = prompt pending
+         %else;                         ! Commanded
+            parse com((my sno<<16)!7!(op<<8),u_input line)
+            %if u_input mode = prompt preempted %then %start
+               u_read = u_preempt
+               set prompt(u_prompt)
+               u_state = prompt pending
+            %finish
+         %finish
+         %return
+      %finish
+      !
+      ! If we get here, the AID is not recognised and the input is ignored
+      !
+      %if multiocp=yes %then reserve log
+      printstring("Oper: Strange AID")
+      %if multiocp=yes %then release log
+   %finish
+   newline
+   -> help
+   !
+intsw(prompt issued):
+   u_input enabled = 1
+   -> now idle %unless u_input mode = requested
+                                        ! Interactive process via NEWSTART
+   -> now idle %if u_caller = 0;        ! Cannot find screen number
+   pparm == pparms(u_caller)
+   screen no = pparm_oper>>4
+   screen == u_screen(screen no)
+   %if screen_id > 0 %then tell picture owner
+   %unless u_tick=0 %start
+      u_tick=0
+      display console
+   %finish %else screen_write=1
+   ->now idle
+   !
+   !--------------------------------------------------------------------
+   !
+act(6):                                 ! PON for display text
+   display text(0,p_line,p_pos,p_txt)
+   -> look for work
+   !
+   !--------------------------------------------------------------------
+   !
+act(7):                                 ! Write line to operlog
+   i = p_srce >> 16
+   %if i < locsn0 %then i = 0 %else i = (i-locsn0) & (maxprocs-1)
+   l = length(p_text)
+   length(p_text) = l & x'7f'
+   j = no
+   %while p_text -> work1.(tostring(17)).work2 %cycle
+      p_text = work1.work2
+      j = yes
+   %repeat
+   %if j = yes %then %start
+      %if multiocp=yes %then reserve log
+      printstring("Oper: Flashing message: ".text)
+      newline
+      %if multiocp=yes %then release log
+      u_alarming = 1
+      u_alarm = 1
+   %finish
+   %while p_text -> work1.(tostring(7)).work2 %cycle
+      p_text = work1.work2
+      u_alarm = 1
+   %repeat
+   text = strint(i)."/ ".p_text
+   text = " ".text %if i < 10
+!   l=l&x'7f'
+   %if l & x'80' # 0 %then %start;      ! Long line
+      %if u_lline = "" %then %start
+         %if u_prefix < 0 %then %start; ! New & no msg under construction
+            u_prefix = i
+            u_lline = text
+            -> look for work
+         %finish
+      %else;                            ! Partial message in buffer
+         %if i = u_prefix %then %start; ! ... for this caller
+            j = length(u_lline) + length(p_text) - ollen
+            u_lline <- u_lline.p_text
+            -> look for work %if j <= 0
+            !
+         frag:
+            !
+            move(j,addr(p_text)+length(p_text)-j+1,addr(p_text)+1)
+            length(p_text) = j!(l & x'80')
+            pon(p);                     ! Start afresh with fragment
+            p_text = ""
+         %finish
+      %finish
+   %finish
+   %if i = u_prefix %then %start;       ! Output long message
+      j = length(u_lline) + length(p_text) - ollen
+      u_lline <- u_lline.p_text
+      -> frag %if j > 0
+      text = u_lline
+      u_lline = ""
+      u_prefix = -1
+   %finish
+   update operlog(text)
+   -> look for work
+   !
+   !--------------------------------------------------------------------
+   !
+act(8):                                 ! Prompt and request input (from D/START, including executives)
+   %unless u_caller = 0 %then %start
+      queue(p)
+   %else
+      u_caller = p_srce
+      i = p_srce >> 16
+      %if i < locsn0 %then i = 0 %else i = (i-locsn0) & (maxprocs-1)
+      text = p_text." from ".strint(i) %unless i = 0
+      text = text." " %while length(text) < lprompt
+      itoe(addr(text)+1,length(text))
+      u_prompt <- text
+      u_read = prompted
+   %finish
+   -> look for work
+   !
+   !--------------------------------------------------------------------
+   !
+act(9):                                 ! Sound console alarm
+   u_alarm = 1
+   u_alarming = 1
+   -> look for work
+   !
+   !--------------------------------------------------------------------
+   !
+act(10):                                ! Clock tick
+   u_alarm = 1 %if u_alarming = 1
+   !
+act10a:
+   !
+   process list_updated = x'ffffffff' %if proc update = yes
+                                        ! Mark process list updated
+   u_tick=1
+   -> look for work
+   !
+   !--------------------------------------------------------------------
+   !
+act(11):                                ! From 'opmess3'
+   length(text) = 36
+   move(36,p_p1,addr(text)+1)
+   returnppcell(p_p2)
+   update operlog(text)
+   -> look for work
+   !
+   !--------------------------------------------------------------------
+   !
+act(12):                                ! adjust windows
+                                        ! p_p1 >=0 = horizontal cursor position
+                                        ! <0 = vpos in p_p2, p_p3=0 top 1 bottom
+%if -1<=p_p1<=ulines %start
+   l=0
+   %for screen no=0,1,hi screen %cycle
+      screen==u_screen(screen no)
+      %if p_p1<0 %start;                ! vertical cursor
+         %if screen no>>1&1=p_p3 %start;! operate on required half
+            %if screen no&1=0 %then scursor=p_p2 %else scursor=ullen-p_p2
+            scursor=0 %if scursor<0
+            screen_llen=scursor
+         %finish
+      %finish %else %start;             ! horizontal cursor
+         %if screen no<(hi screen+1)//2 %then scursor=p_p1 %else scursor=ulines-p_p1-1
+         scursor=0 %if scursor<0
+         screen_lines=scursor
+      %finish
+      screen_size=screen_lines*screen_llen
+      screen_buffer a=base+urec space+l
+      l=l+screen_size
+      %if screen_id>0 %then tell picture owner %and screen_id=0
+      %if screen_size>0 %start
+         j=screen_buffer a
+         k=screen_size
+         *l_0,j; *l_1,k
+         *lr_2,0; *slr_3,3; *mvcl_0,2;   ! clear buffer
+      %finish
+      screen_hl cursor=-1
+      screen_picture a=screen_buffer a
+      screen_write=1
+      display resident picture(screen no) %unless screen no>1
+      %exit %if p_p1<0 %and p_p3=0 %and screen no>0; ! top half done
+   %repeat
+   %if u_screen(2)_size>0 %then u_nss=2 %else u_nss=0
+%finish %else opmess3(" 0/ Cursor position? ".strint(p_p1))
+%return
+   !
+   !--------------------------------------------------------------------
+   !
+act(13):                                ! Nominate NEWSTART screen
+   %if 0 <= p_p1 <= hi screen %then %start
+      u_nss = p_p1
+      opmess3(" 0/ NEWSTART screen is ".strint(u_nss))
+   %finish %else -> help
+   %return
+   !
+   !--------------------------------------------------------------------
+   !
+act(14):                                ! Parse command
+   parse com(p_srce,p_text)
+   %return
+   !
+   !--------------------------------------------------------------------
+   !
+act(17):                                ! COMMAND key
+   %if u_input mode = prompted %or u_input mode = requested %then %start
+      u_preempt = u_input mode
+      u_input mode = prompt preempted
+      set prompt(default prompt)
+      u_state = prompt pending
+   %finish
+   %return
+   !
+   !--------------------------------------------------------------------
+   !
+act(18):                                ! PGF or PGB
+   %return %unless 0 <= p_p2 <= hi screen
+   screen == u_screen(p_p2)
+   %return %if screen_llen=0
+   %if screen_id & bit1 # 0 %then %start
+                                        ! Interactive process
+      pparm == pparms(screen_id&(\(bit0!bit1)))
+      %if pparm_state & display = 0 %then %start
+         pparm_state = pparm_state!display
+         scursor = pparm_cursor + p_p1
+         %if scursor > 0 %then scursor = 0
+         pparm_cursor = scursor
+      %finish
+   %else
+      scursor = screen_cursor + p_p1*screen_size
+      %if scursor < 0 %then scursor = 0
+      %if scursor + screen_size > screen_length %then scursor = screen_length - screen_size
+      %unless scursor = screen_cursor %then %start
+         %if screen_id & bit0 = 0 %then %start
+            pparm == pparms(screen_id)
+            q = 0
+            q_dest = streams(pparm_out cell)_owner
+            q_srce = my sno << 16
+            q_p1 = pparm_out stream
+            q_p6 = scursor//screen_llen
+            pon(q)
+         %else
+            screen_write = 1
+            screen_cursor = scursor
+         %finish
+      %finish
+   %finish
+   -> look for work
+   !
+   !--------------------------------------------------------------------
+   !
+act(19):                                ! Show picture screen
+   screen no = p_p2
+   %return %unless 0 <= screen no <= hi screen
+   screen == u_screen(screen no)
+   %if p_p1 < 0 %then %start
+      text = string(addr(p_p3))
+      %if text = "P" %then p_p1 = plist %else %c
+      %if text = "H" %then p_p1 = helplist %else %c
+                           p_p1 = olog
+   %finish
+   display resident picture(p_p1)
+   -> look for work
+   !
+   !--------------------------------------------------------------------
+   !
+act(20):                                ! Modify OPER parameters
+   %if p_p1 = 1 %then %start;           ! Set process page update criteria
+      %if p_p2 = 0 %then proc update = no %else proc update = yes
+   %finish %else %c
+   %if p_p1 = 2 %then %start;           ! Alter clock tick frequency
+      %if 1 <= p_p3 <= 60 %then %start
+         tickfreq = p_p3
+         q = 0
+         q_dest = (timer sno<<16)!1
+         q_p1 = (my sno<<16)!10!(p_p2<<8)
+         q_p2 = -1;                     ! Un-queue old tick
+         pon(q)
+         q_p2 = tickfreq;               ! Queue new tick
+         pon(q)
+         opmess3("Oper: Tick at ".strint(tickfreq)." seconds")
+      %else
+         opmess3("Oper: Bad tick value")
+      %finish
+   %finish %else %c
+   %if p_p1 = 3 %then %start;           ! Alter dump limit
+      dump limit = p_p2
+   %finish %else %c
+      opmess3("Oper: Bad facility PON")
+   -> look for work
+   !
+   !--------------------------------------------------------------------
+   !
+act(21):                                ! Pseudo clock tick
+   -> act10a
+   !
+   !--------------------------------------------------------------------
+   !
+help:
+   pkmonrec("** Oper: Rcvd:",p)
+   dumptable(2,addr(u),512)
+   %return
+   !
+   !--------------------------------------------------------------------
+   !
+now idle:
+   u_state = idle
+   !
+   !--------------------------------------------------------------------
+   !
+look for work:
+   %return %unless u_state = idle
+   !
+   %if u_alarm # 0 %then %start;        ! Sound console alarm
+      u_alarm = 0
+      u_state = write issued
+      fire(addr(u_wccw4))
+      %return
+   %finish
+   !
+   %if u_attention # 0 %then %start;    ! Attention received
+      u_attention = 0
+      fire(addr(u_rccw1))
+      u_state = read issued
+      %return
+   %finish
+   !
+   %if u_caller = 0 %and u_read q # 0 %start
+                                        ! No read in progress, but one is queued
+      cell = u_read q
+      pq == parm(cell)
+      u_read q = pq_link
+      p = pq_p
+      returnppcell(cell)
+      -> reenter
+   %finish
+   !
+   %if u_read # no input %and u_input enabled = 0 %then %start
+                                        ! Prompt to go
+      !
+   prompt:
+      !
+      u_input mode = u_read
+      u_read = no input
+      u_state = prompt issued
+      set prompt(u_prompt)
+      clean buffer(addr(u_pbuf(5)),u_wccw2_len - 4)
+      fire(addr(u_wccw2))
+      %if u_input mode = requested %and u_caller # 0 %then %start
+                                        ! Interactive process
+         pparm == pparms(u_caller)
+         stream == streams(pparm_in cell)
+         buffer == buffers(stream_link)
+         process page
+      %finish
+      %return
+   %finish
+   !
+   !--------------------------------------------------------------------
+   !
+   %unless u_buff state = empty %then %start
+                                        ! Non-resident picture to go
+      state = u_buff state & x'f'
+      %unless state = being filled %or state = still being filled %then %start
+                                        ! Under construction
+         screen no = u_buff state >> 4
+         screen == u_screen(screen no)
+         pcell = screen_id
+         pparm == pparms(pcell)
+         stream == streams(pparm_out cell)
+         buffer == buffers(stream_link)
+         i = rtv(buffer_real address+buffer_offset)
+         j = screen_picture a
+         %if screen_size < buffer_length %then %start
+            u_buff state = idle
+            %return
+         %finish
+         %if state = second part %then j = j + screen_size - buffer_length
+         move(buffer_length,i,j)
+         l = rtv(-1)
+         %if state = first part %then %start
+            transfer complete(pparm_out stream,1,buffer_length,0)
+            u_buff state = u_buff state & x'f0'
+                                        ! Still being filled
+         %else
+            %unless u_tick=0 %start
+               u_tick=0
+               display console
+            %finish %else screen_write=1
+            u_buff state = empty
+            transfer complete(pparm_out stream,4,0,
+                  ((screen_size//screen_llen)<<24)!(screen_cursor//screen_llen))
+         %finish
+      %finish
+      %return
+   %finish
+   !
+   !--------------------------------------------------------------------
+   !
+   ! Update screens
+   !
+   %for i = 0,1,hi screen %cycle
+      screen == u_screen(i)
+      %if screen_id & bit0 = 0 %then %start
+         %unless screen_id = 0 %then %start
+            %if screen_hl cursor >= 0 %then %start
+               transfer request(screen_hl cursor)
+               %return
+            %finish
+         %finish
+      %else
+         %if screen_id & bit1 = 0 %then %start
+            picture == record(screen_picture a)
+            l = 1 << (op*(hi screen+1)+i)
+            %if (picture_updated&l#0 %or screen_write#0) %and u_tick#0  %start
+               u_tick=0
+               picture_updated = picture_updated & (\l)
+               display console
+               %return
+            %finish
+         %finish
+      %finish
+      %repeat
+      !
+      !-----------------------------------------------------------------
+      !
+      pcell = pparmq;                   ! Process interactive requests
+      %while pcell # 0 %cycle
+         pparm == pparms(pcell)
+         u == record(context(pparm_oper & x'7'))
+         screen no = pparm_oper>>4
+         screen == u_screen(screen no)
+         state = pparm_state
+         %if state & x'f0' = 0 %and state # pidle %then %start
+                                        ! Not waiting go ahead
+            %if state & x'f00' # 0 %then %start
+                                        ! Screen output required
+               %if state & input << 8 # 0 %then %start
+                                        ! Input required - prompt user
+                  %if u_caller = 0 %then %start
+                     %if screen_id > 0 %then tell picture owner
+                     screen_id = pcell!bit0!bit1
+                     u_caller = pcell
+                     buffer == buffers(streams(pparm_in cell)_link)
+                     stream == streams(pparm_out cell)
+                                        ! Find prompt
+                     j = rtv(buffer_real address+stream_start)
+                     k = j + stream_length
+                     scursor = j + stream_cursor
+                                        ! Prompt 1st character
+                     l = j + pparm_pptr;! Last
+                     %if scursor = l %then %start
+                        %for i = 1,1,lprompt %cycle
+                                        ! Scan back for prompt
+                           %if scursor = j %then scursor = k %else scursor = scursor - 1
+                           %if byteinteger(scursor) = lf %or %c
+                               byteinteger(scursor) = cr %then %start
+                              %if scursor = k %then scursor = j %else scursor = scursor + 1
+                              %exit
+                           %finish
+                        %repeat
+                     %finish
+                     *ipk  _0;          ! Get current PSW key
+                     *st   _2,flag;     ! Save it
+                     *spka _0;          ! Set key 0 for access
+                     %for i = 1,1,lprompt %cycle
+                        %exit %if scursor = l
+                        byteinteger(addr(u_prompt)+i) = byteinteger(scursor)
+                        byteinteger(scursor) = lf
+                                        ! Prevent echo
+                        %if scursor = k %then scursor = j %else scursor = scursor + 1
+                     %repeat
+                     *l    _2,flag;     ! Get saved PSW key
+                     *spka _0(2);       ! Reset key
+                     length(u_prompt) = i - 1
+                     u_prompt <- u_prompt." from ".strint((stream_owner>>16-locsn0) & (maxprocs-1))
+                     itoe(addr(u_prompt)+1,length(u_prompt))
+                     u_read = requested
+                     i = rtv(-1)
+                     pparm_state = state & (\(input<<8!display))
+                     -> prompt %if u_state = idle
+                  %finish
+               %else;                   ! Display
+                  %if u_state = idle %then %start
+                     stream == streams(pparm_out cell)
+                     %if screen_id = pcell!bit0!bit1 %and %c
+                         stream_mode & x'30' # x'30' %then %start
+                                        ! On display & not control mode
+                        buffer == buffers(stream_link)
+                        process page
+                        display console
+                     %finish
+                     transfer complete(pparm_out stream,0,0,0)
+                     pparm_state = state&(\(display<<8))
+                  %finish
+               %finish
+            %else
+               %if state & x'f' # 0 %then %start
+                                        ! Transfer request
+                  %if state & input # 0 %then %start
+                     state = state & x'ff0'!input << 4
+                     stream no = pparm_in stream
+                  %else
+                     state = state & x'ff0'!display << 4
+                     stream no = pparm_out stream
+                  %finish
+                  pparm_state = state
+                  q = 0
+                  q_dest = (cc sno <<16)!10
+                                        ! Transfer request
+                  q_srce = my sno << 16
+                  q_p1 = stream no
+                  pon(q)
+               %finish
+            %finish
+         %finish
+         pcell = pparm_link
+      %repeat
+      %return
+!
+!-----------------------------------------------------------------------
+!
+%routine clean buffer(%integer ad,len)
+! Checks the EBCDIC buffer, length 'len', starting at 'ad'.
+! All invalid characters are replaced by spaces.
+%integer i,ch,bad
+!
+bad = no
+%for i = ad,1,ad+len-1 %cycle
+   ch = byteinteger(i)
+   %if 0 <= ch <= x'3f' %or ch = x'ff' %then %start
+      %if bad = no %and dump limit # 0 %then %start
+         %if multiocp=yes %then reserve log
+         printstring("Oper: Bad characters in buffer")
+         newline
+         %if multiocp=yes %then release log
+         dump limit = dump limit - 1
+         dumptable(3,ad,len)
+         bad = yes
+      %finish
+      byteinteger(i) = c' '
+   %finish
+%repeat
+%end;   ! of clean buffer
+!
+!-----------------------------------------------------------------------
+!
+   %routine display console
+      %record(screen f)%name screen0,screen1,screen2,screen3
+      %integer i,offset0,offset1,offset2,offset3,ad
+      ! following definitions used for assembler sequences
+      %integer llen0,llen1,llen2,llen3,pica0,pica1,pica2,pica3
+      %integer trta0,trta1,trta2,trta3
+      %constinteger plus=x'4e'
+      screen0==u_screen(0)
+      screen1==u_screen(1)
+      screen2==u_screen(2)
+      screen3==u_screen(3)
+      %if screen0_id&(bit0!bit1)=bit0 %then offset0=screen0_cursor+hdr s %else offset0=0
+      %if screen1_id&(bit0!bit1)=bit0 %then offset1=screen1_cursor+hdr s %else offset1=0
+      ad=u_buffer a+ullen
+!      %for i=0,1,screen0_lines-1 %cycle
+!         move(screen0_llen,screen0_picture a+offset0+i*screen0_llen,ad)
+!         itoe(ad,screen0_llen) %if screen0_code=iso
+!         %unless screen1_llen=0 %start
+!            byteinteger(ad+screen0_llen-1)=vbar
+!            move(screen1_llen,screen1_picture a+offset1+i*screen1_llen,ad+screen0_llen)
+!            itoe(ad+screen0_llen,screen1_llen) %if screen1_code=iso
+!         %finish
+!         ad=ad+ullen
+!      %repeat
+      i=screen0_lines
+      %unless i=0 %start
+         llen0=screen0_llen-1
+         pica0=screen0_picture a+offset0
+         %if screen0_code=iso %then trta0=com_trans %else trta0=0
+         llen1=screen1_llen-1
+         pica1=screen1_picture a+offset1
+         %if screen1_code=iso %then trta1=com_trans %else trta1=0
+         *l_0,i; *l_3,ad
+         *basr_15,0; *using_15
+loop1:   *l_1,llen0; *l_2,pica0; *ex_1,<mvc>
+         *l_4,trta0; *ltr_4,4; *bc_8,<notr0>; *ex_1,<tr>
+notr0:   *la_2,1(1,2); *st_2,pica0; *la_3,1(1,3)
+         *l_1,llen1; *ltr_1,1; *bc_12,<nomv1>
+         *lr_2,3; *bctr_2,0; *mvi_0(2),x'4f'
+         *l_2,pica1; *ex_1,<mvc>
+         *l_4,trta1; *ltr_4,4; *bc_8,<notr1>; *ex_1,<tr>
+notr1:   *la_2,1(1,2); *st_2,pica1
+nomv1:   *la_3,1(1,3)
+         *bct_0,<loop1>; *drop_15
+         *st_3,ad
+      %finish
+      %if screen0_lines<ulines %start
+         %if screen2_id&(bit0!bit1)=bit0 %then offset2=screen2_cursor+hdr s %else offset2=0
+         %if screen3_id&(bit0!bit1)=bit0 %then offset3=screen3_cursor+hdr s %else offset3=0
+         %unless screen0_lines=0 %start
+            *l_1,ad; *mvi_0(1),x'60'; *mvc_1(79,1),0(1)
+            byteinteger(ad+screen0_llen-1)=plus
+            byteinteger(ad+screen2_llen-1)=plus %unless screen3_llen<=0
+         %finish %else ad=ad-ullen
+!         %for i=0,1,screen2_lines-1 %cycle
+!            ad=ad+ullen
+!            move(screen2_llen,screen2_picture a+offset2+i*screen2_llen,ad)
+!            itoe(ad,screen2_llen) %if screen2_code=iso
+!            %unless screen3_llen=0 %start
+!               byteinteger(ad+screen2_llen-1)=vbar
+!               move(screen3_llen,screen3_picture a+offset3+i*screen3_llen,ad+screen2_llen)
+!               itoe(ad+screen2_llen,screen3_llen) %if screen3_code=iso
+!            %finish
+!         %repeat
+         i=screen2_lines
+         %unless i=0 %start
+            llen2=screen2_llen-1
+            pica2=screen2_picture a+offset2
+            %if screen2_code=iso %then trta2=com_trans %else trta2=0
+            llen3=screen3_llen-1
+            pica3=screen3_picture a+offset3
+            %if screen3_code=iso %then trta3=com_trans %else trta3=0
+            *l_0,i; *l_3,ad; *la_3,80(3)
+            *basr_15,0; *using_15
+loop2:      *l_1,llen2; *l_2,pica2; *ex_1,<mvc>
+            *l_4,trta2; *ltr_4,4; *bc_8,<notr2>; *ex_1,<tr>
+notr2:      *la_2,1(1,2); *st_2,pica2; *la_3,1(1,3)
+            *l_1,llen3; *ltr_1,1; *bc_12,<nomv3>
+            *lr_2,3; *bctr_2,0; *mvi_0(2),x'4f'
+            *l_2,pica3; *ex_1,<mvc>
+            *l_4,trta3; *ltr_4,4; *bc_8,<notr3>; *ex_1,<tr>
+notr3:      *la_2,1(1,2); *st_2,pica3
+nomv3:      *la_3,1(1,3)
+            *bct_0,<loop2>; *drop_15
+         %finish
+      %finish
+      screen0_write=0
+      screen1_write=0
+      screen2_write=0
+      screen3_write=0
+      u_state=write issued
+      clean buffer(u_buffer a,ullen*ulines)
+      fire(addr(u_wccw3))
+      %return
+mvc:  *mvc_0(0,3),0(2)
+tr:   *tr_0(0,3),0(4)
+%end;   ! of display console
+!
+!-----------------------------------------------------------------------
+!
+%routine display resident picture(%integer pic)
+%integer a
+!
+%return %unless olog <= pic <= helplist
+!
+%if screen_id > 0 %then tell picture owner
+screen_id = bit0!pic;                   ! Mark as resident picture
+%if pic = olog %then %start
+   a = addr(operlog)
+   screen_code = ebcdic
+%finish %else %c
+%if pic = plist %then %start
+   a = addr(process list)
+   screen_code = ebcdic
+%else
+   a = addr(help text)
+   screen_code = iso
+%finish
+screen_picture a = a
+picture == record(a)
+screen_length = picture_length
+a = 0
+%if pic = olog %then a = picture_length - screen_size
+screen_cursor = a
+screen_write = 1
+%end;   ! of display resident picture
+!
+!-----------------------------------------------------------------------
+!
+%routine fire(%integer ccwa)
+q = 0
+q_dest = execute
+q_srce = (my sno << 16)!3
+q_p1 = ccwa
+q_p2 = u_sno
+pon(q)
+%end;   ! of fire
+!
+!-----------------------------------------------------------------------
+!
+%integerfunction find pparm(%integer stream)
+%integername link
+%record(pparmf)%name pparm
+!
+link == pparmq
+%while link # 0 %cycle
+   pparm == pparms(link)
+   %result = link %if pparm_in stream = stream %or pparm_out stream = stream
+   link == pparm_link
+%repeat
+monitor("Find pparm fails!")
+%end;   ! of find pparm
+!
+!-----------------------------------------------------------------------
+!
+%routine free pparm(%integer cell)
+%integername link
+%record(pparmf)%name pparm
+!
+link == pparmq
+%while link # 0 %cycle
+   pparm == pparms(link)
+   %if link = cell %then %start
+      link = pparm_link
+      returnppcell(cell)
+      %return
+   %finish
+   link == pparm_link
+%repeat
+monitor("Free pparm fails!")
+%end;   ! of free pparm
+!
+!-----------------------------------------------------------------------
+!
+%integerfunction new pparm
+%integername link
+%record(pparmf)%name pparm
+!
+link == pparmq
+%while link # 0 %cycle
+   pparm == pparms(link)
+   link == pparm_link
+%repeat
+link = newppcell
+pparm == pparms(link)
+pparm = 0
+%result = link
+%end;   ! of new pparm
+!
+!-----------------------------------------------------------------------
+!
+%routine process page
+! 'pparm' and 'buffer' are set up on entry
+%routinespec format(%integer sstart,ssize,bstart,bend,scursor)
+%integer i,j,k,scursor,screen no,lines,ilines,llen
+!
+screen no = pparm_oper >> 4
+screen == u_screen(screen no)
+lines = screen_lines
+%if lines < 10 %then ilines = 0 %else ilines = 4
+                                        ! Minimum size for I/P display
+llen = screen_llen
+j = screen_buffer a
+screen_picture a = j
+k = screen_size
+*l    _0,j
+*l    _1,k
+*lr   _2,0
+*la   _3,32;                            ! Space character
+*sll  _3,24
+*mvcl _0,2;                             ! Clear screen buffer to spaces
+stream == streams(pparm_out cell)
+j = rtv(buffer_real address+stream_start)
+k = j + stream_length
+scursor = j + stream_cursor
+format(screen_buffer a,screen_size-ilines*llen,j,k,scursor)
+%unless ilines = 0 %or pparm_in stream = 0 %then %start
+                                        ! Display I/P if reasonable
+   j = j - stream_start;                ! Buffer RA
+   stream == streams(pparm_in cell)
+   j = j + stream_start
+   k = j + stream_length
+   scursor = j + stream_cursor
+   format(screen_buffer a+(lines-(ilines-1))*llen,(ilines-1)*llen,j,k,scursor)
+   k = screen_buffer a + (lines-ilines)*llen
+                                        ! Separator line
+   *basr _15,0
+   *using_15
+   *l    _1,k
+   *l    _2,llen
+   *bctr _2,0
+   *bctr _2,0
+   *mvi  _0(1),x'2d';                   ! Minus sign
+   *ex   _2,<mvc>
+   *bc   _15,<rmvc>
+   *drop _15
+   !
+mvc:
+   !
+   *mvc  _1(0,1),0(1)
+   !
+rmvc:
+   !
+   text = strint(100-pparm_cursor)
+   move(2,addr(text)+2,k+llen-2)
+   !
+%finish
+j = rtv(-1)
+itoe(screen_buffer a,screen_size)
+screen_code = ebcdic
+!
+!
+%routine format(%integer sstart,ssize,bstart,bend,scursor)
+%integer i,j,len,lines,plines,sptr,rscursor,sscursor
+!
+sptr = sstart+ssize
+lines = ssize//llen
+plines = -(pparm_cursor*lines);         ! PGF/B factor
+%for i = 0,1,lines + plines - 1 %cycle
+   %for j = 1,1,pagesize %cycle;        ! Find end of line
+      %if scursor = bstart %then scursor = bend %else scursor = scursor - 1
+      %exit %unless byteinteger(scursor) = cr %or byteinteger(scursor) = lf
+   %repeat
+   !
+rol:
+   !
+   sscursor = scursor;                  ! Save position
+   %for j = 0,1,pagesize - 1 %cycle;    ! Find start of line
+      %if scursor = bstart %then scursor = bend %else scursor = scursor - 1
+      %if byteinteger(scursor) = lf %or %c
+          byteinteger(scursor) = cr %or %c
+          byteinteger(scursor) = 0 %then %start
+         rscursor = scursor;            ! Remember
+         %if scursor = bend %then scursor = bstart %else scursor = scursor + 1
+         %exit
+      %finish
+   %repeat
+   %if j > llen %then %start;           ! Long line
+      scursor = sscursor;               ! Fragment start
+      %for len = 1,1,j - llen %cycle;   ! Fragment length
+         %if scursor = bstart %then scursor = bend %else scursor = scursor - 1
+      %repeat
+      rscursor = scursor!bit0
+   %finish %else len = llen
+   %if len > llen %then sptr = sptr - len %else sptr = sptr - llen
+   sptr = sstart %if sptr < sstart
+   %for j = 0,1,len - 1 %cycle;         ! Fill line
+      %exit %if byteinteger(scursor) = cr %or byteinteger(scursor) = lf
+      byteinteger(sptr+j) = byteinteger(scursor)
+      byteinteger(sptr+j) = ' ' %if byteinteger(scursor) = 0
+      %if scursor = bend %then scursor = bstart %else scursor = scursor + 1
+   %repeat
+   scursor = rscursor & (\(bit0))
+   %exit %if byteinteger(scursor) = 0;  ! End of data
+   %if i >= lines %then %start;         ! Paging
+      %if i = i//lines*lines %then %start
+                                        ! Reset screen
+         sptr = sstart + ssize
+         *l    _0,sstart
+         *l    _1,ssize
+         *lr   _2,0
+         *la   _3,32;                   ! Space character
+         *sll  _3,24
+         *mvcl _0,2
+      %finish
+   %finish
+   -> rol %if rscursor < 0;             ! Next bit of line
+%repeat
+%end;   ! of format
+!
+%end;   ! of process page
+!
+!-----------------------------------------------------------------------
+!
+%routine queue(%record(parmf) %name p)
+%integer i,cell
+!
+cell = newppcell
+pq == parm(cell)
+pq_p = p
+pq_link = 0
+%if u_read q = 0 %then %start
+   u_read q = cell
+%else
+   i = u_read q
+   pq == parm(i)
+   %while pq_link # 0 %cycle
+      i = pq_link
+      pq == parm(i)
+   %repeat
+   pq_link = cell
+%finish
+%end;   ! of queue
+!
+!-----------------------------------------------------------------------
+!
+%routine set prompt(%string(lprompt) s)
+s = s.e" " %while length(s) < lprompt
+move(lprompt,addr(s)+1,addr(u_pbuf(5)))
+u_wccw2_len = lprompt + 4
+%end;   ! of set prompt
+!
+!-----------------------------------------------------------------------
+!
+%routine tell picture owner
+%record(parmf) q
+%record(pparmf)%name pparm
+%record(stream f)%name stream
+!
+pparm == pparms(screen_id)
+stream == streams(pparm_out cell)
+q = 0
+q_dest = (cc sno << 16)!4;              ! Disable
+q_srce = (my sno << 16)!8
+q_p1 = stream_stream no
+q_p2 = 4;                               ! Suspending
+pon(q)
+q_dest = stream_owner
+q_p6 = -1
+pon(q)
+%if u_buff state >> 4 = screen no %then u_buff state = empty
+%end;   ! of tell picture owner
+!
+!-----------------------------------------------------------------------
+!
+%routine transfer complete(%integer stream,p2,p3,p6)
+%record(parmf) q
+!
+q = 0
+q_dest = (cc sno << 16)!12;             ! Transfer complete
+q_srce = my sno << 16
+q_p1 = stream
+q_p2 = p2;                              ! 2**0 => next page required
+                                        ! 2**1 => page not elegible for recapture
+                                        ! 2**2 => update cursor
+q_p3 = p3;                              ! Bytes transferred
+q_p5 = op!screen no << 4
+q_p6 = p6;                              ! nlines<<24!start line
+pon(q)
+%end;   ! of transfer complete
+!
+!-----------------------------------------------------------------------
+!
+%routine transfer request(%integername cursor)
+screen_cursor = cursor
+cursor = -1
+u_buff state = being filled
+pparm == pparms(screen_id)
+stream == streams(pparm_out cell)
+stream_length = screen_cursor + screen_size - 1
+stream_cursor = screen_cursor
+q = 0
+q_dest = (cc sno << 16)!10
+q_srce = my sno << 16
+q_p1 = pparm_out stream
+q_p2 = screen_cursor
+pon(q)
+%end;   ! of transfer request
+!
+!-----------------------------------------------------------------------
+!
+%routine update operlog(%stringname s)
+%integer ad
+%record(parmf) q
+%string(80) ebcdictxt,isotxt,txt,work
+!
+txt <- s
+%cycle
+   %if txt -> isotxt.(tostring(10)).work %then %start
+      txt = work
+   %else
+      isotxt = txt
+      txt = ""
+   %finish
+   isotxt = isotxt." " %while length(isotxt) < ollen
+   ebcdictxt = isotxt
+   itoe(addr(ebcdictxt)+1,ollen)
+   ad = addr(operlog)
+   move(operlog length-ollen,ad+hdr s+ollen,ad+hdr s)
+   move(ollen,addr(ebcdictxt)+1,ad+hdr s+operlog length-ollen)
+   %if multiocp=yes %then reserve log
+   printstring(string(addr(com_time0)+3)." OPERLOG ".isotxt)
+   newline
+   %if multiocp=yes %then release log
+%repeat %until txt = ""
+%if operlog_updated # x'ffffffff' %then %start
+   operlog_updated = x'ffffffff'
+   q = 0
+   q_dest = (my sno << 16)!21;          ! Look for work (pseudo clock tick)
+   pon(q)
+%finish
+%end;   ! of update operlog
+!
+%end;   ! of oper
+!
+!=======================================================================
+!
+%externalroutine display text(%integer which,line,pos,%string(ollen+1) txt)
+%return %unless 0 <= pos <= ollen - 2
+%return %unless length(txt) > 0
+length(txt) = ollen - pos %if length(txt) > ollen - pos
+itoe(addr(txt)+1,length(txt))
+move(length(txt),addr(txt)+1,addr(process list_data)+ollen*line+pos)
+process list_updated = x'ffffffff'
+%end;   ! of display text
+!
+!=======================================================================
+!
+%externalroutine opmess3(%string(63) mess)
+%integer cell,acell
+%string(36) t
+%record(parmf) p
+!
+p = 0
+p_dest = (my sno<<16)!11;               ! Write long message
+t <- mess
+t = t." " %while length(t) < 36
+cell = newppcell
+acell = addr(parm(cell))
+move(36,addr(t)+1,acell)
+p_p1 = acell
+p_p2 = cell
+pon(p)
+%end;   ! of opmess3
+!
+!=======================================================================
+!
+%externalroutine opmess(%string(63) mess)
+%record(parmf) p
+!
+%if multiocp=yes %then reserve log
+printstring("Opmess: ".mess)
+newline
+%if multiocp=yes %then release log
+p_dest = (my sno<<16)!7;                ! Write line to operlog
+p_srce = 0
+%while length(mess) > max mlen %cycle
+   p_text <- mess
+   mess -> (p_text).mess
+   length(p_text) = max mlen!x'80';     ! Long message
+   pon(p)
+%repeat
+p_text = mess
+pon(p)
+%end;   ! of opmess
+%endoffile
+

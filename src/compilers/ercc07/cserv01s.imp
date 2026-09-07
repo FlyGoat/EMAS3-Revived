@@ -1,0 +1,942 @@
+%constinteger XIMPLHOST=0
+%constinteger XIMPLP64=0
+%INCLUDE "ERCC07:ITRIMP_HOSTCODES"
+%CONSTINTEGER HOST=AMDAHL
+%INCLUDE "ERCC07:itrimp_TFORM2S"
+%OWNINTEGERNAME ASL
+%OWNRECORD(LISTF)%ARRAYNAME ASLIST
+%EXTRINSICRECORD(WORKAF)WORKA
+%EXTRINSICRECORD(PARMF)PARM
+%if XIMPLHOST=0 %start
+%EXTERNALROUTINE MOVE BYTES(%INTEGER LENGTH,FBASE,FOFF,TOBASE,TOOFF)
+!************************************************************************
+!*    A MOVE BYTES ROUTINE THAT WILL WORK ON WORD&BYTE ADDRESS M-CS    *
+!***********************************************************************
+%INTEGER I
+AGN:
+      %RETURN %IF LENGTH<=0
+      %IF HOST=EMAS %START;             ! EMAS BYTE ADDRESSES
+         I=X'18000000'+LENGTH
+         *LDA_TOBASE; *INCA_TOOFF; *LDTB_I
+         *LSS_FBASE; *IAD_FOFF; *LUH_I
+         *MV_%L=%DR
+      %FINISH %else %IF HOST=PERQ %START;             ! WORD ADDRESS+BYTE OFFSET
+         FBASE=FBASE+FOFF>>1
+         FOFF=FOFF&1
+         TOBASE=TOBASE+TOOFF>>1
+         TOOFF=TOOFF&1
+         %IF (TOBASE+LENGTH>>1)>>16#TOBASE>>16 %OR %C
+               (FBASE+LENGTH>>1)>>16#FBASE>>16 %START
+                                        ! TLATE FAILS IF SEG BNDRY CROSSED
+            MOVEBYTES(1,FBASE,FOFF,TOBASE,TOOFF)
+            TOOFF=TOOFF+1
+            FOFF=FOFF+1
+            LENGTH=LENGTH-1
+            ->AGN
+         %FINISH
+         *LDLDB_6;                      ! TO BASE
+         *LDL8;                         ! TOOFF (BTM BITS)
+         *LDLDB_2;                      ! FBASE
+         *LDL4;                         ! FOFF
+         *LDL0;                         ! LENGTH
+         *STLATE_X'63'
+         *MVBW
+      %FINISH %else %IF HOST=ACCENT %START;             ! WORD ADDRESS+BYTE OFFSET
+         FBASE=FBASE+FOFF>>1
+         FOFF=FOFF&1
+         TOBASE=TOBASE+TOOFF>>1
+         TOOFF=TOOFF&1
+         *LDLDB_6;                      ! TO BASE
+         *LDL8;                         ! TOOFF (BTM BITS)
+         *LDLDB_2;                      ! FBASE
+         *LDL4;                         ! FOFF
+         *LDL0;                         ! LENGTH
+         *MVBW
+      %FINISH %else %IF HOST=PNX %START
+         FBASE=2*FBASE+FOFF
+         TOBASE=2*TOBASE+TOOFF
+         **FBASE
+         **TOBASE
+         **LENGTH
+         *MVB
+      %FINISH %else %if 1<<host&emachine#0 %Start
+         fbase=fbase+foff
+         tobase=tobase+tooff
+         **fbase
+         **tobase
+         **length
+         *mvb
+      %FINISH %else %IF HOST=IBM %OR HOST=IBMXA %OR HOST=AMDAHL %START
+         *L_0,TOBASE; *A_0,TOOFF
+         *L_2,FBASE; *A_2,FOFF
+         *L_1,LENGTH; *LR_3,1
+         *MVCL_0,2
+      %else
+         FBASE=FBASE+FOFF
+         TOBASE=TOBASE+TOOFF
+         BYTEINTEGER(TOBASE+I)=BYTEINTEGER(FBASE+I) %FOR I=0,1,LENGTH-1
+      %FINISH
+%END
+%finish %else %start
+%if XIMPLP64=1 %start
+%external%routine%spec movebytes(%integer length,%long%integer fbase,%integer foff,%long%integer tobase,%integer tooff)
+%finish %else %start
+%EXTERNALROUTINESPEC MOVE BYTES(%INTEGER LENGTH,FBASE,FOFF,TOBASE,TOOFF)
+%finish
+%finish
+%EXTERNALSTRING(255)%FN PRINTNAME(%INTEGER N)
+%CONSTSTRING(1)%ARRAY HEX(0:15)="0","1","2","3","4","5","6","7","8","9",
+                                        "A","B","C","D","E","F";
+%INTEGER V,K,TOP
+%STRING(255) S
+      S="?"
+      TOP=N>>16
+      N=N&X'FFFF'
+      %IF 0<=N<=WORKA_NNAMES %START
+         V=WORKA_WORD(N)
+         K=WORKA_LETT(V)
+         %IF K#0 %THEN S=STRING(ADDR(WORKA_LETT(V)))
+      %FINISH
+      %IF S="?" %START;                 ! UNPRINTABLE
+         S=S.HEX(N>>K&15) %FOR K=28,-4,0
+      %FINISH %ELSE %START
+         %IF TOP>0 %THEN S=PRINTNAME(TOP)."_".S
+      %FINISH
+      %RESULT=S
+%END
+
+
+%STRINGFN MESSAGE(%INTEGER N)
+!***********************************************************************
+!*       OUTPUTS AN ERROR MESSAGE STORED IN A COMPRESSED FORMAT        *
+!*       1  %REPEAT is not required                                    *
+!*       2  Label & has already been set in this block                 *
+!*       3  Jump into %CYCLE at Label & from line #                    *
+!*       4  & is not a Switch name at current textual level            *
+!*       5  Switch name & in expression or assignment                  *
+!*       6  Switch label &(#) set a second time                        *
+!*       7  Name & has already been declared                           *
+!*       8  Routine or fn & has more parameters than specified         *
+!*       9  Parameter # of & differs in type from specification        *
+!*      10  Routine or fn & has fewer parameters than specified        *
+!*      11  Label & referenced at line # has not been set              *
+!*      12  %CYCLE at line # has two control clauses                   *
+!*      13  %REPEAT for %CYCLE at line # is missing                    *
+!*      14  %END is not required                                       *
+!*      15  # %ENDs are missing                                        *
+!*      16  Name & has not been declared                               *
+!*      17  Name & does not require parameters or subscripts           *
+!*      18  # too few parameters provided for &                        *
+!*      19  # too many parameters provided for &                       *
+!*      20  # too few subscripts provided for array &                  *
+!*      21  # too many subscripts provided for array &                 *
+!*      22  Actual parameter # of & conflicts with specification       *
+!*      23  Routine name & in an expression                            *
+!*      24  Integer operator has Real operands                         *
+!*      25  Real expression in integer context                         *
+!*      26  # is not a valid %EVENT number                             *
+!*      27  & is not a routine name                                    *
+!*      28  Routine or fn & has specification but no body              *
+!*      29  %FUNCTION name & not in expression                         *
+!*      30  %RETURN outwith routine body                               *
+!*      31  %RESULT outwith fn or map body                             *
+!*      34  Too many textual levels                                    *
+!*      37  Array & has too many dimensions                            *
+!*      38  Array & has upper bound # less than lower bound            *
+!*      39  Size of Array & is more than X'FFFFFF' bytes               *
+!*      40  Declaration is not at head of block                        *
+!*      41  Constant cannot be evaluated at compile time               *
+!*      42  # is an invalid repetition factor                          *
+!*      43  %CONSTANT name & not in expression                         *
+!*      44  Invalid constant initialising & after # items              *
+!*      45  Array initialising items expected ## items given #         *
+!*      46  Invalid %EXTERNAL %EXTRINSIC or variable %SPEC             *
+!*      47  %ELSE already given at line #                              *
+!*      48  %ELSE invalid after %ON %EVENT                             *
+!*      49  Attempt to initialise %EXTRINSIC or %FORMAT &              *
+!*      50  Subscript of # is outwith the bounds of &                  *
+!*      51  %FINISH is not required                                    *
+!*      52  %REPEAT instead of %FINISH for %START at line #            *
+!*      53  %FINISH for %START at line # is missing                    *
+!*      54  %EXIT outwith %CYCLE %REPEAT body                          *
+!*      55  %CONTINUE outwith %CYCLE %REPEAT body                      *
+!*      56  %EXTERNALROUTINE & at wrong textual level                  *
+!*      57  Executable statement found at textual level zero           *
+!*      58  Program among external routines                            *
+!*      59  %FINISH instead of %REPEAT for %CYCLE at line #            *
+!*      61  Name & has already been used in this %FORMAT               *
+!*      62  & is not a %RECORD or %RECORD %FORMAT name                 *
+!*      63  %RECORD length is greater than # bytes                     *
+!*      64  Name & requires a subname in this context                  *
+!*      65  Subname & is not in the %RECORD %FORMAT                    *
+!*      66  Expression assigned to record &                            *
+!*      67  Records && and & have different formats                    *
+!*      69  Subname && is attached to & which is not of type %RECORD   *
+!*      70  String declaration has invalid max length of #             *
+!*      71  & is not a String variable                                 *
+!*      72  Arithmetic operator in a String expression                 *
+!*      73  Arithmetic constant in a String expression                 *
+!*      74  Resolution is not the correct format                       *
+!*      75  String expression contains a sub expression                *
+!*      76  String variable & in arithmetic expression                 *
+!*      77  String constant in arithmetic expression                   *
+!*      78  String operator '.' in arithmetic expression               *
+!*      80  Pointer variable & compared with expression                *
+!*      81  Pointer variable & equivalenced to expression              *
+!*      82  & is not a pointer name                                    *
+!*      83  && and & are not equivalent in type                        *
+!*      86  Global pointer && equivalenced to local &                  *
+!*      87  %FORMAT name & used in expression                          *
+!*      90  Untyped name & used in expression                          *
+!*      91  %FOR control variable & not integer                        *
+!*      92  %FOR clause has zero step                                  *
+!*      93  %FOR clause has noninteger number of traverses             *
+!*      95  Name & not valid in assembler                              *
+!*      96  Operand # not valid in assembler                           *
+!*      97  Assembler construction not valid                           *
+!*      98  Addressability                                             *
+!*      99  Facility not supported by target hardware                  *
+!*     101  Source line has too many continuations                     *
+!*     102  Workfile of # Kbytes is too small                          *
+!*     103  Dictionary completely full                                 *
+!*     104  Dictionary completely full                                 *
+!*     105  Too many textual levels                                    *
+!*     106  String constant too long                                   *
+!*     107  Compiler tables are completely full                        *
+!*     108  Condition too complicated                                  *
+!*     109  Compiler inconsistent                                      *
+!*     110  Input ended                                                *
+!*     201  Long integers are inefficient as subscripts                *
+!*     202  Name & not used                                            *
+!*     203  Label & not used                                           *
+!*     204  Global %FOR control variable &                             *
+!*     205  Name & not addressable                                     *
+!*     206  Semicolon in comment text                                  *
+!*     207  %CONSTANT variable & not initialised                       *
+!*     208  Unsupported precision used - nearest available substituted *
+!*     209  Target machine is word addressed                           *
+!*     210  Redundant %ALIAS provided                                  *
+!*     211  Prefix %SYSTEM not supported. Use %ALIAS                   *
+!*     212  Unproductive logical operation noted                       *
+!*     255  Contact Advisory Service                                   *
+!***********************************************************************
+%CONSTBYTEINTEGERARRAY OUTTT(0:63)='?','A','B','C','D','E','F','G',
+                                        'H','I','J','K','L','M','N',
+                                        'O','P','Q','R','S','T','U',
+                                        'V','W','X','Y','Z','&','-',
+                                        '/','''','(',')',
+                                        'a','b','c','d','e','f','g',
+                                        'h','i','j','k','l','m','n',
+                                        'o','p','q','r','s','t','u',
+                                        'v','w','x','y','z','.','%',
+                                        '#','?'(2)
+%CONSTINTEGER WORDMAX= 802,DEFAULT= 798
+%CONSTshortINTEGERARRAY WORD(0:WORDMAX)=0,%C
+              1, 32769, 32771, 32772, 32773,     2, 32775, 32776,
+          32777, 32778, 32780, 32781, 32782, 32783, 32784,     3,
+          32785, 32786, 32787, 32789, 32775, 32776, 32790, 32791,
+          32792,     4, 32776, 32771, 32772, 32793, 32794, 32796,
+          32789, 32797, 32799, 32801,     5, 32794, 32796, 32776,
+          32782, 32802, 32804, 32805,     6, 32794, 32807, 32808,
+          32781, 32793, 32809, 32811,     7, 32812, 32776, 32777,
+          32778, 32780, 32813,     8, 32815, 32804, 32817, 32776,
+          32777, 32818, 32819, 32821, 32822,     9, 32824, 32792,
+          32826, 32776, 32827, 32782, 32829, 32790, 32830,    10,
+          32815, 32804, 32817, 32776, 32777, 32833, 32819, 32821,
+          32822,    11, 32775, 32776, 32834, 32789, 32791, 32792,
+          32777, 32772, 32780, 32781,    12, 32787, 32789, 32791,
+          32792, 32777, 32836, 32837, 32839,    13, 32769, 32841,
+          32787, 32789, 32791, 32792, 32771, 32842,    14, 32844,
+          32771, 32772, 32773,    15, 32792, 32845, 32846, 32842,
+             16, 32812, 32776, 32777, 32772, 32780, 32813,    17,
+          32812, 32776, 32847, 32772, 32848, 32819, 32804, 32850,
+             18, 32792, 32852, 32853, 32819, 32854, 32841, 32776,
+             19, 32792, 32852, 32856, 32819, 32854, 32841, 32776,
+             20, 32792, 32852, 32853, 32850, 32854, 32841, 32857,
+          32776,    21, 32792, 32852, 32856, 32850, 32854, 32841,
+          32857, 32776,    22, 32858, 32860, 32792, 32826, 32776,
+          32862, 32864, 32830,    23, 32815, 32796, 32776, 32782,
+          32865, 32802,    24, 32866, 32868, 32777, 32870, 32871,
+             25, 32870, 32802, 32782, 32873, 32875,    26, 32792,
+          32771, 32772, 32793, 32877, 32878, 32880,    27, 32776,
+          32771, 32772, 32793, 32882, 32796,    28, 32815, 32804,
+          32817, 32776, 32777, 32830, 32884, 32885, 32886,    29,
+          32887, 32796, 32776, 32772, 32782, 32802,    30, 32889,
+          32891, 32882, 32886,    31, 32893, 32891, 32817, 32804,
+          32895, 32886,    34, 32896, 32856, 32799, 32897,    37,
+          32899, 32776, 32777, 32852, 32856, 32900,    38, 32899,
+          32776, 32777, 32902, 32903, 32792, 32904, 32821, 32905,
+          32903,    39, 32906, 32826, 32899, 32776, 32771, 32818,
+          32821, 32907, 32909,    40, 32910, 32771, 32772, 32789,
+          32913, 32826, 32784,    41, 32914, 32916, 32918, 32919,
+          32789, 32921, 32811,    42, 32792, 32771, 32865, 32923,
+          32925, 32927,    43, 32929, 32796, 32776, 32772, 32782,
+          32802,    44, 32931, 32933, 32935, 32776, 32938, 32792,
+          32939,    45, 32899, 32935, 32939, 32940, 32942, 32939,
+          32943, 32792,    46, 32931, 32944, 32946, 32804, 32948,
+          32950,    47, 32951, 32778, 32943, 32789, 32791, 32792,
+             48, 32951, 32923, 32938, 32952, 32878,    49, 32953,
+          32955, 32956, 32946, 32804, 32958, 32776,    50, 32960,
+          32826, 32792, 32771, 32891, 32962, 32963, 32826, 32776,
+             51, 32965, 32771, 32772, 32773,    52, 32769, 32967,
+          32826, 32965, 32841, 32969, 32789, 32791, 32792,    53,
+          32965, 32841, 32969, 32789, 32791, 32792, 32771, 32842,
+             54, 32971, 32891, 32787, 32769, 32886,    55, 32972,
+          32891, 32787, 32769, 32886,    56, 32974, 32776, 32789,
+          32978, 32799, 32801,    57, 32979, 32981, 32983, 32789,
+          32799, 32801, 32984,    58, 32985, 32987, 32988, 32990,
+             59, 32965, 32967, 32826, 32769, 32841, 32787, 32789,
+          32791, 32792,    61, 32812, 32776, 32777, 32778, 32780,
+          32992, 32782, 32783, 32958,    62, 32776, 32771, 32772,
+          32793, 32993, 32804, 32993, 32958, 32796,    63, 32993,
+          32995, 32771, 32997, 32821, 32792, 32909,    64, 32812,
+          32776, 32999, 32793, 33001, 32782, 32783, 32875,    65,
+          33003, 32776, 32771, 32772, 32782, 32962, 32993, 32958,
+             66, 33005, 33007, 32955, 33009, 32776,    67, 33011,
+          33013, 33014, 32776, 33015, 33016, 33018,    69, 33003,
+          33013, 32771, 33020, 32955, 32776, 33022, 32771, 32772,
+          32826, 32829, 32993,    70, 33023, 33025, 32777, 32923,
+          33028, 32995, 32826, 32792,    71, 32776, 32771, 32772,
+          32793, 33023, 32948,    72, 33029, 32868, 32782, 32793,
+          33023, 32802,    73, 33029, 32933, 32782, 32793, 33023,
+          32802,    74, 33031, 32771, 32772, 32962, 33033, 33035,
+             75, 33023, 32802, 33037, 32793, 33039, 32802,    76,
+          33023, 32948, 32776, 32782, 33040, 32802,    77, 33023,
+          32933, 32782, 33040, 32802,    78, 33023, 32868, 33042,
+          32782, 33040, 32802,    80, 33043, 32948, 32776, 33045,
+          32864, 32802,    81, 33043, 32948, 32776, 33047, 32955,
+          32802,    82, 32776, 32771, 32772, 32793, 33050, 32796,
+             83, 33013, 33014, 32776, 32846, 32772, 33052, 32782,
+          32829,    86, 33054, 33050, 33013, 33047, 32955, 33056,
+          32776,    87, 32958, 32796, 32776, 32992, 32782, 32802,
+             90, 33057, 32796, 32776, 32992, 32782, 32802,    91,
+          33059, 32837, 32948, 32776, 32772, 32873,    92, 33059,
+          33060, 32777, 32984, 33062,    93, 33059, 33060, 32777,
+          33063, 32880, 32826, 33065,    90, 33057, 32796, 32776,
+          32992, 33067, 32948,    95, 32812, 32776, 32772, 32877,
+          32782, 33068,    96, 33070, 32792, 32772, 32877, 32782,
+          33068,    97, 33072, 33074, 32772, 32877,    98, 33077,
+             99, 33080, 32772, 33082, 33084, 33085, 33087,   101,
+          33089, 32791, 32777, 32852, 32856, 33091,   102, 33094,
+          32826, 32792, 33096, 32771, 32852, 33098,   103, 33099,
+          33101, 33103,   104, 33099, 33101, 33103,   105, 32896,
+          32856, 32799, 32897,   106, 33023, 32933, 32852, 33104,
+            107, 33105, 33107, 32846, 33101, 33103,   108, 33109,
+          32852, 33111,   109, 33105, 33114,   110, 33117, 33118,
+            201, 33119, 33120, 32846, 33122, 33067, 32850,   202,
+          32812, 32776, 32772, 32992,   203, 32775, 32776, 32772,
+          32992,   204, 33054, 33059, 32837, 32948, 32776,   205,
+          32812, 32776, 32772, 33125,   206, 33128, 32782, 33130,
+          33132,   207, 32929, 32948, 32776, 32772, 33133,   208,
+          33136, 33139, 32992, 33141, 33142, 33144, 33146,   209,
+          33149, 33151, 32771, 33153, 33154,   210, 33156, 33158,
+          32854,   211, 33160, 33162, 32772, 33164, 33166, 33158,
+            212, 33167, 33170, 33172, 33174,   255, 33175, 33177,
+          33179,     0
+%CONSTINTEGERARRAY LETT(0: 412)=0,%C
+        X'7890A80B',X'02A00000',X'53980000',X'5D7E8000',
+        X'652E3AD3',X'652C8000',X'190C52D8',X'36000000',
+        X'510E6000',X'436652C3',X'49C80000',X'452CB700',
+        X'672E8000',X'53700000',X'69453980',X'4565F1D6',
+        X'15ADB800',X'53769780',X'781B2199',X'0A000000',
+        X'43A00000',X'4D95F680',X'594DD280',X'7A000000',
+        X'42000000',X'27BD3A47',X'50000000',X'5D0DB280',
+        X'47AE594B',X'5DA00000',X'692F1A6B',X'43600000',
+        X'592ED2D8',X'4BC6194B',X'679D37DC',X'5F900000',
+        X'439E74CF',X'5D6CB768',X'590C52D8',X'36FFB000',
+        X'672C77DD',X'48000000',X'694DB280',X'1D0DB280',
+        X'492C7643',X'652C8000',X'257EBA53',X'5D280000',
+        X'4D700000',X'5B7E5280',X'610E50DB',X'4BA4B966',
+        X'69443700',X'6784B1D3',X'4D4CB200',X'210E50DB',
+        X'4BA4B900',X'5F300000',X'494CD34B',X'65980000',
+        X'69CE1280',X'6784B1D3',X'4D4C70E9',X'537DC000',
+        X'4D2EF2E4',X'652CD2E5',X'4B7472C8',X'69BDE000',
+        X'477DDA65',X'5F600000',X'47643AE7',X'4B980000',
+        X'4D7E4000',X'5B4E79D3',X'5D380000',X'7829C200',
+        X'7829C266',X'4394A000',X'497CB980',X'652E3AD3',
+        X'65280000',X'67AC59C7',X'654E1A66',X'697DE000',
+        X'4D2EE000',X'6195FB53',X'492C8000',X'5B0DDC80',
+        X'439650F2',X'031E9AC3',X'58000000',X'610E50DB',
+        X'4BA4B900',X'477DD359',X'531E9980',X'6F4E9400',
+        X'43700000',X'137692CF',X'4B900000',X'5F84B943',
+        X'697E4000',X'252C3600',X'5F84B943',X'5D266000',
+        X'537692CF',X'4B900000',X'477DDA4B',X'71A00000',
+        X'6D0D94C8',X'782AC29D',X'28000000',X'5DADB14B',
+        X'64000000',X'657EBA53',X'5D280000',X'45AE8000',
+        X'5D780000',X'457C9C80',X'7832A707',X'2849E700',
+        X'7890AA2B',X'24700000',X'5FAE9BD3',X'69400000',
+        X'7890A9AB',X'18A00000',X'5B0E0000',X'297DE000',
+        X'592ED2D9',X'66000000',X'039650F2',X'494DB2DD',
+        X'674DF766',X'6B8612E4',X'457EB748',X'592E7980',
+        X'597EF2E4',X'274F5280',X'30F0C30D',X'0C30CF00',
+        X'45CE92E6',X'092C7643',X'650E94DF',X'5C000000',
+        X'512C3200',X'077DD9E9',X'43768000',X'470DD75F',
+        X'68000000',X'45280000',X'4BB4366B',X'43A4B200',
+        X'477DB853',X'59280000',X'5376D0D9',X'53200000',
+        X'652E12E9',X'53A537DC',X'4D0C7A5F',X'64000000',
+        X'7819E727',X'2809CA00',X'1376D0D9',X'53200000',
+        X'477DD9E9',X'43768000',X'53753A53',X'436539D3',
+        X'5D380000',X'433692E4',X'53A4B6E6',X'4BC612C7',
+        X'692C8000',X'7BE80000',X'4F4ED2DC',X'782B0A0B',
+        X'24702600',X'782B0A25',X'12726486',X'6D0E54C3',
+        X'4564A000',X'789A0286',X'7829898A',X'7879C000',
+        X'03A692DB',X'61A00000',X'69780000',X'53753A53',
+        X'436539CA',X'7831E91B',X'02A00000',X'27AC59C7',
+        X'654E1A00',X'6944A000',X'457EB749',X'66000000',
+        X'78312713',X'26400000',X'53767A4B',X'43200000',
+        X'789A80A5',X'28000000',X'782B04A8',X'7819E729',
+        X'1272A280',X'782B0A0B',X'24702625',X'1EAA849D',
+        X'0A000000',X'6F95F74E',X'0BC4B1EB',X'690C564A',
+        X'67A43A4B',X'5B2DDA00',X'4D7EB748',X'752E5780',
+        X'2195F3E5',X'43680000',X'436DF74E',X'4BC692E5',
+        X'5D0D8000',X'657EBA53',X'5D2E6000',X'6B9CB200',
+        X'7890A19F',X'24200000',X'592DD3E9',X'50000000',
+        X'4F94B0E9',X'4B900000',X'652E3AD3',X'652E6000',
+        X'67AC5743',X'5B280000',X'27AC5743',X'5B280000',
+        X'0BC6194B',X'679D37DC',X'439E74CF',X'5D2C8000',
+        X'652C77E5',X'48000000',X'252C77E5',X'49980000',
+        X'36D80000',X'43748000',X'510ED280',X'494CD34B',
+        X'652DDA00',X'4D7E56C3',X'69980000',X'43A690C7',
+        X'512C8000',X'6F4531D0',X'27A654DD',X'4E000000',
+        X'492C7643',X'650E94DF',X'5C000000',X'5B0F0000',
+        X'03953A51',X'5B2E94C6',X'252E77D9',X'6BA537DC',
+        X'477E594B',X'47A00000',X'4D7E56C3',X'68000000',
+        X'477DDA43',X'53766000',X'67AC4000',X'43953A51',
+        X'5B2E94C6',X'3DDBC000',X'217D3769',X'4B900000',
+        X'477DB843',X'652C8000',X'4B8EB4ED',X'4364B747',
+        X'4B200000',X'617D3769',X'4B900000',X'4B8EB4ED',
+        X'4364B768',X'0F65F143',X'58000000',X'597C70D8',
+        X'2B769CE1',X'4B200000',X'7831E900',X'47643AE7',
+        X'4A000000',X'67A4B800',X'5D7DD4DD',X'692CF2E4',
+        X'69943B4B',X'659CB980',X'43980000',X'439E72DB',
+        X'4564B900',X'1F84B943',X'5D200000',X'039E72DB',
+        X'4564B900',X'477DD9E9',X'65AC7A53',X'5F700000',
+        X'0324994B',X'679C3153',X'594E9C80',X'0D0C74D9',
+        X'53A72000',X'67AE185F',X'65A4B200',X'45C80000',
+        X'690E53CB',X'68000000',X'510E526F',X'4394A000',
+        X'277EB947',X'4A000000',X'477DDA53',X'5DAC3A53',
+        X'5F766000',X'2F7E55CD',X'5364A000',X'17173A4B',
+        X'66000000',X'676C3658',X'094C7A53',X'5F743972',
+        X'477DB859',X'4BA4B672',X'4DAD9600',X'597DD380',
+        X'077DB853',X'592E4000',X'690C564B',X'66000000',
+        X'077DD253',X'694DF700',X'477DB859',X'531C3A4B',
+        X'48000000',X'537477DD',X'674E7A4B',X'5DA00000',
+        X'13761AE8',X'4B7492C8',X'197DD380',X'537692CF',
+        X'4B966000',X'5374B34D',X'531D32DD',X'68000000',
+        X'4324994B',X'679C3159',X'4A000000',X'272DB4C7',
+        X'5F65F700',X'477DB6CB',X'5DA00000',X'692F1A00',
+        X'53753A53',X'436539CB',X'48000000',X'2B767AE1',
+        X'617E5A4B',X'48000000',X'6194B1D3',X'674DF700',
+        X'38000000',X'5D2C394B',X'67A00000',X'43B434D9',
+        X'43159280',X'67AC59E9',X'53A6BA4B',X'48000000',
+        X'290E53CB',X'68000000',X'5B0C7453',X'5D280000',
+        X'6F7E5200',X'4324994B',X'679CB200',X'252C9ADD',
+        X'490DDA00',X'78098483',X'26000000',X'2194B353',
+        X'70000000',X'789B29A9',X'0A680000',X'67AE185F',
+        X'65A4B276',X'2B9CA000',X'2B76195F',X'49AC7A53',
+        X'6D280000',X'597CF4C7',X'43600000',X'5F84B943',
+        X'694DF700',X'5D7E92C8',X'077DDA43',X'47A00000',
+        X'0326D4E7',X'5F972000',X'272E5B53',X'47280000'
+        
+%INTEGER I,J,K,M,Q,S
+%STRING(70)OMESS
+      OMESS=" "
+      %CYCLE I=1,1,WORDMAX-1
+         ->FOUND %IF N=WORD(I)
+      %REPEAT
+      I=DEFAULT
+FOUND:
+      J=1
+      %CYCLE
+         K=WORD(I+J)
+         %IF K&X'8000'=0 %THEN %EXIT
+         K=K&X'7FFF'
+         OMESS=OMESS." " %UNLESS J=1
+         %UNTIL M&1=0 %CYCLE
+            M=LETT(K); S=25
+            %UNTIL S<0 %CYCLE
+               Q=M>>S&63; 
+               %IF Q\=0 %THEN OMESS=OMESS.TOSTRING(OUTTT(Q))
+               S=S-6
+            %REPEAT
+            K=K+1
+         %REPEAT
+         J=J+1
+      %REPEAT
+      %RESULT=OMESS
+%END
+%EXTERNALSTRING(16)%FN SWRITE(%INTEGER VALUE, PLACES)
+%STRING (16) S
+%STRING(1)SIGN
+%INTEGER D0, D1, D2
+      PLACES=PLACES&15
+      SIGN=" "
+      S=""
+      %IF VALUE<0 %THEN SIGN="-" %AND VALUE=-VALUE
+      D0=VALUE
+      %CYCLE
+         D1=D0//10
+         D2=D0-10*D1
+         S=TOSTRING(D2+'0').S
+         D0=D1
+      %REPEAT %UNTIL D0=0
+      S=SIGN.S
+      S=" ".S %WHILE LENGTH(S)<=PLACES
+      %RESULT=S
+%END
+%EXTERNALROUTINE FAULT(%INTEGER N, DATA, IDENT)
+!***********************************************************************
+!*    SETS UP AN ERROR MESSAGE AND SHOVES IT OUT ONTO THE LISTING      *
+!*    AN ALSO OPTIONALLY TO THE TERMINAL                               *
+!***********************************************************************
+%INTEGER I, J, S, T, Q, QMAX, LENGTH
+%STRING(255)MESS1,MESS2,WK1,WK2
+!*DELSTART
+      %MONITOR %IF PARM_FAULTY=0 %AND (PARM_Z#0 %OR PARM_DCOMP#0)
+!*DELEND
+      MESS1=""; MESS2=""
+      PARM_FAULTY=PARM_FAULTY+1
+      %IF N=100 %THEN %START;           ! SYNTAX FAULTS ARE SPECIAL
+         MESS1="
+*    Failed to analyse line ".SWRITE(WORKA_LINE,2)."
+     "
+         J=0;  S=0;  T=0;  Q=DATA;  QMAX=IDENT>>16
+         LENGTH=IDENT&X'FFFF'
+         %UNTIL (J=';' %AND Q>QMAX) %OR Q=LENGTH %CYCLE
+            I=J;  J=WORKA_CC(Q);        ! DATA HAS START OF LINE POSN
+            %IF J>128 %AND I<128 %THEN MESS2=MESS2." %" %AND T=T+2
+            %IF I>128 %AND J<128 %THEN MESS2=MESS2." " %AND T=T+1
+            %IF Q=QMAX %THEN %START
+               S=T+1
+               %IF S>=115 %THEN MESS2=MESS2."?" %AND T=T+1
+            %FINISH
+            MESS2=MESS2.TOSTRING(J&127)
+            T=T+1
+            Q=Q+1
+            %EXIT %IF T>=250
+         %REPEAT
+         %IF Q=QMAX %THEN S=T
+      %FINISH %ELSE %START
+         MESS1="
+*".SWRITE(WORKA_LINE, 4)."   "
+         PARM_OPT=1
+         PARM_INHCODE=1 %IF PARM_LET=0;    ! STOP GENERATING CODE
+         MESS1=MESS1."FAULT".SWRITE(N,2)
+         MESS2=MESSAGE(N)
+         %IF MESS2->WK1.("##").WK2 %THEN %C
+            MESS2=WK1.SWRITE(IDENT,1).WK2
+         %IF MESS2->WK1.("#").WK2 %THEN %C
+            MESS2=WK1.SWRITE(DATA,1).WK2
+         %IF MESS2->WK1.("&&").WK2 %THEN %C
+            MESS2=WK1.PRINTNAME(DATA).WK2
+         %IF MESS2->WK1.("&").WK2 %THEN %C
+               MESS2=WK1.PRINTNAME(IDENT).WK2
+         %IF N>100 %THEN MESS2=MESS2." Disaster"
+      %FINISH
+      %CYCLE I=2,-1,1
+         SELECT OUTPUT(PARM_TTOPUT) %IF I=1
+         PRINTSTRING(MESS1)
+         PRINTSTRING(MESS2) %IF MESS2#""
+         %IF N=100 %AND S<115 %THEN %START
+            NEWLINE; SPACES(S+4); PRINTSYMBOL('!')
+         %FINISH
+         NEWLINE
+         SELECT OUTPUT(parm_lpoput) %IF I=1
+         %EXIT %IF PARM_TTOPUT=-1
+      %REPEAT
+      %IF N=109 %THEN %MONITOR
+!      %IF N=109 %THEN PARM_DCOMP=1 %AND CODEOUT
+      %IF N>100 %THEN %STOP
+%END
+%EXTERNALROUTINE WARN(%INTEGER N,V)
+%STRING(30) T; %STRING(120) S
+      S=MESSAGE(N+200)
+      %IF S->S.("&").T %THEN S=S.PRINTNAME(V).T
+      PRINTSTRING("
+?  Warning :- ".S." at line No".SWRITE(WORKA_LINE,1))
+      NEWLINE
+%END
+%EXTERNALROUTINE PRHEX(%INTEGER VALUE, PLACES)
+%CONSTBYTEINTEGERARRAY HEX(0:15)='0','1','2','3','4',
+               '5','6','7','8','9','A','B','C','D','E','F'
+%INTEGER I
+      %CYCLE I=PLACES<<2-4, -4, 0
+         PRINT SYMBOL(HEX(VALUE>>I&15))
+      %REPEAT
+%END
+%EXTERNALROUTINE PRINT THIS TRIP(%RECORD(TRIPF)%ARRAYNAME TRIPS,
+      %INTEGER I)
+!***********************************************************************
+!*    OUTPUTS A TRIPLE IN READABLE FORM                                *
+!***********************************************************************
+%CONST%STRING(5)%ARRAY OPERATION(0:192)= %C
+         "  ?  ","RT HD","RDSPY","RDARE","RDPTR",
+         "RTBAD","RTXIT","XSTOP","  ?  ","  ?  ",
+         "  \  ","  -U "," FLT "," ABS ","SHRNK",
+         "STRCH"," JAM "," ??? ","NO OP","PRELD",
+         "  ?  ","SSPTR","RSPTR","ASPTR","DARRY",
+         "SLINE","STPCK","FRPRE","FPOST","FRPR2",
+         "PRECL","RCALL","RCRFR","RCRMR","  ?  ",
+         "GETAD"," INT ","INTPT","TOSTR","MNITR",
+         "PPROF","RTFP ","ONEV1","ONEV2","DVSTT",
+         "DVEND","FREND","DMASS","TRUNC","  ?  ",
+         "UCNOP","UCB1 ","UCB2 ","UCB3 "," UCW ",
+         "UCBW ","UCWW ","UCLW ","UCB2W","UCNAM",
+         "  ?  "(68),
+         "  +  ","  -  ","  !! ","  !  ","  *  ",
+         "  // ","  /  ","  &  ","  >> ","  << ",
+         " REXP"," COMP","DCOMP"," VMY "," COMB",
+         "  =  ","  <- "," IEXP"," ADJ ","AINDX",
+         "IFTCH","LASS ","FORCK","PRECC","CNCAT",
+         "IOCPC","PASS1","PASS2","PASS3",
+         "PASS4","PASS5","PASS6",
+         "BJUMP","FJUMP","REMLB","TLAB ","DCLSW",
+         "SETSW","-> SW"," S=1 "," S=2 "," S<- ",
+         "AHASS","PTRAS","MAPRS","FNRES","SCOMP",
+         "SDCMP","PRES1","PRES2","RESLN","RESFN",
+         "SIGEV","RECAS","AAINC","AHADJ","CTGEN",
+         "GETPR","SINDX","ZCOMP","CLSFT","CASFT",
+         "DVBPR","RSTRE","MULTX";
+%RECORD(TRIPF)%NAME CURR
+%ROUTINESPEC OPOUT(%RECORD(RD)%NAME OPND)
+      NEWLINE
+      CURR==TRIPS(I)
+      WRITE(I,2)
+      SPACE
+      PRINTSTRING(OPERATION(CURR_OPERN))
+      SPACE
+      PRHEX(CURR_OPTYPE,2)
+      WRITE(CURR_CNT,2)
+      WRITE(CURR_DPTH,2)
+      SPACES(1)
+      PRHEX(CURR_FLAGS,4)
+      WRITE(CURR_PUSE,3)
+      SPACE
+      PRHEX(CURR_X1,8)
+      SPACE
+      OPOUT(CURR_OPND1)
+      OPOUT(CURR_OPND2) %IF CURR_OPERN>=128
+      %RETURN
+%ROUTINE OPOUT(%RECORD(RD)%NAME OPND)
+%STRING(17)T
+%STRING(8)S
+%INTEGER I,J
+%SWITCH SW(0:11)
+      PRHEX(OPND_PTYPE,4)
+      J=OPND _FLAG
+      ->SW(J) %UNLESS J>11
+      PRINTSTRING("?")
+      PRHEX(OPND_S1&X'FFFF',4)
+      SPACE
+      PRHEX(OPND_D,8)
+      SPACE
+      PRHEX(OPND_XTRA,8)
+      %RETURN
+SW(0):SW(1):                            ! CONSTANT
+      %if j=0 %then printstring("s") %else PRINTSTRING(" ")
+      %IF OPND_PTYPE&7=5 %START;        ! STRING CONSTS
+         I=WORKA_A(OPND_D)
+            I=17 %IF I>17
+         LENGTH(T)=I
+         %CYCLE I=1,1,I
+            J=WORKA_A(OPND_D+I)
+            J='_' %IF J<=31
+            CHARNO(T,I)=J
+            %REPEAT
+         T<-T."                    "
+         PRINTSTRING(T)
+      %FINISH %ELSE %START
+         PRHEX(OPND_D,8)
+         SPACES(4)
+         %IF OPND_PTYPE>>4>5 %THEN PRHEX(OPND_XTRA,8) %ELSE SPACES(8)
+      %FINISH
+      SPACES(2)
+      %RETURN
+SW(2):                                  ! NAME
+      PRINTSTRING(" NAME ")
+NAM:  S<-PRINTNAME(OPND_D)."                "
+      PRINTSTRING(S)
+      %IF OPND_XTRA#0 %THEN PRHEX(OPND_XTRA,8) %ELSE SPACES(8)
+      SPACE
+      %RETURN
+SW(4):                                  ! VIA STORED POINTER @TRIPLE
+      PRINTSTRING("OFFSET-PTR")
+      ->COM
+SW(5):                                  ! 32 BIT ADDRESS
+      PRINTSTRING(" PNTR ")
+      ->NAM
+SW(7):                                  ! IN A STACK FRAME
+      PRINTSTRING(" TEMP ")
+      PRHEX(OPND_D,8)
+      SPACE
+      PRHEX(OPND_XTRA,8)
+      %RETURN
+SW(6):                                  ! INDIRECT
+      PRINTSTRING(" IND-OFFST")
+COM:  WRITE(OPND_D,2)
+      SPACE
+      PRHEX(OPND_XTRA,8)
+      SPACE
+      %RETURN
+SW(8):                                  ! A TRIPLE
+      PRINTSTRING(" TRIPLE ")
+      WRITE(OPND_D,2)
+      SPACES(12)
+      %RETURN
+SW(9):                                  ! REGISTER ITEM
+      PRINTSTRING(" ITEM IN REGSTR ")
+      SPACES(4)
+      %RETURN
+SW(10):                                 ! B-D FORFM
+      PRINTSTRING("BASE&DIS ")
+      PRHEX(OPND_XB,2)
+      SPACE
+      PRHEX(OPND_D,8)
+      %RETURN
+SW(11):                                 ! VIA LA ON B&D
+      PRINTSTRING("ADDR(B&D)")
+      PRHEX(OPND_XB,2)
+      SPACE
+      PRHEX(OPND_D,8)
+%END
+%END
+%EXTERNALROUTINE PRINT TRIPS(%RECORD(TRIPF)%ARRAYNAME TRIPS)
+%INTEGER I
+      %RETURN %IF PARM_Y=0 %AND PARM_Z=0;! TRIPLES ON CODE+PARMY OR Z
+      PRINTSTRING("
+TRIPLES FOR LINE"); WRITE(WORKA_LINE,3)
+      PRINTSTRING("
+ NO OPRN  PT  C  D FLGS PUSE   X1         OPERAND 1                  OPERAND 2")
+      I=TRIPS(0)_FLINK
+      %WHILE I>0 %CYCLE
+         PRINT THIS TRIP(TRIPS,I) %UNLESS PARM_Z=0 %AND TRIPS(I)_OPERN=18
+         I=TRIPS(I)_FLINK
+      %REPEAT
+%END
+%EXTERNALROUTINE INITASL(%RECORD(LISTF)%ARRAYNAME SPACE,%INTEGERNAME PTR)
+!***********************************************************************
+!*    INITIALISES THE ASL AND REMEMBERS IT LOCATION
+!***********************************************************************
+%INTEGER I
+      ASLIST==SPACE
+      ASL==PTR
+      WORKA_ASL CUR BTM=ASL-240
+      WORKA_CONST LIMIT=4*WORKA_ASL CUR BTM-8
+      %CYCLE I=WORKA_ASL CUR BTM,1,ASL-1
+         aslist(i+1)=0
+          ASLIST(I+1)_LINK=I
+      %REPEAT
+      ASLIST(WORKA_ASL CUR BTM)_LINK=0
+      ASLIST(0)_S1=-1
+      ASLIST(0)_S2=-1
+      ASLIST(0)_S3=-1
+      ASLIST(0)_LINK=0
+%END
+%EXTERNALROUTINE PRINT LIST(%INTEGER HEAD)
+!***********************************************************************
+!*    A DEBUGGING ONLY ROUTINE. 
+!***********************************************************************
+%RECORD(LISTF)%NAME LCELL
+%INTEGER I,J,K
+      PRINTSTRING("
+PRINT OF LIST ")
+      WRITE(HEAD,2)
+      NEWLINE
+      %WHILE HEAD#0 %CYCLE
+         LCELL==ASLIST(HEAD)
+         WRITE(HEAD,3)
+         SPACES(3)
+         PRHEX(LCELL_S1,8)
+         SPACES(3)
+         PRHEX(LCELL_S2,8)
+         SPACES(3)
+         PRHEX(LCELL_S3,8)
+         SPACES(3)
+         PRHEX(LCELL_LINK,8)
+         NEWLINE
+         HEAD=LCELL_LINK&X'FFFF';       ! EXTRA LINK IN TAGS LIST!!
+      %REPEAT
+%END
+%EXTERNALROUTINE CHECK ASL
+!***********************************************************************
+!*    CHECK ASL AND PRINT NO OF FREE CELLS. DEBUGGING SERVICE ONLY     *
+!***********************************************************************
+%INTEGER N,Q
+      Q=ASL; N=0
+      %WHILE Q#0 %CYCLE
+         N=N+1
+         Q=ASLIST(Q)_LINK
+      %REPEAT
+      NEWLINE
+      PRINTSTRING("FREE CELLS AFTER LINE ")
+      WRITE(WORKA_LINE,3)
+      PRINTSYMBOL('=')
+      WRITE(N,3)
+%END
+%EXTERNALINTEGERFN MORE SPACE
+!***********************************************************************
+!*    FORMATS UP SOME MORE OF THE ASL                                  *
+!***********************************************************************
+%INTEGER I,N,CL,AMOUNT
+      N=WORKA_ASL CUR BTM-1
+      AMOUNT=(WORKA_NNAMES+1)>>3;             ! EIGHTTH OF NNAMES
+      I=WORKA_ASL CUR BTM-((WORKA_CONST PTR+8)>>2);! GAP BETWEEN CONSTS &ASL
+      %IF I>>1<AMOUNT %THEN AMOUNT=I>>1;! TAKE ONLY HALF THE REMAINDER
+      %IF AMOUNT<20 %THEN AMOUNT=0
+      WORKA_ASL CUR BTM=WORKA_ASL CUR BTM-AMOUNT
+      %IF WORKA_ASL CUR BTM<=1 %THEN WORKA_ASL CUR BTM=1
+      CL=4*WORKA_ASL CUR BTM-8
+      %IF WORKA_ASL CUR BTM>=N %OR WORKA_CONST PTR>CL %THEN %START
+         FAULT(102, WORKA_WKFILEK,0)
+      %FINISH %ELSE WORKA_CONST LIMIT=CL;     ! NEW VALUE WITH BIGGER ASL
+      %CYCLE I=WORKA_ASL CUR BTM,1,N-1
+         ASLIST(I+1)_LINK=I
+      %REPEAT
+      ASLIST(WORKA_ASL CUR BTM)_LINK=0
+      ASL=N; %RESULT=N
+%END
+!%EXTERNALINTEGERFN NEW CELL
+!***********************************************************************
+!*       PROVIDE A NEW LIST PROCESSING CELL. CRAPOUT IF NONE AVAILABLE *
+!***********************************************************************
+!%INTEGER I
+!         %IF ASL=0 %THEN ASL=MORE SPACE
+!         I=ASL
+!         ASL=ASLIST(ASL)_LINK
+!         ASLIST(I)_LINK=0
+!         %RESULT =I
+!%END
+%EXTERNALROUTINE PUSH(%INTEGERNAME CELL, %INTEGER S1, S2, S3)
+!***********************************************************************
+!*       PUSH A CELL CONTAINING THE 3 STREAMS OF INFORMATION GIVEN     *
+!*       ONTO THE TOP OF THE LIST POINTED AT BY CELL.                  *
+!***********************************************************************
+%RECORD(LISTF)%NAME LCELL
+%INTEGER I
+      I=ASL
+      %IF I=0 %THEN I=MORE SPACE
+      LCELL==ASLIST(I)
+      ASL=LCELL_LINK
+      LCELL_LINK=CELL
+      CELL=I
+      LCELL_S1=S1
+      LCELL_S2=S2
+      LCELL_S3=S3
+%END
+%EXTERNALROUTINE POP(%INTEGERNAME CELL, S1, S2, S3)
+!***********************************************************************
+!*       COPY THE INFORMATION FROM THE TOP CELL OF LIST 'CELL' INTO    *
+!*         S1,S2&S3 AND THEN POP THE LIST UP 1 CELL. EMPTYLIST GIVE -1S*
+!***********************************************************************
+%INTEGER I
+%RECORD(LISTF)%NAME LCELL
+      I=CELL
+      LCELL==ASLIST(I)
+      S1=LCELL_S1
+      S2=LCELL_S2
+      S3=LCELL_S3
+      %IF I# 0 %THEN %START
+         CELL=LCELL_LINK
+         LCELL_LINK=ASL
+         ASL=I
+      %FINISH
+%END
+%EXTERNALROUTINE BINSERT(%INTEGERNAME TOP,BOT,%INTEGER S1,S2,S3)
+!***********************************************************************
+!*       INSERT A CELL AT THE BOTTOM OF A LIST                         *
+!*       UPDATING TOP AND BOTTOM POINTERS APPROPIATELY                 *
+!***********************************************************************
+%INTEGER I,J
+%RECORD(LISTF)%NAME LCELL
+         I=ASL
+         %IF I=0 %THEN I=MORE SPACE
+         LCELL==ASLIST(I)
+         ASL=LCELL_LINK
+         LCELL_S1=S1; LCELL_S2=S2
+         LCELL_S3=S3; LCELL_LINK=0
+         J=BOT
+         %IF J=0 %THEN BOT=I %AND TOP=BOT %ELSE %START
+            ASLIST(J)_LINK=I
+            BOT=I
+         %FINISH
+%END
+%EXTERNALROUTINE INSERT AFTER(%INTEGERNAME PLACE,%INTEGER S1,S2,S3)
+!***********************************************************************
+!*    ADDS A CELL INT THE MIDDLE OF A LIST AFTER "CELL" WHICH          *
+!*    IS UPDATED                                                       *
+!***********************************************************************
+%INTEGER I
+%RECORD(LISTF)%NAME OLDCELL,CELL
+      FAULT(109,0,0) %IF PLACE<=0
+      I=ASL
+      %IF I=0 %THEN I=MORE SPACE
+      CELL==ASLIST(I)
+      ASL=CELL_LINK
+      OLDCELL==ASLIST(PLACE)
+      CELL_S1=S1; CELL_S2=S2
+      CELL_S3=S3
+      CELL_LINK=OLDCELL_LINK
+      OLDCELL_LINK=I
+      PLACE=I
+%END
+%EXTERNALROUTINE INSERT AT END(%INTEGERNAME CELL, %INTEGER S1, S2, S3)
+!***********************************************************************
+!*       ADD A CELL TO THE BOTTOM OF THE LIST HEADED BY 'CELL'         *
+!***********************************************************************
+%INTEGER I,J,N
+%RECORD(LISTF)%NAME LCELL
+         I=CELL; J=I
+         %WHILE I#0 %CYCLE
+            J=I
+            I=ASLIST(J)_LINK
+         %REPEAT
+         N=ASL
+         %IF N=0 %THEN N=MORE SPACE
+         LCELL==ASLIST(N)
+         ASL=LCELL_LINK
+         %IF J=0 %THEN CELL=N %ELSE ASLIST(J)_LINK=N
+         LCELL_S1=S1
+         LCELL_S2=S2
+         LCELL_S3=S3
+         LCELL_LINK=0
+%END
+%EXTERNALINTEGERFN FIND(%INTEGER LAB, LIST)
+!***********************************************************************
+!*       THIS FUNCTION SEARCHES LIST 'LIST' FOR LAB IN STREAM2 AND     *
+!*       RETURNS THE CORRESPONDING CELL NO.IT USED FOR MORE THAN       *
+!*       SCANNING LABEL LISTS.                                         *
+!***********************************************************************
+         %WHILE LIST#0 %CYCLE
+            %RESULT=LIST %IF LAB=ASLIST(LIST)_S2
+            LIST=ASLIST(LIST)_LINK
+         %REPEAT
+         %RESULT=-1
+%END
+%EXTERNALROUTINE CLEAR LIST(%INTEGERNAME OPHEAD)
+!***********************************************************************
+!*       THROW AWAY A COMPLETE LIST (MAY BE NULL!)                     *
+!***********************************************************************
+%INTEGER I, J
+          I=OPHEAD; J=I
+         %WHILE I#0 %CYCLE
+            J=I
+            I=ASLIST(J)_LINK
+         %REPEAT
+         %IF J#0 %START
+            ASLIST(J)_LINK=ASL
+            ASL=OPHEAD; OPHEAD=0
+         %FINISH
+%END
+!%EXTERNALROUTINE CONCAT(%INTEGERNAME LIST1, LIST2)
+!!***********************************************************************
+!!*        ADDS LIST2 TO BOTTOM OF LIST1                                *
+!!***********************************************************************
+!%INTEGER I,J
+!         I=LIST1
+!         J=I
+!         %WHILE I#0 %THEN J=I %AND I=ASLIST(J)_LINK
+!         %IF J=0 %THEN LIST1=LIST2 %ELSE ASLIST(J)_LINK=LIST2
+!         LIST2=0
+!%END;                                   ! AN ERROR PUTS CELL TWICE ONTO
+                                        ! FREE LIST - CATASTROPHIC!
+%ENDOFFILE

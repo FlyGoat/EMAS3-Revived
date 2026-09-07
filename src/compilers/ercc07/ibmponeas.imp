@@ -1,0 +1,9 @@
+! SPDX-License-Identifier: MIT
+! Copyright (c) 2026 Jiaxun Yang <jiaxun.yang@flygoat.com>
+
+%include "ERCC07.TRIMP_HOSTCODES"
+%constinteger HOST=EMAS
+%constinteger TARGET=IBMXA
+! OLDPS tables with the reserved analysis slots consumed by poneb02s/timp06s.
+%include "../../../build/compiler-grammar/tables.imp"
+%include "ibmpone_support.imp"

@@ -1,0 +1,2593 @@
+!
+! Changes for IFAST23
+!    1) Incorporation of C SCH to help clear down FEPs
+!
+! Changes for IFAST22
+!
+!    1) uses more chain space
+!    2) Better queueing within cylinders for transfers
+!    3) more selective use of seek ans set sector
+!
+!
+! Changes for vsn 21
+!    1) New format for store array to allow for bigger AMT
+!    2) Conditional compilation of Q REQUEST and other non xa rts
+!
+%INCLUDE "ercc07:ibmsup_comf370"
+%INCLUDE "ercc07:ibmsup_page0f"
+%INCLUDE "ercc07:ibmsup_dtform2s"
+%INCLUDE "ercc07:ibmsup_xaioform"
+%RECORD %FORMAT PARMF(%INTEGER DEST,SRCE,(%INTEGER P1,P2,P3,P4,P5,
+   P6 %OR %STRING (23) TEXT))
+%CONST %INTEGER PCELLSIZE=36,MARGIN=48
+%RECORD %FORMAT PDOPEF(%INTEGER CURRMAX,MAXMAX,FIRST UNALLOC,LAST UNALLOC,NEXTPAGE,S1,
+   S2,S3,S4)
+%RECORD %FORMAT PARMXF(%INTEGER DEST,SRCE,P1,P2,P3,P4,P5,P6,LINK)
+%CONST %RECORD (PARMXF) %ARRAY %NAME PARM=PARM0AD
+%CONST %RECORD (PDOPEF) %NAME PARMDOPE=PARM0AD
+%RECORD %FORMAT STOREF(%SHORT %INTEGER FLAGS,USERS, %INTEGER LINK,
+      %SHORT %INTEGER BLINK,FLINK)
+%CONST %RECORD (STOREF) %ARRAY %NAME STORE=STORE0AD
+!
+%EXTERNAL %LONG %INTEGER SEMATIME=0
+%OWN %INTEGER PARMASL=0
+%EXTERNAL %INTEGER MAINQSEMA=-1
+%EXTERNAL %INTEGER %SPEC STORESEMA
+      %OWN %INTEGER %ARRAY GET NEW PAGE(0:14); ! parms for call of new epage
+!
+%CONST %INTEGER LOCSN1=LOCSN0+MAXPROCS
+%OWN %INTEGER APONSTAT1=0,APONSTAT2=0;   !APON STATISTICS..SH
+%RECORD %FORMAT SERVF(%INTEGER P,L)
+                                         ! L is link in circular chain of
+                                         ! services which constitute a queue
+                                         ! P is pointer to circular list
+                                         ! of parameters for this service
+                                         ! 2**31 bit of P is inhibit
+                                         ! 2**30 of P is inter OCP lockout
+%CONST %RECORD (SERVF) %ARRAY %NAME SERVA=SERVAAD
+! Local controllers & user services inhibited initially
+%EXTERNAL %INTEGER KERNELQ=0, RUNQ1=0, RUNQ2=0
+%RECORD %FORMAT PROCF(%STRING (6) USER, %BYTE %INTEGER INCAR,CATEGORY,WSN,RUNQ,ACTIVE,
+   %INTEGER ACTW0,LSTAD,LAMTX,STACK,STATUS)
+      %OWN %RECORD (PROCF) %ARRAY %FORMAT PROCAF(0:MAXPROCS)
+%OWN %RECORD (PROCF) %ARRAY %NAME PROCA
+      %IF MONLEVEL&2#0 %THEN %START
+      %EXTERNAL %LONG %INTEGER %SPEC KMON
+      %FINISH
+!
+!
+!
+%EXTERNAL %STRING %FN %SPEC STRHEX(%INTEGER N)
+%EXTERNAL %STRING %FN %SPEC STRINT(%INTEGER N)
+%EXTERNAL %STRING %FN %SPEC HTOS(%INTEGER VAL,PL)
+!
+%EXTERNAL %ROUTINE %SPEC OPMESS(%STRING (63) S)
+%EXTERNAL %ROUTINE %SPEC ETOI(%INTEGER A,L)
+%EXTERNAL %ROUTINE %SPEC DUMPTABLE(%INTEGER T,A,L)
+%EXTERNAL %ROUTINE %SPEC PKMONREC(%STRING (23) TEXT, %RECORD (PARMF) %NAME P)
+%EXTERNAL %INTEGER %FN %SPEC REALISE(%INTEGER VAD)
+!
+      %IF MULTI OCP=YES %START
+      %EXTERNAL %ROUTINE %SPEC RESERVE LOG
+      %EXTERNAL %ROUTINE %SPEC RELEASE LOG
+      %ROUTINE %SPEC halt other ocp
+      %ROUTINE %SPEC stop other ocp
+      %integerfnspec getmyport
+      %ROUTINE %SPEC restart other ocp
+      %FINISH
+!
+%CONST %LONG %INTEGER DISAWAIT=x'2000000000000'
+%OWN %LONG %INTEGER PSW
+!
+!------------------------------------------------------------------------
+!
+! these are the xa routines for starting and halting i-o. When compiled with
+! XA=NO they use the 370 instructions to get approximately the same effect
+!
+%EXTERNAL %INTEGER %FN SSCH(%INTEGER SLOTADDR,CCWRADDR,KEY)
+!***********************************************************************
+!*     start the device whose slot is at slotaddr and returns the cc   *
+!*       as the result. uses the alternate path where relevant         *
+!*    On non XA a busy condition mak persist if a sense after a        *
+!*    failure goes down the other channel so senses are flagged by     *
+!*    setting the top bit in KEY                                       *
+!***********************************************************************
+%CONST %INTEGER BUSY=x'10000000'
+%RECORD (ORBF) ORB
+%RECORD (DTFORM) %NAME DEVSLOT
+%INTEGER I,CC,CUU,ACC,sense
+      sense=KEY>>31
+      DEVSLOT==RECORD(SLOTADDR)
+      I=DEVSLOT_CUU
+      %IF XA=YES %START
+         ORB_IP=SLOTADDR
+         ORB_KEYTAGS=x'0040ff00'!CCW Format<<23!(CCWRADDR&x'80000000')>>8!(KEY<<28)
+                                         ! format 1 chains have top bit set pro tem
+         ORB_CPADDR=CCW RADDR&x'7fffffff'
+         *L_1,i
+         *SSCH_orb
+         *IPM_1
+         *SRL_1,28
+         *ST_1,cc
+      %ELSE
+         PAGE0_CAW=CCWRADDR!(KEY<<28)
+         *L_1,i
+         *SIO_0(1)
+         *BALR_1,0
+         *SLL_1,2
+         *SRL_1,30
+         *ST_1,cc
+         %IF DEVSLOT_ALT CUU#0 %AND (CC>=2 %OR (cc=1 %AND %C
+            (page0_csw2=x'50000000' {smod&busy} %OR (sense#0 %AND %C
+            page0_csw2&x'10000000'#0)))) %START
+            I=DEVSLOT_ALT CUU
+            *L_1,i
+            *SIO_0(1)
+            *BALR_1,0
+            *SLL_1,2
+            *SRL_1,30
+            *ST_1,acc
+            %IF ACC<CC %THEN %START
+               CC=ACC
+               %IF acc=0 %THEN DEVSLOT_STATS3=DEVSLOT_STATS3+1
+            %FINISH
+         %FINISH
+      %FINISH
+      %RESULT=CC
+%END
+%EXTERNAL %INTEGER %FN TSCH(%INTEGER SLOTADDR, %RECORD (IRBF) %NAME IRB)
+!***********************************************************************
+!*    tests the device whose slot is at slotaddr and returns the cc    *
+!*    relevant information is stored in the response block by xa       *
+!*    in non xa the csws are obtained and put into the response block  *
+!*    note cc0 and cc1 are reversed between 370 and XA but this routine*
+!*    always returns the actual condition code. The only exception is  *
+!*    on channel busy or dev not available when the alternate 370 path *
+!*    may be tried.                                                    *
+!***********************************************************************
+%CONST %INTEGER BUSY=x'10000000'
+%RECORD (DTFORM) %NAME DEVSLOT
+%INTEGER I,CC,CUU,ACC
+      DEVSLOT==RECORD(SLOTADDR)
+      I=DEVSLOT_CUU
+      %IF XA=YES %START
+         *L_1,i; *L_2,irb
+         *TSCH_0(2)
+         *IPM_1
+         *SRL_1,28
+         *ST_1,cc
+      %ELSE
+         *L_1,i
+         *TIO_0(1)
+         *BALR_1,0
+         *SLL_1,2
+         *SRL_1,30
+         *ST_1,cc
+         %IF CC=1 %THEN IRB_CSW1=PAGE0_CSW1 %AND IRB_CSW2=PAGE0_CSW2
+         %IF DEVSLOT_ALT CUU#0 %AND (CC>=2) %START
+            I=DEVSLOT_ALT CUU
+            *L_1,i
+            *TIO_0(1)
+            *BALR_1,0
+            *SLL_1,2
+            *SRL_1,30
+            *ST_1,acc
+            %IF ACC=1 %THEN IRB_CSW1=PAGE0_CSW1 %AND IRB_CSW2=PAGE0_CSW2
+            %IF ACC<CC %THEN CC=ACC
+         %FINISH
+      %FINISH
+      %RESULT=CC
+%END
+%EXTERNAL %INTEGER %FN HSCH(%INTEGER SLOTADDR)
+!***********************************************************************
+!*    halts the device whose slot is at slotaddr and returns the cc    *
+!*    no relevant information is stored in the response block by xa    *
+!*    in non xa the csws are obtained and put into page0 on cc=1       *
+!*    On dev not available the alternate 370 path is tried             *
+!***********************************************************************
+%CONST %INTEGER BUSY=x'10000000'
+%RECORD (DTFORM) %NAME DEVSLOT
+%INTEGER I,CC,CUU,ACC
+      DEVSLOT==RECORD(SLOTADDR)
+      I=DEVSLOT_CUU
+      %IF XA=YES %START
+         *L_1,i
+         *HSCH_I {param is a dummy}
+         *IPM_1
+         *SRL_1,28
+         *ST_1,cc
+      %ELSE
+         *L_1,i
+         *HIO_0(1)
+         *BALR_1,0
+         *SLL_1,2
+         *SRL_1,30
+         *ST_1,cc
+         *L_1,i
+         *CLRIO_0(1);                    ! may help feps recover
+         %IF DEVSLOT_ALT CUU#0 %AND CC=3 %START
+            I=DEVSLOT_ALT CUU
+            *L_1,i
+            *HIO_0(1)
+            *BALR_1,0
+            *SLL_1,2
+            *SRL_1,30
+            *ST_1,acc
+            *L_1,i
+            *CLRIO_0(1);                 ! may help feps recover
+            %IF ACC<CC %THEN CC=ACC
+         %FINISH
+      %FINISH
+      %RESULT=CC
+%END
+%EXTERNAL %INTEGER %FN CSCH(%INTEGER SLOTADDR)
+!***********************************************************************
+!*    Clears down the subchannel and returns the cc                    *
+!*    Used after deallocate in Idevs to minimise problems with FEPs    *
+!***********************************************************************
+%CONST %INTEGER BUSY=x'10000000'
+%RECORD (DTFORM) %NAME DEVSLOT
+%INTEGER I,CC,CUU,ACC
+      DEVSLOT==RECORD(SLOTADDR)
+      I=DEVSLOT_CUU
+      %IF XA=YES %START
+         *L_1,i
+         *CSCH_0(0)
+         *IPM_1
+         *SRL_1,28
+         *ST_1,cc
+      %ELSE
+         OPMESS("Generation Blunder")
+      %FINISH
+      %RESULT=CC
+%END
+%EXTERNAL %INTEGER %FN STSCH(%INTEGER SLOTADDR, %RECORD (SCHIBF) %NAME SCHIB)
+!***********************************************************************
+!*    Stores the subchannel info block into schib and returns the cc   *
+!***********************************************************************
+%CONST %INTEGER BUSY=x'10000000'
+%RECORD (DTFORM) %NAME DEVSLOT
+%INTEGER I,CC,CUU,ACC
+      DEVSLOT==RECORD(SLOTADDR)
+      I=DEVSLOT_CUU
+      %IF XA=YES %START
+         *L_1,i
+         *L_2,schib
+         *STSCH_0(2)
+         *IPM_1
+         *SRL_1,28
+         *ST_1,cc
+      %ELSE
+         OPMESS("Generation Blunder")
+      %FINISH
+      %RESULT=CC
+%END
+%EXTERNAL %INTEGER %FN MSCH(%INTEGER SLOTADDR, %RECORD (SCHIBF) %NAME SCHIB)
+!***********************************************************************
+!*    Modifies the subchannel info block with schib and returns the cc *
+!***********************************************************************
+%CONST %INTEGER BUSY=x'10000000'
+%RECORD (DTFORM) %NAME DEVSLOT
+%INTEGER I,CC,CUU,ACC
+      DEVSLOT==RECORD(SLOTADDR)
+      I=DEVSLOT_CUU
+      %IF XA=YES %START
+         *L_1,i
+         *L_2,schib
+         *MSCH_0(2)
+         *IPM_1
+         *SRL_1,28
+         *ST_1,cc
+      %ELSE
+         OPMESS("Generation Blunder")
+      %FINISH
+      %RESULT=CC
+%END
+!
+!
+!------------------------------------------------------------------------
+!
+%EXTERNAL %ROUTINE STOP %ALIAS "S#STOP"
+      %IF multi ocp=yes %THEN stop other ocp
+      com_failingport=getmyport
+      *stm_0,15,2056(0); *stctl_0,15,2152(0)
+      integer(2048)=M'DEAD'; integer(2052)=M'STOP';      ! funny psw
+      PSW=PSW0!DISAWAIT!x'd1ed'
+      *LPSW_psw
+%END
+!
+%EXTERNAL %ROUTINE MONITOR(%STRING (63) S)
+      %if multiocp=yes %then stop other ocp
+      PRINTSTRING(S)
+      NEWLINE
+      %MONITOR
+      %STOP
+%END
+      %IF MULTI OCP=YES %START
+      %EXTERNAL %ROUTINE SEMALOOP(%INTEGER %NAME SEMA)
+!***********************************************************************
+!*    Loop till a sema comes free. MAXCOUNT is large enough so that    *
+!*    it is only invoked when another OCP has gone down holding a sema *
+!***********************************************************************
+%LONG %INTEGER CPT1,CPT2
+%INTEGER I,J
+         *STPT_cpt1
+         %FOR I=1,1,COM_INSPERSEC*1000 %CYCLE
+            *SLR_1,1; *LR_0,1; *BCTR_0,0
+            *L_2,sema
+            *CS_0,1,0(2)
+            *BC_7,<rep>
+            %IF MONLEVEL&4#0 %START
+               *STPT_cpt2
+               SEMATIME=SEMATIME+(CPT1-CPT2)>>12
+            %FINISH
+            %RETURN
+REP:     %REPEAT
+         SEMA=-1;                     ! free sema before msg lest IOCP sema
+         PRINTSTRING("Sema forced free at ".STRHEX(ADDR(SEMA))."
+")
+      %if com_nocps=1 %then Monitor("sema problem")
+%END
+%externalintegerfn getmyport
+!***********************************************************************
+!*     obtains id of current cpu                                       *
+!***********************************************************************
+%integer i
+      i=0
+      *STAP_I
+      %result=i>>16
+%end
+%integerfn issue sigp(%integer param,hisport,order,%integername status)
+!***********************************************************************
+!*    Sends an order to another CPU                                    *
+!***********************************************************************
+%integer cc
+      *SR_0,0; *LM_1,4,Param
+      *SIGP_0,2,0(3)
+      *ST_0,0(4);                   ! into status
+      *IPM_1; *SRL_1,28(0); *st_1,CC
+      %result=CC
+%end
+%integerfn sense CPU(%integer Hisport,%integername Status)
+!***********************************************************************
+!*    Sends a Sense to other CPU waits a while for a reply             *
+!***********************************************************************
+%integer count,CC
+      Count=0
+      %cycle
+         CC=issue sigp(0,Hisport,1{Send Status},Status)
+         %exit %if CC#2;                  ! Anything but BUSY
+         Count=Count+1
+      %repeat %until count>=1000000
+      %result=cc
+%end
+%externalintegerfn IPL OCP(%integer n)
+!***********************************************************************
+!*    Starts up a further OCP in a multi ocp confign                   *
+!***********************************************************************
+%integer myport,hisport,hisprefix,cc,step,status
+      myport=getmyport
+      step=0
+      hisport=COM_OCPPORT(n)
+      hisprefix=COM_OCP Prefix(N)
+      ->Fail %if hisport=myport
+      step=1
+      CC=Issue sigp(0,Hisport,11,Status);    ! Initial Reset
+      ->Fail %unless CC=0
+      Step=2
+      CC=sense Cpu(Hisport,Status)
+       ->Fail %unless CC=1 %and Status&X'40'#0;    ! Stopped
+      Step=3
+      CC=Issue sigp(Hisprefix,Hisport,13,status);   ! Set his prefix
+      ->Fail %unless CC=0
+      Step=4
+      CC=Sense CPU(Hisport,Status)
+       ->Fail %unless CC=1 %and Status&X'40'#0;    ! Stopped
+      Step=5
+      CC=Issue Sigp(0,Hisport,6,Status)
+      ->Fail %unless cc=0;                ! Restart (=IPL) accpeted
+      Step=6
+      CC=Sense CPU(Hisport,Status)
+      OPmess("OCP".Strint(Hisport)." IPLd ".HTOS(status,2))
+      %result=CC
+Fail:
+      OPmess("OCP".Strint(Hisport)." Failed to IPL")
+      Printstring("OCP".Strint(Hisport)." step=".Strint(step))
+      Printstring("CC=".strint(cc)." Status=".HTOS(status,2))
+      newline
+      %result=-1
+%end
+%externalROUTINE halt other ocp
+!***********************************************************************
+!*    suspends all other OCPs normally only one but coded for more     *
+!***********************************************************************
+%integer i,status,cc,myport,hisport
+      myport=getmyport
+      %for i=1,1,COM_NOCPS %cycle
+         hisport=com_ocp port(i)
+         %if myport#hisport %Start
+            cc=issue sigp(0,Hisport,5,status); ! 5 for stop
+            %if cc#0 %start
+               opmess("OCP".strint(i)." fails to halt ".htos(cc<<8!status,3))
+            %finish
+            cc=Sense cpu(Hisport,Status)
+            %if CC#1 %or Status&X'40'=0 %then %start
+               Opmess("OCP".strint(1)."Did not halt")
+            %finish
+         %finish
+      %repeat
+%END
+%externalROUTINE restart other ocp
+!***********************************************************************
+!*    restarts all other OCPs normally only one but coded for more     *
+!***********************************************************************
+%integer i,status,cc,myport,hisport
+      myport=getmyport
+      %for i=1,1,COM_NOCPS %cycle
+         hisport=com_ocp port(i)
+         %if myport#hisport %Start
+            cc=Sense cpu(Hisport,Status)
+            %if cc=1 %and Status&X'40'#0{Stopped} %then %c
+               cc=issue sigp(0,Hisport,4,Status); ! 4 for restart
+            %if cc#0 %start
+               opmess("OCP".strint(i)." fails to restart ".htos(cc<<8!status,3))
+            %finish
+         %finish
+      %repeat
+%END
+%externalROUTINE stop other ocp
+!***********************************************************************
+!*    stops and store status for all other OCPs                        *
+!*      normally only one but coded for more                           *
+!***********************************************************************
+%integer i,status,cc,myport,hisport
+      myport=getmyport
+      %for i=1,1,COM_NOCPS %cycle
+         hisport=com_ocp port(i)
+         %if myport#hisport %Start
+            cc=issue sigp(0,Hisport,5,status); ! 5 for stop
+            cc=Sense cpu(Hisport,Status)
+            cc=issue sigp(Com_ocp prefix(i),Hisport,14,Status);! store status in prefix page
+            %if cc#0 %start
+               opmess("OCP".strint(i)." fails to stop ".htos(cc<<8!status,3))
+            %finish
+         %finish
+      %repeat
+%END
+      %FINISH
+!
+%EXTERNAL %ROUTINE SYSERR(%INTEGER STK,IP)
+%END
+!
+!-----------------------------------------------------------------------
+%ROUTINE PUTONQ(%INTEGER SERVICE)
+%RECORD (PROCF) %NAME PROC
+%RECORD (SERVF) %NAME SERV,SERVQ
+%INTEGER %NAME RUNQ
+      SERV==SERVA(SERVICE)
+      %IF LOCSN0<SERVICE<=LOCSN1 %THEN %START
+         PROC==PROCA(SERVICE-LOCSN0)
+         %IF PROC_RUNQ=1 %THEN RUNQ==RUNQ1 %ELSE RUNQ==RUNQ2
+         %IF RUNQ=0 %THEN SERV_L=SERVICE %ELSE %START
+            SERVQ==SERVA(RUNQ)
+            SERV_L=SERVQ_L
+            SERVQ_L=SERVICE
+         %FINISH
+         RUNQ=SERVICE %UNLESS PROC_STATUS&3#0 %AND RUNQ#0
+                                         ! priority procs on front
+      %FINISH %ELSE %START
+         %IF KERNELQ=0 %THEN SERV_L=SERVICE %ELSE %START
+            SERVQ==SERVA(KERNELQ)
+            SERV_L=SERVQ_L
+            SERVQ_L=SERVICE
+         %FINISH
+         KERNELQ=SERVICE
+      %FINISH
+%END
+!
+!-----------------------------------------------------------------------
+!
+%EXTERNAL %INTEGER %FN RTV(%INTEGER RAD)
+!***********************************************************************
+!*    setup page to allow access to store at real address RAD          *
+!*    or invalidate page if RAD = -1                                   *
+!*    Page 2 of segment0 is used for single or IPL CPUs                *
+!*    Pages 3-5 for other CPUs inthe system. Each CPU must have its    *
+!*    own entry of problems are bound to occurr                        *
+!***********************************************************************
+      %IF XA=YES %START
+      %CONST %INTEGER STMASK=X'0FC0'
+      %ELSE
+      %CONST %INTEGER STMASK=X'0FF8'
+      %FINISH
+%INTEGER I,J,PRAD,Pageno,RTV Vad
+      Pageno=2
+      %if MULTIOCP=yes %start
+         j=getmyport
+         %for i=1,1,4 %cycle
+            %if j=COM_OCP PORT(i) %then pageno=j+1 %and %exit
+         %repeat
+      %finish
+      RTV VAD=PAGE0 VA+PAGENO<<12
+       *BASR_2,0; *using_2
+      *L_1,rtvvad; *LRA_0,0(1); *ST_0,prad; *BC_8,<ok>
+      *drop_2
+      PRAD=-1;                           ! no tlb purge needed
+OK:
+!
+      %UNLESS PRAD=-1 %START;            ! tlb purge required
+         %IF XA=YES %START
+            I=INTEGER(SEGTAB VA+4*PAGE0 SEG); ! PTO
+            *L_0,i; *L_1,rtvvad; *IPTE_0,1
+         %ELSE
+            *PTLB_0
+         %FINISH
+      %FINISH
+!
+      J=SEGTAB VA+INTEGER(SEGTAB VA+4*PAGE0 SEG)&STMASK+PAGENO*PTE SIZE
+      %IF PTE SIZE=2 %START
+         %IF RAD=-1 %THEN RAD=0 %AND I=8 %ELSE I=0
+         SHORTINTEGER(J)<-RAD>>12<<4!I
+      %ELSE
+         %IF RAD=-1 %THEN RAD=0 %AND I=x'400' %ELSE I=0
+         INTEGER(J)=(RAD&(-4096))!I
+      %FINISH
+!
+      %RESULT=RTV VAD!(RAD&4095)
+%END
+!
+!------------------------------------------------------------------------
+!
+%EXTERNAL %INTEGER %FN PPINIT(%INTEGER %FN NEW EPAGE)
+%CONST %INTEGER INIT EPAGES=SERVASIZE//PAGESIZE+1
+%INTEGER %ARRAY REALADS(0:INIT EPAGES)
+%INTEGER I,J,K,CELLS
+%LONG %INTEGER L
+      I=ADDR(GET NEW PAGE(0));           ! save FN parms
+      *L_1,i; *L_15,64(10)
+      *MVC_0(16,1),0(15)
+      *L_15,12(1); *MVC_16(40,1),20(15)
+      PROCA==ARRAY(COM_PROCAAD,PROCAF)
+      %FOR J=INIT EPAGES,-1,0 %CYCLE
+         I=NEW EPAGE
+         REALADS(J)=I
+      %REPEAT
+      %IF MAXPROCS#COM_MAXPROCS %OR PAGESIZE#COM_PAGESIZE %OR %C
+         STORE0AD#COM_STOREAAD %THEN PRINTSTRING("Incompatible components!!!
+")
+                                         ! page table at beginning of PPSEG
+      %IF XA=NO %THEN J=INIT EPAGES %ELSE J=PARM PT SIZE//16-1
+      %IF XA=YES %THEN j=j!X'10'{Common segment bit} %ELSE J=J<<28
+      INTEGER(SEG TAB VA+4*PPSEG)=I!J
+      I=RTV(I)
+      %FOR J=0,1,PARM PT SIZE-1 %CYCLE
+         %IF J<=INIT EPAGES %THEN K=REALADS(J) %ELSE %IF PTE SIZE=2 %THEN %C
+            K=x'800' %ELSE K=x'400'
+         %IF PTE SIZE=2 %THEN SHORTINTEGER(I+J*PTE SIZE)<-K>>8 %ELSE %C
+            INTEGER(I+J*PTE SIZE)=K
+      %REPEAT
+      I=RTV(-1)
+      PARMDOPE_CURRMAX=PAGESIZE*(INITEPAGES+1)-PARMPTSIZE*PTE SIZE-SERVASIZE
+      PARMDOPE_MAXMAX=PAGESIZE*PARMPTSIZE-PARMPTSIZE*PTE SIZE-SERVASIZE
+      CELLS=PARMDOPE_CURRMAX//PCELLSIZE-1; ! no of cells now avaiable
+      PARMDOPE_FIRSTUNALLOC=CELLS-MARGIN+1
+      PARMDOPE_LAST UNALLOC=CELLS
+      PARMDOPE_NEXTPAGE=INIT EPAGES+1
+      CELLS=CELLS-MARGIN;                ! margin of "MARGIN" cells for trying
+                                         ! to obtain further epage
+      %FOR I=1,1,CELLS-1 %CYCLE
+         PARM(I)_LINK=I+1
+      %REPEAT
+      PARM(CELLS)_LINK=1
+      PARMASL=CELLS
+      COM_PARMASLA=ADDR(PARMASL)
+      COM_KERNELQA=ADDR(KERNELQ)
+      COM_RUNQ1A=ADDR(RUNQ1)
+      COM_RUNQ2A=ADDR(RUNQ2)
+      %RESULT=PARM0AD
+%END
+!
+!------------------------------------------------------------------------
+!
+%ROUTINE MORE PPSPACE
+!***********************************************************************
+!*    Called when PARM ASL is empty and attemps to grab a free epage   *
+!*    and use to extend the (paged) parameter passing area             *
+!*    if no page available it tries to use one of the small no of cells*
+!*    not formatted into the original list. This gives us a fair       *
+!*    chance of finding a free epage before disaster strikes           *
+!***********************************************************************
+%INTEGER I,J,REALAD,PTAD,CELLS,FIRST,CMAX
+      CMAX=PARMDOPE_CURRMAX
+      %IF CMAX>=PARMDOPE_MAXMAX %THEN ->FAIL
+      I=ADDR(GET NEW PAGE(0))
+      *L_2,i
+      *STM_4,14,16(11)
+      *LM_12,15,0(2)
+      *LM_5,10,16(2)
+      *LR_1,14
+      *L_14,52(2)
+      *BASR_15,1
+      *ST_1,realad
+      %IF REALAD=-1 %THEN ->TRY MARGIN
+      %IF XA=NO %START
+         I=INTEGER(SEGTAB VA+4*PPSEG)>>28
+         I=I+1
+         INTEGER(SEGTAB VA+4*PPSEG)=INTEGER(SEGTAB VA+4*PPSEG)&x'0fffffff'!I<<28
+      %FINISH
+      PTAD=PPSEG<<SSHIFT+PTE SIZE*PARMDOPE_NEXTPAGE
+!
+! Extend PARM area by 1 epage by adding entry into page table
+!
+      %IF PTE SIZE=2 %THEN SHORTINTEGER(PTAD)<-REALAD>>8 %ELSE INTEGER(PTAD)=REALAD
+!
+! Adjust param area descriptor and format up new bit of parmlist
+!
+      CMAX=CMAX+PAGESIZE
+      PARMDOPE_CURRMAX=CMAX
+      CELLS=CMAX//PCELLSIZE-1
+      FIRST=PARMDOPE_FIRST UNALLOC
+      PARMDOPE_FIRST UNALLOC=CELLS-MARGIN+1
+      PARMDOPE_LAST UNALLOC=CELLS
+      PARMDOPE_NEXTPAGE=PARMDOPE_NEXTPAGE+1
+      CELLS=CELLS-MARGIN
+      %FOR I=FIRST,1,CELLS-1 %CYCLE
+         PARM(I)_LINK=I+1
+      %REPEAT
+      PARM(CELLS)_LINK=FIRST
+      PARMASL=CELLS
+      %RETURN
+TRY MARGIN:
+!
+! No epage available just now, use one of margin cells
+!
+      I=PARMDOPE_FIRST UNALLOC
+      %IF I>PARMDOPE_LAST UNALLOC %THEN ->FAIL
+      PARMDOPE_FIRST UNALLOC=I+1
+      PARM(I)_LINK=I
+      PARMASL=I
+      %RETURN
+FAIL:
+      MONITOR("PARM ASL empty")
+%END
+!
+!------------------------------------------------------------------------
+!
+%INTEGER %FN APON(%RECORD (PARMF) %NAME P)
+!***********************************************************************
+!*    ADDED MARCH-88, S.HAYES                                          *
+!*    HANDLES TERMINAL UPDATE MESSAGES, AND INT MESSAGES               *
+!*    If handled completely by APON, result=0.                         *
+!*    If message needs to be queued as normal, result=1.               *
+!*    Only called for P_SRCE=X'0037000C' OR P_SRCE=X'00390005'         *
+!*        Ie update input and terminal INT messages                    *
+!*      A precaution aginst fast workstations emulating terminals      *
+!***********************************************************************
+%RECORD (SERVF) %NAME SERV
+%RECORD (PARMXF) %NAME NCELL
+%INTEGER SERVICE,NEXTCELL,SERVP
+!*       %IF P_SRCE#X'0037000C' %AND P_SRCE#X'00390005' %THEN ->DONE
+!*          !IGNORE IF NOT INPUT UPDATE, OR INTERRUPT MESSAGE
+      SERVICE=P_DEST>>16
+      SERV==SERVA(SERVICE)
+      SERVP=SERV_P&X'3FFFFFFF'
+      %IF SERVP=0 %THEN ->DONE;          !NOTHING QUEUED
+      NCELL==PARM(SERVP)
+      %CYCLE
+         NEXTCELL=NCELL_LINK
+         NCELL==PARM(NEXTCELL)
+         %IF NCELL_SRCE=P_SRCE %AND NCELL_P1=P_P1 %THEN %START
+                                         ! SAME SRCE, SAME CONSOLE
+            %IF P_SRCE=X'0037000C' %THEN %START
+                                         !UPDATE INPUT POINTER
+               NCELL_P2=P_P2
+               %IF APONSTAT1#X'7FFFFFFF' %THEN APONSTAT1=APONSTAT1+1
+                                         !KEEP STATISTICS
+            %FINISH %ELSE %START
+                                         !SRCE=X'00390005'..UPDATE INTERRUPT STRING
+                                         !Check length before move..just in case
+               %IF BYTEINTEGER(ADDR(P_P3))<=15 %THEN %C
+                  STRING(ADDR(NCELL_P3))=STRING(ADDR(P_P3))
+               %IF APONSTAT2#X'7FFFFFFF' %THEN APONSTAT2=APONSTAT2+1
+                                         !KEEP STATISTICS
+            %FINISH
+            %RESULT=0;                   !OK..message merged with previous
+         %FINISH
+         %EXIT %IF NEXTCELL=SERVP;       !LAST ONE PROCESSED
+      %REPEAT
+DONE:                                    !SCAN COMPLETE
+      %RESULT=1;                         !SIGNAL NORMAL PON QUEING REQUIRED
+%END
+!
+!------------------------------------------------------------------------
+!
+%EXTERNAL %ROUTINE PON(%RECORD (PARMF) %NAME P)
+%RECORD (SERVF) %NAME SERV,SERVQ
+%RECORD (PARMXF) %NAME ACELL,SCELL,NCELL
+%INTEGER SERVICE,NEWCELL,SERVP,I
+      SERVICE=P_DEST>>16
+      %IF MONLEVEL&2#0 %AND (SERVICE>MAXSERV %OR SERVICE=0) %THEN %C
+         PKMONREC("Invalid PON:",P) %AND %RETURN
+      %IF MULTIOCP=YES %THEN %START
+         *basr_2,0; *using_2
+         *SLR_1,1; *LR_0,1; *BCTR_0,0; *CS_0,1,MAINQSEMA
+         *BC_8,<PSEMAGOT>; *drop_2
+         SEMALOOP(MAINQSEMA)
+PSEMAGOT:
+      %FINISH
+      %IF SERVICE>LOCSN1 {LOCSNO+MAXPROCS} %AND (P_SRCE=X'0037000C' %OR %C
+         P_SRCE=X'00390005') %THEN %START
+                                         ! Message for process..may be asynch update message
+         %IF APON(P)=0 %THEN ->FREESEMA
+                                         !If APON has handled it, then nothing more to do
+                                         ! If not handled by APON - use normal PON code.
+      %FINISH
+      %IF PARMASL=0 %THEN MORE PPSPACE
+      ACELL==PARM(PARMASL);              ! ACELL =ASL HEADCELL
+      NEWCELL=ACELL_LINK
+      NCELL==PARM(NEWCELL);              ! NCELL mapped onto NEWCELL
+      %IF NEWCELL=PARMASL %THEN PARMASL=0 %ELSE ACELL_LINK=NCELL_LINK
+      NCELL<-P;                          ! copy parameters in
+      SERV==SERVA(SERVICE)
+      SERVP=SERV_P&X'3FFFFFFF'
+      %IF SERVP=0 %THEN NCELL_LINK=NEWCELL %ELSE %START
+         SCELL==PARM(SERVP)
+         NCELL_LINK=SCELL_LINK
+         SCELL_LINK=NEWCELL
+      %FINISH
+      I=SERV_P&X'C0000000'
+      SERV_P=I!NEWCELL
+      %IF I=0 %AND SERV_L=0 %START;      ! q if not xecuting or inhbtd
+         %IF SERVICE>=LOCSN0 %THEN PUTONQ(SERVICE) %ELSE %START
+            %IF KERNELQ=0 %THEN SERV_L=SERVICE %ELSE %START
+               SERVQ==SERVA(KERNELQ)
+               SERV_L=SERVQ_L
+               SERVQ_L=SERVICE
+            %FINISH
+            KERNELQ=SERVICE
+         %FINISH
+      %FINISH
+FREESEMA:
+      %IF MULTIOCP=YES %START; MAINQSEMA=-1; %FINISH
+%END
+!
+!------------------------------------------------------------------------
+!
+%EXTERNAL %ROUTINE FASTPON(%INTEGER CELL)
+!***********************************************************************
+!*    Can be used when record already in param table to avoid copy     *
+!*    cell is no of entry in PARM holding the record                   *
+!***********************************************************************
+%INTEGER SERVICE,SERVP,I
+%RECORD (SERVF) %NAME SERV,SERVQ
+%RECORD (PARMXF) %NAME CCELL,SCELL
+      CCELL==PARM(CELL)
+      SERVICE=CCELL_DEST>>16
+      SERV==SERVA(SERVICE)
+      %IF MULTIOCP=YES %THEN %START
+         *basr_2,0; *using_2
+         *SLR_1,1; *LR_0,1; *BCTR_0,0; *CS_0,1,MAINQSEMA
+         *BC_8,<MSEMAGOT>; *drop_2
+         SEMALOOP(MAINQSEMA)
+MSEMAGOT:
+      %FINISH
+      SERVP=SERV_P&x'3fffffff'
+      %IF SERVP=0 %THEN CCELL_LINK=CELL %ELSE %START
+         SCELL==PARM(SERVP)
+         CCELL_LINK=SCELL_LINK
+         SCELL_LINK=CELL
+      %FINISH
+      I=SERV_P&x'c0000000'
+      SERV_P=I!CELL
+      %IF I=0 %AND SERV_L=0 %THEN %START
+         %IF SERVICE>=LOCSN0 %THEN PUTONQ(SERVICE) %ELSE %START
+            %IF KERNELQ=0 %THEN SERV_L=SERVICE %ELSE %START
+               SERVQ==SERVA(KERNELQ)
+               SERV_L=SERVQ_L
+               SERVQ_L=SERVICE
+            %FINISH
+            KERNELQ=SERVICE
+         %FINISH
+      %FINISH
+      %IF MULTIOCP=YES %THEN MAINQSEMA=-1
+%END
+!-----------------------------------------------------------------------
+%EXTERNAL %ROUTINE DPON(%RECORD (PARMF) %NAME P, %INTEGER DELAY)
+!***********************************************************************
+!*    As for PON except for a delay of "DELAY" seconds. Zero delays    *
+!*    are allowed. ELAPSED INT is used to kick DPONPUTONQ              *
+!***********************************************************************
+%RECORD (PARMF) POUT
+%RECORD (PARMXF) %NAME ACELL,NCELL
+%INTEGER SERVICE,NEWCELL
+      SERVICE=P_DEST>>16
+      %IF MONLEVEL&2#0 %AND SERVICE>MAXSERV %THEN %C
+         PKMONREC("Invalid DPON:",P) %AND WRITE(DELAY,4) %AND %RETURN
+      %IF DELAY<=0 %THEN PON(P) %AND %RETURN
+      %IF MULTIOCP=YES %THEN %START
+         *basr_2,0; *using_2
+         *SLR_1,1; *LR_0,1; *BCTR_0,0; *CS_0,1,MAINQSEMA
+         *BC_8,<MSEMAGOT>; *drop_2
+         SEMALOOP(MAINQSEMA)
+MSEMAGOT:
+      %FINISH
+      %IF PARMASL=0 %THEN MORE PPSPACE
+      ACELL==PARM(PARMASL)
+      NEWCELL=ACELL_LINK
+      NCELL==PARM(NEWCELL);              ! onto cell in freelist
+      %IF NEWCELL=PARMASL %THEN PARMASL=0 %ELSE ACELL_LINK=NCELL_LINK
+      NCELL<-P
+      %IF MULTIOCP=YES %THEN MAINQSEMA=-1
+      POUT_DEST=x'a0002'
+      POUT_SRCE=0
+      POUT_P1=x'c0000'!NEWCELL
+      POUT_P2=DELAY
+      PON(POUT)
+%END
+!-----------------------------------------------------------------------
+%EXTERNAL %ROUTINE DPONPUTONQ(%RECORD (PARMF) %NAME P)
+!***********************************************************************
+!*    Scond part of DPON. The delay has elapsed and P_DACT has the    *
+!*    number of a PPCELL set up ready for fastponning                  *
+!***********************************************************************
+      %IF MONLEVEL&2#0 %AND KMON&1<<12#0 %THEN PKMONREC("DPONPUTONQ:",P)
+      FASTPON(P_DEST&x'ffff')
+%END
+!
+!------------------------------------------------------------------------
+!
+%EXTERNAL %INTEGER %FN NEWPPCELL
+%INTEGER NEWCELL
+%RECORD (PARMXF) %NAME ACELL
+      %IF multiocp=yes %THEN %START
+         *basr_2,0; *using_2
+         *SLR_1,1; *LR_0,1; *BCTR_0,0; *CS_0,1,MAINQSEMA
+         *BC_8,<MSEMAGOT>; *drop_2
+         SEMALOOP(MAINQSEMA)
+MSEMAGOT:
+      %FINISH
+      %IF PARMASL=0 %THEN MORE PPSPACE
+      ACELL==PARM(PARMASL)
+      NEWCELL=ACELL_LINK
+      %IF NEWCELL=PARMASL %THEN PARMASL=0 %ELSE ACELL_LINK=PARM(NEWCELL)_LINK
+      %IF multi ocp=yes %THEN mainqsema=-1
+      %RESULT=NEWCELL
+%END
+!
+!------------------------------------------------------------------------
+!
+!%EXTERNALROUTINE poff(%RECORD(parmf)%NAME p)
+!%RECORD(servf)%NAME serv
+!%RECORD(parmxf)%NAME acell,ccell,scell
+!%INTEGER service,cell,servp
+!service=p_dest>>16
+!%UNLESS 0<service<=maxserv %START
+!      pkmonrec("Invalid poff:",p)
+!      p_dest=0
+!      %RETURN
+!%FINISH
+!serv==serva(service)
+!servp=serv_p
+!%IF servp<=0 %THEN p_dest=0 %AND %RETURN
+!scell==parm(servp)
+!cell=scell_link
+!ccell==parm(cell)
+!p<-ccell
+!%IF cell=serv_p %THEN serv_p=0 %ELSE scell_link=ccell_link
+!%IF parmasl=0 %THEN ccell_link=cell %ELSE %START
+!      acell==parm(parmasl)
+!      ccell_link=acell_link
+!      acell_link=cell
+!%FINISH
+!parmasl=cell
+!%END
+!!
+!------------------------------------------------------------------------
+!
+%EXTERNAL %ROUTINE RETURN PPCELL(%INTEGER CELL)
+%RECORD (PARMXF) %NAME ACELL,CCELL
+      %IF multiocp=yes %THEN %START
+         *basr_2,0; *using_2
+         *SLR_1,1; *LR_0,1; *BCTR_0,0; *CS_0,1,MAINQSEMA
+         *BC_8,<MSEMAGOT>; *drop_2
+         SEMALOOP(MAINQSEMA)
+MSEMAGOT:
+      %FINISH
+      CCELL==PARM(CELL)
+      %IF PARMASL=0 %THEN CCELL_LINK=CELL %ELSE %START
+         ACELL==PARM(PARMASL)
+         CCELL_LINK=ACELL_LINK
+         ACELL_LINK=CELL
+      %FINISH
+      PARMASL=CELL
+      %IF multi ocp=yes %THEN mainqsema=-1
+%END
+!
+!------------------------------------------------------------------------
+!
+%EXTERNAL %ROUTINE INHIBIT(%INTEGER SERVICE)
+%RECORD (SERVF) %NAME SERV
+      %UNLESS 0<=SERVICE<=MAXSERV %START
+         PRINTSTRING("Invalid inhibit: ".STRINT(SERVICE))
+         NEWLINE
+         %RETURN
+      %FINISH
+      %IF multiocp=yes %THEN %START
+         *basr_2,0; *using_2
+         *SLR_1,1; *LR_0,1; *BCTR_0,0; *CS_0,1,MAINQSEMA
+         *BC_8,<MSEMAGOT>; *drop_2
+         SEMALOOP(MAINQSEMA)
+MSEMAGOT:
+      %FINISH
+      SERV==SERVA(SERVICE)
+      SERV_P=SERV_P!x'80000000'
+      %IF multi ocp=yes %THEN mainqsema=-1
+%END
+!
+!------------------------------------------------------------------------
+!
+%EXTERNAL %ROUTINE UNINHIBIT(%INTEGER SERVICE)
+%RECORD (SERVF) %NAME SERV
+      %UNLESS 0<=SERVICE<=MAXSERV %START
+         PRINTSTRING("Invalid uninhibit: ".STRINT(SERVICE))
+         NEWLINE
+         %RETURN
+      %FINISH
+      %IF multiocp=yes %THEN %START
+         *basr_2,0; *using_2
+         *SLR_1,1; *LR_0,1; *BCTR_0,0; *CS_0,1,MAINQSEMA
+         *BC_8,<MSEMAGOT>; *drop_2
+         SEMALOOP(MAINQSEMA)
+MSEMAGOT:
+      %FINISH
+      SERV==SERVA(SERVICE)
+      SERV_P=SERV_P&x'7fffffff'
+      %IF SERV_L=0 %AND SERV_P#0 %THEN PUTONQ(SERVICE)
+      %IF multi ocp=yes %THEN mainqsema=-1
+%END
+!-----------------------------------------------------------------------
+%EXTERNAL %ROUTINE SUPPOFF(%RECORD (SERVF) %NAME SERV, %RECORD (PARMF) %NAME P)
+!***********************************************************************
+!*    A more efficient POFF for supervisor                             *
+!*    assumes vital checks have been done                              *
+!***********************************************************************
+%RECORD (PARMXF) %NAME ACELL,CCELL,SCELL
+%INTEGER CELL,SERVP
+      %IF MULTIOCP=YES %THEN %START
+         *basr_2,0; *using_2
+         *SLR_1,1; *LR_0,1; *BCTR_0,0; *CS_0,1,MAINQSEMA
+         *BC_8,<MSEMAGOT>; *drop_2
+         SEMALOOP(MAINQSEMA)
+MSEMAGOT:
+      %FINISH
+      SERVP=SERV_P&X'3FFFFFFF'
+      SCELL==PARM(SERVP)
+      CELL=SCELL_LINK
+      CCELL==PARM(CELL)
+      P<-CCELL
+      %IF CELL=SERVP %THEN SERV_P=SERV_P&X'C0000000' %ELSE SCELL_LINK=CCELL_LINK
+      %IF PARMASL=0 %THEN CCELL_LINK=CELL %ELSE %START
+         ACELL==PARM(PARMASL)
+         CCELL_LINK=ACELL_LINK
+         ACELL_LINK=CELL
+      %FINISH
+      PARMASL=CELL
+      %IF MULTIOCP=YES %THEN MAINQSEMA=-1
+%END
+%EXTERNAL %ROUTINE PINH(%INTEGER PROCESS,MASK)
+!***********************************************************************
+!*    Inhibit a group of services for a process with one claiming      *
+!*    of the relevant sema. Needed for duals.                          *
+!*    Mask controls:-     2**0 set = inhibit processes LOCSN0          *
+!*                        2**1 set = inhibit processes LOCSN1 etc      *
+!***********************************************************************
+%RECORD (SERVF) %NAME SERV
+%INTEGER I,SERVICE
+      %IF MULTIOCP=YES %THEN %START
+         *basr_2,0; *using_2
+         *SLR_1,1; *LR_0,1; *BCTR_0,0; *CS_0,1,MAINQSEMA
+         *BC_8,<GOT>; *drop_2
+         SEMALOOP(MAINQSEMA)
+GOT:
+      %FINISH
+      %FOR I=0,1,3 %CYCLE
+         %IF MASK&(1<<I)#0 %START
+            SERVICE=PROCESS+LOCSN0+I*MAXPROCS
+            SERV==SERVA(SERVICE)
+            SERV_P=SERV_P!X'80000000'
+         %FINISH
+      %REPEAT
+      %IF MULTIOCP=YES %START; MAINQSEMA=-1; %FINISH
+%END
+%EXTERNAL %ROUTINE PUNINH(%INTEGER PROCESS,MASK)
+!***********************************************************************
+!*    Uninhibit service for a process. The converse of PINH(q.v)       *
+!***********************************************************************
+%RECORD (SERVF) %NAME SERV
+%INTEGER I,SERVICE
+      %IF MULTIOCP=YES %THEN %START
+         *basr_2,0; *using_2
+         *SLR_1,1; *LR_0,1; *BCTR_0,0; *CS_0,1,MAINQSEMA
+         *BC_8,<GOT>; *drop_2
+         SEMALOOP(MAINQSEMA)
+GOT:
+      %FINISH
+      %FOR I=0,1,3 %CYCLE
+         %IF MASK&(1<<I)#0 %START
+            SERVICE=PROCESS+LOCSN0+I*MAXPROCS
+            SERV==SERVA(SERVICE)
+            SERV_P=SERV_P&X'7FFFFFFF'
+            %IF SERV_L=0 %AND 0<SERV_P<X'FFFF' %THEN PUT ON Q(SERVICE)
+         %FINISH
+      %REPEAT
+      %IF MULTIOCP=YES %START; MAINQSEMA=-1; %FINISH
+%END
+!-----------------------------------------------------------------------
+%EXTERNAL %ROUTINE CLEAR PARMS(%INTEGER SERVICE)
+!***********************************************************************
+!*    Throw away all cells queuing for service en block                *
+!*    also print discarded cells for information                       *
+!***********************************************************************
+%RECORD (SERVF) %NAME SERV
+%INTEGER CELL,SERVP
+      SERV==SERVA(SERVICE)
+      %IF MULTIOCP=YES %THEN %START
+         *basr_2,0; *using_2
+         *SLR_1,1; *LR_0,1; *BCTR_0,0; *CS_0,1,MAINQSEMA
+         *BC_8,<SSEMAGOT>; *drop_2
+         SEMALOOP(MAINQSEMA)
+SSEMAGOT:
+      %FINISH
+      SERVP=SERV_P&X'3FFFFFFF'
+      %IF SERVP=0 %START
+         %IF MULTI OCP=YES %START; MAINQSEMA=-1; %FINISH
+         %RETURN
+      %FINISH
+      %IF MONLEVEL&2#0 %THEN %START
+         %IF MULTIOCP=YES %START; MAINQSEMA=-1; %FINISH; ! dont hold during o-p
+         CELL=SERVP
+         %UNTIL CELL=SERVP %CYCLE
+            CELL=PARM(CELL)_LINK
+            PKMONREC("PARM cleared:",PARM(CELL))
+         %REPEAT
+         %IF MULTIOCP=YES %THEN %START
+         *basr_2,0; *using_2
+            *SLR_1,1; *LR_0,1; *BCTR_0,0; *CS_0,1,MAINQSEMA
+            *BC_8,<SSEMAGOT2>; *drop_2
+            SEMALOOP(MAINQSEMA)
+SSEMAGOT2:
+         %FINISH
+      %FINISH
+      SERV_P=SERV_P&X'C0000000'
+      %IF PARMASL#0 %THEN CELL=PARM(SERVP)_LINK %AND %C
+         PARM(SERVP)_LINK=PARM(PARMASL)_LINK %AND PARM(PARMASL)_LINK=CELL
+      PARMASL=SERVP
+      %IF MULTIOCP=YES %START; MAINQSEMA=-1; %FINISH
+%END
+!------------------------------------------------------------------------
+%EXTERNAL %ROUTINE ELAPSED INT(%RECORD (PARMF) %NAME P)
+!**********************************************************************
+!*                                                                     *
+!*   ELAPSED INTERVAL TIMER                                            *
+!*                                                                     *
+!* Act 0 = call from RTC interrupt handler (currently once per sec)    *
+!* ACT 1 = Q/unQ nominee for kick every n seconds                      *
+!* ACT 2 = Q nominee for once-off kick in n seconds                    *
+!*                                                                     *
+!* Where : P_P1 is routine to be kicked                                *
+!*       : P_P2 is (a) seconds to elapse before kick (0<P_P2<X8000)    *
+!*              or (b) unQ nominee (P_P2 = -1,act 1 only)              *
+!*       : P_P3 is parameter returned to kicked routine in P_P1        *
+!***********************************************************************
+%ROUTINE %SPEC QUEUE
+%ROUTINE %SPEC UNQUEUE(%INTEGER N)
+%INTEGER %FN %SPEC SLOT(%INTEGER N)
+%RECORD %FORMAT QF(%INTEGER DEST,KLOKTIKS,PARM,PROCNO, %STRING (7) USER, %INTEGER P5,
+   P6,LINK)
+%RECORD (QF) %NAME Q
+%SWITCH ACT(0:2)
+%INTEGER I,SRCE,PROCNO
+%INTEGER %NAME HEAD
+      HEAD==COM_ELAP HEAD
+      SRCE=P_SRCE
+      I=P_DEST&X'FFFF'
+      %IF MONLEVEL&2#0 %AND 1<<10&KMON#0 %THEN PKMONREC("ELAPSED INT:",P)
+      ->ACT(I) %IF 0<=I<=2
+      %IF MONLEVEL&2#0 %AND I>2 %THEN PKMONREC("ELAPSED INT rejects:",P)
+      %RETURN
+ACT(0):                                  ! RTC interrupt
+!      %IF p_srce#M'EINT'  %and p_srce#x'00320007' %THEN monitor("call of elapsed int?")
+      P_SRCE=P_DEST
+      I=HEAD
+      %WHILE I>0 %CYCLE
+         Q==PARM(I)
+         I=Q_LINK
+         %IF Q_DEST#0 %START
+            Q_KLOKTIKS=Q_KLOKTIKS-1
+            %IF Q_KLOKTIKS&X'FFFF'=0 %START
+               P_DEST=Q_DEST
+               P_P1=Q_PARM
+!
+! Check user process has not logged off and if so cancel request
+!
+               PROCNO=Q_PROCNO
+               %IF PROCNO=0 %OR Q_USER=PROCA(PROCNO)_USER %THEN PON(P) %ELSE Q_KLOKTIKS=0
+               %IF Q_KLOKTIKS=0 %THEN UNQUEUE(Q_DEST) %ELSE %C
+                  Q_KLOKTIKS=Q_KLOKTIKS!Q_KLOKTIKS>>16
+            %FINISH
+         %FINISH
+      %REPEAT
+      %RETURN
+ACT(1):                                  ! request timer interrupt
+      %IF P_P2<0 %THEN UNQUEUE(P_P1) %AND %RETURN
+ACT(2):                                  ! one time only
+      %RETURN %IF X'7FFF'<P_P2<1
+      %IF I=1 %THEN P_P2=P_P2<<16+P_P2
+      QUEUE
+      %RETURN
+%ROUTINE QUEUE
+%INTEGER CELL,PROCNO
+      CELL=SLOT(P_P1)
+      %UNLESS CELL=0 %START;             ! already Q'd
+         %IF I=2 %START;                 ! ok if once-off
+            Q==PARM(CELL);               ! update parms
+            Q_KLOKTIKS=P_P2
+            Q_PARM=P_P3
+         %FINISH
+         %RETURN
+      %FINISH
+      CELL=NEWPPCELL
+      Q==PARM(CELL)
+      Q_P6=0
+      Q_LINK=HEAD
+      PARM(HEAD)_P6=CELL
+      HEAD=CELL
+      Q_DEST=P_P1
+      Q_KLOKTIKS=P_P2
+      Q_PARM=P_P3
+      PROCNO=P_P1>>16-LOCSN0
+      %IF PROCNO<0 %THEN PROCNO=0 %ELSE PROCNO=PROCNO&(MAXPROCS-1)
+      Q_PROCNO=PROCNO
+      Q_USER=PROCA(PROCNO)_USER %IF PROCNO>0
+%END
+%ROUTINE UNQUEUE(%INTEGER N)
+%INTEGER I
+%RECORD (QF) %NAME Q
+      I=SLOT(N)
+      %RETURN %IF I=0;                   ! not Q'd
+      Q==PARM(I)
+      %IF Q_P6=0 %THEN HEAD=Q_LINK %ELSE PARM(Q_P6)_LINK=Q_LINK
+      %IF Q_LINK#0 %THEN PARM(Q_LINK)_P6=Q_P6
+      RETURN PPCELL(I)
+%END
+%INTEGER %FN SLOT(%INTEGER DEST)
+%INTEGER I,J
+      I=HEAD
+      %WHILE I>0 %CYCLE
+         Q==PARM(I)
+         %RESULT=I %IF Q_DEST=DEST
+         I=Q_LINK
+      %REPEAT
+      %RESULT=0
+%END
+%END
+%RECORD %FORMAT PROPFORM(%INTEGER TRACKS,CYLS,PPERTRK,BLKSIZE,TOTPAGES,SP1,SP2,SP3,
+   KEYLEN,SECTINDX)
+%RECORD %FORMAT LABFORM(%BYTE %INTEGER %ARRAY VOL(0:5), %BYTE %INTEGER S1,S2,S3,S4,
+   ACCESS, %BYTE %INTEGER %ARRAY RES(1:20), %BYTE %INTEGER C1,C2,AC1,AC2,TPC1,TPC2,BF1,
+   BF2, %BYTE %INTEGER %ARRAY POINTER(0:3),IDENT(1:14))
+%RECORD %FORMAT CCWF(%INTEGER CMDAD, %BYTE %INTEGER FLAGS,SP, %SHORT %INTEGER LEN)
+%RECORD %FORMAT PQF(%INTEGER ADDT,CCWA,P1,P2,P3,P4,P5,P6,LINK)
+%CONST %INTEGER NORMALT=x'0c000000',ERRT=x'02000000',ATTNT=x'80000000'
+%CONST %INTEGER BUSY=x'10000000',OFFLINE=x'40000000',LOGGING=x'00001000'
+%CONST %INTEGER smod=x'40000000'
+%CONST %INTEGER cuend=x'20000000'
+%CONST %INTEGER nostartmask=x'ffff0000'!!(smod!busy!cuend)
+%CONST %INTEGER DISCSNO=x'200000',PDISCSNO=x'210000'
+%CONST %INTEGER SCHEDSNO=x'30000'
+      %OWN %BYTE %INTEGER %ARRAY %FORMAT LVNF(0:99)
+%OWN %BYTE %INTEGER %ARRAY %NAME LVN
+%OWN %INTEGER DITADDR=0,NDISCS=0,CHANNELQ=0,CHANNELQ SEMA=-1
+!
+%ROUTINE %SPEC PDISC(%RECORD (PARMF) %NAME P)
+%EXTERNAL %ROUTINE DISC(%RECORD (PARMF) %NAME P)
+%ROUTINE %SPEC CONSOLE ALARM
+%if XA#YES %start
+      %ROUTINE %SPEC Fire Queued
+%finish
+%ROUTINE %SPEC READ DLABEL(%RECORD (DTFORM) %NAME DDT)
+%ROUTINE %SPEC READ LOG(%RECORD (DTFORM) %NAME DDT)
+%ROUTINE %SPEC LABREAD ENDS
+%ROUTINE %SPEC UNLOAD(%RECORD (DTFORM) %NAME DDT)
+%STRING %FN %SPEC MTOS(%INTEGER M)
+%ROUTINE %SPEC SENSE(%RECORD (DTFORM) %NAME DDT)
+%ROUTINE %SPEC DREPORT(%RECORD (DTFORM) %NAME DDT, %RECORD (PARMF) %NAME P)
+%INTEGER %FN %SPEC FIRE CHAIN(%RECORD (DTFORM) %NAME DDT, %INTEGER CCWA,Qcount)
+%RECORD (DTFORM) %NAME DDT
+%RECORD (PROPFORM) %NAME PROP
+%RECORD (LABFORM) %NAME LABEL
+%RECORD (CCWF) %NAME CCW
+%RECORD (PQF) %NAME CQ
+%RECORD (SCHIBF) SCHIB
+%CONST %INTEGER DEAD=0,CONNIS=1,RLABIS=2,DCONNIS=3,AVAIL=4,PAGTIS=5
+%CONST %INTEGER PAGSIS=6,INOP=7,RRLOG=8,RRLOGP=9,PAVAIL=10,PCLAIMD=11,PTRANIS=12
+%CONST %INTEGER PSENIS=13,SPTRANIS=14,RLABSIS=15,RESERVE=16,RELEASE=17
+%CONST %INTEGER RESPX=1<<CONNIS!1<<RLABIS!1<<DCONNIS!1<<PAGTIS! %C
+      1<<PAGSIS!1<<RRLOG!1<<PTRANIS!1<<PSENIS!1<<SPTRANIS!1<<RLABSIS! %C
+             1<<RESERVE!1<<RELEASE
+%CONST %INTEGER PAGIO=1<<PAGTIS!1<<PAGSIS
+%CONST %INTEGER PRIVIO=1<<PTRANIS!1<<PSENIS!1<<SPTRANIS
+%OWN %INTEGER INITINH=0,LABREADS=0,LOGREADS=0,CURRTICK=0
+%INTEGER ACT,I,J,SLOT,PTR,CSW1,CSW2,ACUU
+%STRING (40) S
+%STRING (6) PREVLAB
+%SWITCH INACT(0:12),AINT,FINT,NINT(0:17)
+!
+      ACT=P_DEST&x'ffff'
+      %IF KMON>>32&1#0 %THEN PKMONREC("DISC:",P)
+      %IF ACT>=64 %THEN ->ACT64
+      ->INACT(ACT)
+!
+INACT(0):                                !initialisation
+      %RETURN %UNLESS NDISCS=0
+      NDISCS=COM_NDISCS
+      DITADDR=COM_DITADDR
+      LVN==ARRAY(COM_DLVNADDR,LVNF)
+      %FOR I=0,1,99 %CYCLE
+         LVN(I)=254
+      %REPEAT
+      INITINH=1
+      %FOR J=0,1,NDISCS-1 %CYCLE
+         DDT==RECORD(INTEGER(DITADDR+4*J))
+         DDT_ISERV=DISCSNO+3
+         DDT_SLOT=J
+         %IF XA=YES %START
+            I=STSCH(ADDR(DDT),SCHIB);    ! get sub channel info
+            %IF I#3 %START
+               SCHIB_IP=ADDR(DDT)
+               SCHIB_FLAGS=SCHIB_FLAGS!x'80'; ! enambled
+               I=MSCH(ADDR(DDT),SCHIB);  ! make operable
+            %FINISH
+         %FINISH
+         %IF CCW Format=1 %START
+            integer(ddt_CCWA-8)=X'04200018'
+            integer(DDT_CCWA-4)=realise(addr(DDT_SENSE1))
+         %FINISH
+         READ DLABEL(DDT)
+         LABREADS=LABREADS+1
+         DDT_STATE=RLABIS
+      %REPEAT
+      P_DEST=PDISCSNO
+      PDISC(P)
+      P_DEST=x'a0001'
+      P_SRCE=0
+      P_P1=DISCSNO!5
+      P_P2=3
+      PON(P)
+      %RETURN
+!
+INACT(1):                                ! claim for dedicated use
+      PTR=P_P3; I=PTR
+      %UNLESS 0<=PTR<NDISCS %START
+         %FOR I=0,1,NDISCS-1 %CYCLE
+            DDT==RECORD(INTEGER(DITADDR+4*I))
+            ->HIT %IF PTR=DDT_MNEMONIC %OR DDT_LABEL=STRING(ADDR(P_P3))
+         %REPEAT
+         ->CLAIM FAILS
+      %FINISH %ELSE DDT==RECORD(INTEGER(DITADDR+4*I))
+HIT:
+      %IF P_P2>0 %START
+         %IF DDT_STATE=PAVAIL %OR (DDT_STATE=AVAIL %AND DDT_DLVN<0) %START
+            DDT_STATE=PCLAIMD
+            DDT_REPSNO=P_P2
+            ->REPLY
+         %FINISH %ELSE ->CLAIM FAILS
+      %ELSE
+         %IF DDT_STATE#PCLAIMD %THEN OPMESS("Duff dev returned") %AND %RETURN
+         DDT_STATE=PAVAIL
+         DDT_REPSNO=0
+         DDT_CURCYL=0
+         OPMESS(MTOS(DDT_MNEMONIC)." unused")
+         %IF P_P2<0 %THEN SENSE(DDT) %AND DDT_STATE=CONNIS
+         %RETURN
+      %FINISH
+REPLY:
+      P_P2=DISCSNO+64+I
+      P_P3=I
+      P_P4=DDT_MNEMONIC
+      STRING(ADDR(P_P5))=DDT_LABEL
+SEND:
+      P_DEST=P_SRCE
+      P_SRCE=DISCSNO!1
+      PON(P)
+      %RETURN
+CLAIM FAILS:
+      P_P2=0
+      ->SEND
+!
+INACT(2):                                ! paged request
+      %IF XA#YES %and Channelq#0 %THEN Fire Queued
+      DDT==RECORD(P_P1)
+      %IF multi ocp=yes %THEN %START
+         *basr_2,0; *using_2
+         *SLR_1,1; *LR_0,1; *BCTR_0,0
+         *l_3,DDT; *CS_0,1,136(3);      ! ddt_sema assumes ddtform not changed
+         *BC_8,<DSEMAGOT>; *drop_2
+         SEMALOOP(DDT_SEMA)
+DSEMAGOT:
+      %FINISH
+!
+! The next line can reject good paged transfers when the the logging
+! information is being read after pon 9 0 on logging int. It does not
+! seem to matter as pdisc retries rejections. The alternative of a new state
+! would invlove a lot of changes.
+!
+      %IF DDT_STATE#AVAIL %OR P_SRCE&x'ffff0000'#PDISCSNO %THEN %Start
+         %if multiocp=yes %then DDT_SEMA=-1
+         ->REJECT
+      %FINISH
+      DDT_STATE=PAGTIS
+      DDT_ID=P_P1
+      %IF multiocp=yes %THEN ddt_sema=-1
+      I=FIRE CHAIN(DDT,DDT_CCWA,99)
+      %RETURN
+!
+ACT64:                                   ! private chains
+      SLOT=ACT&63
+      DDT==RECORD(INTEGER(DITADDR+4*SLOT))
+      %IF DDT_STATE#PCLAIMD %THEN ->REJECT
+      DDT_REPSNO=P_SRCE
+      DDT_ID=P_P1
+      %IF P_P2<0 %THEN DDT_STATE=SPTRANIS %ELSE DDT_STATE=PTRANIS
+      I=FIRE CHAIN(DDT,DDT_CCWA,99)
+      %RETURN
+REJECT:
+      %IF DDT_STATE=INOP %THEN ->REPLY INOP
+      PKMONREC("DISC rejects:",P)
+      P_DEST=P_SRCE
+      P_P2=-1
+      P_SRCE=DISCSNO+64+SLOT
+      PON(P)
+      %RETURN
+!
+INACT(4):                                ! lvn p_p1 cck'd
+      I=P_P1
+      J=LVN(I)
+      %IF J>=NDISCS %THEN %RETURN
+      DDT==RECORD(INTEGER(DITADDR+4*J))
+      DDT_DLVN=DDT_DLVN&255
+      %RETURN
+!
+INACT(5):                                ! clock tick
+      CURRTICK=CURRTICK+1
+      %FOR J=0,1,NDISCS-1 %CYCLE
+         DDT==RECORD(INTEGER(DITADDR+4*J))
+         %IF CURRTICK-DDT_STICK>=DDT_TIMEOUT %AND RESPX&1<<DDT_STATE#0 %THEN %start
+            OPMESS(MTOS(DDT_MNEMONIC)." timed out")
+            I=HSCH(ADDR(DDT))
+            P=0
+            P_DEST=DISCSNO+3
+            %IF XA=YES %THEN P_P1=ADDR(DDT) %ELSE P_P1=DDT_CUU
+            P_P2=-1;                           ! timeout
+            P_P3=ERRT
+            P_P4=J
+            PON(P)
+         %finish
+      %REPEAT
+      ->wayout
+!TOUT:                                    ! timed out
+      %RETURN
+!
+INACT(6):                                ! print statistsics
+      %RETURN %UNLESS LOGREADS=0
+      %FOR J=0,1,NDISCS-1 %CYCLE;        ! read logs
+         DDT==RECORD(INTEGER(DITADDR+4*J))
+         %IF DDT_STATE=AVAIL %OR DDT_STATE=PAGTIS %START
+            %IF DDT_STATE=AVAIL %THEN READ LOG(DDT) %ELSE DDT_STATE=RRLOGP
+            LOGREADS=LOGREADS+1
+         %FINISH
+      %REPEAT
+      P_DEST=P_SRCE
+      P_SRCE=DISCSNO!6
+      P_TEXT="DONE"
+      PON(P)
+      %RETURN
+!
+PSTATS:
+      %IF MULTI OCP=YES %THEN RESERVE LOG
+      NEWLINE
+      SPACES(45)
+      PRINTSTRING("Disc logging information
+
+       alt       transfer   transfer    Q'ed for    alt route")
+      PRINTSTRING("        bytes               overruns     std
+ CUU   CUU       requests     fails       chan         used")
+      PRINTSTRING("           read    seeks     cmd   data     id
+")
+      %FOR J=0,1,NDISCS-1 %CYCLE
+         DDT==RECORD(INTEGER(DITADDR+4*J))
+         %CONTINUE %UNLESS DDT_STATE=AVAIL %OR DDT_STATE=PAGTIS
+         NEWLINE
+         PRINTSTRING(" ".HTOS(DDT_CUU,3))
+         %IF DDT_ALT CUU=0 %THEN SPACES(11) %ELSE %C
+            PRINTSTRING("   ".HTOS(DDT_ALT CUU,3)."     ")
+         WRITE(DDT_STATS2,8); WRITE(DDT_STATS1,9)
+         WRITE(DDT_STATS4,11); WRITE(DDT_STATS3,12)
+         I=ADDR(DDT_SENSE1)
+         WRITE(INTEGER(I+8),14);         ! bytes processed
+         WRITE(INTEGER(I+14),8);         ! seeks
+         WRITE(BYTEINTEGER(I+19),6);     ! cmd overruns
+         WRITE(BYTEINTEGER(I+20),6);     ! data overruns
+         SPACES(2)
+         %IF BYTEINTEGER(I+19)=0=BYTEINTEGER(I+20) %THEN SPACE %ELSE %C
+            PRINTSTRING(HTOS(BYTEINTEGER(I+7)&7+2,1))
+         PRINTSTRING("   ".HTOS(BYTEINTEGER(I+21),2))
+         PRINTSTRING("      ".DDT_LABEL)
+         %IF DDT_BASE>64 %THEN PRINTSTRING(" (IPL vol)")
+         DDT_STATS1=0; DDT_STATS2=0; DDT_STATS3=0; DDT_STATS4=0
+      %REPEAT
+      NEWLINES(2)
+      PRINTSTRING("APON STATS UPDATE/INT:")
+      WRITE(APONSTAT1,6)
+      WRITE(APONSTAT2,6)
+      APONSTAT1=0
+      APONSTAT2=0
+      NEWLINES(3)
+      %IF MULTI OCP=YES %THEN RELEASE LOG
+      %RETURN
+!
+INACT(9):                                ! for testing 'things'
+      %IF P_P1=1 %START;                 ! display devs
+         %FOR I=0,1,NDISCS-1 %CYCLE
+            DDT==RECORD(INTEGER(DITADDR+4*I))
+            %IF DDT_ALT CUU=0 %THEN S="none" %ELSE S=HTOS(DDT_ALT CUU,3)
+            OPMESS(MTOS(DDT_MNEMONIC)." (".HTOS(DDT_CUU,
+               3)."/".S.") ".DDT_LABEL." ".STRINT(DDT_STATE)." ".STRINT(DDT_STATS2). %C
+               " ".STRINT(DDT_STATS3)." ".STRINT(DDT_STATS4))
+         %REPEAT
+      %FINISH
+      %RETURN
+!
+INACT(10):                               ! relocate tables for supervisor
+      %IF VA MODE=NO %START
+         %FOR I=0,1,NDISCS-1 %CYCLE
+            DDT==RECORD(INTEGER(DITADDR+4*I))
+            INTEGER(DITADDR+4*I)=(INTEGER(DITADDR+4*I)-P_P1)!COM SEG<<SSHIFT
+            DDT_PROPADDR=(DDT_PROPADDR-P_P1)!COM SEG<<SSHIFT
+            DDT_CCWA=(DDT_CCWA-P_P1)!COM SEG<<SSHIFT
+         %REPEAT
+         %RETURN
+      %FINISH
+!
+INACT(11):                               ! reconfigure route
+                                         ! p_p1=mnem, p_p2=route, p_p3=action
+      S=MTOS(P_P1)." "
+      %FOR J=0,1,NDISCS-1 %CYCLE
+         DDT==RECORD(INTEGER(DITADDR+4*J))
+         %IF DDT_MNEMONIC=P_P1 %START
+            %IF multi ocp=yes %THEN %START
+               semaloop(ddt_sema)
+            %FINISH
+            %IF P_P3=0 %START;           ! add route
+               %IF DDT_ALT CUU=0 %THEN DDT_ALT CUU=P_P2 %AND S=S."now "
+               S=S."has ".HTOS(DDT_CUU,3)."/".HTOS(DDT_ALT CUU,3)
+            %FINISH %ELSE %START
+               %IF DDT_ALT CUU=0 %THEN S=S.HTOS(DDT_CUU,3)." is only route" %ELSE %START
+                  I=0
+                  %IF DDT_ALT CUU=P_P2 %THEN DDT_ALT CUU=0 %ELSE %IF DDT_CUU=P_P2 %THEN %C
+                     DDT_CUU=DDT_ALT CUU %AND DDT_ALT CUU=0 %ELSE I=1
+                  %IF I=0 %THEN S=S."has ".HTOS(DDT_CUU,3) %ELSE S=S.HTOS(P_P2,3)."???"
+               %FINISH
+            %FINISH
+            OPMESS(S)
+            %IF multiocp=yes %THEN ddt_sema=-1
+            %RETURN
+         %FINISH
+      %REPEAT
+      OPMESS(S."???")
+      %RETURN
+!
+INACT(12):                               ! accept/discard dev
+                                         ! p_p1=mnem, p_p2=action
+      S=MTOS(P_P1)." "
+      %FOR J=0,1,NDISCS-1 %CYCLE
+         DDT==RECORD(INTEGER(DITADDR+4*J))
+         %IF DDT_MNEMONIC=P_P1 %START
+            %IF multi ocp=yes %THEN %START
+               semaloop(ddt_sema)
+            %FINISH
+            %IF P_P2=0 %START;           ! accept dev
+               %IF DDT_STATE=DEAD %START
+                  INTEGER(DDT_CCWA)=X'B4000000'!REALISE(ADDR(DDT_SENSE1))
+                  INTEGER(DDT_CCWA+4)=24
+                  DDT_STATE=RESERVE
+                  I=FIRE CHAIN(DDT,DDT_CCWA,99)
+                  %IF multiocp=yes %THEN ddt_sema=-1
+                  %RETURN
+               %FINISH
+            %FINISH %ELSE %START;        ! discard device
+               %IF DDT_STATE=PAVAIL %OR (DDT_STATE=AVAIL %AND DDT_DLVN<0) %START
+                  INTEGER(DDT_CCWA)=X'94000000'!REALISE(ADDR(DDT_SENSE1))
+                  INTEGER(DDT_CCWA+4)=24
+                  DDT_STATE=RELEASE
+                  I=FIRE CHAIN(DDT,DDT_CCWA,99)
+                  %RETURN
+               %FINISH
+            %FINISH
+         %FINISH
+      %REPEAT
+      OPMESS(S."???")
+      %RETURN
+!
+INACT(3):                                ! interrupt
+                                         !
+                                         ! parameters of the interrupt pon
+                                         ! on non XA machines
+                                         ! P_P1 = channel unit interupting
+                                         ! P_P2 and P_P3 are the csw1&2 from page 0
+                                         ! P_P4 is the device slot via a chopsupe table
+                                         !
+                                         ! on XA machines
+                                         ! P_P1 is the IP which has the virtad of the device slot
+                                         ! P_P2&P3 are words 1&2 of SCSW (very close to csw1&2)
+                                         ! P_P4 is SCSW word 0 (no nonxa equivalent)
+                                         ! P_P5 is the extended Subchannel status word
+                                         !
+      %IF XA=YES %START
+         DDT==RECORD(P_P1)
+         SLOT=DDT_SLOT
+         ACUU=DDT_CUU
+         CSW1=P_P2
+         CSW2=P_P3
+      %ELSE
+         ->wayout %IF P_P4=-1;           ! channel available interrupt only
+         ACUU=P_P1;                      ! active CUU
+         CSW1=P_P2
+         CSW2=P_P3
+         SLOT=P_P4
+         DDT==RECORD(INTEGER(DITADDR+4*SLOT))
+      %FINISH
+      %IF CSW2&x'7fff0000'=NORMALT %THEN ->NINT(DDT_STATE)
+      %IF csw2=cuend %THEN ->wayout
+      %IF CSW2&ATTNT#0 %START
+         PKMONREC("DISC attention:",P)
+         ->AINT(DDT_STATE)
+      %FINISH
+      ->FINT(DDT_STATE)
+wayout:
+      %IF XA#YES %and CHANNELQ#0 %THEN Fire Queued;  ! try waiting I/Os (non xa only)
+      %RETURN
+!
+NINT(AVAIL):
+FINT(AVAIL):
+NINT(PAVAIL):
+FINT(PAVAIL):
+NINT(PCLAIMD):
+FINT(PCLAIMD):
+NINT(DEAD):
+FINT(DEAD):
+      PRINTSTRING("DISC int (".HTOS(P_P1,3).")  CSW: ".htos(csw1,8)." ".htos(csw2,
+         8)." state ".STRINT(DDT_STATE)." ???
+")
+      ->wayout
+NINT(CONNIS):                            ! sense terminates
+      %if DDT_STATE&OFFLINE#0 %then ddt_state=DEAD %and ->wayout
+      READ DLABEL(DDT)
+      LABREADS=LABREADS+1
+      DDT_STATE=RLABIS
+      %RETURN
+!
+NINT(RLABIS):                            ! label read
+      LABREAD ENDS
+      LABEL==RECORD(DDT_CCWA+40)
+      ETOI(ADDR(LABEL),6)
+      PREVLAB=DDT_LABEL
+      %FOR I=0,1,5 %CYCLE
+         BYTEINTEGER(ADDR(DDT_LABEL)+1+I)=LABEL_VOL(I)
+      %REPEAT
+      LENGTH(DDT_LABEL)=6
+!
+!  check label but note that VM does not allow a full 80 byte write (it seems)
+!
+      J=COM_OCPTYPE>>24;                 ! 255 if VM
+      %IF ((J#255 %AND LABEL_ACCESS=x'c5') %OR J=255) %AND '0'<=LABEL_VOL(4)<='9' %AND %C
+         '0'<=LABEL_VOL(5)<='9' %START
+         %FOR I=0,1,3 %CYCLE
+            BYTEINTEGER(ADDR(DDT_BASE)+I)=LABEL_POINTER(I)
+         %REPEAT
+         %IF J=255 %THEN DDT_BASE=x'800'
+         S=" EMAS"
+         I=(LABEL_VOL(4)&x'f')*10+LABEL_VOL(5)&x'f'
+         %IF SLOT#LVN(I)<254 %THEN ->DUPLICATE
+         LVN(I)=SLOT
+         DDT_DLVN=I!x'80000000'
+         DDT_STATE=AVAIL
+      %ELSE
+         DDT_BASE=0
+         DDT_STATE=PAVAIL
+         DDT_DLVN=-1
+         S=" frgn"
+      %FINISH
+      DDT_STATS1=0
+      DDT_STATS2=0
+LOAD MESS:
+      OPMESS(MTOS(DDT_MNEMONIC)." loaded ".DDT_LABEL.S)
+      ->wayout
+DUPLICATE:
+      OPMESS("Duplicate disc lvn")
+      OPMESS("Re-label disc on ".MTOS(DDT_MNEMONIC))
+      DDT_DLVN=-1
+      DDT_STATE=PAVAIL
+      ->wayout
+!
+FINT(CONNIS):                            ! sense fails
+      DDT_STATE=DEAD
+      ->wayout
+!
+FINT(RLABIS):                            ! label read fails
+      LABREAD ENDS
+      DDT_CSW1=CSW1
+      DDT_CSW2=CSW2
+      DDT_STATE=RLABSIS
+      SENSE(DDT)
+      %RETURN
+!
+NINT(RLABSIS):
+      %IF DDT_SENSE1&OFFLINE#0 %START
+FINT(RLABSIS):                           ! sense after lab read
+         OPMESS(MTOS(DDT_MNEMONIC)." offline thru ".HTOS(ACUU,3))
+         %IF multi ocp=yes %THEN %START
+            semaloop(ddt_sema)
+         %FINISH
+         %UNLESS DDT_ALT CUU=0 %START;   ! swap routes
+            %UNLESS DDT_ALT CUU=ACUU %THEN DDT_CUU=DDT_ALT CUU
+            DDT_ALT CUU=0
+            DDT_STATE=RLABIS
+            %IF multiocp=yes %THEN ddt_sema=-1
+            READ DLABEL(DDT);            ! try again
+            LABREADS=LABREADS+1
+            %RETURN
+         %else
+            DDT_STATE=DEAD
+            %if MULTIOCP=YES %then ddt_sema=-1
+            ->wayout
+         %FINISH 
+      %ELSE
+         DDT_LABEL="nolabl"
+         DDT_DLVN=-1
+         DDT_STATE=PAVAIL
+         OPMESS(MTOS(DDT_MNEMONIC)." loaded no label")
+         DDT_BASE=0
+         P_DEST=0
+         ->COM1
+      %FINISH
+!
+NINT(DCONNIS):
+FINT(DCONNIS):                           ! unload complete
+      DDT_STATE=DEAD
+UNLDED:
+      OPMESS(MTOS(DDT_MNEMONIC)." unloaded")
+      %IF DDT_DLVN#-1 %THEN LVN(DDT_DLVN&255)=255
+      ->wayout
+!
+AINT(RLABIS):
+      LABREAD ENDS
+AINT(DEAD):
+AINT(CONNIS):
+AINT(RLABSIS):
+      PRINTSTRING("attntn while initng".STRINT(DDT_STATE)." ".HTOS(DDT_CUU,3)." ".STRHEX(CSW1).STRHEX(CSW2)."
+")
+      %if DDT_STATE=DEAD %or csw2&x'04000000'#0  %then DDT_STATE=CONNIS %and SENSE(DDT)
+AINT(DCONNIS):
+      %RETURN
+!
+AINT(AVAIL):
+AINT(PAVAIL):
+AINT(PAGTIS):
+AINT(PAGSIS):
+AINT(RRLOGP):
+      %RETURN
+!
+AINT(INOP):
+      %RETURN
+!
+NINT(INOP):
+FINT(INOP):
+REPLY INOP:
+      P_P3=ERRT
+      P_P4=0
+      P_P5=NORMALT
+      P_DEST=PDISCSNO!10
+      P_SRCE=DISCSNO
+      DDT_ID=ADDR(DDT)
+      DDT_SENSE1=OFFLINE
+      ->COM2
+!
+FINT(SPTRANIS):
+NINT(PTRANIS):
+NINT(SPTRANIS):
+      P_DEST=DDT_REPSNO
+      P_SRCE=DISCSNO+64+SLOT
+      P_P1=DDT_ID
+      P_P2=0
+      P_P3=CSW1
+      P_P4=CSW2
+      PON(P)
+      DDT_STATE=PCLAIMD
+      ->wayout
+!
+FINT(RRLOGP):                            ! read page fails
+      DDT_STATE=PAGTIS;                  ! abandon pending read log
+FINT(PAGTIS):
+FINT(PTRANIS):
+      DDT_CSW1=CSW1
+      DDT_CSW2=CSW2
+      DDT_STATE=DDT_STATE+1
+      SENSE(DDT)
+      %RETURN
+!
+NINT(RRLOGP):                            ! read log pending
+      READ LOG(DDT)
+      P_DEST=PDISCSNO!10
+      P_SRCE=DISCSNO!2
+      P_P1=DDT_ID
+      P_P2=0
+      DPON(P,1);                         ! delay reply
+      %RETURN
+!
+NINT(PAGTIS):
+      P_DEST=PDISCSNO!10
+      P_SRCE=DISCSNO!2
+      P_P1=DDT_ID
+      P_P2=0
+      DDT_STATE=AVAIL
+      PDISC(P)
+      ->wayout
+!
+FINT(PAGSIS):
+NINT(PAGSIS):
+      P_DEST=PDISCSNO!10
+      P_SRCE=DISCSNO!2
+      DDT_STATE=AVAIL
+      ->COM1
+!
+NINT(PSENIS):
+FINT(PSENIS):
+      P_DEST=DDT_REPSNO
+      P_SRCE=DISCSNO+64+SLOT
+      DDT_STATE=PCLAIMD
+COM1:
+      P_P3=DDT_CSW1
+      P_P4=DDT_CSW2
+      P_P5=CSW1
+COM2:
+      P_P1=DDT_ID
+      P_P2=1
+      P_P6=DDT_SENSE1
+      %IF DDT_SENSE1&OFFLINE#0 %START
+         OPMESS(MTOS(DDT_MNEMONIC)." offline thru ".HTOS(ACUU,3))
+         CONSOLE ALARM
+         %UNLESS DDT_ALT CUU=0 %START;   ! abandon route
+            %IF DDT_ALT CUU#ACUU %THEN DDT_CUU=DDT_ALT CUU; ! swap routes
+            DDT_ALT CUU=0
+            P_P6=P_P6&(\(OFFLINE)) %IF P_DEST&x'ffff0000'=PDISCSNO
+                                         ! PDISC will retry
+         %FINISH %ELSE DDT_STATE=INOP
+      %FINISH
+      DREPORT(DDT,P)
+      PON(P) %UNLESS P_DEST=0
+      ->wayout
+!
+NINT(RRLOG):                             ! buffered log read
+FINT(RRLOG):
+AINT(RRLOG):
+      DDT_STATE=AVAIL
+      LOGREADS=LOGREADS-1
+      ->PSTATS %IF LOGREADS=0;           ! all finished
+      ->wayout
+!
+NINT(RESERVE):
+NINT(RELEASE):
+      %IF DDT_STATE=RESERVE %START
+         OPMESS(MTOS(DDT_MNEMONIC)." accepted")
+         READ DLABEL(DDT)
+         LABREADS=LABREADS+1
+         DDT_STATE=RLABIS
+      %FINISH %ELSE %START
+         DDT_STATE=DEAD
+         OPMESS(MTOS(DDT_MNEMONIC)." released")
+      %FINISH
+      ->WAYOUT
+FINT(RESERVE):
+FINT(RELEASE):
+AINT(RESERVE):
+AINT(RELEASE):
+      %IF DDT_STATE=RESERVE %THEN S=" reserve" %ELSE S=" release"
+      OPMESS(MTOS(DDT_MNEMONIC).S." fails")
+      DDT_STATE=DEAD
+      SENSE(DDT)
+      ->WAYOUT
+!
+AINT(*):                                 ! private atts
+      P_DEST=DDT_REPSNO
+      P_SRCE=DDT_SLOT+64
+      P_P1=0
+      P_P2=0
+      P_P3=CSW1
+      P_P4=CSW2
+      PON(P) %UNLESS P_DEST=0
+      %RETURN
+!
+INACT(*):                                ! sink
+      PKMONREC("DISC act?:",P)
+      %RETURN
+!
+%STRING %FN MTOS(%INTEGER M)
+!***********************************************************************
+!*    Turn integer m into a string                                     *
+!***********************************************************************
+%INTEGER I,J
+      I=4; J=M
+      %RESULT=STRING(ADDR(I)+3)
+%END
+!
+%if XA#YES %START
+%ROUTINE Fire Queued
+!***********************************************************************
+!*     Tried an fire a io request that was held up by channel busy     *
+!*     Should not occurr when running under XA                         *
+!***********************************************************************
+%INTEGER i,j
+%RECORD (PQF) %NAME CQ
+%RECORD (DTFORM) %NAME DDT
+      %IF MULTI OCP=YES %START
+         SEMALOOP(CHANNELQ SEMA)
+      %FINISH
+      CQ==PARM(CHANNELQ)
+      DDT==RECORD(CQ_ADDT)
+      I=CHANNELQ
+      CHANNELQ=CQ_LINK
+      j=FIRE CHAIN(DDT,CQ_CCWA,cq_p6-1)
+      RETURN PP CELL(I)
+      %IF MULTI OCP=YES %THEN CHANNELQ SEMA=-1
+%END
+%finish
+%ROUTINE CONSOLE ALARM
+!***********************************************************************
+!*    Request OPER to light the alarm/sound the bell on the console    *
+!***********************************************************************
+%RECORD (PARMF) P
+      P_DEST=x'320009'
+      PON(P)
+%END
+!
+%ROUTINE READ DLABEL(%RECORD (DTFORM) %NAME DDT)
+!***********************************************************************
+!*    Read 80 byte vol label from cyl/track/sector 0/0/0               *
+!***********************************************************************
+%INTEGER I,RAD
+      I=DDT_CCWA
+      RAD=REALISE(I)
+      %IF CCW Format=0 %THEN %START
+         INTEGER(I)=x'13000000';         ! recalibrate
+         INTEGER(I+4)=x'60000001'
+         INTEGER(I+8)=x'31000000'!(RAD+32); ! search id eq
+         INTEGER(I+12)=x'60000005'
+         INTEGER(I+16)=x'08000000'!(RAD+8); ! tic
+         INTEGER(I+20)=0
+         INTEGER(I+24)=x'06000000'!(RAD+40); ! read data
+         INTEGER(I+28)=x'20000050'
+      %ELSE
+         integer(I)=X'13600001'
+         integer(I+4)=0
+         integer(I+8)=X'31600005'
+         integer(I+12)=RAD+32
+         integer(I+16)=x'08000000'
+         integer(I+20)=RAD+8
+         integer(I+24)=X'06200050'
+         integer(I+28)=RAD+40
+      %FINISH
+      INTEGER(I+32)=0;                   ! cchh = 0
+      INTEGER(I+36)=0;                   ! r0
+      I=FIRE CHAIN(DDT,I,7)
+%END
+!
+%ROUTINE LABREAD ENDS
+!***********************************************************************
+!*    Called when vol label read to uninhibit if required              *
+!***********************************************************************
+      LABREADS=LABREADS-1
+      %IF INITINH=1 %AND LABREADS=0 %THEN INITINH=0 %AND UNINHIBIT(SCHEDSNO>>16)
+%END
+!
+%ROUTINE READ LOG(%RECORD (DTFORM) %NAME DDT)
+!***********************************************************************
+!*    Read & reset buffered log                                        *
+!***********************************************************************
+%INTEGER I
+      %IF multi ocp=yes %THEN %START
+         semaloop(ddt_sema)
+      %FINISH
+      %IF CCW Format=0 %START
+         INTEGER(DDT_CCWA)=x'a4000000'!REALISE(ADDR(DDT_SENSE1))
+         INTEGER(DDT_CCWA+4)=24
+      %ELSE
+         integer(DDT_CCWA)=X'A4000018'
+         integer(DDT_CCWA+4)=realise(addr(DDT_SENSE1))
+      %FINISH
+      DDT_STATE=RRLOG
+      %IF multiocp=yes %THEN ddt_sema=-1
+      I=FIRE CHAIN(DDT,DDT_CCWA,7)
+%END
+!
+%if XA#YES %start
+%ROUTINE Q REQUEST(%RECORD (DTFORM) %NAME DDT, %INTEGER CCWA,count)
+!***********************************************************************
+!*    All routes give channel busy so queue request for later retry    *
+!***********************************************************************
+%INTEGER %NAME LINK
+%INTEGER I
+      %IF MULTI OCP=YES %START
+         SEMALOOP(CHANNELQ SEMA)
+      %FINISH
+      DDT_STATS4=DDT_STATS4+1
+      LINK==CHANNELQ
+      %WHILE LINK#0 %CYCLE
+         CQ==PARM(LINK)
+         LINK==CQ_LINK
+      %REPEAT
+      LINK=NEW PP CELL
+      %IF MULTI OCP=YES %THEN CHANNELQ SEMA=-1
+      CQ==PARM(LINK)
+      CQ=0
+      CQ_ADDT=ADDR(DDT)
+      CQ_CCWA=CCWA
+      cq_P6=count
+%END
+%finish
+!
+%ROUTINE SENSE(%RECORD (DTFORM) %NAME DDT)
+!***********************************************************************
+!*    Perform a sense either for initial status or because of an       *
+!*     abnormal termination. A sense CCW is always at ddt_ccwa-8.      *
+!***********************************************************************
+%INTEGER I
+      I=FIRE CHAIN(DDT,DDT_CCWA-8,3)
+      %UNLESS I=0 %START;                ! failed
+         PRINTSTRING("DISC sense fails ".STRINT(I)." on ".MTOS(DDT_MNEMONIC)." CSW: ". %C
+            HTOS(PAGE0_CSW1,8)." ".HTOS(PAGE0_CSW2,8))
+         NEWLINE
+         DDT_SENSE1=OFFLINE %IF I=3;     ! offline if inop
+      %FINISH
+%END
+!
+%INTEGER %FN FIRE CHAIN(%RECORD (DTFORM) %NAME DDT, %INTEGER CCWA,Qcount)
+!***********************************************************************
+!*    Fire the CCW chain at ccwa. If all routes are busy and q=yes     *
+!*     then q the request until a channel becomes free                 *
+!***********************************************************************
+%RECORD (PARMF) P
+%RECORD (IRBF) IRB
+%INTEGER I,J,CUU,RCCWA
+      CUU=DDT_CUU
+      DDT_STICK=CURRTICK
+      %IF VA MODE=YES %START
+         *L_1,ccwa; *LRA_0,0(1); *ST_0,rccwa
+      %FINISH %ELSE RCCWA=CCWA
+      I=SSCH(ADDR(DDT),RCCWA,0)
+      %RESULT=0 %IF I=0;                 ! I/O fired
+      %IF XA=YES %THEN J=TSCH(ADDR(DDT),IRB) %ELSE %START
+         IRB=0
+         IRB_CSW1=PAGE0_CSW1
+         IRB_CSW2=PAGE0_CSW2
+      %FINISH
+      %IF XA#YES %and QCOUNT>0 %AND (I=2 %OR (I=1 %AND irb_CSW2&nostartmask=0)) %THEN %C
+         Q REQUEST(DDT,CCWA,Qcount) %AND %RESULT=0
+                                         ! unless busy with no errors
+      %IF I=3 %THEN IRB_CSW2=ERRT;       ! CUU inop
+      %IF I=2 %THEN IRB_CSW2=ERRT!BUSY
+      P_DEST=DISCSNO!3;                  ! pon abterm
+      P_SRCE=m'FIRE'
+      %IF XA=YES %THEN %START
+         P_P1=ADDR(DDT)
+         P_P2=IRB_CSW1
+         P_P4=IRB_KEYCNTR
+         P_P5=IRB_XSTATUSW
+      %ELSE
+         P_P1=CUU
+         p_P2=i<<24;                     ! field not set on cc=1 but fake dffrd CC
+         P_P4=BYTEINTEGER(COM_STEER INT+P_P1)
+      %FINISH
+      P_P3=IRB_CSW2
+      PON(P)
+      %RESULT=I
+%END
+!
+%ROUTINE DREPORT(%RECORD (DTFORM) %NAME DDT, %RECORD (PARMF) %NAME P)
+!***********************************************************************
+!*    Print failure report                                             *
+!***********************************************************************
+%INTEGER I,J
+      PRINTSTRING("&& disc transfer ".DDT_LABEL." on ".MTOS(DDT_MNEMONIC)." (".HTOS %C
+         (ACUU,3).") fails ".STRING(ADDR(COM_DATE0)+3)." ".STRING(ADDR(COM_TIME0)+3))
+      PRINTSTRING("
+csw1 = ".STRHEX(P_P3)." csw2 = ".STRHEX(P_P4)."
+ccws (@ ".STRHEX(DDT_CCWA).") : ")
+      I=DDT_CCWA
+      %CYCLE
+         NEWLINE
+         PRINTSTRING(STRHEX(INTEGER(I))." ".STRHEX(INTEGER(I+4)))
+         J=INTEGER(I)
+         %UNLESS J>>24=8 %START
+            %EXIT %IF CCW Format=0 %and INTEGER(I+4)&x'40000000'=0
+         %exit %if CCW Format=1 %and INTEGER(i)&X'00400000'=0
+         %FINISH
+         I=I+8
+      %REPEAT
+      NEWLINE
+      %IF DDT_SENSE1&LOGGING=LOGGING %START
+         PRINTSTRING("Statistical usage/error log data present
+")
+      %FINISH
+      PRINTSTRING("sense data :")
+      %FOR I=0,1,5 %CYCLE
+         PRINTSTRING(" ".STRHEX(INTEGER(ADDR(DDT_SENSE1)+4*I)))
+      %REPEAT
+      NEWLINE
+%END
+!
+%END
+!
+!------------------------------------------------------------------------
+!
+%EXTERNAL %ROUTINE PDISC(%RECORD (PARMF) %NAME P)
+      %CONST %INTEGER %ARRAY CMD(1:6)=x'06000000',x'05000000'(2),x'06000000'(2),
+ x'05000000'
+%RECORD %FORMAT REQFORM(%INTEGER DEST, %BYTE %INTEGER FAULTS,FCCW,LCCWP1,REQTYPE,
+   %INTEGER IDENT,CYLINK,COREADDR,CYL,
+      (%integer TRKSECT %or %short TRK,%byte sect,dontuse),%integer STOREX,REQLINK)
+%RECORD (DTFORM) %NAME DDT
+%RECORD (PROPFORM) %NAME PROP
+%RECORD (PARMXF) %NAME ACELL
+%RECORD (REQFORM) %NAME REQ
+%RECORD (PARMF) Q
+%CONST %INTEGER TRANOK=0,TRANWITHERR=1,TRANREJECT=2,NOTTRANNED=3
+%CONST %INTEGER ABORTED=4,PTACT=5,POUTACT=6
+%CONST %INTEGER RETRIES=7,MIN READ ADDR=x'c000',Chain space=760
+%ROUTINE %SPEC QUEUE(%INTEGER %NAME QHEAD, %INTEGER REQ,CYL)
+%ROUTINE %SPEC PTREPLY(%RECORD (REQFORM) %NAME REQ, %INTEGER FAIL)
+%SWITCH PDA(0:11)
+%OWN %INTEGER INIT=0,TRAP=0,TFSYS=0
+%INTEGER I,J,K,ACT,UNIT,LUNIT,CYL,TRACK,SECT,CELL,SECSTAT,SEEKCMD
+%INTEGER CCWA,SEEKA,RSEEKA,SECTINDX,ERRCCW,NEXTCELL,SRCE,FAIL,FCCW
+!
+      ACT=P_DEST&x'ffff'
+      %IF KMON>>33&1#0 %THEN PKMONREC("pdisc:",P)
+      ->PDA(ACT)
+!
+PDA(0):                                  ! initialise
+      %RETURN %IF INIT#0
+      %FOR I=0,1,NDISCS-1 %CYCLE
+         DDT==RECORD(INTEGER(DITADDR+4*I))
+         DDT_QSTATE=0
+         DDT_LQLINK=0
+         DDT_UQLINK=0
+         DDT_TRLINK=0
+         DDT_CURCYL=0
+      %REPEAT
+      INIT=1
+      %RETURN
+!
+PDA(6):                                  ! pageout request (write)
+PDA(5):                                  ! pageturn request (read)
+                                         ! P_P1 = amtx/epx
+                                         ! P_P2 = discaddr
+                                         ! P_P3 = storex
+                                         ! P_P4 = priority (0=high,1=low)
+      P_P6=P_P3;                         ! save storex
+      P_P3=P_P3*PAGESIZE;                ! store addr
+PDA(1):                                  ! read
+PDA(2):                                  ! write
+PDA(3):                                  ! write + check
+PDA(4):                                  ! check read
+                                         ! p_p3 now real store addr
+      SRCE=P_SRCE&x'7fffffff'
+      %IF P_P3<MIN READ ADDR %AND (ACT=5 %OR ACT=1 %OR ACT=4) %START
+         OPMESS("PDISC read to low store!!!")
+         ->REJECT
+      %FINISH
+      UNIT=P_P2>>24
+      %IF UNIT>99 %THEN ->REJECT
+      J=P_P2&x'ffffff'
+      LUNIT=LVN(UNIT)
+      ->REJECT %IF LUNIT>=NDISCS
+      %IF J<TRAP %AND UNIT=TFSYS %AND (2<=ACT<=3 %OR ACT=6) %THEN %C
+         MONITOR("PDISC: illegal write request!!!")
+      DDT==RECORD(INTEGER(DITADDR+4*LUNIT))
+      PROP==RECORD(DDT_PROPADDR)
+      I=J//PROP_PPERTRK
+      SECT=J-I*PROP_PPERTRK+1
+      CYL=I//PROP_TRACKS
+      TRACK=I-CYL*PROP_TRACKS
+      %IF CYL>PROP_CYLS %THEN ->REJECT
+      %IF multi ocp=yes %THEN %START
+         *basr_2,0; *using_2
+         *SLR_1,1; *LR_0,1; *BCTR_0,0; *CS_0,1,MAINQSEMA
+         *BC_8,<MSEMAGOT>; *drop_2
+         SEMALOOP(MAINQSEMA)
+MSEMAGOT:
+      %FINISH
+      %IF PARMASL=0 %THEN MORE PPSPACE
+      ACELL==PARM(PARMASL)
+      CELL=ACELL_LINK
+      REQ==PARM(CELL)
+      %IF CELL=PARMASL %THEN PARMASL=0 %ELSE ACELL_LINK=REQ_REQLINK
+      %IF multiocp=yes %THEN mainqsema=-1
+      P_SRCE=ACT
+      REQ<-P
+      REQ_DEST=SRCE
+      REQ_CYLINK=0
+      REQ_CYL=CYL
+      REQ_TRKSECT=(TRACK<<8!SECT)<<8
+      REQ_REQLINK=0
+      %IF multi ocp=yes %THEN %START
+         *basr_2,0; *using_2
+         *SLR_1,1; *LR_0,1; *BCTR_0,0
+         *l_3,DDT; *CS_0,1,136(3);      ! ddt_sema assumes ddtform not changed
+         *BC_8,<DSEMAGOT>; *drop_2
+         SEMALOOP(DDT_SEMA)
+DSEMAGOT:
+      %FINISH
+      %IF DDT_QSTATE=0 %OR CYL>=DDT_CURCYL %THEN QUEUE(DDT_UQLINK,CELL,CYL) %ELSE %C
+         QUEUE(DDT_LQLINK,CELL,CYL)
+!
+!     for callers of pdisc advisory information is returned in p_p6
+!        -pages ontrack if the transfer has been initiated
+!         else the number of pages on the rest of the track
+!
+      %IF DDT_QSTATE=0 %THEN P_P6=sect-prop_ppertrk %AND ->INIT TRANSFER
+      P_P6=PROP_PPERTRK-SECT
+      %IF multi ocp=yes %THEN ddt_sema=-1
+      %RETURN
+!
+REJECT:
+      PKMONREC("*** pdisc rejects",P)
+      P_DEST=SRCE
+      P_SRCE=PDISCSNO!ACT
+      P_P2=TRANREJECT
+      %IF ACT=PTACT %THEN PTREPLY(P,2) %ELSE PON(P)
+      %RETURN
+!
+INIT TRANSFER:
+      CELL=DDT_UQLINK
+      REQ==PARM(CELL)
+      DDT_UQLINK=REQ_REQLINK
+      CYL=REQ_CYL
+      CCWA=DDT_CCWA
+      SEEKA=CCWA+(Chainspace-8)
+      RSEEKA=REALISE(SEEKA)
+      PROP==RECORD(DDT_PROPADDR)
+      SECTINDX=PROP_SECTINDX
+      FCCW=0; I=0; track=-1; sect=-2; SEEKCmd=X'07';! seek cyl&head
+      %CYCLE
+         NEXTCELL=REQ_CYLINK
+         %IF REQ_REQTYPE=POUTACT %AND STORE(REQ_STOREX)_USERS>0 %START
+            REQ_CYLINK=ABORTED
+            INTEGER(ADDR(REQ)+4)=PDISCSNO
+            FASTPON(CELL)
+         %ELSE
+            %unless REQ_TRK=Track %start;     ! Seek unless the same track
+               %IF CCW Format=0 %START
+                  INTEGER(CCWA)=SEEKCmd<<24!RSEEKA
+                  INTEGER(CCWA+4)=x'40000006'
+               %ELSE
+                  integer(CCWA)=X'400006'!SeekCmd<<24
+                  integer(CCWA+4)=RSEEKA
+               %FINISH
+               CCWA=CCWA+8
+               SeekCmd=X'1B';           ! Seek head only
+            %finish
+            %unless req_sect=Sect+1 %start; ! RPS unless next record
+               %IF CCW Format=0 %START
+                  INTEGER(CCWA)=x'23000000'!(RSEEKA+7)
+                  INTEGER(CCWA+4)=x'40000001'
+               %ELSE
+                  integer(CCWA)=X'23400001'
+                  integer(CCWA+4)=RSEEKA+7
+               %FINISH
+               CCWA=CCWA+8
+            %finish
+            %IF CCW Format=0 %START
+               INTEGER(CCWA)=x'31000000'!(RSEEKA+2)
+               INTEGER(CCWA+4)=x'40000005'
+               INTEGER(CCWA+8)=x'08000000'!REALISE(CCWA)
+               INTEGER(CCWA+12)=0
+            %ELSE
+               integer(CCWA)=X'31400005'
+               integer(CCWA+4)=RSEEKA+2
+               integer(CCWA+8)=X'08000000'
+               integer(CCWA+12)=realise(CCWA)
+            %FINISH
+            CCWA=CCWA+16
+            %IF CCW Format=0 %START
+               INTEGER(CCWA)=CMD(REQ_REQTYPE&255)!REQ_COREADDR
+               INTEGER(CCWA+4)=x'40000000'!PAGESIZE
+            %ELSE
+               integer(CCWA)=CMD(REQ_REQTYPE&255)!x'00400000'!pagesize
+               integer(CCWA+4)=REQ_COREADDR
+            %FINISH
+            INTEGER(SEEKA)=CYL
+            INTEGER(SEEKA+4)=REQ_TRKSECT!((REQ_SECT-1)*SECTINDX)
+            CCWA=CCWA+8
+            SEEKA=SEEKA-8
+            RSEEKA=RSEEKA-8
+            I=I+1
+            Track=Req_Trk; Sect=Req_Sect
+            REQ_REQLINK=DDT_TRLINK
+            DDT_TRLINK=CELL
+            REQ_FCCW=FCCW
+            FCCW=(CCWA-DDT_CCWA)>>3
+            REQ_LCCWP1=FCCW
+         %FINISH
+         CELL=NEXT CELL
+         %IF CELL=0 %THEN ->DECHAIN
+         REQ==PARM(CELL)
+         %EXIT %IF Seeka-ccwa<48;    ! Not room for another transfer
+      %REPEAT
+      REQ_REQLINK=DDT_UQLINK
+      DDT_UQLINK=CELL
+!
+DECHAIN:
+      %IF I=0 %THEN ->DOMORE
+      %IF CCW Format=0 %THEN INTEGER(CCWA-4)=INTEGER(CCWA-4)&x'bfffffff' %ELSE %C
+         integer(CCWA-8)=integer(CCWA-8)&X'FFBFFFFF'
+      DDT_STATS2=DDT_STATS2+I
+      Q_DEST=DISCSNO!2
+      Q_SRCE=PDISCSNO!10
+      Q_P1=ADDR(DDT)
+      DDT_QSTATE=1
+      DDT_CURCYL=CYL
+      %IF multi ocp=yes %THEN ddt_sema=-1
+      DISC(Q)
+      %RETURN
+!
+PDA(10):
+                                         ! P_P2=0 for successfully chains
+                                         ! P_P2=1 for unsuccessfull chains
+                                         ! P_P2=-1 for time outs or rejections
+                                         ! p_p3=csw1 or xa equivalent
+                                         ! P_P6=secondary status
+      DDT==RECORD(P_P1)
+      %IF multi ocp=yes %THEN %START
+         *basr_2,0; *using_2
+         *SLR_1,1; *LR_0,1; *BCTR_0,0
+         *l_3,DDT; *CS_0,1,136(3);      ! ddt_sema assumes ddtform not changed
+         *BC_8,<DSEMAGOT2>; *drop_2
+         SEMALOOP(DDT_SEMA)
+DSEMAGOT2:
+      %FINISH
+      CELL=DDT_TRLINK
+      %IF P_P2=0 %START
+         %WHILE CELL#0 %CYCLE
+            REQ==PARM(CELL)
+            J=REQ_REQLINK
+            %IF REQ_REQTYPE=PTACT %THEN PTREPLY(REQ,0) %ELSE %START
+               INTEGER(ADDR(REQ)+4)=PDISCSNO
+               REQ_CYLINK=0
+               FASTPON(CELL)
+            %FINISH
+            CELL=J
+         %REPEAT
+         DDT_TRLINK=0
+      %ELSE
+         pkmonrec("PDISC tranfail:",p)
+         DDT_STATS1=DDT_STATS1+1
+         %IF XA=Yes %THEN ccwa=p_p3&x'7fffffff' %ELSE ccwa=P_P3&X'FFFFFF'
+         %IF ccwa=0 %THEN ERRCCW=0 %ELSE ERRCCW=((ccwa)-realise(DDT_CCWA))>>3-1
+                                         ! p_p3 8 bytes on
+         SEC STAT=P_P6
+         FAIL=NOT TRANNED
+         CYL=DDT_CURCYL
+         %WHILE CELL#0 %CYCLE
+            REQ==PARM(CELL)
+            DDT_TRLINK=REQ_REQLINK
+            %IF (P_P2#-1 {Not timeout} %AND REQ_LCCWP1<=ERRCCW) %OR %C
+               REQ_FAULTS>RETRIES %START
+               %IF REQ_LCCWP1<=ERRCCW %THEN REQ_CYLINK=TRAN OK %ELSE REQ_CYLINK=FAIL
+               %IF REQ_CYLINK#0 %START
+                  PKMONREC("pdisc transfer fails",REQ)
+               %ELSE
+                  printstring("transfer OKed")
+                  write(req_lccwp1,5); write(errccw,5)
+                  newline
+               %FINISH
+               %IF REQ_REQTYPE=PTACT %THEN PTREPLY(REQ,REQ_CYLINK) %ELSE %C
+                  INTEGER(ADDR(REQ)+4)=PDISCSNO %AND FASTPON(CELL)
+            %ELSE
+               REQ_CYLINK=0
+               %IF REQ_FCCW<=ERRCCW<REQ_LCCWP1 %THEN REQ_FAULTS=REQ_FAULTS+1
+               pkmonrec("PDISC requeues:",req)
+               QUEUE(DDT_UQLINK,CELL,CYL)
+            %FINISH
+            CELL=DDT_TRLINK
+         %REPEAT
+!
+! The code to deal with a replaceable disc demounted when required
+! and to hold transfer till the remount (pda(11)) has not been implemented
+! since there are no demountable discs any longer
+!
+!         %IF SEC STAT&OFFLINE#0 %THEN %START
+!            DDT_QSTATE=2
+!            %IF multi ocp=yes %THEN ddt_sema=-1
+!            %RETURN
+!         %FINISH
+      %FINISH
+DOMORE:
+      %IF DDT_UQLINK=0 %THEN DDT_UQLINK=DDT_LQLINK %AND DDT_LQLINK=0
+      ->INIT TRANSFER %IF DDT_UQLINK#0
+      DDT_QSTATE=0
+      %IF multi ocp=yes %THEN ddt_sema=-1
+      %RETURN
+!
+!PDA(11):                                ! disc now remounted possible on different drive
+!      DDT==RECORD(INTEGER(DITADDR+4*P_P1))
+!      %IF multi ocp=yes %THEN %START
+!         semaloop(ddt_sema)
+!      %FINISH
+!      DDT_TRLINK=0
+!      DDT_CURCYL=0
+!      ->DOMORE
+!
+PDA(7):                                  ! special tests
+      TRAP=P_P1;                         ! trap writes below this page
+      %IF P_P2<0 %THEN TFSYS=0 %ELSE TFSYS=P_P2; ! fsys
+      %RETURN
+!
+!
+PDA(*):
+      PKMONREC("pdisc act??",P)
+      %RETURN
+!
+%ROUTINE QUEUE(%INTEGER %NAME LINK, %INTEGER CELL,CYL)
+!***********************************************************************
+!*    Queues request in ascending page (ie cyl) order so seek times    *
+!*     are minimised.                                                  *
+!***********************************************************************
+%RECORD (REQFORM) %NAME REQ,ENTRY,NEXTREQ
+%INTEGER NEXTCELL,AD,Last
+      REQ==PARM(CELL)
+      NEXTCELL=LINK
+      ENTRY==PARM(NEXTCELL)
+      %IF NEXTCELL=0 %OR CYL<ENTRY_CYL %START
+         LINK=CELL
+         REQ_REQLINK=NEXTCELL
+         %RETURN
+      %FINISH
+      %CYCLE
+         ->QONCYL %IF CYL=ENTRY_CYL
+         NEXTCELL=ENTRY_REQLINK
+         %EXIT %IF NEXTCELL=0
+         NEXTREQ==PARM(NEXTCELL)
+         %EXIT %IF NEXTREQ_CYL>CYL
+         ENTRY==NEXTREQ
+      %REPEAT
+      REQ_REQLINK=NEXTCELL
+      ENTRY_REQLINK=CELL
+      %RETURN
+QONCYL:
+!
+! Tests have shown that we CANT headswitch between sectors but ca switch
+! between sector 9 and sector 0 where there is a bigger gap. Hence full ordering
+! is needed on the cyl to promote track readint and switching at the ends only
+!
+      Last=-1
+      %cycle
+         next cell=entry_cylink
+         %exit %if next cell=0
+         next req==parm(next cell)
+         %exit %if req_trksect<nextreq_trksect %and last<req_trksect
+         entry==next req
+         Last=entry_trksect
+      %repeat
+enter:
+      ENTRY_CYLINK=CELL
+      REQ_CYLINK=next cell
+%END
+!
+%ROUTINE PTREPLY(%RECORD (REQFORM) %NAME REQ, %INTEGER FAIL)
+!***********************************************************************
+!*    Replies to all local controllers waiting for a page transfer     *
+!*    usually one only but possibly several. This code will go inline  *
+!*    for the normal case when alltransfers in chain are errorfree     *
+!***********************************************************************
+%RECORD (PARMXF) %NAME REP
+%INTEGER L,J,STOREX
+      STOREX=REQ_STOREX
+      %IF FAIL=0 %START;                 ! remove the chnged and dirty bits set by transfer
+
+         *L_2,storex; *SLL_2,12;         ! real address of page transfered
+         %IF XA=YES %THEN %START
+            *ISKE_0,2;                   ! MARKERS TO MARK
+            *SRL_0,3; *SLL_0,3;          ! MARKERS REMOVED
+            *SSKE_0,2;                   ! STORE KEY RESET
+         %FINISH %ELSE %IF XA=AMDAHL %START; ! KEYS GANGED IN PAIRS
+            *ISK_0,2;
+            *SRL_0,3; *SLL_0,3
+            *SSK_0,2
+         %ELSE
+            *ISK_0,2;                    ! KEY ON 1ST 2 K
+            *LA_15,2048(2);              ! 2ND SET OF MARKERS
+            *SRL_0,3; *SLL_0,3;          ! CLEAR THE MARKERS
+            *SSK_0,2; *SSK_0,15;         ! MARKERS RESET
+         %FINISH
+      %FINISH
+      %IF FAIL>1 %THEN %START;           ! clear the page
+         J=RTV(REQ_COREADDR)
+         *IPK_0; *ST_2,l; *SPKA_0;       ! key 0
+         *L_0,j; *L_1,pagesize
+         *LR_2,0; *SLR_3,3; *MVCL_0,2
+         *L_2,l; *SPKA_0(2);             ! restore key
+         J=RTV(-1)
+      %FINISH
+      %IF MULTIOCP=YES %THEN %START
+         *basr_2,0; *using_2
+         *SLR_1,1; *LR_0,1; *BCTR_0,0
+         *l_3,Storesema; *CS_0,1,0(3)
+         *BC_8,<SSEMAGOT>; *drop_2
+         SEMALOOP(STORESEMA)
+SSEMAGOT:
+      %FINISH
+      L=STORE(STOREX)_LINK
+      STORE(STOREX)_FLAGS<-STORE(STOREX)_FLAGS&x'ff3f'; ! clear i/o flag
+      STORE(STOREX)_LINK=0;              ! & link
+      %IF MULTI OCP=YES %THEN STORESEMA=-1
+      %UNTIL L=0 %CYCLE
+         REP==PARM(L)
+         REP_P3=FAIL
+         J=REP_LINK
+         FASTPON(L)
+         L=J
+      %REPEAT
+      RETURN PPCELL(CELL) %IF FAIL#2;    ! headcell back to freelist
+%END
+!
+%END
+!
+%EXTERNAL %ROUTINE SEMAPHORE(%RECORD (PARMF) %NAME P)
+%RECORD %FORMAT SEMAF(%INTEGER DEST,SRCE,TOP,BTM,SEMA,TICK,P5,P6,LINK)
+%RECORD (SEMAF) %NAME SEMACELL
+%RECORD (PARMXF) %NAME WAITCELL
+      %OWN %INTEGER %ARRAY HASH(0:31)=0(32)
+%OWN %INTEGER TICKS=0
+%INTEGER %FN %SPEC NEWSCELL
+%INTEGER %FN %SPEC NEWWCELL
+%INTEGER SEMA,HASHP,NCELL,I,J,K,WCELL
+%INTEGER %NAME CELLP
+%SWITCH ACT(1:4)
+      %IF MONLEVEL&2#0 %AND KMON&1<<7#0 %THEN PKMONREC("Semaphore:",P)
+      SEMA=P_P1
+      %IF P_DEST&15<3 %THEN HASHP=IMOD(SEMA-SEMA//31*31) %AND CELLP==HASH(HASHP)
+      ->ACT(P_DEST&7)
+!-----------------------------------------------------------------------
+ACT(1):                                  ! p operation
+      %WHILE CELLP#0 %CYCLE
+         SEMACELL==PARM(CELLP)
+         %IF SEMA=SEMACELL_SEMA %THEN %START
+            I=SEMACELL_BTM
+            %IF I=0 %THEN %START;        ! already had v operation
+               SEMACELL_DEST=P_SRCE
+               SEMACELL_SRCE=x'70001'
+               FASTPON(CELLP)
+               CELLP=0
+            %FINISH %ELSE %START;        ! add to btm of queue
+               WCELL=NEWWCELL
+               PARM(I)_LINK=WCELL
+               SEMACELL_BTM=WCELL
+            %FINISH
+            %RETURN
+         %FINISH
+         CELLP==SEMACELL_LINK
+      %REPEAT
+!
+! no queue yet
+!
+      NCELL=NEWSCELL
+      CELLP=NCELL
+      WCELL=NEWWCELL
+      SEMACELL_TOP=WCELL
+      SEMACELL_BTM=WCELL
+      %RETURN
+!-----------------------------------------------------------------------
+ACT(2):                                  ! v operation
+      %WHILE CELLP#0 %CYCLE
+         SEMACELL==PARM(CELLP)
+         %IF SEMA=SEMACELL_SEMA %THEN %START
+            SEMACELL_TICK=TICKS;         ! record v operation
+            I=SEMACELL_TOP
+            %IF I#0 %START;              ! in case 2 v operations
+               SEMACELL_TOP=PARM(I)_LINK
+               PARM(I)_SRCE=P_SRCE;      ! if a timeout P_SRCE = X'70004'
+                                         ! this SRCE enables director to reset faulty SEMA
+               J=SEMACELL_TOP; K=0
+               %WHILE J>0 %CYCLE
+                  K=K+1; J=PARM(J)_LINK
+               %REPEAT
+               PARM(I)_P1=K;             ! return outstanding count to dir
+               FASTPON(I)
+            %FINISH
+            %IF SEMACELL_TOP=0 %THEN %START; ! return headcell
+               I=SEMACELL_LINK
+               RETURN PP CELL(CELLP)
+               CELLP=I
+            %FINISH
+            %RETURN
+         %FINISH
+         CELLP==SEMACELL_LINK
+      %REPEAT
+!
+! p operation not here yet
+!
+      NCELL=NEWSCELL
+      CELLP=NCELL
+      %RETURN
+!-----------------------------------------------------------------------
+ACT(3):                                  ! display semaphore queues
+      %IF MONLEVEL&2#0 %THEN %START
+         %FOR HASHP=0,1,31 %CYCLE
+            CELLP==HASH(HASHP)
+            %WHILE CELLP#0 %CYCLE
+               SEMACELL==PARM(CELLP)
+               SEMA=SEMACELL_SEMA
+               I=SEMACELL_TOP
+               %WHILE I#0 %CYCLE
+                  OPMESS("Sema x".HTOS(SEMA,8)." q :x".HTOS(PARM(I)_DEST>>16,3))
+                  I=PARM(I)_LINK
+               %REPEAT
+               CELLP==SEMACELL_LINK
+            %REPEAT
+         %REPEAT
+      %FINISH
+      %RETURN
+!-----------------------------------------------------------------------
+ACT(4):                                  ! ten second tick
+      TICKS=TICKS+1
+      %FOR HASHP=0,1,31 %CYCLE
+         CELLP==HASH(HASHP)
+         %WHILE CELLP#0 %CYCLE
+            SEMACELL==PARM(CELLP)
+            %IF TICKS-SEMACELL_TICK>=12 %START; ! 2 mins since v oper
+               OPMESS("Fsema timeout ".HTOS(SEMACELL_SEMA,8))
+               P_DEST=x'70002'
+               P_SRCE=x'70004'
+               P_P1=SEMACELL_SEMA
+               PON(P)
+            %FINISH
+            CELLP==SEMACELL_LINK
+         %REPEAT
+      %REPEAT
+      %RETURN
+%INTEGER %FN NEWWCELL
+%INTEGER I
+      I=NEWPPCELL
+      WAITCELL==PARM(I)
+      WAITCELL_DEST=P_SRCE
+      WAITCELL_SRCE=x'70001'
+      WAITCELL_LINK=0
+      %IF MONLEVEL&2#0 %THEN WAITCELL_P5=m'SEMA'
+      %IF MONLEVEL&2#0 %THEN WAITCELL_P6=m'WAIT'
+      %RESULT=I
+%END
+!-----------------------------------------------------------------------
+%INTEGER %FN NEWSCELL
+%INTEGER I
+      I=NEWPPCELL
+      SEMACELL==PARM(I)
+      SEMACELL=0
+      SEMACELL_SEMA=SEMA
+      SEMACELL_TICK=TICKS
+      %IF MONLEVEL&2#0 %THEN SEMACELL_P5=m'SEMA'
+      %IF MONLEVEL&2#0 %THEN SEMACELL_P6=m'head'
+      %RESULT=I
+%END
+%END
+%END %OF %FILE

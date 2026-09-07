@@ -1,0 +1,562 @@
+!*
+!*    NDIAG - TRIMP version - 30TH October 1984 - J.M.
+!*
+%INCLUDE "ercc07:ibmsup_page0f"
+!
+%EXTERNALROUTINE NDIAG %ALIAS "S#NDIAG"(%INTEGER PCOUNT,LNB,FAULT,INF)
+!
+%ROUTINESPEC DUMP(%INTEGER ST,END)
+%EXTERNALROUTINESPEC ETOI(%INTEGER AD,LEN)
+%EXTERNALSTRINGFNSPEC STRHEX(%INTEGER N)
+%EXTERNALSTRINGFNSPEC STRINT(%INTEGER N)
+%ROUTINESPEC INDIAG(%INTEGER GLA,LNB, %INTEGERNAME NEWREGS)
+%INTEGERFNSPEC NEXT LNB(%INTEGER LNB)
+%INTEGERFNSPEC VALIDATE(%INTEGER I)
+%ROUTINESPEC ERMESS(%INTEGER N,INF)
+!
+%OWNLONGINTEGER PSW=PSW0!x'2000000000000'!x'00d1ad1a',SAVED PE PSW
+%CONSTINTEGER STACK BASE=2<<SSHIFT
+!
+%ROUTINESPEC ASSDUMP(%INTEGER I,J)
+%OWNBYTEINTEGER ACTIVE=0;               ! check for loops
+%INTEGER LANGFLAG,GLA,PSWK,NEWREG,SST PTR,PREV BLK,BTYPE,ECOUNTER
+%INTEGER I,J,K,L
+%SWITCH LANGUAGE(0:4)
+%STRING (1) FAILNO
+%CONSTINTEGER MAXE=5
+%INTEGERARRAY ENVIRONMENTALS PRINTED(0:MAXE)
+%INTEGERARRAY REGS(0:24);               ! GRs & FRs in here
+%INTEGERARRAY MYREGS(0:15);             ! used if ndiag gets error
+%OWNSTRING (9) %ARRAY LT(0:4)=" !???! "," IMP "," FORTRAN "," IMPS "," ASMBLR "
+      SAVED PE PSW=PAGE0_PE NEW PSW;    ! trap errors in ndiag
+      *la_1,<perror>; *st_1,i
+      PAGE0_PE NEW PSW=saved pe psw&X'FFFFFFFF80000000'!I
+      ECOUNTER=0
+      ACTIVE=ACTIVE+1
+      FAILNO="1"
+      %IF ACTIVE>5 %THEN ->EOUT
+      %IF PCOUNT=-2 %START;             ! program error etc.
+         I=x'808'
+         L=INTEGER(I+44)
+         *l_1,i; *l_2,regs; *mvc_0(100,2),0(1)
+         *l_2,l; *mvc_0(64,2),0(1)
+         LNB=NEXT LNB(L)
+      %FINISHELSESTART
+         *l_2,regs; *mvc_0(64,2),0(10)
+         *mvc_2056(64,0),0(10);         ! for dump print
+         *stctl_0,15,2152(0)
+         LONGINTEGER(2048)=PSW
+      %FINISH
+      GLA=REGS(13)
+      FAILNO="3"
+      ->EOUT %UNLESS GLA#0 %AND GLA&7=0
+      LANGFLAG=BYTE INTEGER(GLA+16)
+      LANGFLAG=0 %IF LANGFLAG>4
+      PRINTSTRING("
+Monitor entered from".LT(LANGFLAG)."
+")
+      ERMESS(FAULT,INF)
+!
+      *ipk_0; *st_2,pswk; *spka_0;      ! key 0
+      NEWREG=0
+      ->LANGUAGE(LANGFLAG)
+!
+PERROR:                                 ! error in ndiag
+      *st_1,i; *l_1,myregs; *stm_0,15,0(1)
+      MYREGS(1)=I
+      ACTIVE=ACTIVE+1
+      %UNLESS ACTIVE>5 %START
+         PRINTSTRING("
+Program error ".STRINT(PAGE0_PE CODE)." in NDIAG
+PSW: ".STRHEX(INTEGER(ADDR(PAGE0_PE OLD PSW)))." ".STRHEX(INTEGER(ADDR(PAGE0_PE OLD PSW)+4))."
+GRs 0-15:
+")
+         DUMP(ADDR(MYREGS(0)),ADDR(MYREGS(15)))
+         PRINTSTRING("Parms:
+")
+         DUMP(ADDR(PCOUNT),ADDR(INF))
+         *stctl_1,1,i
+         PRINTSTRING("
+CR1: ".STRHEX(I)."
+")
+      %FINISH
+      *lpsw_psw
+!
+LANGUAGE(1):
+LANGUAGE(3):                            ! imp & imps
+      INDIAG(GLA,LNB,NEWREG);           ! imp diags
+      %IF NEWREG=0 %THEN ->EXIT
+NEXTRT:                                 ! continue to unwind stack
+      GLA=INTEGER(LNB+52)
+      LNB=NEWREG
+      LANGFLAG=BYTEINTEGER(GLA+16)
+      LANGFLAG=0 %IF LANGFLAG>4
+      ->LANGUAGE(LANGFLAG)
+!
+!
+LANGUAGE(*):                            ! unknown, fortran & assembler
+      ASSDUMP(PCOUNT,1)
+      ->EXIT;                           ! no way of tracing back
+!
+EOUT:                                   ! error exit
+      PRINTSTRING("
+NDIAG fails ".FAILNO."
+")
+      ->QUIT
+EXIT:
+      *l_2,pswk; *spka_0(2);            ! reset key
+      PAGE0_PE NEW PSW=SAVED PE PSW;    ! & pe psw
+      ACTIVE=0
+      %IF FAULT=0 %THEN ->END
+QUIT:
+      %IF PCOUNT=-2 %START
+         *lpsw_2224(0);                 ! set up by supervisor
+      %FINISH
+      *lpsw_psw
+      %RETURN
+!
+%ROUTINE ASSDUMP(%INTEGER PCOUNT,FLAG)
+%INTEGER I
+      PRINTSTRING("
+PC = ".STRHEX(PCOUNT))
+      PRINTSTRING("
+registers:
+")
+      DUMP(LNB,LNB+96)
+      PRINTSTRING("
+code
+")
+      DUMP(PCOUNT-64,PCOUNT+64)
+      %RETURNIF FLAG=0
+      PRINTSTRING("
+ gla
+")
+      I=INTEGER(LNB+56)
+      DUMP(I,I+128)
+%END
+END:
+!
+%INTEGERFN NEXT LNB(%INTEGER LNB)
+%INTEGER I,J,LOW
+%CONSTINTEGER MIN=64;                   ! minimum stack frame
+      LOW=LNB
+      %FOR I=10,-1,5 %CYCLE
+         J=INTEGER(LNB+4*I)
+         %IF ((LNB=LOW %AND J+MIN<=LOW) %OR (LNB-MIN>=J>LOW)) %AND J>=STACK BASE %AND %C
+            INTEGER(J+44)=J %THEN LOW=J
+      %REPEAT
+      %RESULT=LOW
+%END
+!
+%INTEGERFN VALIDATE(%INTEGER N)
+      *basr_15,0; *using_15
+      *l_1,n; *lra_0,0(1); *bc_8,<ok>
+      %RESULT=-1
+OK:   %RESULT=0
+      *drop_15
+%END
+!
+%ROUTINE INDIAG(%INTEGER GLA,LNB, %INTEGERNAME NEWREGS)
+
+! Prints diagnostics for one routine level of an IMP program.  Set NEWREGS to
+! point to previous stack frame if possible (else zero, to terminate diagnostics)
+!
+!
+! Layout of diagnostic tables
+!
+! The first half-word of the stack frame contains a displacement relative to
+! the start of SST of the  diagnostic tables for the block or routine being
+! executed.  A zero value means no diagnostics requested. (NB This may mean a
+! dummy first word in the SST).
+! The address of the SST for the current code segment is at GLA+20 bytes (this
+! word points to the x'C2C2C2C2' word in the SST-area of the object file).
+!
+! Form of the diagnostic tables:-
+!    For each routine/block there is a routine/block record of 20+N bytes, where
+! N is the number by which the routine-identifier including length-byte exceeds
+! four bytes. (Blocks have a null identifier).
+!    Following the routine/block record are IMP-variable records, each comprising
+! one word of type-information followed by the identifier as an IMP string.
+! These variable-records are contiguous and are terminated by a -1 type-information
+! word.
+
+! The routine/block record is as follows:
+!
+! Bytes 0-1  =   line of rt/black heading in source prog
+!       2-3  =   line no posn (from LNB) ??
+!
+! bytes 4-5  =   ??
+!       6-7  =   pointer (relative to the SST for the module) of the routine/block
+!                record for the enclosing block (or zero if none)
+! Word 2     =   display posn (from LNB)<<16 ! rt type info
+! Word 3     =   zero for blocks or string(<=11bytes) being the rt name.
+!                This will take words 4 and 5 if needed
+! Word 6     =   language dependent info . IMP on conditions etc
+!
+! Each variable entry consists of the variable word followed by
+! the variable name as a string. The word consists of
+! bits 2**31 to 2**20 type information (may be language dependent
+! Bit  2**19  =0 under LNB =1 in GLA
+! Bits 2**18 to 2**0 displacement from LNB(GLA) in bytes
+!
+! The environment (bytes 6-7 of the routine/block) is a pointer (relative to SST)
+! of the next outermost block or a pointer to global owns, external or common areas
+! A zero means no enclosing block. Word1=word3=0 is an IMP main program or
+! global owns for a module of external routines and will terminate the diagnostics.
+
+!      0    2    4    6    8...
+!     +----+----+----+----+----- - - ---------+
+!     | FBL|    |    |PREV|  locvars      -1  |  Inner routine or block
+!     +----+----+----+----+----- - - ---------+
+!                      |
+!       +--------------+
+!       |
+!       V     2    4    6    8...
+!       +----+----+----+----+----- - - ---------+
+!       | FBL|    |    |PREV|  locvars       -1 |  Outer begin or ext routine
+!       +----+----+----+----+----- - - ---------+
+!                        |
+!          +-------------+
+!          |
+!          V     2    4    6    8...
+!          +----+----+----+----+----- - - ---------+
+!          |zero|    |    |zero|  locvars       -1 |  Environmental level
+!          +----+----+----+----+----- - - ---------+
+!
+!  FBL       = "from-block line", i.e. starting line-number of this routine/block
+!
+!  PREV      = "previous block" i.e. pointer to diag tables for enclosing (textual) block
+!
+!  locvars   = Diag tables for variables local to this level.
+!
+!  -1          ends the records for the variables of this level.
+
+%ROUTINESPEC PRINT LOCALS(%INTEGER LOCENV)
+%ROUTINESPEC PRINT VAR(%INTEGER ADATA)
+%INTEGER SST PTR,DTABLE,FLINE,FBLINE,BTYPE,PREV BLK,I,J,OLD FBLINE
+%STRING (11) NAME
+
+! The scheme of things here is as follows.
+! CYCLE
+!     Have we done all dynamic levels?  EXIT if so.
+!     (This test and this cycle are in routine IDIAG)
+!     CYCLE
+!         (The contents of this cycle comprise routine INDIAG)
+!         Print diagnostics for current level.
+!         Look at next textual level and print diagnostics for same if GLOBAL, i.e.
+!         print values of global owns if any, ELSE select next dynamic level and EXIT.
+!     REPEAT
+! REPEAT
+
+! In the diagnostic tables, FromBlockLINE (FBLINE) and PREVBLK indicate whether
+! the current diagtable is for
+!      Global owns (Environmental block)             FBLINE=0   PREVBLK=0
+!   or outer begin/ext routine/routine/inner begin   FBLINE>0   PREVBLK>0
+
+      SSTPTR=BYTEINTEGER(LNB)<<8!BYTEINTEGER(LNB+1); ! Short(LNB)
+      FLINE=BYTEINTEGER(LNB+2)<<8!BYTEINTEGER(LNB+3); ! Short(LNB+2)
+      OLD FBLINE=0
+      %CYCLE
+         DTABLE=INTEGER(GLA+20)+SST PTR
+         %UNLESS VALIDATE(DTABLE)=0 %START
+            PRINTSTRING("DTABLE invalid")
+            NEWLINE
+            NEWREGS=0
+            %EXIT
+         %FINISH
+         FBLINE=BYTEINTEGER(DTABLE)<<8!BYTEINTEGER(DTABLE+1) {Short(DTABLE)}
+         BTYPE=BYTEINTEGER(DTABLE+12) {name-length, hence blocktype}
+
+         %IF BTYPE>11 %START
+            PRINTSTRING("Invalid symbol tables")
+            NEWLINE
+            NEWREGS=0
+            %RETURN
+         %FINISHELSESTART
+            PREV BLK=BYTEINTEGER(DTABLE+6)<<8!BYTEINTEGER(DTABLE+7)
+            NAME=STRING(DTABLE+12) {null if block}
+         %FINISH
+
+         %IF FBLINE=0 %START
+            PRINT LOCALS(1) {Environmental block - global owns}
+            %EXIT {to next dynamic level}
+         %FINISHELSEIF OLD FBLINE#0 %START
+                                        ! Have done one textual level already and this (current) textual level
+                                        ! is not the Environmental block
+            %EXIT {to next dynamic level}
+         %FINISH
+
+         PRINTSTRING("Entered from line")
+         WRITE(FLINE,4)
+         PRINTSTRING(" of")
+
+         %IF BTYPE=0 %THEN PRINTSTRING(" block") %ELSE PRINT STRING(" routine/fn/map ".NAME)
+         PRINTSTRING(" starting at line")
+         WRITE(FBLINE,4)
+         PRINT LOCALS(0)
+
+                                        ! Go to next textual level.  If this is the environmental block, then
+                                        ! we shall print the variables therein, else finished.
+         OLD FBLINE=FBLINE
+         SST PTR=PREV BLK
+      %REPEAT
+      NEWLINE
+      NEWREGS=NEXTLNB(LNB)
+      NEWREGS=0 %IF NEWREGS=LNB
+
+%ROUTINE PRINT LOCALS(%INTEGER LOCENV)
+! Param is  zero  for locals,  one  for environmentals
+%INTEGER NUM,PRTD,J,ADATA
+%CONSTINTEGER MAX=99
+%INTEGERARRAY PT,X(0:MAX)
+%ROUTINESPEC SORT
+      NUM=0; PRTD=0
+      NEWLINES(2)
+      ADATA=(DTABLE+BTYPE+20)&(-4)
+      %IF LOCENV#0 %START
+         %IF INTEGER(ADATA)<0 %THENRETURN {silent for no environmental variables}
+                                        ! Have we printed these already?
+         J=0
+         %WHILE J<ECOUNTER %CYCLE
+            %IF ENVIRONMENTALS PRINTED(J)=ADATA %THENRETURN {Yes: clear off}
+            J=J+1
+         %REPEAT
+                                        ! Add to array of ADATA's for which diags have been printed, to avoid
+                                        ! being tedious and printing the same several times.
+         %IF ECOUNTER<=MAXE %START
+            ENVIRONMENTALS PRINTED(ECOUNTER)=ADATA
+            ECOUNTER=ECOUNTER+1
+         %FINISH
+         PRINTSTRING("Environmental")
+      %FINISHELSESTART
+         %IF INTEGER(ADATA)<0 %THEN PRINTSTRING("No l") %ELSE PRINTSTRING("L")
+         PRINTSTRING("ocal")
+      %FINISH
+      PRINTSTRING(" variables")
+      NEWLINES(2)
+
+      %WHILE INTEGER(ADATA)>=0 %CYCLE
+                                        ! Save the ADATA pointer if we have enough room, else squawk once
+         %IF NUM<=MAX %START
+            PT(NUM)=ADATA
+            NUM=NUM+1
+         %FINISHELSESTART
+            %IF PRTD=0 %START
+               PRINTSTRING("Max loc variables!")
+               NEWLINE
+               PRTD=1
+            %FINISH
+         %FINISH
+         ADATA=(ADATA+8+BYTE INTEGER(ADATA+4))&(-4)
+      %REPEAT
+
+                                        ! Finally print out the sorted variable names
+      SORT
+      %FOR J=0,1,NUM-1 %CYCLE
+         ADATA=PT(X(J))
+         PRINT VAR(ADATA)
+         NEWLINE
+      %REPEAT
+
+%ROUTINE SORT
+! DECLARE INTEGER ARRAY X, BOUNDS 0:NUM-1, IN CALLING ROUTINE
+%INTEGER I,J,HIT,N
+      %FOR I=0,1,NUM-1 %CYCLE
+         X(I)=I
+      %REPEAT
+      %FOR I=NUM-2,-1,0 %CYCLE
+         HIT=0
+         %FOR N=0,1,I %CYCLE
+            %IF STRING(PT(X(N))+4)>STRING(PT(X(N+1))+4) %START
+               J=X(N)
+               X(N)=X(N+1)
+               X(N+1)=J
+               HIT=1
+            %FINISH
+         %REPEAT
+         %IF HIT=0 %THENEXIT
+      %REPEAT
+%END {sort}
+%END {print locals}
+
+!---------------------------------- PRINTVAR ----------------------------------
+
+%ROUTINE PRINT VAR(%INTEGER ADATA)
+!***********************************************************************
+!*       output the next variable in the current block.                *
+!*       a variable entry in the tables is:-                           *
+!*       flag<<20!vbreg<<18!disp                                       *
+!*       where:-                                                       *
+!*         vbreg is variable's base register, disp is it's offset      *
+!*         and flags=nam<<6!prec<<3!type                               *
+!***********************************************************************
+%INTEGER I,J,K,ARR,LEN,NAM,PREC,TYPE,VADDR,V
+%CONSTINTEGER UNASSI=x'80808080'
+%STRING (11) LNAME
+%STRING (63) MESS
+%SWITCH INTV,REALV(3:7)
+
+      I=INTEGER(ADATA)
+      K=I>>20
+      TYPE=K&7
+      PREC=K>>4&7
+      ARR=K>>8&3
+      NAM=K>>10&1
+      LNAME<-STRING(ADATA+4)."          "
+      PRINTSTRING(LNAME."=")
+      %IF I&x'40000'=0 %THEN VADDR=LNB %ELSE VADDR=GLA
+      VADDR=VADDR+I&x'3ffff'
+      %IF ARR=0 %AND NAM#0 %START
+         ->NOT ASS %IF VALIDATE(VADDR)<0
+         %IF TYPE=0 %OR TYPE=5 %THEN VADDR=VADDR+4 {%name or %stringname}
+         VADDR=INTEGER(VADDR)
+         ->NOT ASS %IF VADDR=UNASSI %OR VALIDATE(VADDR)<0
+      %FINISH
+      ->ILL ENT %IF PREC<3;             ! bits not implemented
+      %IF PREC>=5 %OR TYPE=3 %START
+         ->NOT ASS %IF VALIDATE(VADDR)<0
+         V=INTEGER(VADDR)
+      %FINISH
+
+      %IF ARR#0 %THEN ->ARRAY
+      %IF TYPE=1 %THEN ->INTV(PREC)
+      %IF TYPE=2 %THEN ->REALV(PREC)
+      %IF TYPE=3 %THEN ->REC
+      %IF TYPE=5 %THEN ->STR
+
+INTV(4):                                ! 16 bit integer
+      V=BYTEINTEGER(VADDR)<<8!BYTEINTEGER(VADDR+1)
+                                        !v=shortinteger(vaddr)
+      MESS="x'".STRHEX(V)."' ".STRINT(V)
+      ->OMESS
+
+INTV(7):                                ! 128 bit integer
+REALV(3):                               ! 8 bit real
+REALV(4):                               ! 16 bit real
+ILL ENT:                                ! should not occurr
+      MESS="unknown type of variable"
+      ->OMESS
+
+INTV(5):                                ! 32 bit integer
+      ->NOT ASS %IF V=UN ASSI
+      MESS="x'".STRHEX(V)."' ".STRINT(V)
+      ->OMESS
+
+INTV(3):                                ! 8 bit integer
+      WRITE(BYTEINTEGER(VADDR),1)
+      %RETURN
+
+REALV(5):                               ! 32 bit real
+      ->NOT ASS %IF V=UN ASSI
+      MESS="x'".STRHEX(V)."'"
+      ->OMESS
+
+REALV(6):                               ! 64 bit real
+      ->NOT ASS %IF UNASSI=INTEGER(VADDR)=INTEGER(VADDR+4)
+      MESS="x'".STRHEX(V).STRHEX(INTEGER(VADDR+4))."'"
+      ->OMESS
+      %RETURN
+
+REALV(7):                               ! 128 bit real
+      ->NOT ASS %IF UNASSI=INTEGER(VADDR)=INTEGER(VADDR+4)
+      MESS=" (R'".STRHEX(INTEGER(VADDR)).STRHEX(INTEGER(VADDR+4))." ".STRHEX(INTEGER(VADDR+8) %C
+         ).STRHEX(INTEGER(VADDR+12))."')"
+      ->OMESS
+
+INTV(6):                                ! 64 bit integer
+ARRAY:                                  ! array print 1st 4 words
+REC:                                    ! record print 1st 4 words
+      ->NOT ASS %IF UN ASSI=V
+      MESS="x'".STRHEX(V).STRHEX(INTEGER(VADDR+4))
+      %IF PREC=7 %OR ARR#0 %OR TYPE=3 %THENSTART
+         MESS=MESS." ".STRHEX(INTEGER(VADDR+8)).STRHEX(INTEGER(VADDR+12))
+      %FINISH
+      MESS=MESS."'"; ->OMESS
+STR:  ->NOT ASS %IF BYTEINTEGER(VADDR+1)=UNASSI&255=BYTEINTEGER(VADDR)
+      ->TOOLONG %IF BYTEINTEGER(VADDR)>253
+      MESS<-"""".STRING(VADDR).""""
+      ->OMESS
+
+INVALID:
+      MESS=" invalid address ".STRHEX(VADDR)
+      ->OMESS
+TOO LONG:
+      MESS=" too long ";                ! assume short strings
+      ->OMESS
+
+NOT ASS:
+      MESS=" not assigned"
+OMESS:
+      PRINTSTRING(MESS)
+%END {print var}
+%END;                                   ! of rt idiags
+!
+%ROUTINE ERMESS(%INTEGER N,INF)
+%CONSTINTEGER MAXN=27
+%CONSTINTEGERARRAY FAULTS(0:MAXN)= %C
+      x'501', {1281}
+      x'505', {1285}
+      x'601', {1537}
+      x'602', {1538}
+      x'701', {1793}
+      x'801', {2049}
+      x'802', {2050}
+      1,2,3,4,5,6,7,8,9,10,
+      11,12,13,14,15,16,17,18,19,64,
+      0
+%CONSTSTRING (32) %ARRAY FMESS(0:MAXN)= %C
+      "invalid cycle ",
+      "illegal exponent ",
+      "capacity exceeded ",
+      "array bound fault ",
+      "resolution fails ",
+      "unassigned variable ",
+      "switch label not set ",
+      "operation exception ",
+      "privileged operation excp ",
+      "execute exception ",
+      "protection execption ",
+      "addressing exception ",
+      "specification exception ",
+      "data exception ",
+      "fixed point overflow excp ",
+      "fixed point divide excp ",
+      "decimal overflow exception ",
+      "decimal divide exception ",
+      "exponent overflow excp ",
+      "exponent underflow excp ",
+      "significance exception ",
+      "floating point divide excp ",
+      "segment translation exception ",
+      "page translation exception ",
+      "translation specification excp ",
+      "special operation exception ",
+      "monitor event ",
+      "unknown fault "
+%INTEGER I,J
+      %RETURNIF N<=0
+      %FOR I=0,1,MAXN %CYCLE
+         J=FAULTS(I)
+         %EXITIF N=FAULTS(I)
+      %REPEAT
+      PRINTSTRING(FMESS(I))
+      %IF J=0 %THEN PRINTSTRING(STRHEX(N)) %AND WRITE(N,1)
+      %UNLESS INF=0 %THEN WRITE(INF,1)
+      NEWLINE
+%END;                                   ! ermess
+!
+%ROUTINE DUMP(%INTEGER START,FINISH)
+%INTEGER I,J
+      I=START&(-4)
+      %WHILE I<=FINISH %CYCLE
+         PRINTSTRING(STRHEX(I))
+         %CYCLE J=0,4,12
+            SPACES(2)
+            PRINTSTRING(STRHEX(INTEGER(I+J)))
+         %REPEAT
+         NEWLINE
+         I=I+16
+      %REPEAT
+%END;                                   ! dump
+%END { of ndiag }
+%ENDOFFILE

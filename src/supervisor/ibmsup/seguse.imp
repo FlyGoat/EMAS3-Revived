@@ -1,0 +1,57 @@
+
+!
+! This is the latest information on the use of Segments for EMAS3.
+! Segments 0-63 correspond roughly to Public in EMAS2
+! Segments 64-255 are the equivalent to Local in Emas2
+! Segments 241-255 vanish from the Segment table when User is running
+! but re-appear when Director is entered.
+!
+!     Seg 0                             address page 0 and used for
+!                                       the zero page (page 1) and
+!                                       writing to real addresses (page 2)
+!     Seg 1                             segment table segment
+!     Seg 2                             Supervisor stack
+!     Seg 3                             Alternate Local Controller Stack for Amdahl
+!                                       which uses 24 bit virtual addresses in Priv instrns
+!     Seg 4                             Supervisor code
+!     Segs 5-7                          free (for testing on 24 bit machines
+!                                       these contain overflow portions of code)
+!     Seg 8                             Supervisor Gla
+!     Segs 9-15                        Reserved for VSS
+!     Segs 16-19                        Fress
+!     Seg 20                            Parameter (parm) table
+!     Seg 21                            Active Memory table
+!     Seg 22                            AMTDD Table
+!     Seg 23                            Store table
+!     Segs 24-29                        Free
+!     Seg 30                            Main Printer Buffer
+!     Seg 31                            The COM Segment (ex public 48)
+!     Segs 32-63                        Reserved for real->Virtual Mapping
+!
+!     Seg 64                            Local Controller Stack (incorporating
+!                                       4 contexts[ssn+1s] and the DIRCSEG
+!                                       formerly local 10)
+!     Seg 65                            Director stack
+!     Seg 66                            Signal Stack
+!     Seg 67                            Director Code
+!     Segs 68-71                        Free (code on 4341)
+!     Seg 71                            Free
+!     Seg 72                            Subsytem code
+!     Seg 73-239(inc)                   For connected Files
+!     Seg 240-254                       For Director indexes & tables
+!     Seg 255                           Directore Gla(Must be private!)
+!
+%constinteger PAGE0 SEG=0;              ! Segment for pages 0,1,2
+%constinteger SEGTAB SEG=1;             ! Segment for segment table
+%constinteger PPSEG=20;                 ! Segment for Parameter  table
+%constinteger AMTASEG=21;               ! Segment for Active Memory table
+%constinteger AMTDDSEG=22;              ! Segment for AMTDD Table
+%constinteger STORESEG=23;              ! Segment for Store Table
+%constinteger PBSEG=30;                 ! Segment for main printer buffer
+%constinteger COMSEG=31;                ! Segment for comm area
+%constinteger LCSTKSEG=64;              ! Local Controller Stack segment
+%constinteger DCODESEG=67;              ! Director Code segment
+%constinteger DGLASEG=255;              ! Directore GLA SEg
+%constinteger DSTKSEG=65;               ! Directors Stack
+%constinteger DSIGSTKSEG=66;            ! Director Signal Stack
+%constinteger vssbtmseg=9

@@ -1,0 +1,41 @@
+! SPDX-License-Identifier: MIT
+! Copyright (c) 2026 Jiaxun Yang <jiaxun.yang@flygoat.com>
+
+! Host compiler pointers carried through fixed-width intermediate handles.
+! These handles never belong in the serialized guest object.
+%include "unix_host.imp"
+%ownlonginteger addresses=0
+%owninteger used=0,capacity=0
+%externalintegerfn host address handle(%byteintegername address)
+%integer next
+%longinteger replacement,bytes
+  %result=0 %if addr(address)=0
+  %signal 1,5 %if used=X'7FFFFFFF'
+  %if used=capacity %start
+    next=256
+    %if capacity>0 %start
+      next=X'7FFFFFFF'
+      %if capacity<=X'3FFFFFFF' %then next=capacity*2
+    %finish
+    bytes=next;bytes=bytes*8
+    replacement=addr(unix resize(byteinteger(addresses),bytes))
+    %signal 1,5 %if replacement=0
+    addresses=replacement;capacity=next
+  %finish
+  bytes=used;bytes=bytes*8
+  longinteger(addresses+bytes)=addr(address)
+  used=used+1
+  %result=used
+%end
+%externalbyteintegermap host handle address(%integer handle)
+%longinteger offset
+  %result==byteinteger(0) %if handle=0
+  %signal 1,5,handle %unless 1<=handle<=used
+  offset=handle-1;offset=offset*8
+  %result==byteinteger(longinteger(addresses+offset))
+%end
+%externalroutine clear address handles
+  unix free(byteinteger(addresses))
+  addresses=0;used=0;capacity=0
+%end
+%endoffile

@@ -1,0 +1,1787 @@
+%recordformat pf(%integer dest, srce, %string (23) text)
+%recordformat pe(%integer dest, srce, p1, p2, p3, p4, p5, p6)
+%constinteger amdahl = 369, xa = 371
+%INCLUDE "TARGET"
+
+
+%if TARGET = 2900 %start  { machine specific constants }
+      %constinteger MAX LINE = 132
+      %conststringname DATE = X'80C0003F'
+      %conststringname TIME = X'80C0004B'
+      %constinteger SEG SHIFT = 18
+%finish  { 2900 }
+!
+%if TARGET = 370 %start
+      %constinteger SEG SHIFT = 16
+%finish
+!
+%if TARGET = XA %or TARGET = AMDAHL %start
+      %constinteger SEG SHIFT = 20
+%finish
+!
+%unless TARGET = 2900 %start
+      %constinteger com seg = 31
+      %conststringname DATE = COM SEG << SEG SHIFT + X'3B'
+      %conststringname TIME = COM SEG << SEG SHIFT + X'47'
+      %constinteger MAX LINE = 80  { for convenience on terminals }
+%finish
+!* COMMUNICATIONS RECORD FORMAT - EXTANT FROM CHOPSUPE 20A ONWARDS *
+!
+! This is the Supervisor Communications Record Format, defined in EMAS
+! 2900 Supervisor Note 15.
+!* COMMUNICATIONS RECORD FORMAT - EXTANT FROM CHOPSUPE 20A ONWARDS *
+%if TARGET = 2900 %start
+      %recordformat %c
+COMF(%integer OCPTYPE, IPLDEV, SBLKS, SEPGS,
+      NDISCS, DLVNADDR, GPCTABSIZE, GPCA,
+      SFCTABSIZE, SFCA, SFCK, DIRSITE,
+      DCODEDA, SUPLVN, TOJDAY, DATE0,
+      DATE1, DATE2, TIME0, TIME1,
+      TIME2, EPAGESIZE, USERS, CATTAD,
+      SERVAAD, %byteinteger NSACS, RESV1, SACPORT1, SACPORT0, 
+      NOCPS, RESV2, OCPPORT1, OCPPORT0, 
+      %integer ITINT,
+      CONTYPEA, GPCCONFA, FPCCONFA, SFCCONFA, 
+      BLKADDR, RATION, SMACS, TRANS,
+      %longinteger KMON, %integer DITADDR, SMACPOS,
+      SUPVSN, PSTVA, SECSFRMN, SECSTOCD, 
+      SYNC1DEST, SYNC2DEST, ASYNCDEST, MAXPROCS,
+      KINSTRS, ELAPHEAD, COMMSRECA, STOREAAD,
+      PROCAAD, SFCCTAD, DRUMTAD, TSLICE,
+      FEPS, MAXCBT, PERFORMAD,
+      %INTEGER SP0,SP1,SP2,SP3,SP4,SP5,
+      %integer LSTL, LSTB, PSTL,
+      PSTB, HKEYS, HOOT, SIM,
+      CLKX, CLKY, CLKZ, HBIT,
+      SLAVEOFF, INHSSR, SDR1, SDR2,
+      SDR3, SDR4, SESR, HOFFBIT,
+      BLOCKZBIT, BLKSHIFT, BLKSIZE, END)
+%finish %else %start
+      %recordformat %C
+COMF(%integer OCPTYPE, SLIPL, TOPS, SEPGS,
+      NDISCS, NSLDEVS, DLVNADDR, DITADDR,
+      SLDEVTABAD, STEER INT, DIRSITE, DCODEDA,
+      exSUPLVN, TOJDAY, DATE0, DATE1,
+      DATE2, TIME0, TIME1, TIME2,
+      PAGESIZE, USERS, CATTAD, SERVAAD,
+      NOCPS, ITINT, RATION, TRANS,
+      %longinteger KMON, %integer SUPVSN, SECSFRMN,
+      SECSTOCD, SYNC1DEST, SYNC2DEST, ASYNCDEST,
+      MAXPROCS, KINSTRS, ELAPHEAD, COMMSRECA,
+      STOREAAD, PROCAAD, TSLICE, FEPS,
+      MAXCBT, PERFORMAD, END)
+%finish
+!*
+!
+%if TARGET = 2900 %start
+%recordformat file inff(%string(11)NAME,
+      %integer SD,%halfinteger PGS, H0,
+      %byteinteger CODES, CODES2, DAYNO, USE,
+      OWNP, EEP, PHEAD, ARCH,
+      %byteinteger CCT, SSBYTE, %halfinteger PREFIX)
+%finish %else %start
+%recordformat file inff(%string(11)NAME, %integer SD,
+      %shortinteger PGS, H0,
+      %byteinteger CODES, CODES2, DAYNO, USE,
+         OWNP, EEP, PHEAD, ARCH,
+         CCT, SSBYTE, %shortinteger PREFIX)
+%finish
+
+
+%if TARGET # 2900 %start
+%RECORDFORMAT FINFF((%INTEGER NKB, RUP, EEP, APF, USE, ARCH, FSYS, CONSEG,
+      CCT, CODES,  DAYNO, CODES2,
+       SSBYTE %or %INTEGERARRAY i(0:12)),%STRING(6)OFFER)
+%finish %else %start
+%RECORDFORMAT FINFF(%INTEGER NKB, RUP, EEP, APF, USE, ARCH, FSYS, CONSEG,
+      CCT, CODES, %BYTEINTEGER SP1, DAYNO, SP2, CODES2,
+       %INTEGER SSBYTE,%STRING(6)OFFER)
+%finish
+!*
+%recordformat daf((%integer blksi, nblks, last blk, spare,
+   %integerarray da(1 : 512) %or %integer sparex, %integerarray i(0:514)))
+!
+%if TARGET = 2900 %start
+
+%externalstringfnspec derrs(%integer flag)
+%externalintegerfnspec dexecmess(%string(6) user,%integer sact,len,addr)
+%externalintegerfnspec ddap(%integerfn a(%integer a,b,c), %integer act, addr)
+%externalintegerfnspec dsfi(%string (6) user,
+   %integer fsys, %integer type, set, address)
+%externalroutinespec dstop(%integer reason)
+!%externalintegerfnspec change context
+%externalintegerfnspec d check bpass(%string(6) user,
+ %string(63) bpass, %integer fsys)
+%externalintegerfnspec dpon3(%string(6) user,
+   %record(pe)%name p, %integer invoc, msgtype, outno)
+%externalroutinespec dpoff(%record(pe)%name p)
+%externalroutinespec dtoff(%record(pe)%name p)
+%externalintegerfnspec dgetda(%string (6) user,
+   %string (11) file, %integer fsys, address)
+%externalintegerfnspec dchsize(%string (6) user,
+   %string (11) file, %integer fsys, newsize)
+%externalroutinespec get av fsys(%integername n,
+   %integerarrayname a)
+%externalintegerfnspec dfsys(%string (6) user, %integername fsys)
+%externalintegerfnspec dpermission( %c
+   %string (6) owner, user, %string (8) date,
+   %string (11) file, %integer fsys, type, adrprm)
+%externalintegerfnspec ddestroy(%string (6) user,
+   %string (11) file, %string (8) date, %integer fsys, type)
+%externalintegerfnspec ddisconnect(%string(6) user, %string(11) file  %c
+      %integer fsys, destroy)
+%externalintegerfnspec drename(%string (6) user,
+   %string (11) oldname, newname, %integer fsys)
+%externalintegerfnspec dfstatus(%string (6) user,
+   %string (11) file, %integer fsys, act, value)
+%externalintegerfnspec dfilenames(%string (6) user,
+   %record(file inff)%arrayname inf,
+   %integername filenum, maxrec, nfiles, %integer fsys, type)
+%externalintegerfnspec dfinfo(%string (6) user,
+   %string (11) file, %integer fsys, address)
+%externalintegerfnspec dcreate(%string (6) user,
+   %string (11) file, %integer fsys, nkb, type)
+%externalintegerfnspec dconnect(%string (6) user,
+   %string (11) file, %integer fsys, mode, apf,
+   %integername seg, gap)
+%externalintegerfnspec dmessage(%string (6) user,
+   %integername l, %integer act, fsys, adr)
+%externalintegerfnspec dtransfer( %c
+   %string (6) user1, user2,
+   %string (11) file, newname, %integer fsys1, fsys2, type)
+%externalintegerfnspec dnewgen(%string(6) user, %string(11) file, %c
+   newgen of file, %integer fsys)
+
+%finish %else %start
+
+%EXTERNALINTEGERFNSPEC DCHECKBPASS(%STRINGNAME USER, BPASS, %INTEGERNAME FSYS)
+
+%EXTERNALINTEGERFNSPEC DCHSIZE(%STRINGNAME FILE INDEX, FILE, %INTEGERNAME FSYS, NKB)
+! The physical size of file FILE belonging to file index FILE INDEX on
+! disc-pack FSYS (or -1) is altered (if necessary) so that its new size
+! is NEWKB Kbytes.  The size may not be reduced to zero.  The file may
+! be connected in the caller's virtual memory (only).  If the caller is
+! not the file owner, he must either have W access to the file index or
+! be privileged.
+
+!%EXTERNALINTEGERFNSPEC CHANGE CONTEXT
+
+%EXTERNALINTEGERFNSPEC DCONNECT(%STRINGNAME FILE INDEX, FILE, %INTEGERNAME FSYS, MODE, SEG, GAP)
+
+%EXTERNALINTEGERFNSPEC DCREATE(%STRINGNAME FILE INDEX, FILE, %INTEGERNAME FSYS, NKB, TYPE, DA)
+! A file of name FILE is created, in file index FILE INDEX on disc-pack
+! FSYS, of E Epages, where E is the smallest number of Epages containing
+! NKB Kbytes.  The maximum size of file allowed is 16 Mbytes.  Subsystems
+! requiring larger files should arrange that they be made up of subfiles
+! comprising files created by this procedure.
+!
+! Bits in TYPE may be set:
+!
+!     2**0     For a temporary file (destroyed when the creating process
+!              stops if the file was connected, or at System start-up).
+!
+!     2**1     For a very temporary file (destroyed when the file is
+!              disconnected).
+!
+!     2**2     For a file which is to be zeroed when created.
+!
+!     2**3     To set "CHERISHed" status for the file.
+!
+!
+! Temporary files are made into ordinary files (that is, the "temporary"
+! attribute is removed) on being RENAMEd, OFFERed, TRANSFERred or
+! PERMITted, and also explicitly by an appropriate call on procedure
+! DFSTATUS.
+!
+! The disc address of the first section of the file is returned in DA.
+
+%EXTERNALINTEGERFNSPEC DDESTROY(%STRINGNAME FILE INDEX, FILE, DATE, %INTEGERNAME FSYS, TYPE)
+! File FILE belonging to file index FILE INDEX on disc-pack FSYS, is
+! destroyed.  TYPE should be set to 1 to destroy a file from archive
+! storage, otherwise it should be set to zero.  When TYPE=1, DATE should
+! be set to the archive date.  DATE is ignored if TYPE=0.
+!
+! The procedure fails if 'OWNP' for the file is either zero (no access)
+! or 8 (do not destroy).
+
+%EXTERNALINTEGERFNSPEC DDISCONNECT(%STRINGNAME FILE INDEX, FILE, %INTEGERNAME FSYS, DSTRY)
+! The file of name FILE belonging to file index FILE INDEX on disc-pack
+! FSYS is disconnected from the caller's virtual memory.  Parameter
+! DESTROY should be set either to 0 or 1.  If set to 1 the file will be
+! destroyed, provided that it belongs to the process owner (not necessary
+! if the process is privileged) and the "use-count" for the file is zero
+! after disconnection.  Otherwise the  parameter is ignored.
+
+%EXTERNALINTEGERFNSPEC DFILENAMES(%STRINGNAME GROUP, %INTEGERNAME FILENO, MAXREC, %C
+  NFILES, FSYS, TYPE, %RECORD(file inff)%ARRAYNAME INF)
+! This procedure delivers, in the record array INFS (which should be
+! declared (0:n)), a sequence of records describing the on-line files
+! (for TYPE=0), archived files (for TYPE=1) or backed-up files (for
+! TYPE=2) belonging to group GROUP on fsys FSYS (or -1 if not known).
+!
+! The procedure works differently for on-line files (TYPE=0) and
+! off-line files (TYPE>0).
+!
+! For on-line files, the records returned give the names of files and
+! groups belonging to GROUP but not the contents of any of these groups.
+! DFILENAMES must be called again with GROUP set to the name of the
+! subgroup to determine these.  Thus
+!
+!        FLAG = DFILENAMES(ERCC99,...
+!
+! returns the names of files and groups in ERCC99's main file index.  If
+! there is a group called PROJ:, the contents of it can be found with
+!
+!        FLAG = DFILENAMES(ERCC99.PROJ:,...
+!
+! The group separator, :, may be omitted if desired.
+!
+! Note that the usage of . and : (USEP and GSEP) is reversed in EMAS3.
+! The UINF fields USEP, USEPCH etc allow utilities to be written which
+! will work for both EMAS2 and EMAS3.
+!
+! MAXREC is set by the caller to specify the maximum number of records he
+! is prepared to accept in the array INFS, and is set by Director to be
+! the number of records returned.
+!
+! NFILES is set by Director to be the number of files actually held on
+! on-line storage or on archive storage, depending on the value of TYPE.
+!
+! FILENO is not normally used.  [ If the top bit of MAXREC is set, FILENO
+! is used in the same way as for off-line files, described below ]
+!
+! The format of the records returned in INFS is
+!
+!        %string(11)NAME,  %integer SPARE1, KBYTES,
+!        %byteinteger ARCH, CODES, CCT, OWNP,
+!           EEP, USE, CODES2, SSBYTE, SPARE2, PHEAD, DAYNO, GROUP
+!
+!        ( 32 bytes )
+! PHEAD is non-zero if the file or group has been permitted itself to a
+! user or user group.
+! GROUP is non-zero if NAME is the name of a group.
+!
+! For off-line files, TYPE = 1 or 2, GROUP will normally be be the name
+! of a file index eg ERCC99 or ERCC99{UTILS} when all the names in the
+! index will be returned.  If an actual group name is given eg
+!
+!        ERCC99.PROJ:
+!
+! then only names of the form
+!
+!        ERCC99.PROJ:name
+!
+! are returned.  MAXREC and NFILES are used in the same way as above.
+!
+! Filenames are stored in chronological order of archive (or backup) date,
+! youngest first.  FILENO is set by the caller to specify the "file-number"
+! from which names are to be  returned, zero representing the most recently
+! archived file.  Thus the caller can conveniently receive subsets of names
+! of a very large number of files.
+!
+! The format of the records returned in INFS is
+!
+!        %string(11)NAME,  %integer KBYTES,
+!        %string(8)DATE,  %string(6)TAPE,
+!        %halfinteger PREFIX, CHAPTER,
+!        %byteinteger EEP, PHEAD, SPARE, COUNT
+!
+!        ( 40 bytes )
+! To allow the full filenames to be reconstructed, the array INFS, in
+! general, contains some records which hold group names.  Records refering
+! to filenames can be distinguished by the fact that KBYTES > 0.  If PREFIX
+! is > 0, the name is a member of a group whose name is given in the
+! record INFS(PREFIX).  The chain can be followed back until a record
+! with a zero PREFIX field is found.
+!
+! Note.  MAXREC does not give the number of filenames returned but the
+! number of records in INFS.
+!
+! TAPE and CHAPTER are returned null to unprivileged callers.
+
+%EXTERNALINTEGERFNSPEC DFINFO(%STRINGNAME FILE INDEX, FILE, %INTEGERNAME FSYS, %C
+  %STRINGNAME S, %INTEGERARRAYNAME I)
+! This procedure returns detailed information about the attributes of
+! file or group FILE belonging to file index FILE INDEX on disc-pack
+! FSYS, in a record written to address ADR.
+!
+! A caller of the procedure having no permitted access to the file
+! receives an error result of 32, as though the file did not exist.
+!
+! The format of the record returned is:
+!
+%recordformat DFINFOF((%integer NKB, RUP, EEP, APF,
+      USE, ARCH, FSYS, CONSEG, CCT, CODES,
+      %byteinteger SP1, DAYNO, SP2, CODES2,
+      %integer SSBYTE %or %INTEGERARRAY i(1:12)), %string(6)OFFER)
+!
+! where
+! NKB       the number of Kbytes (physical file size)
+!           zero indicates a group name
+! RUP       the caller's permitted access modes
+! EEP       the general access permission
+! APF       1-4-4 bits, right-justified, giving respectively the Execute,
+!           Write and Read fields of APF, if the file is connected in
+!           this VM
+! USE       the current number of users of the file
+! ARCH      the value of the archive byte for the file (see procedure
+!           DFSTATUS)
+! FSYS      disc-pack number on which the file resides
+! CONSEG    the segment number at which the file is connected in the
+!           caller's VM, zero if not connected  
+! CCT       the number of times the file has been connected since this
+!           field was last zeroed (see procedure DFSTATUS)
+! CODES     information for privileged processes 
+! SP1       spare
+! DAYNO     Day number when file last connected
+! SP2       spare
+! CODES2    information for internal use 
+! SSBYTE    information for the subsystem's exclusive use
+! OFFER     the username to which the file has been offered, otherwise
+!           null
+
+%EXTERNALINTEGERFNSPEC DFLAG(%INTEGERNAME FLAG, %STRINGNAME TXT)
+
+%EXTERNALINTEGERFNSPEC DEXECMESS(%STRINGNAME USER, %INTEGERNAME SACT,LEN,ADDR)
+
+
+%EXTERNALINTEGERFNSPEC DFSTATUS(%STRINGNAME FILE INDEX, FILE, %INTEGERNAME FSYS, ACT, VALUE)
+! This procedure is supplied to enable the attributes of file FILE
+! belonging to file index FILE INDEX on disc-pack FSYS to be modified,
+! as follows.
+!
+! Parameter VALUE is for use by the archive/backup program (ACT=13),
+! and by the subsystem (ACT=18), otherwise it should be set to zero.
+!
+! ACT                 ACTION
+!
+!  0      HAZARD      Remove CHERISHed attribute
+!
+!  1      CHERISH     Make subject to automatic System back-up procedures
+!                     Note: If the file is one of
+!                        SS#DIR, SS#OPT or SS#PROFILE
+!                     then the 'archive-inhibit' bit is also set.
+!                     Similarly, the 'archive-inhibit' bit is
+!                     cleared by HAZARD for these files.
+!
+!  2      UNARCHIVE   Remove the "to-be-archived" attribute
+!
+!  3      ARCHIVE     Mark the file for removal from on-line to archive
+!                     storage.
+!
+!  4      NOT TEMP    Remove the "temporary" attribute.
+!
+!  5      TEMPFI      Mark the file as "temporary", that is, to be
+!                     destroyed when the process belonging to the file
+!                     owner stops (if the file is connected at that
+!                     time), or at system start-up.
+!
+!  6      VTEMPFI     Mark the file as "very temporary", that is, to be
+!                     destroyed when it is disconnected from the owner's
+!                     VM.
+!
+!  7      NOT PRIVATE May now be written to magnetic tape either for
+!                     back-up or archive.  May be called only by
+!                     privileged programs.
+!
+!  8      PRIVATE     Not to be written to magnetic tape either for
+!                     back-up or archive.  May be called only by
+!                     privileged programs.
+!
+!  9      SET CCT     Set the connect count for the file to VALUE.
+!
+! 11      ARCH        Operation 1 (PRIVILEGED).
+!                     Set currently-being-backed-up bit (bit 2**1 in
+!                     ARCH byte), unless the file is currently connected
+!                     in write mode, when error result 52 is given.
+!
+! 12      ARCH        Operation 2 (PRIVILEGED).
+!                     Clear currently-being-backed-up bit (2**1) and
+!                     has-been-connected-in-write-mode bit (2**0).
+!
+! 14      ARCH        Operation 4 (PRIVILEGED).
+!                     Clear the UNAVAilable and privacy VIOLATed bits in
+!                     CODES.  Used by the back-up and archive programs
+!                     when the file has been read in from magnetic tape.
+!
+! 15      CLR USE     Clear file use-count and WRITE-CONNECTED status
+!                     (PRIVILEGED).
+!
+! 16      CLR NOARCH  Clear archive-inhibit bit in CODES.   PRIVILEGED -
+!                                                           for System
+!
+! 17      SET NOARCH  Set archive-inhibit bit in CODES.     Library use
+!
+! 18      SSBYTE      Set SSBYTE to be the bottom 8 bits of VALUE (byte
+!                     for a subsystem's exclusive use).
+!
+! 19      ARCH        Operation 5 (PRIVILEGED).
+!                     Set the WRCONN bit in CODES2.  Used to prevent any
+!                     user connecting the file in write mode during
+!                     back-up or archive.
+!
+! 20      ARCH        Operation 6 (PRIVILEGED).
+!                     Clear the WRCONN bit in CODES2.  Used when back-up
+!                     is complete.
+!
+! 21      DAYNO       Set DAYNO to bottom 8 bits of VALUE
+%EXTERNALINTEGERFNSPEC DFSYS(%STRINGNAME FILE INDEX, %INTEGERNAME FSYS)
+
+%EXTERNALINTEGERFNSPEC DFSYSDATA(%INTEGERNAME FSYS, %INTEGERARRAYNAME DATA)
+
+%EXTERNALINTEGERFNSPEC DGETDA(%STRINGNAME FILE INDEX, FILE, %INTEGERNAME FSYS, %INTEGERARRAYNAME I)
+! This procedure provides the disc addresses of the sections of file FILE
+! belonging to file index FILE INDEX on disc-pack FSYS.  Data is written
+! from address ADR in the format
+!
+!     (%integer SECTSI, NSECTS, LASTSECT, %integerarray DA(0:255))
+!
+! where SECTSI      is the size (in epages) of the sections (except
+!                   possibly the final section)
+!
+!       NSECTS      is the number of sections, and hence the number
+!                   of entries returned in array DA
+!
+!       LASTSECT    is the size (in epages) of the final section
+!
+! In each entry in the DA array, the top byte contains the FSYS number.
+
+%EXTERNALINTEGERFNSPEC DMESSAGE(%STRINGNAME USER, %INTEGERNAME LEN, ACT, INVOC, FSYS, ADR)
+
+%EXTERNALINTEGERFNSPEC DNEWGEN(%STRINGNAME FILE INDEX, FILE, NEWGEN, %INTEGERNAME FSYS)
+! This procedure provides a means of introducing an updated version
+! (i.e. a new generation) of file FILE belonging to file index FILE INDEX
+! even though it may be connected in other users' virtual memories.
+!
+! If FILE is not connected in any virtual memory, a call on DNEWGEN is
+! equivalent to destroying FILE and then renaming NEWGEN to FILE,
+! except that the new version of FILE retains the former FILE's access
+! permissions.
+!
+! If FILE is connected in some virtual memory, then the filename
+! NEWGEN "disappears", and any subsequent connection of FILE into
+! a virtual memory yields the contents of the new generation formerly
+! held in NEWGEN.
+!
+! When the number of users of a former copy of FILE becomes zero
+! (i.e. when it is not connected in any virtual memory), that copy is
+! destroyed.
+
+%EXTERNALINTEGERFNSPEC DPERMISSION(%STRINGNAME FILE INDEX, %C
+  USER, DATE, FILE, %INTEGERNAME FSYS, TYPE, ADR)
+! This procedure allows the caller to set access permissions, or specific
+! preventions, for file connection to individual users, groups of users
+! or to all users to file FILE belonging to file index FILE INDEX.  It
+! also allows a caller to determine the modes (if any) in which he may
+! access the file.
+!
+! TYPE determines the service required of the procedure:
+!
+!         TYPE         Action
+!
+!           0          set OWNP (not for files on archive storage)
+!           1          set EEP
+!           2          put USER into the file list (see "Use of file
+!                      access permissions", below)
+!           3          remove USER from file list
+!           4          return the file list
+!           5          destroy the file list
+!           6          put USER into the index list (see "Use of file
+!                      access permissions", below)
+!           7          remove USER from the index list
+!           8          return the index list
+!           9          destroy the index list
+!          10          give modes of access available to USER for FILE
+!          11          set EEP for the file index as a whole
+!
+! TYPEs 0 to 9 and 11 are available only to the file owner and to
+! privileged processes.  For TYPE 10, ADRPRM (see below) should be the
+! address of an integer into which the access permission of USER to the
+! file is returned. If USER has no access to the file, error result 32
+! will be returned from the function, as though the file did not exist.
+! If the file is on archive storage, TYPE should be set to 16 plus the
+! above values to obtain the equivalent effects.
+!
+! ADRPRM is either the permission being attached to the file, bit
+! values interpreted as follows:
+!
+!         all bits zero    prevent access
+!         2**0             allow READ access
+!         2**1             allow WRITE access      not allowed for files
+!         2**2             allow EXECUTE access    on archive storage
+!         2**3             If TYPE = 0, prevent the file from being
+!                          destroyed by e.g. DDESTROY, DDISCONNECT (and
+!                          destroy).
+! or, except for type 10, it is the address of an area into which access
+! permission information is to be written
+!
+!     %recordformat(%integer BYTES RETURNED, OWNP, EEP, SPARE,
+!         %record(EF)%array INDIV PRMS(0:15))
+!
+!       and EF is
+!        %recordformat EF(%string(6)USER, %byteinteger PERMISSION)
+!
+!   where:
+!
+!   BYTES      indicates the amount of data returned.
+!   RETURNED
+!
+!   OWNP       is the file owner's own permission to the file, or the
+!              requesting user's "net" permission if the caller of the
+!              procedure is not the file owner (see "Use of file access
+!              permissions", below).
+!
+!   EEP        is the general (all users) access permission to the file
+!              ("everyone else's permission").
+!
+!   UPRM       The PERMISSION values in the sub-records are those
+!              for the corresponding users or groups of users denoted by
+!              USER.  Up to 16 such permissions may be attached to a
+!              file.
+!
+! Use of file access permissions
+!
+! The general scheme for permissions is as follows.  With each file
+! there are associated:
+!
+!   OWNP       the permission of the owner of the file to access it
+!
+!   EEP        everyone else's permission to access it (other than users
+!              whose names are explicitly or implicitly attached to the
+!              file)
+!
+!   INDIV PRMS a list of up to 16 items describing permissions for
+!              individual users, e.g. ERCC00, or groups of users, e.g.
+!              ERCC?? (specifying all usernames of which the first four
+!              characters are "ERCC")
+!
+! In addition, a user may attach a similar list of up to 16 items to
+! his file index as a whole and an EEP for the file index.  These
+! permissions apply to any file described in the index along with those
+! attached to that particular file.
+! In determining the mode or modes in which a particular user may access
+! a file, the following rules apply:
+!
+!   1. If the user is the file owner then OWNP applies.
+!
+!   2. Otherwise, if the user's name appears explicitly in the list for
+!      the file, the corresponding permission applies.
+!
+!   3. Otherwise, if the user's name is a member of a group of users
+!      represented by a list item for the file, the corresponding
+!      permission applies.
+!
+!   4. Otherwise EEP applies if greater than zero.
+!
+!   5. Otherwise, if the user's name appears explicitly in the list for
+!      the index, the corresponding permission applies.
+!
+!   6. Otherwise, if the user's name is a member of a group of users
+!      represented by a list item for the index, the corresponding
+!      permission applies.
+!
+!   7. Otherwise, everybody else's permission to the file index applies.
+!
+! In the event of a user's name appearing more than once (implicitly)
+! within groups specified in a single list, the actual list item to be
+! selected to give the permission should be regarded as indeterminate.
+
+%EXTERNALINTEGERFNSPEC DPOFF(%RECORD(pe)%NAME P)
+
+%EXTERNALINTEGERFNSPEC DPON3(%STRINGNAME USER, %RECORD(pe)%NAME P, %C
+  %INTEGERNAME INVOC, MSGTYPE, OUTNO)
+
+%EXTERNALINTEGERFNSPEC DRENAME(%STRINGNAME FILE INDEX, OLDNAME, NEWNAME, %INTEGERNAME FSYS)
+! File OLDNAME belonging to file index FILE INDEX on disc-pack FSYS is
+! renamed NEWNAME.
+!
+! A file may not be renamed while it is connected in any virtual memory.
+
+%EXTERNALINTEGERFNSPEC DSTOP(%INTEGERNAME REASON)
+
+%EXTERNALINTEGERFNSPEC DSFI(%STRINGNAME FILE INDEX, %INTEGERNAME FSYS, TYPE, %C
+  SET, %STRINGNAME S, %INTEGERARRAYNAME I)
+! This procedure is used to set or read information in file index FILE
+! INDEX (or user record in some cases) on disc-pack FSYS.  TYPE specifies
+! which data item is to be referenced (see list below).  SET must be 1
+! to write the data item into the index, or 0 to read the item from the
+! index.  ADR is the address of an area, which must be available in write
+! or read mode, to or from which the data item is to be transferred.
+!
+! TYPE              Data item                         Data type & size
+!
+!  0     BASEFILE name (the file to be connected
+!        and entered at process start-up)                 string(18)
+!
+!  1     DELIVERY information (to identify                string(31)
+!        slow-device output requested by the
+!        index owner)
+!
+!  2     CONTROLFILE name (a file for use by the
+!        subsystem for retaining control information)     string(18)
+!
+!  3     ADDRTELE address and telephone number of user    string(63)
+!
+!  4     INDEX USE (may not be reset)
+!        Gives (in successive integers from ADR):
+!        a) number of files
+!        b) number of file descriptors currently in use
+!        c) number of free file descriptors
+!        d) index size (Kbytes)
+!        e) Number of section descriptors (SDs)
+!        f) Number of free section descriptors
+!        g) Number of permission descriptors (PDs)
+!        h) Number of free permission descriptors         integer(x8)
+!
+!  5     Foreground and background passwords
+!        (reading is a privileged operation), a zero
+!        value means "do not change"                      integer(x2)
+!
+!  6     Date last logged-in: (Y-70)<<9 ! (M<<5) !  D  and
+!        date last started (non-interactive)  (same)
+!        (may not be reset)                               integer(x2)
+!
+!  7     ACR level at which the process owning this
+!        index is to run (may be set only by privileged
+!        processes)                                       integer
+!
+!  8     Director Version (may be set only by privileged
+!        processes)                                       integer(x2)
+!
+!  9     ARCHIVE INDEX USE (may not be reset)
+!        Gives (in successive integers from ADR):
+!        a) number of archived files
+!        b) number of archived Kbytes
+!        c) number of backed-up files
+!        d) number of backed-up Kbytes
+!        e) index size (Kbytes)
+!        f) number of file descriptors
+!        g) number of free file descriptors
+!        h) number of permission descriptors
+!        i) number of free permission descriptors         integer(x9)
+!
+! 10     Stack size (Kbytes)                              integer
+!
+! 11     Limit for total size of all files in disc
+!        storage (Kbytes) (may be set only by privileged
+!        processes                                        integer
+!
+! 12     Maximum file size (Kbytes) (may be set only by
+!        privileged processes)                            integer
+!
+! 13     Current numbers of interactive and batch
+!        processes, respectively, for the user (may
+!        not be reset)                                    integer(x2)
+!
+! 14     Process concurrency limits (may be set only
+!        by privileged processes).  The three words
+!        denote respectively the maximum number of
+!        interactive, batch and total processes which
+!        may be concurrently running for the user.
+!        (Setting the fields to -1 implies using
+!        the default values, currently 1, 1 and 1.)       integer(x3)
+!
+! 15     When bit 2**0 is set, TELL messages to the
+!        index owner are rejected with flag 48.           integer
+!
+! 16     Set Director monitor level (may be set only
+!        by privileged processes)                         integer(x2)
+!
+! 17     Set SIGNAL monitor level (may be set only
+!        by privileged processes)                         integer
+!
+! 18     Initials and surnames of user (may
+!        be set only by privileged processes)             string(31)
+!
+! 19     Director monitor file                            string(11)
+!
+! 20     Thousands of instructions executed, interactive
+!        and batch modes (may be reset only by
+!        privileged processes)                            integer(x2)
+!
+! 21     Thousands of instructions executed (current
+!        session only)                                    integer
+!
+! 22     Thousands of instructions executed in Director
+!        procedures (current process session only)
+!        (may not be reset)                               integer
+!
+! 23     Page-turns, interactive and batch modes
+!        (may be reset only by privileged processes)      integer(x2)
+!
+! 24     Page-turns (current process session only)        integer
+!
+! 25     Thousands of bytes output to slow-devices
+!        (local or remote) (may be reset only by
+!        privileged processes)                            integer
+!
+! 26     Thousands of bytes input from slow-devices
+!        (local or remote) (may be reset only by
+!        privileged processes)                            integer
+!
+! 27     Milliseconds of OCP time used, interactive
+!        and batch modes (may be reset only by
+!        privileged processes)                            integer(x2)
+!
+! 28     Milliseconds of OCP time used (current
+!        session only)                                    integer
+!
+! 29     Seconds of interactive terminal connect time
+!        (may be reset only by privileged processes)      integer
+!
+! 30     No. of disc files, total disc Kbytes, no. of
+!        cherished files, total cherished Kbytes, no.
+!        of temporary files, total temporary Kbytes
+!        (cannot be reset)                                integer(x6)
+!
+! 31     No. of archive files, total archive Kbytes       integer(x2)
+!
+! 32     Interactive session length in minutes            integer
+!        0 or 5 <= x <= 240
+!
+! 33     Funds                                            integer
+!
+! 34     The FSYS of the Group Holder of the index        integer
+!        owners funds, if he has a GH
+!
+! 35     Test BASEFILE name                               string(18)
+!
+! 36     Batch BASEFILE name                              string(18)
+!
+! 37     Group Holder of funds for scarce resources       string(6)
+!
+! 38     Privileges                                       integer
+!
+! 39     Default LP                                       string(15)
+!
+! 40     Dates passwords last changed                     integer(x2)
+!        (may not be reset)
+!
+! 41     Password data                                    integer(x8) 
+!
+! 42     Get accounting data                              integer(x17)
+!
+! 43     Mail count                                       integer
+!        (may be reset only by privileged processes)
+!
+! 44     Supervisor                                       string(6)
+!
+! 45     Secure record                          about 512 bytes
+!
+! 46     Gateway access id                                string(15)
+!
+! 47     File index attributes                            byte
+!
+! 48     User type                                        byte
+
+%EXTERNALINTEGERFNSPEC DTOFF(%RECORD(pe)%NAME P)
+
+%EXTERNALINTEGERFNSPEC DTRANSFER(%STRINGNAME FILE INDEX1, FILE INDEX2, FILE1, %C
+  FILE2, %INTEGERNAME FSYS1, FSYS2, TYPE)
+! This procedure transfers FILE1 belonging to file index FILE INDEX1 on
+! FSYS1 to the ownership of file index FILE INDEX2 on FSYS2 under name
+! FILE2.
+!
+! TYPE = 0 'accepts' a file which has been 'offered'. This call
+!          is non-privileged.
+!        1 a privileged call to transfer a file.
+!        2 like 1, but, in addition, forces a re-allocation of the
+!          disc space.
+!        3 a privileged call to copy the file.
+!        4 as 3 but works even when file connected W (for test purposes)
+
+
+%EXTERNALINTEGERFNSPEC DVALIDATE(%INTEGERNAME ADR, LEN, RW)
+%finish
+
+
+%if TARGET = 2900 %start
+%systemroutinespec oper(%integer oper no, %string (255) s)
+%finish %else %start
+%externalintegerfnspec doper(%stringname s)
+%finish
+
+
+%externalstring (6) %spec my name
+%externalintegerspec my service number
+%externalintegerspec my fsys
+%externalintegerspec oper no
+
+
+%conststring (1) snl = "
+"
+%constinteger atrans = x'80C0008F';     !ADDR OF MASTER I TO E AND E TO I TABLES
+%if TARGET = 2900 %start
+%constlonginteger secs70 = x'0000000083AA7E80'
+%finish
+%constinteger not assigned = x'80808080';    !INTERNAL UNASSIGNED PATTERN
+%constinteger r = b'00000001';          !READ ACCESS
+%constinteger w = b'00000010';          !WRITE ACCESS
+%constinteger sh = b'00001000';        !shared access
+%constinteger spoolr reply act = 23
+%constinteger lp = 1
+%constinteger jrnl = 0
+%constinteger new copy = 16
+%constinteger ok = 0
+%constinteger log file size = 256
+%constinteger section size = 64;        !SECTION SIZE IN KBYTES
+%constinteger file header size = 32;    !STANDARD FILE HEADER SIZE
+%constinteger max oper = 7;             !MAXIMUM OPER NUMBER
+%constinteger max streams = 19;         !MAX NUMBER OF OUTPUT STREAMS
+%constinteger already exists = 16;      !FILE ALREADY EXISTS FLAG
+%constinteger to queue dact = 10;       !ACTIVITY TO PUT ONE OF SPOOLERS OWN FILES IN A QUEUE
+%constinteger descriptor update = 12;     !PERIODIC DOC DESCRIPTOR UPDATE.
+%constinteger prompt reply dact = 19;   !ACTIVITY SHOULD REQUIRES REPLIES FROM PROMPT ON
+%constinteger oper prompt = x'320008';  !SERVICE NUMBER OF OPER PROMPT
+%constbyteintegerarray hex(0 : 15) =                  %c
+'0','1','2','3','4','5','6','7',
+'8','9','A','B','C','D','E','F'
+
+
+%routinespec iocp(%integer ep, n)
+%stringfnspec errs(%integer flag)
+%integerfnspec to spoolr(%string(6) user,%string(11) file,%integer fsys,q)
+%routinespec print log(%integer stream,q)
+
+
+%recordformat fhf(%integer end, start, size, type, spare,
+   datetime, s1, s2)
+
+
+%owninteger current stream = 0;         !DEFAULT AND CURRENT OUTPUT STREAM
+%ownstring (132) %array oper buffer(0 : max oper) =   %c
+     ""(max oper + 1)
+                                        !OPER OUTPUT SAVED HERE UNTIL A NEWLINE OR FULL
+%ownintegerarray conads(1 : max streams) =     %c
+                  0(max streams)
+                                        !CONNECT ADDRESS OF OUTPUT STREAMS
+
+
+
+%externalintegerfn validate(%integer adr, len, rw)
+!***********************************************************************
+!*                                                                     *
+!*  FUNCTION VALIDATES THE AREA SPECIFIED FOR READ OR WRITE ACCESS     *
+!*  RESULT = 1  AREA OK (ACCESSIBLE)                                   *
+!*  RESULT = 0  AREA NOT OK (INACCESSIBLE)                             *
+!*  RW SHOULD BE SET  0  (READ ACCESS)                                 *
+!*                OR  1  (WRITE ACCESS)                                *
+!*                                                                     *
+!***********************************************************************
+%if TARGET = 2900 %start
+%integer inseg1, inseg2
+%longinteger dr
+%constinteger write = 1
+   %result = 0 %unless 0 < len <= x'40000';  ! DON'T ALLOW > 1 SEG ANYWAY
+! WE WANT TO COVER THE SEG BOUNDARY CASE HERE
+   %if adr>>18 # (adr+len-1)>>18 %start
+      inseg2 = (adr+len)&x'3FFFF';      !HIGHER SEGMENT NUMBER
+      inseg1 = len-inseg2;              !LOWER SEGMENT NUMBER
+      %result = validate(adr,inseg1,rw)&validate(adr+inseg1,
+         inseg2,rw)
+                                        !OK ONLY IF BOTH VALIDATE
+   %finish
+   dr = x'1800000000000000'!(LENGTHENI(LEN)<<32)!ADR
+                                        !SET UP A DESCIPTOR FOR AREA
+   *ld_dr
+   *val_(%lnb+1)
+   *jcc_8,<cczer>
+   *jcc_4,<ccone>
+   *jcc_2,<cctwo>
+! THEN CC=3, INVALID
+   %result = 0
+cczer:                                  ! read and write permitted
+   %result = 1;                         ! OK
+ccone:                                  ! read, but not write, permitted
+   %if rw = write %then %result = 0;    ! BAD
+   %result = 1;                         ! OK
+cctwo:                                  ! write, but not read, permitted
+   %result = 0;                         ! BAD
+
+%finish %else %start {non 2900}
+  %integer flag
+  flag = dvalidate(adr, len, rw)
+  %if flag = 0 %then %result = 1
+  %result = 0
+%finish
+%end;                                   !OF INTEGERFN VALIDATE
+
+
+!***********************************************************************
+!*                                                                     *
+!* THESE FUNCTIONS ALL USE A PACKED FORMAT OF DATE AND TIME OF THE     *
+!* FOLLOWING FORM. BITS ARE NUMBERED FROM 31 (MOST SIGNIFICANT) TO     *
+!* 0 (LEAST SIGNIFICANT)                                               *
+!* BITS    USE                                                         *
+!* 31-26  YEAR-70  (VALID FOR 1970-2033)                               *
+!* 25-22  MONTH                                                        *
+!* 21-17  DAY                                                          *
+!* 16-12  HOUR                                                         *
+!* 11- 6  MINUTE                                                       *
+!*  5- 0  SECOND                                                       *
+!*                                                                     *
+!***********************************************************************
+
+
+
+%stringfn s2(%integer n)
+!THIS FUNCTION RETURNS A TWO DIGIT DECIMAL VALUE FOR N
+%integer tens, units
+   tens = n//10
+   units = n-10*tens
+   %result = tostring(tens+'0').tostring(units+'0')
+%end;                                   !OF S2
+
+
+
+%externalstringfn unpack date(%integer p)
+   %result = s2(p>>17&x'1F')."/".s2(p>>22&x'F')."/".s2((p>>26& %c
+      x'3F')+70)
+%end;                                   !OF UNPACK DATE
+
+
+
+%externalstringfn unpack time(%integer p)
+   %result = s2(p>>12&x'1F').".".s2(p>>6&x'3F').".".s2(p&x'3F')
+%end;                                   !OF UNPACK TIME
+
+
+
+%integerfn i2(%integer ad)
+!AD POINTS TO THE FIRST OF A PAIR OF DECIMAL CHARACTERS. THE RESULT
+!IS THE NUMERIC VALUE OF THE CHAS
+   %result = 10*(byteinteger(ad)&x'F')+(byteinteger(ad+1)&x'F')
+%end;                                   !OF I2
+
+
+
+%externalintegerfn pack date(%string (8) date)
+%integer ad
+   ad = addr(date)
+   %result = ((i2(ad+7)-70)<<26)!(i2(ad+4)<<22)!(i2(ad+1)<<17)
+%end;                                   !OF PACK DATE
+
+
+
+
+!
+
+%externalintegerfn pack date and time(%string (8) date, time)
+%integer at
+   at = addr(time)
+   %result = pack date(date)!(i2(at+1)<<12)!(i2(at+4)<<6)!(i2( %c
+      at+7))
+%end;                                   !OF PACK DATE AND TIME
+
+
+
+%stringfn errs(%integer flag)
+  %integer i; %string(63) error
+  %if TARGET = 2900 %then %result = derrs(flag) %else %START
+    i = dflag(flag,error)
+    %result = error
+  %FINISH
+%end
+
+
+%externalroutine stop %alias "S#STOP"
+%integer flag
+   %if TARGET # 2900 %then flag = dstop(100) %else dstop(100)
+%end;                                   !OF ROUTINE STOP
+
+!%if TARGET = 2900 %start
+!
+!%externalINTEGER %FN CURRENT PACKED DT
+!!***********************************************************************
+!!*    GIVES CURRENT DT IN NEW PACKED FORM                              *
+!!***********************************************************************
+!%CONSTLONGINTEGER MILL=1000000
+!      *RRTC_0; *USH_-1
+!      *SHS_1; *USH_1
+!      *IMDV_MILL
+!      *ISB_SECS70; *STUH_%B
+!      *OR_X'80000000'
+!      *EXIT_-64
+!%END
+!
+!%finish %else %start
+
+%externalintegerfn current packed dt
+  %result = pack date and time(date,time)
+%end
+
+!%finish
+
+
+%if TARGET = 2900 %start
+
+%externalroutine i to e(%integer ad, l)
+%integer j
+   j = integer(atrans);                 !ADDR OF I TO E TABLE IN PUBLIC SEGMENT
+   *lb_l
+   *ldtb_x'18000000'
+   *ldb_%b
+   *lda_ad
+   *lss_j
+   *luh_x'18000100'
+   *ttr_%l=%dr
+%end;                                   !OF I TO E
+
+
+
+%externalroutine e to i(%integer ad, l)
+%integer j
+   j = integer(atrans)+256;             !ADDR OF E TO I TABLE IN PUBLIC SEGMENT
+   *lb_l
+   *ldtb_x'18000000'
+   *ldb_%b
+   *lda_ad
+   *lss_j
+   *luh_x'18000100'
+   *ttr_%l=%dr
+%end;                                   !OF E TO I
+
+
+
+%systemroutine move(%integer length, from, to)
+!***********************************************************************
+!*                                                                     *
+!*  MOVES "LENGTH" BYTES "FROM" "TO"                                   *
+!*                                                                     *
+!***********************************************************************
+   *ldtb_x'18000000'
+   *ldb_length ;  *lda_from
+   *cyd_0 ;  *lda_to
+   *mv_%l=%dr
+%end;                                   !OF ROUTINE MOVE
+
+%finish %else %start  {NON 2900}
+
+!*
+%externalroutine itoe(%integer ad, l)
+!* iso to ebcdic
+%integer i,j
+%byteintegerarrayname table
+%byteintegerarrayformat tablef(0:255)
+%returnif l=0
+%constrecord(comf)%name com = 31 << seg shift
+table==array(com_trans,tablef)
+%for i=0,1,l %cycle
+  j=ad+i
+  byteinteger(j)=table(byteinteger(j))
+%repeat
+%end;                                   !of itoe
+!*
+!*
+%externalroutine etoi(%integer ad, l)
+!* ebcdic to iso
+%integer i,j
+%byteintegerarrayname table
+%byteintegerarrayformat tablef(0:255)
+%returnif l=0
+%constrecord(comf)%name com = 31 << seg shift
+table==array(com_trans+256,tablef)
+%for i=0,1,l %cycle
+  j=ad+i
+  byteinteger(j)=table(byteinteger(j))
+%repeat
+%end;                                   !of etoi
+!*
+!*
+
+%externalroutine move(%integer length, from, to)
+!***********************************************************************
+!*  moves "LENGTH" bytes "FROM" "TO"
+!***********************************************************************
+%integer i
+%returnif length=0
+byteinteger(to+i)=byteinteger(from+i) %for i=0,1,length-1
+%end;                                   !of routine move
+!*
+%finish {of NON 2900}
+
+
+
+%if TARGET = 2900 %start
+
+%systemroutine fill(%integer length, from, filler)
+!***********************************************************************
+!*                                                                     *
+!*  FILL "LENGTH" BYTES "FROM" WITH CHARACTER "FILLER"                 *
+!*                                                                     *
+!***********************************************************************
+   *lb_length
+   *ldtb_x'18000000'
+   *ldb_%b
+   *lda_from
+   *lb_filler
+   *mvl_%l=%dr
+%end
+
+%finish %else %start {NON 2900}
+
+%externalroutine fill(%integer length, from, filler)
+%integer i
+  %return %if length = 0
+  byteinteger(from+i) = filler %for i = 0 ,1 ,length-1
+%end;                                   !OF ROUTINE FILL
+
+%finish
+
+
+
+
+%externalstring (15) %fn i to s(%integer n)
+!**********************************************************************
+!*                                                                    *
+!*  TURNS AN INTEGER INTO A STRING USES MACHINE CODE                  *
+!*                                                                    *
+!**********************************************************************
+%string (16) s
+%integer d0, d1, d2, d3, sign,w,d
+%if TARGET # 2900 %start
+%result="0" %if n=0
+sign=1
+sign=-1 %and n=-n %if n<0;  ! which can overflow
+s=""
+%while n>0 %cycle
+  w=n//10
+  d=n-w*10
+  s=tostring('0'+d).s
+  n=w
+%repeat
+s="-".s %if sign<0
+%result=s
+%finish %else %start {2900}
+   *lss_n;  *cdec_0
+   *ld_s;  *inca_1;                     ! PAST LENGTH BYTE
+   *cpb_%b;                             ! SET CC=0
+   *supk_%l=15,0,32;                    ! UNPACK 15 DIGITS SPACE FILL
+   *std_d2;                             ! FINAL DR FOR LENGTH CALCS
+   *jcc_8,<waszero>;                    ! N=0 CASE
+   *lsd_%tos;  *st_d0;                  ! SIGN DESCRIPTOR STKED BY SUPK
+   *ld_s;  *inca_1
+   *mvl_%l=15,15,48;                    ! FORCE IN ISO ZONE CODES
+   %if n < 0 %then byteinteger(d1) = '-' %and d1 = d1-1
+   byteinteger(d1) = d3-d1-1
+   %result = string(d1)
+waszero:
+
+   %result = "0"
+%finish
+%end;                                   !OF STRINGFN I TO S
+
+
+%if TARGET = 2900 %start
+
+%system %string(255) %fn substring(%string %name s, %integer i,j)
+  %string(255) holds
+  j = j - i + 1
+  length(holds) = j
+  move(j, addr(s)+i, addr(holds)+1)
+  %result = holds
+%end
+
+ %finish %else %start
+
+%external %string(255) %fn substring(%string %name s, %integer i,j)
+  %string(255) holds
+  j = j - i + 1
+  length(holds) = j
+  move(j, addr(s)+i, addr(holds)+1)
+  %result = holds
+%end
+
+%finish
+
+
+
+
+%if TARGET = 2900 %start
+
+%systemroutine write(%integer value, places)
+%string (16) s
+%integer d0, d1, d2, d3, l
+   places = places&15
+   *lss_value;  *cdec_0
+   *ld_s;  *inca_1;  *std_%tos
+   *cpb_%b;                             ! SET CC=0
+   *supk_%l=15,0,32;                    ! UNPACK & SPACE FILL
+   *std_d2;  *jcc_8,<waszero>
+   *ld_%tos;  *std_d0;                  ! FOR SIGN INSERTION
+   *ld_%tos
+   *mvl_%l=15,63,0;                     ! FORCE ISO ZONE CODES
+   %if value < 0 %then byteinteger(d1) = '-'
+   l = d3-d1
+out:
+
+   %if places >= l %then l = places+1
+   d3 = d3-l-1
+   byteinteger(d3) = l
+   iocp(15,d3)
+   %return
+waszero:
+
+   byteinteger(d3-1) = '0'
+   l = 2;  -> out
+%end;                                   !OF ROUTINE WRITE
+
+%finish %else %start {NON 2900}
+
+!*
+%externalroutine write %alias "S#WRITE" (%integer i, pl)
+%string (31) s
+   %if i < 0 %start
+      print string("-")
+      %if i = x'80000000' %then i = x'7FFFFFFF' %else i = -i
+   %finish %else print string(" ")
+   s = itos(i)
+   %if length(s) < pl %then spaces(pl-length(s))
+   printstring(s)
+%end;                                   ! write
+!*
+
+%finish{NON 2900}
+
+
+
+%externalstring (8) %fn h to s(%integer value, places)
+!**********************************************************************
+!*                                                                    *
+!*  TURNS AN INTEGER INTO A HEXIDECIMAL STRING OF GIVEN LENGTH        *
+!*  USES MACHINE CODE                                                 *
+!*                                                                    *
+!**********************************************************************
+%string(8) s
+%integer i
+%if TARGET # 2900 %start
+
+places=1 %if places<1
+places=8 %if places>8
+s=""
+%cycle
+  s=tostring(hex(value&15)).s
+  places=places-1
+  %result=s %if places=0
+  value=value>>4
+%repeat
+
+%finish %else %start {2900}
+
+   i = 64-4*places
+   *ld_s;  *lss_places;  *st_(%dr)
+   *inca_1;  *std_%tos;  *std_%tos
+   *lss_value;  *luh_0;  *ush_i
+   *mpsr_x'24';                         ! SET CC=1
+   *supk_%l=8
+   *ld_%tos;  *ands_%l=8,0,15;          ! THROW AWAY ZONE CODES
+   *lss_hex+4;  *luh_x'18000010'
+   *ld_%tos;  *ttr_%l=8
+   %result = s
+%finish {2900}
+
+%end;                                   !OF STRINGFN H TO S
+
+
+
+%externalintegerfn s to i(%stringname s)
+!**********************************************************************
+!*                                                                    *
+!*  TURNS A STRING INTO AN INTEGER                                    *
+!*                                                                    *
+!**********************************************************************
+%string (255) p, ns1, ns2
+%integer total, sign, ad, i, j, hex
+   hex = 0;  total = 0;  sign = 1
+   ad = addr(p)
+a: %if s ->ns1.(" ").ns2 %and ns1="" %then s=ns2 %and -> a; !CHOP LEADING SPACES
+   %if s ->ns1.("-").ns2 %and ns1="" %then s=ns2 %and sign = -1
+   %if s ->ns1.("X").ns2 %and ns1="" %then s=ns2 %and hex = 1 %and -> a
+   p = s
+   %unless s -> p.(" ").s %then s = ""
+   i = 1
+   %while i <= byteinteger(ad) %cycle
+      j = byte integer(i+ad)
+      -> fault %unless '0' <= j <= '9' %or (hex # 0 %c
+         %and 'A' <= j <= 'F')
+      %if hex = 0 %then total = 10*total %c
+         %else total = total<<4+9*j>>6
+      total = total+j&15;  i = i+1
+   %repeat
+   %if hex # 0 %and i > 9 %then -> fault
+   %if i > 1 %then %result = sign*total
+fault:
+
+   s = p.s
+   %result = not assigned
+%end;                                   !OF INTEGERFN S TO I
+
+
+!*
+%if TARGET # 2900 %start
+
+%externalroutine dump(%integer start, finish, conad)
+!**********************************************************************
+!*  dumps area specified by start and finish in hexidecimal
+!*  accepts parameters as start, finish or as start,length with conad
+!*  specifying the actual address of the area being dumped
+!**********************************************************************
+%string (255)s
+%integer i,j,above,actual start,prev start
+finish=start+finish-1 %if finish<start;   ! must mean start, length
+start=start&x'FFFFFFFC'
+actual start=start
+conad=conad&x'FFFFFFFC'
+finish=((finish+4)&x'FFFFFFFC')-1
+%returnif finish<start
+above = 0
+-> printline;                    !must print first line in full
+!
+nextline:
+-> printline %if finish-start<32;   ! must print last line
+prev start=start-32
+%for i=0,1,31 %cycle
+  %if byteinteger(start+i)#byteinteger(prev start+i) %then ->printline
+%repeat
+above=above+1
+start=start+32
+-> nextline
+!
+printline:
+%if above#0 %start 
+   spaces(50)
+   %if above=1 %then print string("  line ") %else printstring(i to s(above)." lines")
+   print string(" as above".snl)
+   above=0
+%finish 
+s="*"
+%for i=start,1,start+31 %cycle
+   j=byteinteger(i)
+   %unless 32<=j < 127 %then j='_'
+   s=s.to string(j)
+%repeat 
+s=s."*   (".h to s(conad+(start-actual start), 8).")   "
+%for i=start,4,start+28 %cycle
+   s=s.h to s(integer(i), 8)."  "
+%repeat 
+start=start+32
+print string(s.snl)
+-> nextline %unless start>finish
+%end ;                                 ! of dump
+
+%finish %else %start {2900}
+
+
+%externalroutine dump(%integer start, finish, conad)
+!**********************************************************************
+!*                                                                    *
+!*  DUMPS AREA SPECIFIED BY START AND FINISH IN HEXIDECIMAL           *
+!*  ACCEPTS PARAMETERS AS START, FINISH OR AS START,LENGTH WITH CONAD *
+!*  SPECIFYING THE ACTUAL ADDRESS OF THE AREA BEING DUMPED            *
+!*                                                                    *
+!**********************************************************************
+%constbyteintegerarray table(0 : 255) =  %c
+'_'(32),
+' ','!','"','#','$','%','&','''','(',
+')','*','+',',','-','.','/','0','1',
+'2','3','4','5','6','7','8','9',':',
+';','<','=','>','?','@','A','B','C',
+'D','E','F','G','H','I','J','K','L',
+'M','N','O','P','Q','R','S','T','U',
+'V','W','X','Y','Z','[','\',']','^',
+'_','`','a','b','c','d','e','f','g',
+'h','i','j','k','l','m','n','o','p',
+'q','r','s','t','u','v','w','x','y',
+'z','{','|','}','~','_'(129)
+%string (255) s
+%integer i, j, above, actual start
+                                        !TEST IS TO SEE IF LENGTH< START
+   finish = start+finish-1 %if finish < start
+                                        !MUST MEAN START, LENGTH
+   start = start&x'FFFFFFFC'
+   actual start = start
+   conad = conad&x'FFFFFFFC'
+   finish = ((finish+4)&x'FFFFFFFC')-1
+   %return %if finish < start
+   above = 0
+   -> printline;                        !MUST PRINT FIRST LINE IN FULL
+nextline:
+
+   -> printline %if finish-start < 32
+                                        !MUST PRINT LAST LINE
+   *lda_start;                          !CHECK IF SAME AS PREVIOUS LINE
+   *ldtb_x'18000020'
+   *cyd_0
+   *inca_-32
+   *cps_ %l = %dr 
+   *jcc_7, < printline > 
+   above = above+1
+   start = start+32
+   -> nextline
+printline:
+
+   %if above # 0 %start
+      spaces(50)
+      %if above = 1 %then print string("  LINE ") %c
+         %else print string(i to s(above)." LINES ")
+      print string("AS ABOVE".snl)
+      above = 0
+   %finish
+   s = "*"
+!   %CYCLE I = START,1,START+31
+!      J = BYTEINTEGER(I)
+!      %UNLESS 32 <= J < 127 %THEN J = '_'
+!      S = S.TO STRING(J)
+!   %REPEAT
+   i = addr(table(0))
+   j = addr(s)+2
+   *ldtb_x'18000020'
+   *lda_start
+   *cyd_0
+   *lda_j
+   *mv_%l=%dr
+   *lb_32
+   *ldtb_x'18000000'
+   *ldb_%b
+   *lda_j
+   *lss_i
+   *luh_x'18000100'
+   *ttr_%l=%dr
+   length(s) = 33
+   s = s."*   (".h to s(conad+(start-actual start),8).")   "
+   %cycle i = start,4,start+28
+      s = s.h to s(integer(i),8)."  "
+   %repeat
+   start = start+32
+   print string(s.snl)
+   -> nextline %unless start > finish
+%end;                                   ! OF DUMP
+
+%finish {2900}
+
+
+
+%externalroutine pt rec(%record(pe)%name p)
+!********************************************************************
+!*                                                                  *
+!*  PRINT RECORD P AS A STRING                                     *
+!*                                                                  *
+!********************************************************************
+%string (255) s
+%integer i, j, k, char
+   s = ""
+   j = addr(p_dest)
+   k = 1
+   %cycle i = j,1,j+31
+      s = s.h to s(byteinteger(i),2);   !DONE THIS WAY TO AVOID UNASSIGNED CHECK
+      s = s." " %and k = 0 %if k = 4
+      k = k+1
+   %repeat
+   s = s." "
+   j = addr(p_p1)
+   %cycle i = j,1,j+23
+      char = byteinteger(i)
+      char = ' ' %unless 32 < char < 127
+      s = s.to string(char)
+   %repeat
+   print string(s.snl)
+%end;                                   !OF ROUTINE PT REC
+
+
+
+%externalroutine prompt(%string (23) s)
+!***********************************************************************
+!*                                                                     *
+!*  PUT A PROMPT UP ON THE CURRENT OPER                                *
+!*                                                                     *
+!***********************************************************************
+%record (pf)p
+%integer flag
+   p_dest = oper prompt!(oper no)<<8
+   p_srce = my service number!prompt reply dact
+   p_text = s
+   flag = dpon3("",p,0,0,6)
+%end;                                   !OF ROUTINE PROMPT
+
+!*
+%INTEGERFN TOSPOOLR(%STRING (6) USER,%STRING (11) FILE, %C
+                                        %INTEGER FSYS, QUEUE)
+!***********************************************************************
+!*                                                                     *
+!*  SENDS THE SPECIFIED FILE TO THE LINE PRINTER QUEUE IF QUEUE = 1 OR *
+!*  THE JOURNAL QUEUE IF QUEUE # 1                                     *
+!*                                                                     *
+!***********************************************************************
+%STRING (255) S
+%INTEGER SEG, GAP, LEN, START, FLAG
+%RECORD(FHF)%NAME FILE HEADER
+%RECORD (PE)P
+!*
+   SEG = 0;  GAP = 0;                   !ANY SEGMENT, MINIMUM GAP
+   %if TARGET # 2900 %then flag = dconnect(user,file,fsys,1,seg,gap) %else %c
+    FLAG = DCONNECT(USER,FILE,FSYS,1,0,SEG,GAP);   !CONNECT READ
+   %IF FLAG = 0 %START;                 !SUCCESS?
+      SEG = SEG<<seg shift;                    !SEGMENT NUMBER TO VIRTUAL ADDRESS
+      FILE HEADER == RECORD(SEG);       !MAP ON A STANDARD HEADER
+      LEN = FILE HEADER_END-FILE HEADER_START;    !BYTES TO BE SENT
+      START = FILE HEADER_START;        !START BYTE
+      FLAG = DDISCONNECT(USER,FILE,FSYS,0); !DISCONNECT THE FILE
+      %IF FLAG = 0 %START
+         %IF LEN > 0 %START;            !SOMETHING TO SEND
+            S = "DOCUMENT DEST=";    !SET UP DOCUMENT DESCRIPTOR
+            %IF QUEUE = LP %THEN S = S."LP" %C
+                  %ELSE S = S."JOURNAL"
+            S = S.",SRCE=".FILE.",LENGTH=".I TO S(LEN).",USER=".USER. %C
+               ",START=".I TO S(START).",FSYS=".I TO S(FSYS)
+            LEN = LENGTH(S);         !FIND LENGTH OF DESCRIPTOR
+            FLAG=DEXECMESS("SPOOLR",SPOOLR REPLY ACT,LEN,ADDR(S)+1)
+            %IF FLAG=0 %START
+              S=USER.".".FILE." sent to "
+              %IF QUEUE=LP %THEN S=S."LP" %ELSE S=S."JOURNAL"
+              PRINTSTRING(S.snl);  ! WE WONT SEE THIS IF ITS THE CURRENT STREAM
+            %FINISH
+         %FINISH %ELSE FLAG = DDESTROY(USER,FILE,"",FSYS,0)
+      %FINISH
+   %FINISH
+   %RESULT = FLAG
+%END;                                   !OF ROUTINE TOSPOOLR
+!*
+!*
+%EXTERNALROUTINE PRINT LOG(%INTEGER STREAM,Q)
+!***********************************************************************
+!*  IF A LOG FILE EXISTS THEN PRINT IT. IF ONE DOES NOT EXISTS THEN    *
+!*  CREATE A NEW ONE. LOG ADDR = 0 IF NO LOGFILE EXISTS AND OUTPUT IS  *
+!*  DISCARDED.                                                         *
+!*                                                                     *
+!***********************************************************************
+%RECORDFORMAT FHF1(%INTEGER END,START,SIZE,TYPE,SPARE0,DATETIME, %C
+  JRNLIND,SPARE1)
+%INTEGER FLAG, SEG, GAP, SPOOL, SAVEAD,TAG, size
+%RECORD(FHF1)%NAME FILE HEADER
+%STRING (11) FILE,SPOOLFILE
+!*
+   %IF 1 <= STREAM <= MAX STREAMs %START;!CHECK VALID STREAM NUMBER
+      FILE = "LOGFILE".I TO S(STREAM);   !CREATE FILE NAME
+      %IF conads(STREAM) = 0 %START;  !IS THERE A CONNECTED FILE
+         SEG = 0;  GAP = 0;             !NO THEN TRY AND CONNECT ONE
+         %if TARGET # 2900 %then flag = dconnect(my name,file,my fsys,R,seg,gap) %c
+          %else FLAG = DCONNECT(MY NAME,FILE,MY FSYS,R,0,SEG,GAP)
+         conads(STREAM) = SEG<<seg shift %IF FLAG = OK
+      %FINISH
+      %IF conads(STREAM) # 0 %START;  !LOG FILE CURRENTLY CONNECTED
+         FILE HEADER == RECORD(conads(STREAM)); !CHECK IF THERE IS AYTHING WORTH PRINTING
+         SAVEAD=conads(STREAM)
+         conads(STREAM)=0; ! TO DISABLE 'PRINTSTRING' WHILE WERE
+                             ! DOING THIS AND GET THE NEW ONE SET UP
+         %IF FILE HEADER_START=FILE HEADER_END %THEN SPOOL=0 %ELSESTART
+           ! SOMETHING TO PRINT
+           %IF Q=LP %START;  ! FIRST PUT A COMPLETE COPY TO JRNL
+             PRINT LOG(9,JRNL);   ! ANY CURRENT TO JRNL AND CREATE A NEW ONE
+             %IF conads(9)#0 %START;  ! CREATED OK ELSE JUST FORGET JRNL COPY
+               MOVE(FILE HEADER_END,SAVEAD,conads(9));  ! COMPLETE COPY INCLUDING HEADER
+               ! APPROPRIATE JRNL IND IN HDR OVERWRITES STREAM 9 ONE.
+               PRINT LOG(9,JRNL)
+             %FINISH
+           %FINISH
+           SPOOL=1
+         %FINISH
+         FLAG = DDISCONNECT(MY NAME,FILE,MY FSYS,0)
+         printstring("Disconnect ".FILE." fails ".errs(FLAG).snl) %IF FLAG # OK
+         ! NOW WERE GOING TO SEND IT TI SPOOLR, BUT NOT WAIT FOR HIS REPLY
+         ! BEFORE RUSHING ON TO CREATE A NEW ONE. SO WE HAVE TO RENAME
+         ! THIS ONE. THERE MAY ALREADY BE ON(OR MORE) WAITING FOR SPOOOLR
+         ! TO TAKE IF HE'S SLOW OR WE'RE FAST ON ONE PARTICULAR STREAM,
+         ! SO WERE PREPARED TO TAG THE NEWNAME FROM 0-9 TO GET AN UNUSED
+         ! SEQUENCE.
+         TAG=0
+         %WHILE TAG<10 %CYCLE
+           SPOOLFILE="SPOOLLOG".ITOS(STREAM).ITOS(TAG)
+           FLAG=DRENAME(MYNAME,FILE,SPOOLFILE,MYFSYS)
+           %IF FLAG#16 %THENEXIT
+           TAG=TAG+1
+         %REPEAT
+         %IF FLAG#OK %START
+           ! FAILED TO DO RENAME EITHER BECAUSE ALL THE TAGS ARE USED
+           ! OR SOME OTHER REASON LIKE NO FREE DESCRIPTORS OR SOMETHING
+           ! WE HAVE NO CHOICE NOW BUT TO DELETE THIS ONE SINCE WE WISH
+           ! TO CREATE A NEW ONE.
+           SPOOL=0
+           SPOOLFILE=FILE
+           printstring("Spool rename ".FILE." fails ".errs(FLAG).snl)
+         %FINISH
+         %IF SPOOL = 1 %START
+            FLAG = TOSPOOLR(MY NAME,SPOOLFILE,MY FSYS,Q)
+            %IF FLAG # OK %START
+               ! THIS IS NOT SPOOLRS FLAG. ITS MY DIRECTOR WHINING ABOUT
+               ! PARAMS FOR DEXECMESS
+               PRINTSTRING("Spool ".SPOOLFILE." fails ".errs(FLAG).snl)
+               SPOOL = 0
+            %FINISH
+         %FINISH
+         %IF SPOOL = 0 %START
+            FLAG = DDESTROY(MY NAME,SPOOLFILE,"",MY FSYS,0)
+            printstring("Destroy ".SPOOLFILE." fails ".errs(FLAG).snl) %IF FLAG # OK
+         %FINISH
+      %FINISH
+      !NOTE stream 9 is reserved for COPYING only.
+      %if stream = 9 %then size = log file size %else size = section size
+      %if TARGET # 2900 %then flag = dcreate(my name,file,my fsys,size,0,seg) %c
+       %else FLAG = dcreate(MY NAME,FILE,MY FSYS,size,0)
+      %IF FLAG = 0 %START
+         SEG = 0;  GAP = 0
+         %if TARGET # 2900 %then flag = dconnect(my name,file,my fsys,R!W!NEW COPY, %c
+          seg,gap) %else FLAG = DCONNECT(MY NAME,FILE,MY FSYS,R!W!NEW COPY,0, %C
+            SEG,GAP)
+         %IF FLAG = OK %START
+            conads(STREAM) = SEG<<seg shift
+            FILE HEADER == RECORD(conads(STREAM))
+            FILE HEADER_START = FILE HEADER SIZE
+            FILE HEADER_END = FILE HEADER SIZE
+            FILE HEADER_SIZE = size<<10
+            FILE HEADER_DATETIME=PACKDATEANDTIME(DATE,TIME)
+            FILE HEADER_JRNL IND=x'FFFFFF08'
+            conads(STREAM) = 0;       !DISCONNECT AND CONNECT TO CLEAR PRIVACY VIOLATED
+            FLAG = DDISCONNECT(MY NAME,FILE,MY FSYS,0)
+                                        !DISCONNECT ALL PAGES
+            printstring("Disconnect ".FILE." fails ".errs(FLAG).snl) %IF FLAG # OK
+            SEG = 0;  GAP = 0
+            %if TARGET # 2900 %then flag = dconnect(my name,file,my fsys,R!W!SH,seg,gap) %c
+             %else FLAG = DCONNECT(MY NAME,FILE,MY FSYS,R!W!SH,0,SEG,GAP)
+            %IF FLAG # OK %THEN printstring("Connect ".FILE." fails ".errs(FLAG %C
+               ).snl) %ELSE conads(STREAM) = SEG<<seg shift
+         %FINISH %ELSE printstring("Connect ".FILE." fails ".errs(FLAG).snl)
+      %FINISH %ELSE printstring("Create ".FILE." fails ".errs(FLAG).snl)
+   %FINISH %ELSE printstring("Bad stream".itos(STREAM).snl)
+%END;                                   !OF ROUTINE PRINT LOG
+!*
+!*
+
+
+
+
+
+
+%routine update output(%integer address, len)
+%integer end, sym, size, stream, seg, gap, flag
+%record(fhf)%name file header
+%record (pe)p
+%string (11) file
+   %if current stream = 0 %start;       !OPER CONSOLE
+      end = address+len
+      %while address < end %cycle
+         sym = byteinteger(address)
+         %if sym = nl %or length(oper buffer(oper no)) = 132 %start
+            %if TARGET # 2900 %then flag = doper(oper buffer(oper no)) %else %c
+             oper(oper no,oper buffer(oper no));   !OUTPUT THE BUFFER
+            %if conads(1) # 0 %start;   !IS THERE A MAINLOG
+               select output(1);        !MAIN LOG STREAM
+               print string("DT: ".date." ".time." TO OPER". %c
+                  i to s(oper no)." ".oper buffer(oper no).snl)
+               select output(0)
+            %finish
+            oper buffer(oper no) = ""
+         %finish
+         oper buffer(oper no) = oper buffer(oper no).to string( %c
+            sym) %if sym # nl
+         address = address+1
+      %repeat
+   %finish %else %start
+      file header == record(conads(current stream))
+      %if file header_end+len > file header_size %start
+                                        !END OF FILE
+         size = file header_size>>10;   !REMEMBER SIZE
+         stream = current stream
+         select output(0);              !IN CASE ANY FAILURES DURING FILE SIZE CHANGE
+         file = "LOGFILE".i to s(stream)
+         flag = ddisconnect(my name,file,my fsys,0)
+         conads(stream) = 0
+         %if flag = 0 %start
+            size = size+section size;   !EXTEND IT BY A SECTION
+            !HERE PON OF MESSAGE TO MYSELF FOR THE PERIODIC DOC DESCRIPTOR UPDATE.
+            p=0
+            p_dest=my service number ! descriptor update
+            p_p1=0;  !START LOOKING AT FSYS 0
+            flag=dpon3("",p,0,0,6)
+            %if size>log file size %then %start
+              !DO NOT ALLOW LOG TO EXCEED log file sizeK.
+               print log(stream,jrnl)
+              file header==record(conads(stream))
+              select output(stream)
+            %finish %else %start
+              flag = dchsize(my name,file,my fsys,size)
+              %if flag = 0 %start
+                 seg = 0;  gap = 0
+                 %if TARGET # 2900 %then flag = dconnect(my name,file,my fsys,r!w!sh,seg,gap) %c
+                  %else flag = dconnect(myname,file,my fsys,r!w!sh,0,seg,gap)
+                 %if flag = 0 %start
+                    conads(stream) = seg<<seg shift
+                    file header == record(conads(stream))
+                    file header_size = size<<10
+                    select output(stream)
+                 %finish %else print string("CONNECT ".myname. %c
+                    ".".file." FAILS ".errs(flag).snl)
+              %finish %else print string("CHSIZE ".myname.".". %c
+                 file." FAILS ".errs(flag).snl)
+           %finish
+         %finish %else print string("DISCONNECT ".myname.".". %c
+            file." FAILS ".errs(flag).snl)
+         %return %if flag # 0
+      %finish
+      move(len,address,file header_end+conads(current stream))
+      file header_end = file header_end+len
+   %finish
+%end;                                   !OF ROUTINE UPDATE OUTPUT
+
+
+%externalroutine iocp %alias "S#IOCP" (%integer ep, n)
+
+%integer num, sym
+%byteintegerarray s(0 : 255)
+%switch io(0 : 17)
+   -> io(0) %unless 0 < ep <= 17
+   -> io(ep)
+io(3):                                  ! printsymbol(n)
+io(5):                                  ! printch(n)
+   update output(addr(n)+3,1)
+   %return
+io(7):                                  ! printstring
+io(15):                                 ! printstring (only valid chars allowed)
+   update output(n+1,byteinteger(n))
+   %return
+io(17):                                 ! mulsymbol
+   num = (n>>8)&255
+   sym = n&255
+   fill(num,addr(s(0)),sym)
+   update output(addr(s(0)),num)
+   %return
+io(9):                                  !select output
+   %if 0 <= n <= max streams %start
+      %if n # 0 %start;                 !NOT OPER?
+         %if conads(n) = 0 %start;      !NOT CONNECTED
+            print string("SELECT OUTPUT ".i to s(n). %c
+               " FAILS STREAM NOT DEFINED".snl)
+            %return
+         %finish
+      %finish
+      current stream = n
+   %finish %else print string("SELECT OUTPUT ".i to s(n). %c
+      " FAILS INVALID STREAM NUMBER".snl)
+   %return
+io(16):                                 !close stream
+io(0):                                  !invalid
+io(1):                                  !read symbol
+io(2):                                  !next symbol
+io(4):                                  !read ch
+io(6):                                  !reconstruct
+io(8):                                  !select input
+io(10):                                 !iso card
+io(11):                                 !chop current output
+io(12):                                 !set input margin
+io(13):                                 !set output margin
+io(14):                                 !set read address
+   print string("ILLEGAL CALL ON IOCP EP = ")
+   write(ep,2);  newline
+%end;                                   !OF ROUTINE IOCP
+
+
+%endoffile

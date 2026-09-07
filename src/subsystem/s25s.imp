@@ -1,0 +1,1556 @@
+! S25 Pascal Diagnostics
+!*
+!*
+!***********************************************************************
+!***********************************************************************
+!*                                                                     *
+!*      P A S C A L   P O S T M O R T E M   D I A G N O S T I C S      *
+!*                                                                     *
+!***********************************************************************
+!***********************************************************************
+!*
+!*
+!*  History
+!*  -------
+!*
+!*  Version 1 for PERQ2.
+!*
+%CONST %INTEGER PERQ2= 0;
+%CONST %INTEGER PERQ3= 1;
+%CONST %INTEGER AMDAHL= 2;
+%CONST %INTEGER GOULD= 3;
+%CONST %INTEGER HOST= AMDAHL
+%CONST %INTEGER TARGET= AMDAHL
+!*
+%CONST %INTEGER increport=1
+!*
+!************************************************************************
+!*      S Y S T E M - D E P E N D E N T   D E C L A R A T I O N S       *
+!************************************************************************
+!*
+%CONST %INTEGER MCBYTESPERWORD= 4 { bytes per machine word               }
+!*
+%IF HOST=PERQ2 %THEN %START
+!*
+      %CONST %INTEGER BYTESTOUNITS= 2  { scale bytes to architectural units   }
+      %CONST %INTEGER UNITSTOBYTES= 2  { scale architectural units to bytes   }
+      %CONST %INTEGER WORDSTOUNITS= 1  { scale words to architectural units   }
+      %CONST %INTEGER UNITSTOWORDS= 1  { scale architectural units to words   }
+!*
+%FINISH %ELSE %START
+!*
+      %CONST %INTEGER BYTESTOUNITS= 1  { scale bytes to architectural units   }
+      %CONST %INTEGER UNITSTOBYTES= 1  { scale architectural units to bytes   }
+      %CONST %INTEGER WORDSTOUNITS= 2  { scale words to architectural units   }
+      %CONST %INTEGER UNITSTOWORDS= 2  { scale architectural units to words   }
+!*
+%FINISH
+!*
+%EXTERNAL %STRING (15) %FN %SPEC ITOS %ALIAS "S#ITOS"(%INTEGER N)
+%EXTERNAL %ROUTINE %SPEC PHEX %ALIAS "S#PHEX"(%INTEGER N)
+%EXTERNAL %INTEGER %FN %SPEC dvalidate(%INTEGER %NAME adr,len,rw{r=0})
+%IF increport#0 %THEN %START
+      %EXTERNAL %INTEGER %MAP %SPEC COMREG %ALIAS "S#COMREGMAP"(%INTEGER N)
+%FINISH
+!*
+!************************************************************************
+!*    S Y S T E M - I N D E P E N D E N T   D E C L A R A T I O N S     *
+!************************************************************************
+!*
+%CONST %INTEGER FALSE= 0  { denotes Boolean false }
+%CONST %INTEGER TRUE= 1  { denotes Boolean true }
+%CONST %INTEGER NIL= 0  { denotes nil pointer value }
+!*
+!************************************************************************
+!*               types defining object-table entries                    *
+!************************************************************************
+!*
+%CONST %INTEGER BADOBJECT= 0  { denotes unidentified object }
+%CONST %INTEGER BLOCKOBJECT= 1  { denotes block object }
+%CONST %INTEGER CONSTOBJECT= 2  { denotes const-id objects }
+%CONST %INTEGER TYPEOBJECT= 3  { denotes typ tobject }
+%CONST %INTEGER VAROBJECT= 4  { denotes variable object }
+%CONST %INTEGER BOUNDOBJECT= 5  { denotes variable object }
+%CONST %INTEGER BYTEFIELDOBJECT= 6  { denotes byte-packed field }
+%CONST %INTEGER BITFIELDOBJECT= 7  { denotes bit-packed field }
+!*
+%CONST %INTEGER BADFORM= 0  { denotes unidentified type-form }
+%CONST %INTEGER INTFORM= 1  { denotes integer form }
+%CONST %INTEGER REALFORM= 2  { denotes single-real form }
+%CONST %INTEGER DOUBLEFORM= 3  { denotes double-real form }
+%CONST %INTEGER BOOLFORM= 4  { denotes Boolean form }
+%CONST %INTEGER CHARFORM= 5  { denotes char form }
+%CONST %INTEGER WORDFORM= 6  { denotes word form }
+%CONST %INTEGER TEXTFORM= 7  { denotes textfile form }
+%CONST %INTEGER ENUMFORM= 8  { denotes enumeration form }
+%CONST %INTEGER RANGEFORM= 9  { denotes range-type form }
+%CONST %INTEGER PTRFORM= 10 { denotes pointer form }
+%CONST %INTEGER SETFORM= 11 { denotes set form }
+%CONST %INTEGER ARRAYFORM= 12 { denotes array form }
+%CONST %INTEGER CAPFORM= 13 { denotes conformant array form }
+%CONST %INTEGER RECORDFORM= 14 { denotes record form }
+%CONST %INTEGER FILEFORM= 15 { denotes record form }
+%CONST %INTEGER VARIANTFORM= 16 { denotes record-variant form }
+!*
+%CONST %INTEGER VALUEPARAM= 0  { denotes value parameter }
+%CONST %INTEGER VARPARAM= 1  { denotes var paramater }
+%CONST %INTEGER LOCALVAR= 2  { denotes local variable }
+%CONST %INTEGER READONLYPARAM= 3  { denotes readonly parameter }
+%CONST %INTEGER EXTERNALVAR= 4  { denotes external var }
+%CONST %INTEGER VISIBLEVAR= 5  { denotes visible var }
+!*
+%CONST %INTEGER PROCBLOCK= 0  { denotes procedure block }
+%CONST %INTEGER FUNCBLOCK= 1  { denotes function block }
+%CONST %INTEGER PROGBLOCK= 2  { denotes program block }
+!*
+%CONST %STRING (12) %ARRAY BLOCKCLASS(PROCBLOCK:PROGBLOCK)= %C
+"procedure", "function", "program"
+!*
+%RECORD %FORMAT OBJFORMAT(%BYTE %INTEGER OBJID,OBJCLASS,OBJTYPE,OBJINFO)
+%RECORD %FORMAT TYPFORMAT(%BYTE %INTEGER TYPID,FORM,BITSIZE,BYTESIZE)
+%RECORD %FORMAT BITFORMAT(%BYTE %INTEGER FIELDID,FIELDTYPE,BITOFFSET,BITSIZE)
+%RECORD %FORMAT BYTEFORMAT(%BYTE %INTEGER FIELDID,FIELDTYPE,
+   %SHORT %INTEGER BYTESIZE)
+!*
+%RECORD %FORMAT TYPEFORM(%INTEGER TYPFORM,TYPPTR)
+%RECORD %FORMAT DATAFORM(%INTEGER IVAL %OR %REAL RVAL %OR %LONG %REAL DVAL)
+%RECORD %FORMAT DATAFIELD(%INTEGER STARTBYTE,BYTESIZE,
+   %BYTE %INTEGER BITFIELD,BITSIZE,STARTBIT)
+!*
+%CONST %INTEGER %ARRAY MASK(1:31)= %C
+X'00000001', X'00000003', X'00000007', X'0000000F',
+ X'0000001F', X'0000003F', X'0000007F', X'000000FF',
+ X'000001FF', X'000003FF', X'000007FF', X'00000FFF',
+ X'00001FFF', X'00003FFF', X'00007FFF', X'0000FFFF',
+ X'0001FFFF', X'0003FFFF', X'0007FFFF', X'000FFFFF',
+ X'001FFFFF', X'003FFFFF', X'007FFFFF', X'00FFFFFF',
+ X'01FFFFFF', X'03FFFFFF', X'07FFFFFF', X'0FFFFFFF',
+ X'1FFFFFFF', X'3FFFFFFF', X'7FFFFFFF'
+!*
+!************************************************************************
+!*                constants defining output format                      *
+!************************************************************************
+!*
+%CONST %INTEGER LEFTMOST= 2  { left-most print position }
+%CONST %INTEGER LEFTMINUS1= 1  { LeftMost - 1 }
+%CONST %INTEGER RIGHTMOST= 80 { right-most print position }
+%CONST %INTEGER RIGHTPLUS1= 81 { right-most + 1 }
+%CONST %INTEGER INDENT= 3  { record-scope indentation }
+%CONST %INTEGER MAXFIELD= 16 { max print field-width for names }
+!*
+!************************************************************************
+!*                constants defining control bytes                      *
+!************************************************************************
+!*
+%CONST %INTEGER NULL= 0  { ASCII null character }
+%CONST %INTEGER BS= 8  { ASCII back-space character }
+%CONST %INTEGER TAB= 9  { ASCII tab-character }
+%CONST %INTEGER NL= 10 { ASCII new-line character }
+%CONST %INTEGER FF= 12 { ASCII form-feed character }
+%CONST %INTEGER CR= 13 { ASCII carriage-return character }
+%CONST %INTEGER BSL= 97 { ASCII back-slash character }
+!*
+!************************************************************************
+!*                   constant defining value status                     *
+!************************************************************************
+!*
+%CONST %INTEGER UDVPATTERN= X'80808080' { denotes undefined value }
+!*
+!************************************************************************
+!*           constants defining diagnostic level control                *
+!************************************************************************
+!*
+%CONST %INTEGER LEVEL0= 0  { no diags required }
+%CONST %INTEGER LEVEL1= 1  { minimal trace-back required }
+%CONST %INTEGER LEVEL2= 2  { full trace-back required }
+%CONST %INTEGER LEVEL3= 3  { full trace-back plus variable dump }
+%CONST %INTEGER LEVEL4= 4  { full trace-back plus full dump }
+!*
+!************************************************************************
+!*           constants and types describing file-variables              *
+!************************************************************************
+!*
+%CONST %INTEGER LAZYFLAG= 1    { set bit 0 if f^ defined          }
+%CONST %INTEGER EOLFLAG= 2    { set bit 1 if eoln(f) true        }
+%CONST %INTEGER EOFFLAG= 4    { set bit 2 if eof(f)              }
+%CONST %INTEGER PERMFLAG= 8    { set bit 3 if permanent file      }
+%CONST %INTEGER TERMFLAG= 16   { set bit 4 if terminal file       }
+!*
+%CONST %INTEGER DATAFILE= 0    { denote data file                 }
+%CONST %INTEGER TEXTFILE= 1    { denote text file                 }
+%CONST %INTEGER BYTEFILE= 2    { denote byte-packed data file     }
+%CONST %INTEGER BITFILE= 3    { denote bit-packed data file      }
+!*
+%CONST %INTEGER UNDEFINED= 0    { denote 'undefined' file mode     }
+%CONST %INTEGER DEFINED= 1    { denote 'defined' file mode       }
+%CONST %INTEGER READING= 2    { denote 'inspection' file mode    }
+%CONST %INTEGER WRITING= 3    { denote 'generation' file mode    }
+%CONST %INTEGER APPENDING= 4    { denote 'appending' file mode     }
+!*
+%RECORD %FORMAT CTLBLOCK(%INTEGER BUFFERPTR,FLAGS, %BYTE %INTEGER DESCRIPTOR,
+   MODE,TYPE,SPARE, %INTEGER STARTBUFFER,ENDBUFFER,PACKPTR,
+   %SHORT %INTEGER ELEMSIZE,BUFFERSIZE, %INTEGER NAMEPTR)
+!*
+!*
+!************************************************************************
+!************************************************************************
+!*                     E R R O R   M E S S A G E S                      *
+!************************************************************************
+!************************************************************************
+!*
+!*
+%CONST %STRING (128) %ARRAY PMDMESSAGES(1:10)= %C
+"
+ 1 : Unidentified stack-frame - no diagnostics available.
+",
+ "
+ 2 : Data tables corrupt - no diagnostics available.
+",
+ "
+ 3 : Item has invalid type - data tables corrupt.
+",
+ "
+ 4 : Address has invalid alignment - data tables corrupt.
+",
+ "
+ 5 : Invalid enumerated type entry - data tables corrupt.
+",
+ "
+ 6 : Invalid range type entry - data tables corrupt.
+",
+ "
+ 7 : Invalid data field size - data tables corrupt.
+",
+ "
+ 8 : Invalid bit-field size - data tables corrupt.
+",
+ "", ""
+!*
+!*
+!*
+!************************************************************************
+!************************************************************************
+!*                           P D I A G                                  *
+!************************************************************************
+!************************************************************************
+!*
+!*
+%EXTERNAL %ROUTINE PDIAG %alias "S#PDIAG"(%INTEGER LNB,GLA,ASIZE,
+   %INTEGER %NAME SAVEAREAA)
+!************************************************************************
+!*                                                                      *
+!* Pascal diagnostics routine called to analyse a Pascal stack-frame.   *
+!*                                                                      *
+!* LNB        - address of current stack-frame                          *
+!*                                                                      *
+!* Gla        - address of Gla                                          *
+!*                                                                      *
+!* DiagBase   - address of diagnostic area                              *
+!*                                                                      *
+!* FrameId    - address of word containing M'PDIA' in frame-header      *
+!*                                                                      *
+!* DiagLevel  - diagnostic level control                                *
+!*                                                                      *
+!*              set to 0 if no diags requested                          *
+!*                     1 if minimal trace back requested                *
+!*                     2 if full trace-back requested                   *
+!*                     3 if full trace-back and scalar var dump         *
+!*                     4 if full trace-back and full var dump           *
+!*                                                                      *
+!* FirstFrame - set to 1 if this is the first frame                     *
+!*                                                                      *
+!*                                                                      *
+!************************************************************************
+!*
+!*
+      %INTEGER LINENUMBER,FIRSTVAR,NAMEPTR,NAMELENGTH,GLOBAL
+      %INTEGER BLOCK,BLOCKITEM,BLOCKHEADER,BLOCKSERIAL,DIAGBASE,DIAGLEVEL
+      %RECORD (DATAFIELD) FIRSTFIELD
+!*
+!*
+!*
+!*
+!************************************************************************
+!*              U N I V E R S A L   U T I L I T I E S                   *
+!************************************************************************
+!*
+!*
+      %ROUTINE PMDERROR(%INTEGER CODE)
+!*********************************************************************
+!* Report PMD error. Abandon execution.                              *
+!*********************************************************************
+         NEWLINES(2)
+         SPACES(25)
+         PRINTSTRING("------ PMD Error ------")
+         NEWLINES(2)
+         PRINTSTRING(PMDMESSAGES(CODE))
+         %MONITOR %if Comreg(25)#0
+      %END
+!*
+      %ROUTINE PRINTNAME(%INTEGER NAMEPTR,FIELDWIDTH)
+!*********************************************************************
+!* Print variable name within the given field-width.                 *
+!*********************************************************************
+         %INTEGER LENGTH,I
+         LENGTH=BYTEINTEGER(NAMEPTR)
+         %IF LENGTH>FIELDWIDTH %THEN LENGTH=FIELDWIDTH
+         %FOR I=NAMEPTR+1,1,NAMEPTR+LENGTH %CYCLE
+            PRINT SYMBOL(BYTEINTEGER(I))
+         %REPEAT
+         %IF LENGTH<FIELDWIDTH %THEN SPACES(FIELDWIDTH-LENGTH)
+      %END
+!*
+      %ROUTINE CHECKALIGNMENT(%INTEGER ADDRESS,OFFSET)
+!*********************************************************************
+!* Check address alignment.                                          *
+!*********************************************************************
+         %IF ADDRESS&(OFFSET-1)#0 %THEN PMDERROR(4)
+      %END
+!*
+      %INTEGER %FN UNDEFINED(%INTEGER VALUE)
+!*********************************************************************
+!* Test scalar for undefined value.                                  *
+!*********************************************************************
+         %IF VALUE=UDVPATTERN %THEN %RESULT=TRUE
+         %RESULT=FALSE
+      %END
+!*
+      %INTEGER %FN TOTALLYUNDEFINED(%INTEGER ADDRESS,SIZE)
+!*********************************************************************
+!* Test structure for undefined value.                               *
+!*********************************************************************
+         %IF HOST=PERQ2 %THEN SIZE=SIZE>>1
+         %CYCLE
+            SIZE=SIZE-2*WORDSTOUNITS
+            %IF INTEGER(ADDRESS+SIZE)#UDVPATTERN %THEN %RESULT=FALSE
+         %REPEAT %UNTIL SIZE=0
+         %RESULT=TRUE
+      %END
+!*
+      %INTEGER %FN PRINTABLE(%INTEGER CH)
+!*********************************************************************
+!* Test if character-value has graphical representation.             *
+!*********************************************************************
+         %IF ' '<=CH<=127 %THEN %RESULT=TRUE
+         %RESULT=FALSE
+      %END
+!*
+      %INTEGER %FN GSTBASE(%INTEGER GLABASE)
+!*********************************************************************
+!* Return GST base from third word of Gla.                           *
+!*********************************************************************
+         %INTEGER GSTOFFSET
+         GSTOFFSET=INTEGER(GLABASE//BYTESTOUNITS+4*WORDSTOUNITS)
+         %RESULT=GSTOFFSET*UNITSTOBYTES
+      %END
+!*
+!*
+!************************************************************************
+!*       I T E M   I N T E R R O G A T I O N   F A C I L I T I E S      *
+!************************************************************************
+!*
+!*
+      %INTEGER %FN STDRDTYPE(%INTEGER TYPEFORM)
+!*********************************************************************
+!* Return true if TypeForm denotes a standard type. Mask out 'packed'*
+!* bit.                                                              *
+!*********************************************************************
+         %IF INTFORM<=TYPEFORM&127<=TEXTFORM %THEN %RESULT=TRUE
+         %RESULT=FALSE
+      %END
+!*
+      %INTEGER %FN VALIDTYPE(%INTEGER TYPEFORM)
+!*********************************************************************
+!* Return true if TypeForm denotes a valid type. Mask out 'packed'   *
+!* bit.                                                              *
+!*********************************************************************
+         %IF INTFORM<=TYPEFORM&127<=VARIANTFORM %THEN %RESULT=TRUE
+         %RESULT=FALSE
+      %END
+!*
+      %INTEGER %FN STRUCTURED(%INTEGER TYPEFORM)
+!*********************************************************************
+!* Return true if TypeForm denotes a structured type.                *
+!*********************************************************************
+         TYPEFORM=TYPEFORM&127
+         %IF TYPEFORM=TEXTFORM %OR SETFORM<=TYPEFORM<=FILEFORM %THEN %C
+            %RESULT=TRUE %ELSE %RESULT=FALSE
+      %END
+!*
+      %INTEGER %FN DLINK(%INTEGER BASE,OFFSET)
+!*********************************************************************
+!* Return pointer to an item linked by a diagnostic table link.      *
+!*********************************************************************
+         %RESULT=DIAGBASE+(INTEGER(BASE+OFFSET)//BYTESTOUNITS)
+      %END
+!*
+      %INTEGER %FN ITEMKIND(%INTEGER ITEMPTR)
+!*********************************************************************
+!* Return the kind of an item.                                       *
+!*********************************************************************
+         %RECORD (OBJFORMAT) %NAME ITEMINFO
+         ITEMINFO==RECORD(ITEMPTR)
+         %RESULT=ITEMINFO_OBJID
+      %END
+!*
+      %INTEGER %FN ITEMCLASS(%INTEGER ITEMPTR)
+!*********************************************************************
+!* Return the id-class of a variable item.                           *
+!*********************************************************************
+         %RECORD (OBJFORMAT) %NAME ITEMINFO
+         ITEMINFO==RECORD(ITEMPTR)
+         %RESULT=ITEMINFO_OBJCLASS
+      %END
+!*
+      %INTEGER %FN ITEMTYPE(%INTEGER ITEMPTR)
+!*********************************************************************
+!* Return the type of a variable item.                               *
+!*********************************************************************
+         %SWITCH O(BADOBJECT:BITFIELDOBJECT)
+         %RECORD (OBJFORMAT) %NAME ITEMINFO
+         %RECORD (BYTEFORMAT) %NAME FIELDINFO
+         %RECORD (TYPFORMAT) %NAME TYPEINFO
+!*
+         %IF dvalidate(itemptr,4,0)#0 %THEN %MONITOR
+         ->O(ITEMKIND(ITEMPTR))
+!*
+O(TYPEOBJECT):
+         TYPEINFO==RECORD(ITEMPTR)
+         %RESULT=TYPEINFO_FORM
+!*
+O(BYTEFIELDOBJECT):
+O(BITFIELDOBJECT):
+         FIELDINFO==RECORD(ITEMPTR)
+         %RESULT=FIELDINFO_FIELDTYPE
+!*
+O(VAROBJECT):
+O(BOUNDOBJECT):
+         ITEMINFO==RECORD(ITEMPTR)
+         %RESULT=ITEMINFO_OBJTYPE
+!*
+O(BLOCKOBJECT):
+O(BADOBJECT):
+O(CONSTOBJECT):
+         PMDERROR(3)
+      %END
+!*
+      %INTEGER %FN ITEMSUBTYPE(%INTEGER ITEMPTR)
+!*********************************************************************
+!* Return a sub-type link for a variable item not possessing standard*
+!* type.                                                             *
+!*********************************************************************
+         %RESULT=DLINK(ITEMPTR,6*WORDSTOUNITS)
+      %END
+!*
+      %INTEGER %FN ITEMOFFSET(%INTEGER ITEMPTR)
+!*********************************************************************
+!* Return byte offset of variable item from the start of the stack   *
+!* frame.                                                            *
+!*********************************************************************
+         %RESULT=INTEGER(ITEMPTR+2*WORDSTOUNITS)
+      %END
+!*
+      %INTEGER %FN NEXTITEM(%INTEGER ITEMPTR)
+!*********************************************************************
+!* Return pointer to the next identifier item within the current     *
+!* scope.                                                            *
+!*********************************************************************
+         %INTEGER LINK
+         LINK=INTEGER(ITEMPTR+4*WORDSTOUNITS)
+         %IF LINK=NIL %THEN %RESULT=NIL
+         %RESULT=DIAGBASE+LINK//BYTESTOUNITS
+      %END
+!*
+      %INTEGER %FN NAMEOFFSET(%INTEGER ITEMPTR)
+!*********************************************************************
+!* Return the offset of a variable name from the start of an         *
+!* identifier item.                                                  *
+!*********************************************************************
+         %INTEGER OFFSET
+         %IF STDRDTYPE(ITEMTYPE(ITEMPTR))=FALSE %THEN OFFSET=8 %ELSE OFFSET=6
+         %RESULT=OFFSET*WORDSTOUNITS
+      %END
+!*
+      %INTEGER %FN ITEMNAME(%INTEGER ITEMPTR)
+!*********************************************************************
+!* Return a byte-pointer to a variable name.                         *
+!*********************************************************************
+         %RECORD (OBJFORMAT) %NAME ITEMINFO
+         %INTEGER OFFSET
+         ITEMINFO==RECORD(ITEMPTR)
+         %IF ITEMINFO_OBJID=BLOCKOBJECT %THEN %START
+            OFFSET=6*WORDSTOUNITS
+         %FINISH %ELSE OFFSET=NAMEOFFSET(ITEMPTR)
+         %RESULT=(ITEMPTR+OFFSET)*UNITSTOBYTES
+      %END
+!*
+      %INTEGER %FN VALIDITEM(%INTEGER ITEMPTR)
+!*********************************************************************
+!* Return true if an item is valid.                                  *
+!*********************************************************************
+         %RECORD (OBJFORMAT) %NAME ITEMINFO
+         ITEMINFO==RECORD(ITEMPTR)
+         %IF BLOCKOBJECT<=ITEMINFO_OBJID<=BITFIELDOBJECT %THEN %START
+            %IF ITEMINFO_OBJID=BLOCKOBJECT %THEN %RESULT=TRUE
+            %RESULT=VALIDTYPE(ITEMTYPE(ITEMPTR))
+         %FINISH
+         %RESULT=FALSE
+      %END
+!*
+      %INTEGER %FN INDIRECTION(%INTEGER ITEMPTR)
+!*********************************************************************
+!* Return true if indirection is involved in fetching the value of a *
+!* variable.                                                         *
+!*********************************************************************
+         %INTEGER CLASS
+         CLASS=ITEMCLASS(ITEMPTR)
+         %IF CLASS=VARPARAM %OR CLASS=EXTERNALVAR %OR %C
+            CLASS=READONLYPARAM %THEN %RESULT=TRUE
+         %IF ITEMTYPE(ITEMPTR)&127=CAPFORM %THEN %RESULT=TRUE
+         %RESULT=FALSE
+      %END
+!*
+      %ROUTINE READFORM(%INTEGER ITEMPTR, %RECORD (TYPEFORM) %NAME ITEMFORM)
+!*********************************************************************
+!* Read the type-form for an item.                                   *
+!*********************************************************************
+         %INTEGER TYPE
+         TYPE=ITEMTYPE(ITEMPTR)
+         ITEMFORM_TYPFORM=TYPE; ITEMFORM_TYPPTR=NIL
+         %IF STDRDTYPE(TYPE)=FALSE %THEN %START
+            %IF ITEMKIND(ITEMPTR)=TYPEOBJECT %THEN %START
+               ITEMFORM_TYPPTR=ITEMPTR
+            %FINISH %ELSE ITEMFORM_TYPPTR=ITEMSUBTYPE(ITEMPTR)
+         %FINISH
+      %END
+!*
+      %INTEGER %FN BYTEFORM(%RECORD (TYPEFORM) %NAME ITEMFORM)
+!*********************************************************************
+!* Return true if ItemForm describes a char-type or subrange of char *
+!*********************************************************************
+         %INTEGER RANGETYPE
+         %RECORD (TYPEFORM) BASEFORM
+         %IF ITEMFORM_TYPFORM=CHARFORM %THEN %RESULT=TRUE
+         %IF ITEMFORM_TYPFORM#RANGEFORM %THEN %RESULT=FALSE
+         RANGETYPE=DLINK(ITEMFORM_TYPPTR,6*WORDSTOUNITS)
+         READFORM(RANGETYPE,BASEFORM)
+         %RESULT=BYTEFORM(BASEFORM)
+      %END
+!*
+      %INTEGER %FN DATABYTES(%INTEGER ITEMPTR)
+!*********************************************************************
+!* Return the unpacked data-size of a variable item.                 *
+!*********************************************************************
+         %INTEGER TYPEFORM
+         TYPEFORM=ITEMTYPE(ITEMPTR)&127
+         %IF TYPEFORM=CHARFORM %THEN %RESULT=1
+         %IF TYPEFORM#RANGEFORM %THEN %RESULT=4
+         %RESULT=DATABYTES(DLINK(ITEMPTR,6*WORDSTOUNITS))
+      %END
+!*
+      %ROUTINE ADDFIELDS(%RECORD (DATAFIELD) %NAME BASE, %INTEGER OFFSET,
+         %RECORD (DATAFIELD) %NAME FIELD)
+!*********************************************************************
+!* Generate a new DataField descriptor from the given Base and Offset*
+!*********************************************************************
+         %RECORD (BITFORMAT) %NAME BITFIELD
+         %RECORD (BYTEFORMAT) %NAME BYTEFIELD
+         %INTEGER FIELDKIND
+         FIELDKIND=ITEMKIND(OFFSET)
+         %IF BASE_BITFIELD=TRUE %OR FIELDKIND=BITFIELDOBJECT %THEN %START
+            BITFIELD==RECORD(OFFSET)
+            %IF BASE_BITFIELD=TRUE %THEN FIELD_STARTBYTE=BASE_STARTBYTE %ELSE %C
+               FIELD_STARTBYTE=BASE_STARTBYTE+ITEMOFFSET(OFFSET)
+            FIELD_BYTESIZE=4
+            FIELD_BITFIELD=TRUE
+            FIELD_BITSIZE=BITFIELD_BITSIZE
+            %IF BASE_BITFIELD=TRUE %THEN %C
+               FIELD_STARTBIT=BASE_STARTBIT+BITFIELD_BITOFFSET %ELSE %C
+               FIELD_STARTBIT=BITFIELD_BITOFFSET
+         %FINISH %ELSE %START
+            BYTEFIELD==RECORD(OFFSET)
+            FIELD_STARTBYTE=BASE_STARTBYTE+ITEMOFFSET(OFFSET)
+            FIELD_BYTESIZE=BYTEFIELD_BYTESIZE
+            FIELD_BITFIELD=FALSE
+         %FINISH
+      %END
+!*
+!*
+!************************************************************************
+!*                     P R I N T   S C O P E                            *
+!************************************************************************
+!*
+!*
+      %ROUTINE PRINTSCOPE(%INTEGER GLOBALSCOPE,FIRSTITEM,
+         %RECORD (DATAFIELD) %NAME SCOPEBASE, %INTEGER STARTATPOS)
+!*********************************************************************
+!* Print the current scope. GlobalScope is true if the scope belongs *
+!* to a global block. FirstItem is the first in a chained list of    *
+!* variable items. ScopeBase defines the base address of the scope.  *
+!* StartAtPos defines the left print margin.                         *
+!*********************************************************************
+         %INTEGER POSITION,STARTOFLINE,THISITEM,KIND,BASE,DATASIZE,NAMEFIELD
+         %RECORD (DATAFIELD) ITEMFIELD
+         %RECORD (TYPEFORM) ITEMFORM
+!*
+         %ROUTINE SETNAMEFIELD
+!******************************************************************
+!* Set the NameField to the length of the longest identifier.     *
+!******************************************************************
+            %INTEGER LENGTH,THISITEM
+            NAMEFIELD=0; LENGTH=0;
+            THISITEM=FIRSTITEM
+            %WHILE THISITEM<>NIL %CYCLE
+               LENGTH=BYTEINTEGER(ITEMNAME(THISITEM))
+               %IF LENGTH>NAMEFIELD %THEN NAMEFIELD=LENGTH
+               THISITEM=NEXTITEM(THISITEM)
+            %REPEAT
+            %IF NAMEFIELD>MAXFIELD %THEN NAMEFIELD=MAXFIELD
+         %END
+!*
+         %ROUTINE STARTLINE
+!******************************************************************
+!* Start the current output line.                                 *
+!******************************************************************
+            NEWLINE
+            POSITION=STARTOFLINE
+         %END
+!*
+         %ROUTINE TABTO(%INTEGER NEWPOSITION)
+!******************************************************************
+!* Tab to new position in the current output line.                *
+!******************************************************************
+            SPACES(NEWPOSITION-1)
+            POSITION=NEWPOSITION
+         %END
+!*
+         %ROUTINE NEXTLINE
+!******************************************************************
+!* Move to next output line.                                      *
+!******************************************************************
+            NEWLINE
+            TABTO(STARTOFLINE)
+         %END
+!*
+         %ROUTINE MAKESPACEFOR(%INTEGER PRINTFIELD)
+!******************************************************************
+!* Ensure there is space for the given PrintField on the current  *
+!* line.                                                          *
+!******************************************************************
+            %IF POSITION+PRINTFIELD>RIGHTMOST %THEN %START
+               STARTLINE
+               %IF POSITION+PRINTFIELD>RIGHTMOST %THEN %C
+                  TABTO(RIGHTMOST-PRINTFIELD) %ELSE TABTO(STARTOFLINE)
+            %FINISH
+            POSITION=POSITION+PRINTFIELD
+         %END
+!*
+         %ROUTINE PRINTCH(%INTEGER CH)
+!******************************************************************
+!* Print a single character.                                      *
+!******************************************************************
+            MAKESPACEFOR(1)
+            PRINTSYMBOL(CH)
+         %END
+!*
+         %ROUTINE PRINTSTR(%STRING (64) TEXT)
+!******************************************************************
+!* Print a string.                                                *
+!******************************************************************
+            MAKESPACEFOR(LENGTH(TEXT))
+            PRINTSTRING(TEXT)
+         %END
+!*
+         %ROUTINE PRINTHEX(%INTEGER VALUE,FIELD)
+!******************************************************************
+!* Print Value in hex notation using Field digit places.          *
+!******************************************************************
+            %STRING (16) DIGITS
+            %INTEGER UNIT,CH,I
+            %IF VALUE<0 %AND FIELD<8 %THEN FIELD=8
+            DIGITS=""
+            %FOR I=1,1,FIELD %CYCLE
+               UNIT=VALUE&15
+               %IF UNIT>=10 %THEN CH=UNIT-10+'A' %ELSE CH=UNIT+'0'
+               DIGITS=TOSTRING(CH).DIGITS
+               VALUE=VALUE>>4
+            %REPEAT
+            PRINTSTR(DIGITS)
+         %END
+!*
+         %ROUTINE PRINTBYTE(%INTEGER VALUE)
+!******************************************************************
+!* Print special character byte value.                            *
+!******************************************************************
+            %STRING (16) DIGITS
+            %INTEGER CH
+            PRINTCH('\')
+            %IF VALUE=NL %THEN PRINTCH('n') %AND %RETURN
+            %IF VALUE=TAB %THEN PRINTCH('t') %AND %RETURN
+            %IF VALUE=BS %THEN PRINTCH('b') %AND %RETURN
+            %IF VALUE=CR %THEN PRINTCH('r') %AND %RETURN
+            %IF VALUE=FF %THEN PRINTCH('f') %AND %RETURN
+            %IF VALUE=BSL %THEN PRINTCH('\') %AND %RETURN
+            %IF VALUE=NULL %THEN PRINTCH('0') %AND %RETURN
+            DIGITS=""
+            %CYCLE
+               CH=(VALUE&7)+'0'
+               DIGITS=TOSTRING(CH).DIGITS
+               VALUE=VALUE>>3
+            %REPEAT %UNTIL VALUE=0
+            PRINTSTR(DIGITS)
+         %END;                           ! PrintByte
+!*
+         %ROUTINE PRINTINT(%INTEGER VALUE)
+!******************************************************************
+!* Print Value in denary notation using a minimum number of digit *
+!* places.                                                        *
+!******************************************************************
+            %STRING (16) DIGITS
+            DIGITS=ITOS(VALUE)
+            PRINTSTR(DIGITS)
+         %END
+!*
+         %ROUTINE PRINTRL(%INTEGER ADDRESS, %INTEGER FLAG)
+!******************************************************************
+!* Print the real number located at Address. Flag is 1 if double  *
+!* precision is required.                                         *
+!******************************************************************
+            %IF FLAG=0 %THEN %START
+               %IF INTEGER(ADDRESS)&X'7F800000'#X'7F800000' %THEN %START
+                  MAKESPACEFOR(14)
+                  PRINT FL(REAL(ADDRESS),7)
+               %FINISH %ELSE %START
+                  PRINTSTR("<<invalid real>> ")
+                  PRINTSTR("16#")
+                  PRINTHEX(INTEGER(ADDRESS),8)
+                  PRINTCH('''')
+               %FINISH
+            %FINISH %ELSE %START
+               %IF INTEGER(ADDRESS)&X'7FF00000'#X'7FF00000' %THEN %START
+                  MAKESPACEFOR(21)
+                  PRINT FL(LONG REAL(ADDRESS),14)
+               %FINISH %ELSE %START
+                  PRINTSTR("<<invalid real>> ")
+                  PRINTSTR("16#")
+                  PRINTHEX(INTEGER(ADDRESS),8)
+                  PRINTHEX(INTEGER(ADDRESS+2*WORDSTOUNITS),8)
+                  PRINTCH('''')
+               %FINISH
+            %FINISH
+         %END
+!*
+!*
+!*
+!************************************************************************
+!*                      P R I N T   I T E M                             *
+!************************************************************************
+!*
+!*
+         %ROUTINE PRINTITEM(%RECORD (DATAFIELD) %NAME ITEMFIELD,
+            %RECORD (TYPEFORM) %NAME ITEMFORM)
+!******************************************************************
+!* Print the value of a data item according to its form.          *
+!******************************************************************
+            %SWITCH F(BADFORM:VARIANTFORM)
+            %RECORD (DATAFORM) DATUM
+            %INTEGER FORM
+!*
+            %ROUTINE FETCHDATUM(%RECORD (TYPEFORM) %NAME ITEMFORM,
+               %RECORD (DATAFIELD) %NAME ITEMFIELD,
+               %RECORD (DATAFORM) %NAME DATUM)
+!***************************************************************
+!* Fetch the value of a data item according to its size.       *
+!***************************************************************
+               %SWITCH F(INTFORM:PTRFORM)
+               %INTEGER ADDRESS,SIZE,WORD,FORM
+
+               ADDRESS=ITEMFIELD_STARTBYTE
+               %IF dvalidate(itemfield_startbyte,itemfield_bytesize,
+                  0)#0 %THEN printstring("<< Invalid Item Address >>") %AND %C
+                  %RETURN
+               FORM=ITEMFORM_TYPFORM
+               ->F(FORM&31)
+F(DOUBLEFORM):
+               DATUM_DVAL=LONGREAL(ADDRESS//BYTESTOUNITS)
+               %RETURN
+F(REALFORM):
+               DATUM_RVAL=REAL(ADDRESS//BYTESTOUNITS)
+               %RETURN
+F(CHARFORM):
+               DATUM_IVAL=BYTEINTEGER(ADDRESS)
+               %RETURN
+F(INTFORM):
+F(WORDFORM):
+F(PTRFORM):
+               DATUM_IVAL=INTEGER(ADDRESS//BYTESTOUNITS)
+               %RETURN
+F(BOOLFORM):
+F(ENUMFORM):
+F(RANGEFORM):
+               %IF ITEMFIELD_BITFIELD=FALSE %THEN %START
+                  SIZE=ITEMFIELD_BYTESIZE
+                  %IF SIZE=1 %THEN %START
+                     DATUM_IVAL=BYTEINTEGER(ADDRESS)
+                     %RETURN
+                  %FINISH
+                  %IF SIZE=2 %THEN %START
+                     DATUM_IVAL=SHORTINTEGER(ADDRESS//BYTESTOUNITS)
+                     %RETURN
+                  %FINISH
+                  %IF SIZE=4 %THEN %START
+                     DATUM_IVAL=INTEGER(ADDRESS//BYTESTOUNITS)
+                     %RETURN
+                  %FINISH
+                  PMDERROR(7)
+               %FINISH %ELSE %START
+                  WORD=INTEGER(ADDRESS//BYTESTOUNITS)
+                  SIZE=ITEMFIELD_BITSIZE
+                  PMDERROR(8) %UNLESS 0<=SIZE<=31
+                  DATUM_IVAL=(WORD>>ITEMFIELD_STARTBIT)&MASK(SIZE)
+               %FINISH
+            %END
+!*
+            %ROUTINE PRINTCHAR(%INTEGER CH)
+!***************************************************************
+!* Output a character value if printable. Print hex if not.    *
+!***************************************************************
+               %IF PRINTABLE(CH)=TRUE %THEN %START
+                  PRINTCH('''')
+                  PRINTCH(CH)
+                  PRINTCH('''')
+               %FINISH %ELSE %START
+                  PRINTSTR("16#")
+                  PRINTHEX(CH,2)
+               %FINISH
+            %END
+!*
+            %ROUTINE PRINTSCALAR(%RECORD (DATAFORM) %NAME DATUM,
+               %RECORD (TYPEFORM) %NAME TYPE)
+!***************************************************************
+!* Print the value of a scalar Datum according to its Type.    *
+!***************************************************************
+               %SWITCH F(INTFORM:RANGEFORM)
+               %INTEGER FORM,CONSTPTR,NAMEPTR,LENGTH,RANGETYPE,ADDRESS
+               %INTEGER ORDINAL,MINORDINAL,MAXORDINAL
+               %RECORD (TYPEFORM) BASEFORM
+
+               FORM=TYPE_TYPFORM
+               ->F(FORM&31)
+!*
+F(INTFORM):
+               %IF UNDEFINED(DATUM_IVAL)=TRUE %THEN %C
+                  PRINTSTR("<<undefined>>") %ELSE PRINTINT(DATUM_IVAL)
+               %RETURN
+!*
+F(REALFORM):
+               ADDRESS=ADDR(DATUM_RVAL)
+               %IF TOTALLYUNDEFINED(ADDRESS,4)=TRUE %THEN %C
+                  PRINTSTR("<<undefined>>") %ELSE PRINTRL(ADDRESS,0)
+               %RETURN
+!*
+F(DOUBLEFORM):
+               ADDRESS=ADDR(DATUM_DVAL)
+               %IF TOTALLYUNDEFINED(ADDRESS,8)=TRUE %THEN %C
+                  PRINTSTR("<<undefined>>") %ELSE PRINTRL(ADDRESS,1)
+               %RETURN
+!*
+F(BOOLFORM):
+               %IF UNDEFINED(DATUM_IVAL)=FALSE %THEN %START
+                  %IF FALSE<=DATUM_IVAL<=TRUE %THEN %START
+                     %IF DATUM_IVAL=FALSE %THEN PRINTSTR("False") %ELSE %C
+                        PRINTSTR("True")
+                  %FINISH %ELSE %START
+                     PRINTINT(DATUM_IVAL)
+                     PRINTSTR(" (Illegal Boolean value)")
+                  %FINISH
+               %FINISH %ELSE PRINTSTR("<<undefined>>")
+               %RETURN
+!*
+F(CHARFORM):
+               PRINTCHAR(DATUM_IVAL)
+               %RETURN
+!*
+F(WORDFORM):
+               %IF UNDEFINED(DATUM_IVAL)=FALSE %THEN %START
+                  PRINTSTR("16#")
+                  PRINTHEX(DATUM_IVAL,8)
+               %FINISH %ELSE PRINTSTR("<<undefined>>")
+               %RETURN
+!*
+F(ENUMFORM):
+               %IF UNDEFINED(DATUM_IVAL)=FALSE %THEN %START
+                  CONSTPTR=DLINK(TYPE_TYPPTR,2*WORDSTOUNITS)
+                  %IF ITEMKIND(CONSTPTR)#CONSTOBJECT %THEN PMDERROR(5)
+                  ORDINAL=DATUM_IVAL
+                  MAXORDINAL=INTEGER(CONSTPTR)&X'FFFFFF'
+                  %IF 0<=ORDINAL<=MAXORDINAL %THEN %START
+                     CONSTPTR=DLINK(CONSTPTR,2*WORDSTOUNITS)
+                     NAMEPTR=CONSTPTR*UNITSTOBYTES
+                     %WHILE ORDINAL>0 %CYCLE
+                        NAMEPTR=NAMEPTR+BYTEINTEGER(NAMEPTR)+1
+                        ORDINAL=ORDINAL-1
+                     %REPEAT
+                     LENGTH=BYTEINTEGER(NAMEPTR)
+                     PRINTNAME(NAMEPTR,LENGTH)
+                  %FINISH %ELSE %START
+                     PRINTINT(ORDINAL)
+                     PRINTSTR(" (Out of range [")
+                     DATUM_IVAL=0; PRINTSCALAR(DATUM,TYPE)
+                     PRINTSTR("..")
+                     DATUM_IVAL=MAXORDINAL; PRINTSCALAR(DATUM,TYPE)
+                     PRINTSTR("])")
+                  %FINISH
+               %FINISH %ELSE PRINTSTR("<<undefined>>")
+               %RETURN
+!*
+F(RANGEFORM):
+               %IF UNDEFINED(DATUM_IVAL)=FALSE %THEN %START
+                  MINORDINAL=INTEGER(TYPE_TYPPTR+2*WORDSTOUNITS)
+                  MAXORDINAL=INTEGER(TYPE_TYPPTR+4*WORDSTOUNITS)
+                  RANGETYPE=DLINK(TYPE_TYPPTR,6*WORDSTOUNITS)
+                  %IF ITEMKIND(RANGETYPE)#TYPEOBJECT %THEN PMDERROR(6)
+                  READFORM(RANGETYPE,BASEFORM)
+                  %IF MINORDINAL<=DATUM_IVAL<=MAXORDINAL %THEN %START
+                     PRINTSCALAR(DATUM,BASEFORM)
+                  %FINISH %ELSE %START
+                     PRINTINT(DATUM_IVAL)
+                     PRINTSTR(" (Out of range [")
+                     DATUM_IVAL=MINORDINAL; PRINTSCALAR(DATUM,BASEFORM)
+                     PRINTSTR("..")
+                     DATUM_IVAL=MAXORDINAL; PRINTSCALAR(DATUM,BASEFORM)
+                     PRINTSTR("])")
+                  %FINISH
+               %FINISH %ELSE PRINTSTR("<<undefined>>")
+               %RETURN
+!*
+            %END;                        ! PrintScalar
+!*
+            %ROUTINE PRINTPOINTER(%RECORD (DATAFORM) %NAME DATUM)
+!***************************************************************
+!* Print a pointer value.                                      *
+!***************************************************************
+               %INTEGER POINTER,DOMAIN,I
+               POINTER=DATUM_IVAL
+               %IF UNDEFINED(POINTER)=FALSE %THEN %START
+                  %IF POINTER#NIL %THEN %START
+                     PRINTSTR("16#")
+                     PRINTHEX(POINTER,8)
+                     %IF dvalidate(pointer,32,0)#0 %THEN %C
+                        printstring("<<invalid>>") %ELSE %START
+                        %IF comreg(25)&1#0 %START
+                           printsymbol('[')
+                           %FOR i=0,4,44 %CYCLE
+                              printhex(integer(pointer+i),8)
+                              space %UNLESS i=28
+                           %REPEAT
+                           printsymbol(']')
+                        %FINISH
+                        DOMAIN=INTEGER(POINTER)
+                        %IF UNDEFINED(DOMAIN)=TRUE %THEN %C
+                           PRINTSTR(" (dangling?)")
+                     %FINISH
+                  %FINISH %ELSE PRINTSTR("nil")
+               %FINISH %ELSE PRINTSTR("<<undefined>>")
+            %END
+!*
+            %ROUTINE PRINTSET
+!***************************************************************
+!* Print a set value.                                          *
+!***************************************************************
+               %INTEGER SETTYPE,BASETYPE,SETMIN,SETMAX,SETWORD,SETBASE,SETBIT
+               %INTEGER INDEX,FIRST,MARGIN
+               %RECORD (TYPEFORM) BASEFORM
+               %RECORD (DATAFORM) VALUE
+               MARGIN=STARTOFLINE
+               SETBASE=ITEMFIELD_STARTBYTE//BYTESTOUNITS
+               SETTYPE=ITEMFORM_TYPPTR
+               SETMIN=INTEGER(SETTYPE+2*WORDSTOUNITS)
+               SETMAX=INTEGER(SETTYPE+4*WORDSTOUNITS)
+               BASETYPE=DLINK(SETTYPE,6*WORDSTOUNITS)
+               READFORM(BASETYPE,BASEFORM)
+               FIRST=TRUE
+               PRINTCH('[')
+               STARTOFLINE=POSITION
+               %FOR INDEX=SETMIN,1,SETMAX %CYCLE
+                  SETWORD=INTEGER(SETBASE+(INDEX>>5)<<wordstounits)
+                  SETBIT=(SETWORD>>(INDEX&31))&1
+                  %IF SETBIT=1 %THEN %START
+                     %IF FIRST=FALSE %THEN PRINTCH(',')
+                     VALUE_IVAL=INDEX
+                     PRINTSCALAR(VALUE,BASEFORM)
+                     FIRST=FALSE
+                  %FINISH
+               %REPEAT
+               PRINTCH(']')
+               STARTOFLINE=MARGIN
+            %END
+!*
+            %ROUTINE PRINTFORM(%RECORD (TYPEFORM) %NAME TYPE)
+!***************************************************************
+!* Print the form of a type in source-language terms.          *
+!***************************************************************
+               %INTEGER FORM,CONSTPTR,MINVALUE,MAXVALUE,BASETYPE,INDEXTYPE
+               %RECORD (TYPEFORM) BASEFORM,INDEXFORM
+               %RECORD (DATAFORM) DATUM
+               %SWITCH F(BADFORM:VARIANTFORM)
+!*
+               FORM=TYPE_TYPFORM
+               ->F(FORM&31)
+!*
+F(INTFORM):
+               PRINTSTR("integer")
+               %RETURN
+!*
+F(REALFORM):
+F(DOUBLEFORM):
+               PRINTSTR("real")
+               %RETURN
+!*
+F(BOOLFORM):
+               PRINTSTR("Boolean")
+               %RETURN
+!*
+F(CHARFORM):
+               PRINTSTR("char")
+               %RETURN
+!*
+F(WORDFORM):
+               PRINTSTR("word")
+               %RETURN
+!*
+F(TEXTFORM):
+               PRINTSTR("text file")
+               %RETURN
+!*
+F(ENUMFORM):
+               CONSTPTR=DLINK(TYPE_TYPPTR,2*WORDSTOUNITS)
+               MAXVALUE=INTEGER(CONSTPTR)&X'FFFFFF'
+               PRINTCH('(')
+               DATUM_IVAL=0; PRINTSCALAR(DATUM,TYPE)
+               PRINTSTR(",..,")
+               DATUM_IVAL=MAXVALUE; PRINTSCALAR(DATUM,TYPE)
+               PRINTCH(')')
+               %RETURN
+!*
+F(RANGEFORM):
+               MINVALUE=INTEGER(TYPE_TYPPTR+2*WORDSTOUNITS)
+               MAXVALUE=INTEGER(TYPE_TYPPTR+4*WORDSTOUNITS)
+               BASETYPE=DLINK(TYPE_TYPPTR,6*WORDSTOUNITS)
+               READFORM(BASETYPE,BASEFORM)
+               PRINTCH('[')
+               DATUM_IVAL=MINVALUE; PRINTSCALAR(DATUM,BASEFORM)
+               PRINTSTR("..")
+               DATUM_IVAL=MAXVALUE; PRINTSCALAR(DATUM,BASEFORM)
+               PRINTCH(']')
+               %RETURN
+!*
+F(PTRFORM):
+               PRINTSTR("Pointer-type")
+               %RETURN
+!*
+F(SETFORM):
+               %IF FORM&128#0 %THEN PRINTSTR("packed ")
+               PRINTSTR("set of ")
+               BASETYPE=DLINK(TYPE_TYPPTR,6*WORDSTOUNITS)
+               READFORM(BASETYPE,BASEFORM)
+               PRINTFORM(BASEFORM)
+               %RETURN
+!*
+F(ARRAYFORM):
+               %IF FORM&128#0 %THEN PRINTSTR("packed ")
+               PRINTSTR("array")
+               INDEXTYPE=DLINK(TYPE_TYPPTR,6*WORDSTOUNITS)
+               READFORM(INDEXTYPE,INDEXFORM)
+               PRINTCH('[')
+               DATUM_IVAL=INTEGER(TYPE_TYPPTR+2*WORDSTOUNITS)
+               PRINTSCALAR(DATUM,INDEXFORM)
+               PRINTSTR("..")
+               DATUM_IVAL=INTEGER(TYPE_TYPPTR+4*WORDSTOUNITS)
+               PRINTSCALAR(DATUM,INDEXFORM)
+               PRINTSTR("] of ")
+               BASETYPE=DLINK(TYPE_TYPPTR,8*WORDSTOUNITS)
+               READFORM(BASETYPE,BASEFORM)
+               %IF STRUCTURED(BASEFORM_TYPFORM)=TRUE %THEN NEXTLINE
+               PRINTFORM(BASEFORM)
+               %RETURN
+!*
+F(CAPFORM):
+               %RETURN
+!*
+F(RECORDFORM):
+               %IF FORM&128#0 %THEN PRINTSTR("packed ")
+               PRINTSTR("record-type")
+               %RETURN
+!*
+F(FILEFORM):
+               %IF FORM&128#0 %THEN PRINTSTR("packed ")
+               PRINTSTR("file of ")
+               BASETYPE=DLINK(TYPE_TYPPTR,2*WORDSTOUNITS)
+               READFORM(BASETYPE,BASEFORM)
+               %IF STRUCTURED(BASEFORM_TYPFORM)=TRUE %THEN NEXTLINE
+               PRINTFORM(BASEFORM)
+               %RETURN
+!*
+            %END
+!*
+            %ROUTINE PRINTARRAY
+!***************************************************************
+!* Print an array value.                                       *
+!***************************************************************
+               %INTEGER ARRAYTYPE,ELEMTYPE,MARGIN
+               %RECORD (TYPEFORM) ELEMFORM
+!*
+               %ROUTINE PRINTBYTEARRAY
+!************************************************************
+!* Print a byte array as a string of char                   *
+!************************************************************
+                  %INTEGER LOWBOUND,HIGHBOUND,BYTEADDR,CH,I
+                  LOWBOUND=INTEGER(ARRAYTYPE+2*WORDSTOUNITS)
+                  HIGHBOUND=INTEGER(ARRAYTYPE+4*WORDSTOUNITS)
+                  BYTEADDR=ITEMFIELD_STARTBYTE
+                  PRINTCH('''')
+                  %FOR I=LOWBOUND,1,HIGHBOUND %CYCLE
+                     CH=BYTEINTEGER(BYTEADDR)
+                     %IF PRINTABLE(CH)=TRUE %THEN PRINTCH(CH) %ELSE %C
+                        PRINTBYTE(CH)
+                     BYTEADDR=BYTEADDR+1
+                  %REPEAT
+                  PRINTCH('''')
+               %END
+!*
+               ARRAYTYPE=ITEMFORM_TYPPTR
+               ELEMTYPE=DLINK(ARRAYTYPE,8*WORDSTOUNITS)
+               READFORM(ELEMTYPE,ELEMFORM)
+               MARGIN=STARTOFLINE; STARTOFLINE=POSITION
+               %IF BYTEFORM(ELEMFORM)=TRUE %THEN PRINTBYTEARRAY %ELSE %C
+                  PRINTFORM(ITEMFORM)
+               STARTOFLINE=MARGIN
+            %END
+!*
+            %ROUTINE PRINTCAP
+!***************************************************************
+!* Print a conformant array parameter value.                   *
+!***************************************************************
+            %END
+!*
+            %ROUTINE PRINTRECORD
+!***************************************************************
+!* Print a record value.                                       *
+!***************************************************************
+               %INTEGER FIXEDLINK,VARLINK
+!*
+               %ROUTINE PRINTLEVEL(%INTEGER FIXEDLINK,VARLINK)
+!************************************************************
+!* Print the the fixed and variant parts at the current     *
+!* nesting level.                                           *
+!************************************************************
+                  %INTEGER FIXEDPTR,VARPTR,TAG,TAGNAME,VNTPTR,VARIANT,FOUND
+                  %INTEGER SUBFIXEDLINK,SUBVARLINK
+!*
+                  %ROUTINE READTAG(%INTEGER VARPTR, %INTEGER %NAME TAG)
+!*********************************************************
+!* Read the value of the Tag field from the variant-part *
+!* referenced by VarPtr.                                 *
+!*********************************************************
+                     %RECORD (DATAFIELD) TAGFIELD
+                     %RECORD (DATAFORM) TAGDATUM
+                     %RECORD (TYPEFORM) TAGFORM
+                     %INTEGER TAGPTR
+                     TAGPTR=VARPTR
+                     READFORM(TAGPTR,TAGFORM)
+                     ADDFIELDS(ITEMFIELD,TAGPTR,TAGFIELD)
+                     FETCHDATUM(TAGFORM,TAGFIELD,TAGDATUM)
+                     TAG=TAGDATUM_IVAL
+                  %END
+!*
+                  %INTEGER %FN ACTIVE(%INTEGER VNTPTR,TAG)
+!*********************************************************
+!* Return true if the variant referenced by VntPtr is    *
+!* active - ie its label-value matches the tag-value.    *
+!*********************************************************
+                     %IF INTEGER(VNTPTR+2*WORDSTOUNITS)<=TAG %AND %C
+                        TAG<=INTEGER(VNTPTR+4*WORDSTOUNITS) %THEN %RESULT=TRUE
+                     %RESULT=FALSE
+                  %END
+!*********************************************************
+!*             P R I N T    L E V E L                    *
+!*********************************************************
+                  STARTOFLINE=STARTOFLINE+INDENT
+                  %IF FIXEDLINK#NIL %THEN %START
+                     FIXEDPTR=DIAGBASE+FIXEDLINK//BYTESTOUNITS
+                     PRINTSCOPE(FALSE,FIXEDPTR,ITEMFIELD,STARTOFLINE)
+                  %FINISH
+                  %IF VARLINK#NIL %THEN %START
+                     VARPTR=DIAGBASE+VARLINK//BYTESTOUNITS
+                     %IF INTEGER(VARPTR)#NIL %THEN %START
+                        PRINTSCOPE(FALSE,VARPTR,ITEMFIELD,STARTOFLINE)
+                        TABTO(STARTOFLINE)
+                        PRINTSTR("( ")
+                        STARTLINE
+                        READTAG(VARPTR,TAG)
+                        TAGNAME=ITEMNAME(VARPTR)
+                        TAGNAME=TAGNAME+BYTEINTEGER(TAGNAME)+1
+                        VNTPTR=((TAGNAME+3)&X'FFFFFFFC')//BYTESTOUNITS
+                        FOUND=FALSE
+                        %WHILE INTEGER(VNTPTR)#NIL %AND FOUND=FALSE %CYCLE
+                           VARIANT=DLINK(VNTPTR,0)
+                           %IF ACTIVE(VARIANT,TAG)=TRUE %THEN %START
+                              SUBFIXEDLINK=INTEGER(VARIANT+6*WORDSTOUNITS)
+                              SUBVARLINK=INTEGER(VARIANT+8*WORDSTOUNITS)
+                              PRINTLEVEL(SUBFIXEDLINK,SUBVARLINK)
+                              FOUND=TRUE
+                           %FINISH
+                           VNTPTR=VNTPTR+2*WORDSTOUNITS
+                        %REPEAT
+                        TABTO(STARTOFLINE)
+                        PRINTCH(')')
+                        STARTLINE
+                     %FINISH %ELSE %START
+                        VNTPTR=VARPTR+2*WORDSTOUNITS
+                        %WHILE INTEGER(VNTPTR)#NIL %CYCLE
+                           TABTO(STARTOFLINE);
+                           PRINTSTR("( ")
+                           STARTLINE
+                           VARIANT=DLINK(VNTPTR,0)
+                           SUBFIXEDLINK=INTEGER(VARIANT+6*WORDSTOUNITS)
+                           SUBVARLINK=INTEGER(VARIANT+8*WORDSTOUNITS)
+                           PRINTLEVEL(SUBFIXEDLINK,SUBVARLINK)
+                           VNTPTR=VNTPTR+2*WORDSTOUNITS
+                           TABTO(STARTOFLINE)
+                           PRINTCH(')')
+                           STARTLINE
+                        %REPEAT
+                     %FINISH
+                  %FINISH
+                  STARTOFLINE=STARTOFLINE-INDENT
+               %END
+!************************************************************
+!*                P R I N T   R E C O R D                   *
+!************************************************************
+               STARTLINE
+               STARTOFLINE=STARTATPOS+INDENT
+               TABTO(STARTOFLINE)
+               %IF FORM&128#0 %THEN PRINTSTR("packed ")
+               PRINTSTR("record")
+               STARTLINE
+               FIXEDLINK=INTEGER(ITEMFORM_TYPPTR+2*WORDSTOUNITS)
+               VARLINK=INTEGER(ITEMFORM_TYPPTR+4*WORDSTOUNITS)
+               PRINTLEVEL(FIXEDLINK,VARLINK)
+               TABTO(STARTOFLINE)
+               PRINTSTR("end")
+            %END
+!*
+            %ROUTINE PRINTFILE
+!***************************************************************
+!* Print a file value.                                         *
+!***************************************************************
+               %RECORD (CTLBLOCK) %NAME FCB
+               %INTEGER FCBPTR,MODE,MARGIN
+!*
+               %ROUTINE PRINTMODE
+!************************************************************
+!* Print a file mode.                                       *
+!************************************************************
+                  %STRING (31) %NAME FILENAME
+                  %IF READING<=MODE<=APPENDING %THEN %START
+                     PRINTSTR("Bound to '")
+                     FILENAME==STRING(FCB_NAMEPTR)
+                     PRINTSTR(FILENAME)
+                     PRINTSTR("' and opened for ")
+                     %IF MODE=READING %THEN PRINTSTR("reading")
+                     %IF MODE=WRITING %THEN PRINTSTR("writing")
+                     %IF MODE=APPENDING %THEN PRINTSTR("appending")
+                  %FINISH %ELSE PRINTSTR("Unopened")
+               %END
+!*
+               %ROUTINE PRINTSTATUS
+!************************************************************
+!* Print status of a file in read-mode.                     *
+!************************************************************
+!*
+                  %ROUTINE PRINTBUFFER
+!*********************************************************
+!* Print contents of the buffer-variable.                *
+!*********************************************************
+                     NEXTLINE
+                     PRINTSTR("buffer-variable = ")
+                     %IF FCB_FLAGS&EOLFLAG=0 %THEN %C
+                        PRINTCHAR(BYTEINTEGER(FCB_BUFFERPTR)) %ELSE %C
+                        PRINTCH(' ')
+                  %END
+!*********************************************************
+!*           P R I N T   S T A T U S                     *
+!*********************************************************
+                  NEXTLINE
+                  PRINTSTR("eof is ")
+                  %IF FCB_FLAGS&EOFFLAG#0 %THEN PRINTSTR("true") %ELSE %C
+                     PRINTSTR("false")
+                  %IF FCB_TYPE=TEXTFILE %THEN %START
+                     NEXTLINE
+                     PRINTSTR("eoln is ")
+                     %IF FCB_FLAGS&EOLFLAG#0 %THEN PRINTSTR("true") %ELSE %C
+                        PRINTSTR("false")
+                  %FINISH
+                  %IF FCB_FLAGS&EOFFLAG=0 %AND (FCB_TYPE=TEXTFILE %OR %C
+                     FCB_TYPE=BYTEFILE) %THEN PRINTBUFFER
+               %END
+!************************************************************
+!*                 P R I N T   F I L E                      *
+!************************************************************
+               FCBPTR=ITEMFIELD_STARTBYTE//BYTESTOUNITS
+               %IF TOTALLYUNDEFINED(FCBPTR,32)=FALSE %THEN %START
+                  MARGIN=STARTOFLINE
+                  STARTOFLINE=POSITION
+                  FCB==RECORD(FCBPTR)
+                  PRINTFORM(ITEMFORM)
+                  NEXTLINE
+                  MODE=FCB_MODE
+                  PRINTMODE
+                  %IF MODE=READING %THEN PRINTSTATUS
+                  STARTOFLINE=MARGIN
+               %FINISH %ELSE PRINTSTR("<<undefined>>")
+            %END
+!***************************************************************
+!*                    P R I N T   I T E M                      *
+!***************************************************************
+            FORM=ITEMFORM_TYPFORM
+            ->F(FORM&31)
+
+F(INTFORM):
+F(REALFORM):
+F(DOUBLEFORM):
+F(BOOLFORM):
+F(CHARFORM):
+F(WORDFORM):
+F(ENUMFORM):
+F(RANGEFORM):
+            FETCHDATUM(ITEMFORM,ITEMFIELD,DATUM)
+            PRINTSCALAR(DATUM,ITEMFORM)
+            %RETURN
+!*
+F(PTRFORM):
+            FETCHDATUM(ITEMFORM,ITEMFIELD,DATUM)
+            PRINTPOINTER(DATUM)
+            %RETURN
+!*
+F(SETFORM):
+            PRINTSET
+            %RETURN
+!*
+F(ARRAYFORM):
+            %IF DIAGLEVEL>=LEVEL4 %THEN PRINTARRAY %ELSE %C
+               PRINTSTRING("<<Array Value>>")
+            %RETURN
+!*
+F(CAPFORM):
+            %IF DIAGLEVEL>=LEVEL4 %THEN PRINTCAP %ELSE %C
+               PRINTSTRING("<<Conformant Array Value>>")
+            %RETURN
+!*
+F(RECORDFORM):
+            %IF DIAGLEVEL>=LEVEL4 %THEN PRINTRECORD %ELSE %C
+               PRINTSTRING("<<Record Value>>")
+            %RETURN
+!*
+F(FILEFORM):
+            PRINTFILE
+         %END;                           ! PrintItem
+!*
+!*
+!************************************************************************
+!*            P R I N T S C O P E   -   M A I N                         *
+!************************************************************************
+!*
+!*
+         SETNAMEFIELD
+         THISITEM=FIRSTITEM
+         %WHILE THISITEM<>NIL %CYCLE
+            %IF VALIDITEM(THISITEM)=TRUE %THEN %START
+               STARTOFLINE=STARTATPOS
+               TABTO(STARTOFLINE)
+               MAKESPACEFOR(NAMEFIELD)
+               PRINTNAME(ITEMNAME(THISITEM),NAMEFIELD)
+               PRINTSTR(" = ")
+               KIND=ITEMKIND(THISITEM)
+               ITEMFIELD=0
+               READFORM(THISITEM,ITEMFORM)
+               %IF KIND=VAROBJECT %OR KIND=BOUNDOBJECT %THEN %START
+                  DATASIZE=DATABYTES(THISITEM)
+                  %IF DATASIZE=1 %THEN %START
+                     ITEMFIELD_BYTESIZE=1
+                     %IF GLOBALSCOPE=TRUE %THEN %C
+                        BASE=GSTBASE(SCOPEBASE_STARTBYTE) %ELSE %C
+                        BASE=SCOPEBASE_STARTBYTE
+                     ITEMFIELD_STARTBYTE=BASE+ITEMOFFSET(THISITEM)
+                  %FINISH %ELSE %START
+                     ITEMFIELD_BYTESIZE=4
+                     %IF KIND=VAROBJECT %AND INDIRECTION(THISITEM)=TRUE %THEN %C
+                        %START
+                        BASE=(SCOPEBASE_STARTBYTE+ITEMOFFSET(THISITEM)) %C
+                           //BYTESTOUNITS
+                        ITEMFIELD_STARTBYTE=INTEGER(BASE)*UNITSTOBYTES
+                     %FINISH %ELSE %START
+                        %IF GLOBALSCOPE=TRUE %THEN %C
+                           BASE=GSTBASE(SCOPEBASE_STARTBYTE) %ELSE %C
+                           BASE=SCOPEBASE_STARTBYTE
+                        ITEMFIELD_STARTBYTE=BASE+ITEMOFFSET(THISITEM)
+                     %FINISH
+                  %FINISH
+                  PRINTITEM(ITEMFIELD,ITEMFORM)
+               %FINISH %ELSE %START
+                  %IF KIND=BYTEFIELDOBJECT %OR KIND=BITFIELDOBJECT %THEN %START
+                     ADDFIELDS(SCOPEBASE,THISITEM,ITEMFIELD)
+                     PRINTITEM(ITEMFIELD,ITEMFORM)
+                  %FINISH
+               %FINISH
+            %FINISH %ELSE PMDERROR(2)
+            STARTLINE
+            THISITEM=NEXTITEM(THISITEM)
+         %REPEAT
+      %END;                              ! PrintScope
+!*
+      %IF increport#0 %THEN %START
+         %ROUTINE DUMPDIAGTABLES
+!*********************************************************************
+!* Dump diagnostic tables.                                           *
+!*********************************************************************
+            %INTEGER I,J
+!*
+            %ROUTINE PALPHA(%INTEGER N)
+               %STRING (4) ALPHA
+               %INTEGER C,I
+               ALPHA=""
+               %FOR I=1,1,4 %CYCLE
+                  C=N&255
+                  %IF C>127 %OR C<32 %THEN C='_'
+                  ALPHA=TOSTRING(C).ALPHA
+                  N=N>>8
+               %REPEAT
+               PRINTSTRING(ALPHA)
+            %END
+!*
+            PRINTSTRING("Gla")
+            NEWLINES(2)
+            %FOR I=0,8,8 %CYCLE
+               PRINTSTRING("GLA + ")
+               WRITE(I*WORDSTOUNITS,2)
+               %FOR J=0,4,12 %CYCLE
+                  SPACES(2)
+                  PHEX(INTEGER(GLA+I*WORDSTOUNITS+J))
+               %REPEAT
+               NEWLINE
+            %REPEAT
+            NEWLINES(2)
+            PRINTSTRING("Current Frame")
+            NEWLINES(2)
+            %FOR I=0,8,48 %CYCLE
+               PRINTSTRING("LNB + ")
+               WRITE(I*WORDSTOUNITS,2)
+               %FOR J=0,4,12 %CYCLE
+                  SPACES(2)
+                  PHEX(INTEGER(LNB+I*WORDSTOUNITS+J))
+               %REPEAT
+               NEWLINE
+            %REPEAT
+            NEWLINES(2)
+            PRINTSTRING("Diag Tables")
+            NEWLINES(2)
+            I=0
+            %WHILE I<=BLOCKSERIAL %CYCLE
+               PRINTSTRING("DIAG + ")
+               WRITE(I*WORDSTOUNITS,3)
+               %FOR J=0,4,12 %CYCLE
+                  SPACES(2)
+                  PHEX(INTEGER(DIAGBASE+I*WORDSTOUNITS+J))
+               %REPEAT
+               SPACES(4)
+               %FOR J=0,4,12 %CYCLE
+                  PALPHA(INTEGER(DIAGBASE+I*WORDSTOUNITS+J))
+               %REPEAT
+               NEWLINE
+               I=I+8
+            %REPEAT
+            NEWLINES(2)
+         %END
+      %FINISH
+!*
+!*
+!************************************************************************
+!*                 P D I A G   -   M A I N                              *
+!************************************************************************
+!*
+!*
+      DIAGLEVEL=INTEGER(GLA+16)>>4&15;   ! extract from langflag word
+      %IF ASIZE=0 {no arrays} %AND DIAGLEVEL=4 %THEN DIAGLEVEL=3
+      DIAGBASE=INTEGER(GLA+20);          ! addres of diag tables in standard%C
+                                         place
+      %IF DIAGLEVEL>LEVEL0 %THEN %START
+         BLOCKHEADER=INTEGER(LNB)
+         %IF DIAGLEVEL>=LEVEL2 %THEN LINENUMBER=BLOCKHEADER&X'FFFF'
+         BLOCKSERIAL=BLOCKHEADER>>16
+         BLOCKITEM=DIAGBASE+(BLOCKSERIAL//BYTESTOUNITS)
+         %if dvalidate(blockitem,32,0)#0 %then %Start
+            pmderror(2)
+            saveareaa=lnb
+            %return
+         %finish
+         %IF increport#0 %AND comreg(25)&8#0 %THEN DUMPDIAGTABLES
+         %IF ITEMKIND(BLOCKITEM)=BLOCKOBJECT %THEN %START
+            PRINTSTRING("Executing ")
+            %IF DIAGLEVEL>=LEVEL2 %THEN %START
+               PRINTSTRING("line")
+               WRITE(LINENUMBER,4)
+               PRINTSTRING(" of ")
+            %FINISH
+            BLOCK=ITEMCLASS(BLOCKITEM)
+            PRINTSTRING(BLOCKCLASS(BLOCK))
+            PRINTSTRING(" ")
+            NAMEPTR=ITEMNAME(BLOCKITEM)
+            NAMELENGTH=BYTEINTEGER(NAMEPTR)
+            PRINTNAME(ITEMNAME(BLOCKITEM),NAMELENGTH)
+            %IF DIAGLEVEL>=LEVEL1 %THEN %START
+               PRINTSTRING(" which was entered at line")
+               WRITE(INTEGER(BLOCKITEM+2*WORDSTOUNITS),4)
+            %FINISH
+            NEWLINE
+            %IF DIAGLEVEL>=LEVEL3 %THEN %START
+               FIRSTVAR=NEXTITEM(BLOCKITEM)
+               %IF FIRSTVAR#NIL %THEN %START
+                  NEWLINE
+                  %IF BLOCK=PROGBLOCK %THEN PRINTSTRING("Global ") %ELSE %C
+                     PRINTSTRING("Local ")
+                  PRINTSTRING("variables.")
+                  NEWLINES(2)
+                  FIRSTFIELD=0
+                  %IF BLOCK=PROGBLOCK %THEN %START
+                     FIRSTFIELD_STARTBYTE=GLA*UNITSTOBYTES
+                     GLOBAL=TRUE
+                  %FINISH %ELSE %START
+                     FIRSTFIELD_STARTBYTE=(LNB+64)*UNITSTOBYTES
+                     GLOBAL=FALSE
+                  %FINISH
+                  PRINTSCOPE(GLOBAL,FIRSTVAR,FIRSTFIELD,LEFTMOST+INDENT)
+                  NEWLINE
+               %FINISH %ELSE %START
+                  NEWLINE
+                  PRINTSTRING("No ")
+                  %IF BLOCK=PROGBLOCK %THEN PRINTSTRING("global ") %ELSE %C
+                     PRINTSTRING("local ")
+                  PRINTSTRING("variables.")
+                  NEWLINES(2)
+               %FINISH
+            %FINISH
+         %FINISH %ELSE PMDERROR(2)
+      %FINISH
+      SAVEAREAA=LNB
+%END;                                    ! Pdiag
+%EXTERNAL %ROUTINE PDSDIAGS%alias "S#CGDIAGS"(%INTEGER LANG,LNB,GLA,PC,
+   ASIZE, %INTEGER %NAME SAVEAREAA)
+! This provides a testing path prior to incoporating diags into emass%C
+subsystems
+      %IF LANG=15 {pascal} %THEN PDIAG(LNB,GLA,ASIZE,SAVEAREAA) %ELSE %C
+         SAVEAREAA=LNB
+%END
+!*
+%END %OF %FILE

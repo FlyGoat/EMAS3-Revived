@@ -1,0 +1,67 @@
+%constinteger LSTLEN=512;               ! LOCAL SEGMENT TABLE LENGTH
+%constinteger CBTLEN=380;               ! LENGTH OF CBT TABLE
+%constinteger CONTEXTL=192;             ! LENGTH OF AN IBM CONTEXT
+%constinteger LCONTN=5;                 ! NO OF LOCAL CONTEXTS
+%constinteger LCSPTSIZE=16;             ! pages in lcptable
+!
+                                        ! CONTEXTF A SORT OF SSN+1
+%recordformat CONTEXTF((%integer psw0,psw1 %or %longinteger PSW),
+      {8}%integerarray GR(0:15),
+      {72}FR(0:7),{104}CONTROLR(0:15),{168}%longinteger CPUTIMER,
+      %integer ASYNI,SUSP,%short PECODE,ILC,%integer last vsparm)
+                                        ! PARMF FOR PARAMETER PASSING(32 BYTES
+%recordformat PARMF((%integer DEST,SRCE %OR %short DSNO,DACT,SSNO,SACT),
+      (%integer P1,P2,P3,P4,P5,P6 %OR %integerarray P(1:6) %OR %C
+      %string(6)USER,%byte INCAR,%string(15)INTMESS))
+!
+                                        ! SIGOUTPF FOR PASSING SIGNALS(48 BYTES)
+%recordformat SIGOUTPF(((%integer DEST,SRCE %or %short DSNO,DACT,SSNO,SACT),
+      (%integer P1,P2,P3,P4,P5,P6 %or %INTEGERARRAY p(1:6) %or %c
+      %string(6)USER,%byte incar,%string(15) INTMESS)),%integer TYPE,SSN,SSNAD,SUSP)
+!
+                                        ! CBT THE CLAIMED BLOCK FORMAT
+%recordformat CBTF(%integer DA,%short AMTX,%byte LNGTH,TAGS)
+                                        ! CBT FLAGS DEFINED AS FOLLOWS
+%constinteger NEW BLK=X'80';            ! BLOCK HAS BEEN JUST CREATED
+%constinteger READONLY=X'40';           ! USERS REQUEST PROTECTION AGAINST WRITES
+%constinteger ACTIVE=X'20';             ! BLOCK HAS AMT ENTRY ALLOCATED
+%constinteger CONTINUATN BLK=X'8';      ! CBT BLOCK IS NOT THE FIRST
+%constinteger ADVISORY SEQ=X'4';        ! ADVISORY SEQUENTIAL ACCESS BIT
+%constinteger SMULTIPLE CON=X'2';       ! SYSTEM SHRD COMPONENT
+!
+                                        ! ACCOUNTING FORMAT(16 BYTES)
+%recordformat ACNTF(%integer LTIME{MILLESECS},PTURNS,LLIMIT{MILLESECS},SPARE)
+!
+                                        ! IO SYNC RECORD FORMAT(40 BYTES)
+%recordformat IOSTATF(%integer IAD,%string(15) INTMESS, %C
+     %integer INBUFLEN,OUTBUFLEN,INSTREAM,OUTSTREAM,SPARE)
+!
+                                        ! LCFORM THE DEFINITIVE LAYOUT
+%recordformat LCFORM(%integerarray SEGTABLE(0:LSTLEN-1),
+      (%integerarray LCPTABLE(0:LCSPTSIZE-1) %OR %shortarray LCHPTABLE(0:2*LCSPTSIZE-1)),
+      %integer CURCONTEXT,PROCNO,SEMAHELD,SPARE1,
+      %record(CONTEXTF)%array CONTEXTS(0:LCONTN-1),
+      %record(SIGOUTPF)%array OUTPS(1:LCONTN-1),
+      %record(ACNTF) ACNT,%record(IOSTATF) IOSTAT,
+      %record(CBTF)%array CBT(0:CBTLEN-1),
+      %shortarray SSN(0:LSTLEN-1),%integer END)
+!
+%constinteger DIRCSEGOFFSET=4*LSTLEN+4*LCSPTSIZE+16+CONTEXTL*LCONTN;! FOR ALIGNMENT IF NEEDED
+%constinteger LCSTKSEGAD=LCSTKSEG<<SSHIFT;  ! VIRTUAL ADDRESS OF LC-SEG
+%constinteger LSTACKLEN=4;              ! LOCAL CONT. STACK LENGTH IN PAGES
+%constinteger LSTACKLENP=3;             ! PAGED PART
+%constinteger DIROUTPAD=LCSTKSEGAD+DIRCSEGOFFSET;! SYSTEMCALL INDEX TABLE
+%constinteger OUTPLEN=48;               ! ONE 48 BYTE RECORD
+%constinteger SIGOUTPAD=DIROUTPAD+OUTPLEN;! ADDR SIGOUTP
+%constinteger CBTAD=DIROUTPAD+OUTPLEN*(LCONTN-1)+56;! CLAIMED BLOCK TABLE AD
+%constinteger SSTAD=CBTAD+8*CBTLEN;     ! 2DRY SEG TABLE OF  LSTLEN BYTES
+%constinteger LSTVAD=3<<SSHIFT;          ! need a 24 bit address for control ins.
+!%constinteger LSTVAD=LCSTKSEG<<SSHIFT;      ! VIRTUAL ADDRESS OF LOCAL SEG TABLE
+%constrecord(PARMF)%name DIROUTP=DIROUTPAD
+%constrecord(SIGOUTPF)%name SIGOUTP=SIGOUTPAD
+%constrecord(IOSTATF)%name IOSTAT=DIROUTPAD+(LCONTN-1)*OUTPLEN+16
+%constrecord(LCFORM)%name LCTABLES=LSTVAD
+%constrecord(CBTF)%arrayname CBTA=CBTAD
+%constrecord(ACNTF)%name ACNT=DIROUTPAD+(LCONTN-1)*OUTPLEN
+%constshortintegerarrayname SST=SSTAD
+%constintegerarrayname LST=LSTVAD

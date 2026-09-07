@@ -1,0 +1,721 @@
+! EMAS Subsystem SSOWN record format                 (do not soap!)
+
+! ERROR flags
+
+%constinteger SS100 failure = 100
+%constinteger SS202 invalid parameter = 202
+%constinteger SS239 profile data short = 239
+
+
+!***********************************************************************
+!*                                                                     *
+!*                              Constants                              *
+!*                                                                     *
+!***********************************************************************
+
+%constinteger toploadlevel=29, doesexistlist=30, notexistlist=31
+
+%constintegername procbits = x'0030084C';      ! In local controller stack
+%conststringname date = X'01F0003B'
+%conststringname time = X'01F00047'
+%constinteger filesizealloc = 4096
+%conststring(11)sspermjname = ":SS#JOURNAL"
+%constinteger basell=2
+%constinteger top bit = X'80000000'
+%constinteger yes=1
+%constinteger no=0
+%constinteger funds on=yes
+%constinteger monitoring possible=yes
+%conststring(1) snl = "
+"
+
+%constinteger machine = 470
+
+%constinteger segshift = 20
+%constinteger comseg = 31
+%constinteger basestackseg = 65
+%constinteger uinfseg = 68
+%constinteger base seg = 75
+
+%constinteger ireason = 1
+%constinteger dstartreason = 2
+%constinteger batchreason = 4
+%constinteger testreason = 8
+%constinteger dnewstartreason = 16
+%constinteger forkreason = 32  { ie 1 << uinf_reason }
+
+
+
+%constinteger ssobjfiletype = 1
+%constinteger nonstandardtype = 2
+%constinteger sscharfiletype = 3
+%constinteger ssdatafiletype = 4
+%constinteger sscorruptobjfiletype = 5
+%constinteger sspdfiletype = 6
+%constinteger ssdirfiletype = 7
+%constinteger ssjournaltype = 8
+%constinteger sstopfiletype = 8
+
+
+%constinteger pre empt shift = 10
+%constinteger scarcity shift = 20
+%constinteger ration mask = 1023
+
+%const %integer hot top = 7  { power of 2 minus 1 }
+%constinteger ISEPCHL = '{';  %conststring(1) ISEPL = "{"
+%constinteger ISEPCHR = '}';  %conststring(1) ISEPR = "}"
+%constinteger USEPCH  = ':';  %conststring(1) USEP  = ":"
+%constinteger GSEPCH  = '.';  %conststring(1) GSEP  = "."
+!
+!     ie the format of a file name is:
+!
+!        user {index} : group . group . file
+!
+%const %integer maxsearchdir = 30
+%const %integer maxfaliases= 16
+%const %integer maxconf= 162;             ! This MUST be one less than some prime number.
+%constinteger min tape channel = 1
+%constinteger max tape channel = 4
+
+! Note: by keeping MAXCHAN greater than MAXFD, we need not check for fullness of the CHANNEL hash-table
+
+%const %integer maxchan= 96;             ! This MUST be one less than some prime number.
+%const %integer maxfd=48;                ! Max file definition records
+
+%const %integer lofree=11202, hifree=11279; ! Bounds for free channel allocation
+
+! The consideration in altering MAXOBEYS, NULLOBEYSTREAM is as follows.
+! We assume that streams -99 to -81 are system-reserved, taking the place of
+! the former streams 81 to 99.  The "free channel" allocation is done from the
+! range LOFREE to HIFREE.  The OBEY streams are taken below -99, and streams
+! numbered NULLOBEYSTREAM to NULLOBEYSTREAM+(2*MAXOBEYS) are used for MACRO and
+! OBEY purposes.  Thus NULLOBEYSTREAM IS (at time of writing) the lowest used
+! stream number.
+
+%const %integer maxobeys=10, nullobeystream=-101-(2*maxobeys)
+
+%const %integer maxpromptsize=255
+%const %integer maxsetr=32
+%const %integer maxtraps=24 {Arbitrary but should divide by 4}
+%const %integer prmlim= 32;              ! Max numbers of parameters for a command.
+%const %integer stream maxrec=512
+%const %integer nodenamesize= 11
+%const %integer usernamesize= 6
+%const %integer indexnamesize= 11
+!!!  Site-dependent constants
+
+%constant %string (18) alertfile= "MANAGR:ALERTINF"
+%constinteger chbaselen=5 {no to add to length(CHAN) to get size of SSOWN_CHAN entry}
+! This constant is the length of this record up to but not including FILE, plus 1
+%constinteger cbaselen=36
+
+%constinteger max space = 224
+%constinteger maxa = 255  { size of array of terminal addresses }
+%constinteger ercc tcps = yes
+%constinteger maxterminals = 33
+%constinteger abs maxterminals = 255  {for recordarrayname}
+%conststring(19)chsfile = "SUBSYS:NEWCHFILE"
+%constinteger max job space desc = 99
+%constinteger max for = 4
+
+
+!***********************************************************************
+!*                                                                     *
+!*                           Record Formats                            *
+!*                                                                     *
+!***********************************************************************
+
+
+   %record %format %c
+cxstaterf(%integer psw0, psw1, %integer %array gr(0:15),
+   %long %integer %array fr(0:3), %integer %array cr(0:15),
+   %long %integer timer,
+   %integer asyncinh, susp, %short %integer pe, ilc, %integer spare)
+! PSW0 and PSW1 are the PSW,   so that PSW1 includes the PC.
+!    GR represents the general  registers.
+!    FR  the  floating point registers.
+!    CR the control registers.
+!    TIMER,   like CR,  is not defined.
+! The least significant (right-hand) bit of ASYNCINH is zero if the  context is
+! "interruptable" and non-zero if the context is not to be interrupted.
+!    PE and ILC contain information about the last program error or SVC
+!   detected  in  the context.
+!  CONTEXT is the number of the context.
+!  The field SPARE is spare.
+
+
+   %recordformat %c
+comf(%integer ocptype,slipl,tops,sepgs,ndiscs,nsldevs,dlvnaddr,ditaddr,
+   sldevtabad,steer int,dirsite,dcodeda,suplvn,tojday,date0,date1,
+   date2,time0,time1,time2,pagesize,users,cattad,servaad,
+   nocps,itint,ration,trans, %longinteger kmon, %integer supvsn,secsfrmn,
+   secstocd,sync1dest,sync2dest,asyncdest,maxprocs,inspersec,elaphead,commsreca,
+   storeaad,procaad,tslice,feps,maxcbt,performad,curproc,inptr,
+   outptr,parm asla,kernelqa,runq1a,runq2a,channelt,proc pictad,schannelq,
+   cpuid,s0,s1,s2,end)
+
+%constrecord(comf)%name com = comseg << segshift
+
+
+   %record %format %c
+fchanf (%integer afd, %string(255) chan)
+
+
+   %record %format %c { Remember to alter SHORTCONFF if you alter CONFF }
+conff(%integer flnk,  {this field must come first}
+   blnk, conad, size, hole, %shortinteger mode,
+   %byteinteger con level, fsys, type, rup, eep, use, codes, codes2,
+   defines, opens, stamp, pos, finfo flag,
+   %string(255) file)
+
+      { The purpose of SHORTCONF is to allow a one-line clear of a CONF entry}
+   %record %format %c
+shortconff(%integer flnk, blnk, conad, size, hole, %shortinteger mode,
+   %byteinteger con level, fsys, type, rup, eep, use, codes, codes2,
+   defines, opens, stamp, pos, finfo flag)
+
+   %record %format %c
+duffglaf(%integer from, to)
+
+   %record %format %c
+ent4f(%integer codeoffset, glaoffset, epoffset, parmword %or %integer codead, glaad, epad,
+   wordad %or %integer datadr0, datadr1, i3, i4)
+
+   %record %format %c
+faliasedf(%string (nodenamesize) title, %string (usernamesize) owner, %string (indexnamesize) index,
+   %string %name name)
+
+   %recordformat %c
+fdf(                                     %c
+    %integer     link,         {  not used by mag tape software     }
+                 dsnum,        {  channel number as assigned by OPEN via DEFINEMT  }
+   (%integer asvar %or %integer rel file num), {  file position relative to start of tape  }
+                %integer arec,         {  address of data portion of record being processed  }
+                 rec size,     {  size of the data portion (excluding red tape) of the 'current' record  }
+                 minrec,       {  minimum permissible record length for the current file  }
+                 maxrec,       {  maximum permissible record length for the current file  }
+   (%integer maxsize %or %integer block ptr),    {  points to the start of the current block within the buffer  }
+   (%integer lastrec %or %integer recptr),       {  pointer to the next record (including red tape if any)  }
+   (%integer conad %or %integer sob),          {  address of the start of the buffer for the current file  }
+   (%integer cur rec %or %integer eob),          {  address of the end of the buffer for the current file  }
+   (%integer cur %or %integer sod),          {  address of the start of data within the current buffer  }
+   (%integer end %or %integer eod),          {  pointer to (address of) the end of data within the current buffer  }
+                %integer transfers,    {  not used by mag tape software  }
+   (%integer da rec num %or %integer block xfers),  {  number of blocks transfered to or from tape  }
+   (%integer cur size %or %integer block length), {  maximum permissible block length for current file  }
+   (%integer datastart %or %integer reclen),       {  length of current record including red tape for variable formats  }
+    %stringname  iden,         {  not used by tape software  }
+    %byteinteger f1, f2,
+                 size spec,    { in define so that connect uses suitable hole }
+                 dev code upper,
+                 status,       {  not used by mag tape software  }
+                 access route, {  set to 5 for tape use by DEFINEMT    }
+                 valid action, {  used by DEFINEMT to indicate read/write etc    }
+                 cur state,    {  file closed, open, after read, after write,eof etc  }
+                 mode of use,  {  DEFINEMT sets this to 2 => sequential access (cf direct access)  }
+                 mode,         {  1 => no ring, 2=> ring needed, 3 => ring optional   }
+                 dev code,     {  not used by tape software    }
+                 rectype,      {  1 => fixed, 2=> variable, 3=> undefined   }
+                 flags,        {  bit 0 => asa control chars, 1 => EBCDIC bit, 2 => ring, 3 => MOD open  }
+                 f77flag,      {  not used by tape software  }
+                 f77form,      {  not used by tape software  }
+                 f77access,    {  not used by tape software  }
+                 f77status,    {  not used by tape software  }
+                 f77blank,     {  not used by tape software  }
+                 f77ufd,       {  not used by tape software  }
+                 channel,      {  internal channel allocation in array 'tc'  }
+                 relpos,       {  formally used by backspaceing  }
+                 recrtl,       {  length of any red tape for each record  }
+                 blkrtl,       {  length of any red tape for each block  }
+                 lpmode,       {  label processing mode (from DEFINEMT), 1 => unlabelled, 2 => IBM standard labelled }
+    %integer     f77recl,      {  not used by tape software  }
+                 f77nrec,      {  not used by tape software  }
+    %byteinteger blocking,     {  1 => unblocked, 2 => blocked, 3 => spanned, 4 => blocked and spanned  }
+                 data format,  {  see under declaration for 'format map'  }
+                 bwf,          {  buffer write flag, indicates whether the buffer has been written to at all  }
+    %string(17)  dsn,          {  file (data set) name   }
+    %string(6)   volume)       {  tape volume name  }
+
+
+   %record %format %c
+fhf(%integer end, start, size, type,
+   spare0, datetime, spare1, spare2)
+
+   %record %format %c
+frf(%integer conad, filetype, datastart, dataend, size, rup, eep,
+   %byte %integer fsys, cct, dayno, codes2,
+   %integer users, arch,
+   %string (6) tran, %string (8) date, time,
+   %integer count, ssbyte, spare2)
+
+   %record %format %c
+intinfof(%integer class, subclass, psw0, psw1, %integer %array gr(0:15), %long %real %array fr(0:3),
+   %integer %array cr(0:15), %long %integer timer, %integer asyncinh, susp, %short %integer pe, ilc, %integer spare,
+   %string (8) timeofday)
+
+   %record %format %c
+iostatf(%integer inpos, %string (15) intmess)
+
+   %record %format %c
+itf(%integer inbase, inlength, inpointer, outbase, outlength, outpointer, outbusy, omwaiting,
+   inttwaiting, jnbase, jncur, jnmax, lastfree, spare5, spare6, spare7)
+
+   %record %format %c
+llinfof(%integer tab, gla, istk) {Load level info held by LOADER}
+
+   %record %format %c
+reportf(%integer conad, filetype, datastart, dataend)
+
+
+   %record %format %c
+rrcf(%integer type, class, %long %integer mask, %integer %array regs(12:15),
+   %integer %array env(4:10))
+
+   %record %format %c
+sctabf(%string (31) name, %integer code, gla, ep, parmword)
+
+   %record %format %c
+settrapf(%integer class, %byte %integer id, sp1, sp2,
+   (%integer %array sub(0:3) %or %long %integer l1, l2))
+
+   %record %format %c
+sslf(%integer start, len)
+
+   %record %format %c
+termf (%byte type,name,columns,lines,leadin,
+   clearscreen,home,endofline,endofscreen,init,int,
+   cursor up,cursor down,cursor left,cursor right,
+   insert line,delete line,home at top,page mode,
+   roll mode,can do page mode,xbase,ybase,xintro,
+   yintro,yfirst,auto wrap,uname,start standout,
+   end standout,cursor pos,
+   (%byteinteger string ptr %or %c
+   %string(max space) string space))
+
+   %record %format %c
+trapf(%integer %array gr(0:15),
+    {%INTEGER LNB,PSR,PC, the 'magic' stack frame TRAP LNB,} {AUXDR0,AUXDR1,AUXSTACKTOP,OLDLNB,OLDPC,GLA,} %c
+   %integer com36, spare1, %c
+   %byte %integer prot, type, saveby, loadlevel)
+                             { in options record }
+
+   %RECORD %FORMAT %c
+optionf(%string (31) bstartfile,fstartfile,preloadfile,
+   %integer arraydiag,blanklines,echo,initworksize,
+      itinsize,itoutsize,recall,recorddiag,ustacksize,
+   %longinteger initparm,
+   %integer max,
+   %byteintegerarray b(0 : maxa),
+   %integer define size, i2, i3,
+   %byteinteger auto search, basedirsearch, verbosity, maxhslot,
+   %byteinteger c char ints, paritymask, default t type, journal pages)
+
+   %record %format %c
+tape channel f ( %c
+    %string(6)   tsn,              {  tape serial number, ie. volume identification  }
+    %integer     use,              {  0 => not in use, 1=> HLL use, 2 => utility use  }
+                 tm count,         {  count of tape marks between current position and BT  }
+                 mode,             {  2 => NRZI, 3 => PE, 8 => GCR, 4 added => C/E  }
+                 sno,              {  service number as allocated by 'dmag claim'  }
+                 term flag,        {  termination flag, set to 'yes' after writing double tape mark  }
+                 xfers,            {  count of physical transfers or calls on 'dmagio'  }
+                 block no,         {  count of blocks between current position and previous tape mark  }
+                 buffer length,    {  length of buffer declared for this tape channel  }
+                 control,
+                 err count,        {  number of consecutive tape i/o errors, usually zero  }
+                 et flag,          {  end of tape flag, set to 'yes' after writing beyond ET  }
+    %string(4)   init fsn,         {  sequence number of first file on tape - not necessarily one  }
+                 buffer file)
+
+   %RECORD %FORMAT %c
+TMODEF (%SHORTINTEGER FLAGS1, FLAGS2, %BYTE %INTEGER PROMPTCHAR, ENDCHAR,
+   %BYTE %ARRAY BREAKBIT1 (0:3) {or %SHORT %INTEGER %ARRAY BREAKBIT2 (0:1)},
+   %BYTE %INTEGER PADS, RPTBUF, LINELIMIT, PAGELENG,
+   %BYTE %INTEGER %ARRAY TABS(0:7), %BYTE %INTEGER CR, ESC, DEL, CAN,
+   %BYTE %INTEGER SCREED1, SCREED2, SCREED3, SCREED4, SCREED5, SCREED6)
+
+   %record %format %c
+UINFF (%string(6)USER, %string(31)JOBDOCFILE, %byteinteger CONTEXT,
+{.28}  %integer MARK, FSYS,
+{.30}  PROCNO, ISUFF, REASON, BATCHID,
+{.40}  SESS LIMIT, INT COUNT, I2, STARTCNSL,
+{.50}  AIOSTAT, SCT DATE, SYNC1 DEST, SYNC2 DEST,
+{.60}  ASYNC DEST, AACCT REC, I3,
+{.6C}  %string(15)JOBNAME,
+{.7C}  %string(31)BASEFILE,
+{.9C}  %byteinteger b1, b2, b3, top exec,
+{.A0}  %integer ITADDR0, ITADDR1, ITADDR2, ITADDR3,
+{.B0}  ITADDR4, STREAM ID, i4, SCARCITY,
+{.C0}  PREEMPTAT, %string(11)SPOOLRFILE,
+{.D0}  %integer FUNDS, SESSLEN, PRIORITY, DECKS,
+{.E0}  DRIVES, PART CLOSE,
+{.E8}  %record(TMODEF)TMODES,
+{108}  %integer PSLOT,
+{10C}  %string(63)ITADDR,
+{14C}  %integerarray FCLOSING(0:3), %integer CLO FES,
+{160}  %integer OUTPUT LIMIT, ACONTEXT1, ACONTEXT3, ACONTEXT4,
+{170}  %integer OUT, %string(15)OUTNAME,
+{184}  %integer HISEG,
+{188}  %string(31)FORK,
+{1A8}  %integer INSTREAM, OUTSTREAM,
+{1B0}  %integer DIRVSN, I8, SCT BLOCK AD,
+       %integer PROTOCOL,
+       %byteinteger ISEPCHL, ISEPCHR, USEPCH, GSEPCH,
+       %string(1)ISEPL, ISEPR, USEP, GSEP,
+            { thus a simple filename has the form:                      }
+            {    user USEP file                                         }
+            { while a complex one has the form:                         }
+            {    user ISEPL index ISEPR USEP group GSEP group GSEP file }
+      %integer CLASS, SUBCLASS,
+      %string (31) jobname31, outname31,
+      %integer WO BASE, {Subsystem uses this to implement Customised Subsysteem}
+      %string (63) full user,
+      %integer last logon, last nonint start,
+      %integer WO PTR1, WO PTR2, UEND)
+
+%constrecord(uinff)%name uinf = uinfseg << segshift
+
+
+   %record %format %c
+job space var f(%byte type {0=int, 1=longreal, 2=string},
+   %string(255)name,
+   %integer unused, i,
+   %longreal r,
+   %string(255)s)
+
+
+   %record %format %c
+jobspace variable f(%integer len, addr, link,
+   %byte type,  { 3 = no heap taken }
+   %string(255)name)
+
+   %record %format %c
+global var f(%integer link, p)
+
+   %record %format %c
+job space desc f(%integer type, p, adr)
+
+
+   %record %format %c
+job space for f(%string(31)name, %integer type, start, end, count, static start, sp1)
+
+
+   %record %format %c
+job spacef(%string(31)name,
+   %integer topv, afd, depth, type,  { to do with if/cycle nesting }
+   p, top p,
+   fstart, fend, fordepth,
+   pamad, spec, sp3, global,
+   %byte %integer error action, procetc, { 0 for obey/batch, 1 for procedure }
+                                 { whether to continue after an error }
+   b2, b3,
+   %record(job space desc f)%array desc(1 : max job space desc),
+   %integerarray ref(1 : 31),
+   %record(job space for f)%array for(1 : max for),
+   %integer pointer)
+
+! Things for screen handling
+
+%constinteger top window = 4
+
+   %record %format %c
+windowf(%integer start, end, { address limits in the file }
+   firstline, lastline, firstcol, lastcol, { on the screen }
+   firstfileline, { to be displayed }
+   cursor { if > 0, put a '>' on that line },
+   curpos { addr of first line on display },
+   spare)
+
+   %record %format %c
+sdirf(%string (31) name, %integer conad, type) {While old/new}
+
+
+   %record %format %c
+matchrecf(%byte %integer bits, wilds,
+   %byte %integer %array l to right wilds(0:11), length wilds(0:11))
+   ! 26 bytes
+   %record %format %c
+mff{matched file format}(%string (11) name, %integer kbytes, level, parent slot,
+   %byte %integer arch, codes, ownp, eep, dayno, group, %record (matchrecf) match)
+%constinteger mfrecsize=60
+
+   %record %format %c
+wildf(%integer pt, end, dummy{nextpt}, type,
+   (%string (255) prepost %or %string (255) static), %record (wildf) %name next)
+! type=0 for constant, 1 for list
+
+   %record %format %c
+pamf(%integer filept, fileend, next file pt, control, tokenpt, mfn,
+   %record (mff) %array %name mf, %record (wildf) %name head, tail, %string (255) tokens,
+   verbatim, help, history, %string (31) command, clicomm)
+
+
+!***********************************************************************
+!*                                                                     *
+!*                         SSOWN Record Format                         *
+!*                                                                     *
+!***********************************************************************
+
+
+{             If you change this format PLEASE:                    }
+{                                                                  }
+{     (1) Amend the routine PRINTSSOWN in S88                      }
+{                                                                  }
+{     (2) Re-compile ALL affected modules                          }
+{                                                                  }
+{     (3) Put a new listing in Room 2013                           }
+{                                                Ta!               }
+
+
+   %record %format %c
+ssownf(  %c
+%record (ent4f) dynent4 {S#DYNAMICREF entrypoint},
+%record (ent4f) unsatent4 {S#UNSATREF entrypoint},
+%integer topstk,                                      {FIXED address x4C38020}
+
+{ frequently used items }
+
+%integer aitbuffer,
+%byteinteger nocrtrans, {iocp translate cr. 0=yes, 1=no..SH 17-dec-86}
+   {crtrans belongs with SETMODEP and INHIBITMESS}
+%byteinteger suppress terminal output,  { non zero means to recall file only }
+%byteinteger whosetcomreg36,
+%byteinteger setmode changed,  { if set, setmode(defaults) will be called before next command }
+%integer basedirsearch, {WAS allowconn, NOW really an "infrequent byte" - to be moved}
+%integer confpos,
+%integer connfiles,
+%integer curfsys,
+%integer curlinesout {since last call of getfep},
+%integer current fd,
+%integer current pamad, {address of current PAM record, declared in COMMAND}
+%integer currms,
+%integer custinit, {Initialisation routine file for Customised Subsys}
+%integer defaultdefinesize,
+%integer devarraybase,
+%integer dfdfinsdc,
+%integer dfdfoutsdc,
+%integer dynpc,
+%integer dynrefend,
+%integer dynrefstart,
+%integer freechan,
+%integer hconad,                  {Address of history mechanism data}
+%integer heaparea,
+%integer heapfree,
+%integer heaphole,
+%integer indefault,
+%integer inquire,
+%integer irgap {inter-record gap},
+%integer itinlength,
+%integer itoutlength,
+%integer lastdcputime,
+%integer loadmonitor,
+%integer maxdevarray,
+%integer maxugla,
+%integer obeystream,
+%integer olddcpu,
+%integer oldpageturns,
+%integer outdefault,
+%integer outfep line count,
+%integer pamworkad,    {connect address of t#pamwork}
+%integer permistk,
+%integer rcode,          {set by SETRETURNCODE, move to LASTRCODE at start of next command}
+%integer savecom36,               {used in S01 (only)}
+%integer saveidpointer,
+%integer seq {in NEXTTEMP},
+%integer ssarraydiag,
+%integer sscurbgla {current top of bgla},
+%integer command echoed,  { pecho and command }
+%integer ssinhibit,
+%integer ssinitworksize,
+%integer ssitwidth,
+%integer sslastdfn { Last non-zero director error number translated by DIRTOSS},
+%integer ssmaxbgla {last byte of bgla},
+%integer ssmaxfsize {maximum file size allowed},
+%integer ssmonitor,
+%integer ssmp ctl1,
+%integer ssmp ctl2,
+%integer ssmp ctl3,
+%integer ssmp ctl4,
+%integer ssmp ctl5,
+%integer ssnote,
+%integer ss record diag,
+%integer sstopadir,
+%integer ssuglasize,
+%integer stackfile,
+%integer tempistk,
+%integer topfd { highest fd used so far this session},
+%integer topsct,
+%integer trap stk top,
+%integer unsatpc,
+%byteinteger xx1, xx2, usage{private code/ECL monitoring}, verbosity,
+%integer ustacksize,
+%integer ustb,
+
+%integer %name lastrcode {points to comreg(24) return code},
+%integer %name permoffset {Nextfree in perm entry table - mapped on to NEXTAD(2)},
+%integer %name tempoffset { Nextfree in temp entry tables - mapped on to NEXTAD(3)},
+
+%byte %integer basefile,  { 1 if TEST else 0 }
+%byte %integer blanklines,  { 0=on, 1=off }
+%byte %integer caller of command,
+%byte %integer confstamp,
+%byte %integer dataecho {for input echo in obey and batch},
+%byte %integer dirdiscon,
+%byte %integer erte process,
+%byte %integer fepmode,
+%byte %integer fourdots,
+%byte %integer fulldump,
+%byte %integer gcstarted {in GETCOMMAND},
+%byte %integer graphmode,
+%byte %integer inhibitmessages,
+%byte %integer inhibitspooler,
+%byte %integer inttombusy,
+%byte %integer journal pages,
+%byte %integer lastch in outfep,
+%byte %integer lastep,
+%byte %integer loadinprogress,
+%byte %integer loadlevel,
+%byte %integer maxhslot,
+%byte %integer noautosearch,
+%byte %integer nowarnings,
+%byte %integer obeylevel,
+%byte %integer parity mask,  { 255 or 127 see OPTION command }
+%byte %integer preloadfailed,
+%byte %integer prompt type,  { 0 = data, 1 = command }
+%byte %integer scarcityfound,
+%byte %integer shoutactive,    {to avoid recursive calls of shout}
+%byte %integer dataechooption,
+%byte %integer ssinvocation,
+%byte %integer ssjournal,
+%byte %integer ssownfsys {fsys for this user},
+%byte %integer ssreason {reason for starting 0=interactive,1=started from oper,2=batch},
+%byte %integer ssterminaltype,
+%byte %integer ssttact,
+%byte %integer sstthide,
+%byte %integer ssttkn { Used for INT:K control - must stay together and in this order},
+%byte %integer tempavdset {used by plu packages},
+%byte %integer terminalinput,
+%byte %integer term valid,  {0=term record not set up}
+%byte %integer too many processes,
+%byte %integer trapbusy,
+%byte %integer ttype,
+%byte %integer unsharedbgla,
+%byte %integer useoptstarted,
+
+%string (255) cliparm,
+%string  (11) codeloading,
+%string (255) command prompt,
+%string   (7) endcomment,
+%string  (11) glaloading,
+%string (255) pam last param,
+%string (255) path to be used,
+%string  (maxpromptsize) prompttext,
+%string (255) shortname,
+%string (255) ssfname,
+%string  (255) ssfname2,
+%string  (6) ssowner,
+%string   (3) sssuffix {added to names of temp files},
+%string   (7) startcomment,
+
+%integer %array areastart(1:11) {Starting addresses of obj file areas},
+%integer %array chan(0:maxchan),
+%integer %array conf(0:maxconf),
+%integer %array defiden(0:maxchan),
+%integer %array dirptr(-1:maxsearchdir),
+%integer %array levelhead(0:notexistlist),
+%integer %array nextad(1:3),
+%integer %array obeyfile(1:2*maxobeys),
+%integer %array partloaded(0:2),
+%integer %array pos(-91:-90),
+%integer %array sscomreg(0:60),
+
+%long %real montimebase,
+
+%stringname avd,
+
+%integer %array %name rlh, plh, tlh, slh,
+
+%record (duffglaf) %array duffgla(0:63),
+%record (fdf) %name inf,
+%record (iostatf) %name iostat {status of input from fep},
+%record (itf) %name it,
+%record (llinfof) %array llinfo(-1:top load level),
+%record (ent4f) mainent4,
+%record (fdf) %name outf,
+%record (intinfof) %array saveidata(0:3),
+%record(sctabf)%arrayname sct,
+%record (sslf) %array ssloadtab(0:3),
+%record(termf)term,
+%record (trapf) %array traps(1:maxtraps),
+%record (settrapf) %array trset(1:maxsetr),
+
+%byte %integer %array hotfsys(0:hottop),
+%byte %integer %array inbuff(0:255),
+%byte %integer %array intmess(1:9),
+%byte %integer %array outbuff(0:133) {allow room for added nl},
+%byte %integer %array setmodep(1:18),
+%byte %integer %array stinbuff(1:stream maxrec) {for stream input },
+%byte %integer %array stoutbuff(1:stream maxrec+2) {for stream output},
+%byte %integer %array tstkptr(1:maxtraps),
+
+%string  (19) %array hotindex(0:hottop),
+
+{ large item }
+
+%record (fdf) %array fd(1:maxfd),
+
+{ infrequently used items }
+
+%integer abgla {start of bgla},
+%integer active { checks for loops},
+%integer aiostat,
+%integer apageturns,
+%integer bopmessstart,
+%integer bopmesslen {for broadcast oper messages},
+%integer broadcastfilebase,
+%integer callbcistarted,
+%integer curpar,
+%integer tempdelivery,
+%integer ssnotespaces,  {indenting spaces for #note output}
+%integer pcount,
+%integer pmap,
+%integer startsecs,
+%stringname holdavd,
+%integer current user channel,
+%integer vsstrapad,
+%integer %arrayname vssregs31,
+%integer astartfile,
+%integer %array job spacebase(1 : 2*maxobeys),
+%integer job spacetrace,
+%integer job space fsys,
+%byte %integer %array parstring(0:255),
+%byte %integer %array pindex(1:prmlim) {max likely no of params},
+%string (6) first user,  { used when getting a range of users }
+%string (8) ssstarttime,
+%byteinteger stopping,
+%record (intinfof) intinfo,
+%record(tape channel f)%array tc(min tape channel : max tape channel),
+%string(6)%array held tape(min tape channel : max tape channel+1),
+%byteinteger %array uchannel(min tape channel : max tape channel),
+%record(job space var f)job space result,
+%string(19)job space index,
+%byteinteger %array screen(0 : 1919),   { ie 24*80 }
+%integerarray window(1:top window),
+%string(15) screen vector,
+%byte %integer %array echostate(1:maxobeys),
+%stringname xxxdefmode,
+%integer endglaused,
+%string(19)%array coded mode(0 : toploadlevel),
+%integer ssownend);         !end of ssownf
+!
+!
+%constrecord(SSOWNF)%name SSOWN=X'04C38000'  { last 8 pages of 64 page BGLA. See Note below}
+!
+! Note that the following areas will need attention if EITHER ssown is moved
+! OR the #BGLA file is altered in size.  FIRST, the code early in SSINIT, where
+! SSOWN_MAXBGLA is set up: the BGLA area stops where the SSOWN starts, currently.
+! SECOND, the EMAS3TOPSTK external variable is located at x'04C38020' by SUBFIX.
+!
+!
+%end %of %file
+

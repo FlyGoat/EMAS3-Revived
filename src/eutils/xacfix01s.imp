@@ -1,0 +1,372 @@
+!
+!updated 25-09-85..SH..subsys specs
+%conststring(30) vsn="xa_cfix01 - 9th June 1988"
+!
+%conststring(8) default obj="ICHOPZ"
+%conststring(5) entry name="ENTER"
+%conststring(8) tops="I#STKTOP"
+%constinteger load address=x'8000'
+%constinteger iput=0,lput=1
+!
+%externalroutine xachopfix %alias "C#XACHOPFIX"
+%externalroutinespec emas3string(%stringname vector,value)
+%externalroutinespec emas3integer(%stringname vectore,%integername i)
+%externalintegerfnspec rdfilead(%string(255)file)
+%externalintegerfnspec nwfilead(%string(255)file,%integer pages)
+%externalroutinespec move %alias "S#MOVE" (%integer l,f,t)
+%externalroutinespec phex %alias "S#PHEX" (%integer i)
+%recordformat centf(%integer link, (%integer loc, %string (31) iden %or %c
+   %integer code offset,gla offset,ep offset,pword,%string(31)iden2))
+%routinespec analyse(%record(centf)%name cent,%integername lput type, %c
+      %stringname iden,%integer link)
+%routinespec findcodeep(%string(31) entry,%integername co,gl,ep,flag)
+%routinespec finddataep(%string(31) entry,%integername ad, flag)
+%recordformat rf(%integer arealoc, baseloc)
+%recordformat relf(%integer link, n, %record(rf)%array r(1:1000))
+%recordformat ofmf(%integer start, l, prop)
+%recordformat dentf(%integer link, disp, l, a,  %c
+         %string (31) iden)
+%recordformat creff(%integer link, refloc, %string (31) iden)
+%recordformat dreff(%integer link, refarray, l,  %c
+         %string (31) iden)
+%record(centf)%name cent
+%record(dentf)%name dent
+%constinteger areas=10
+%record(ofmf)%arrayformat ofmaf(1:areas)
+%record(ofmf)%arrayname ofm
+%record(creff)%name cref
+%record(dreff)%name dref
+%record(relf)%name rel
+%integerarray base,lbase(1:areas);               !area start addresses when loaded
+%integerarrayformat ldataaf(0:14)
+%integerarrayformat reflocaf(1:1000)
+%integerarrayname ldata, refloc
+%constinteger irsize=6
+%ownintegerarray ipl rec(1:irsize)=%c
+      x'000C0000',x'80001800',          { PSW }
+      x'06001000',x'40001000',          { read next 4K to x'1000' }
+      x'08001000',0                     { TIC to x'1000'
+%constinteger ecsize=32
+%ownintegerarray entry code(1:ecsize)=%c
+      x'070005e0',                      { nopr; balr_14,0 }
+      x'41100001',x'8910000f',          { la_1,1; sll_1,15 (chopsupe @ x8000) }
+      x'58201000',x'1e218820',          { l_2,0(1), alr_2,1, srl_2,17 }
+      x'00111222',x'4780e034',          { ltr_2,2; bz_52(14) (no code above x20000) }
+      x'41200001',x'89200011',          { la_2,1; sll_2,17 (addr1=x20000) }
+      x'58301000',x'1e311f32',          { l_3,0(1); alr_3,1; slr_3,2 (length) }
+      x'41400021',x'8940000c',          { la_4,x'21'; sll_4,12 (addr2=x21000) }
+      x'18540e24',                      { lr_5,4; mvcl_2,4 (move down) }
+      x'58b01000',x'1eb15820',          { l_11,0(1); alr_11,1 (stack base) }
+      x'101c1e21',x'58c02004',          { l_2,28(1); alr_2,1; l_12,4(2) (code base) }
+      x'1ec158d0',x'20101ed1',          { alr_12,1; l_13,16(2); alr_13,1 (gla) }
+      x'58e01010',x'05fe0000',          { l_14,16(1); balr_15,14 (enter chopsupe) }
+      0(*)
+%ownbyteintegerarray seek data(0:6)=%c
+      0,0,
+      0,0,        { cyl }
+      0,0,        { track }
+      1           { sector }
+%integer codestart,glastart,ep,codelen,glalen
+%integer areacode, areadisp, basecode, basedisp, n, co, gl, entp
+%integer unsatcode, unsatdata, rlink
+%integer conad, flag, inbase, loc, link, ad, refarray,lput type
+%integer map,BCmode,i,j,k,datad,track
+ %constinteger seek=x'07000000'
+%constinteger ss=x'23000000'
+%constinteger tic=x'08000000'
+%constinteger sie=x'31000000'
+%constinteger rd=x'06000000'
+%constinteger cc=x'40000000'
+%constinteger xtra=3;                   ! 4K hdr + 2 ipl blocks
+%constinteger pptrkmo=9;                ! 3380 pages/track-1
+%string (31) iden
+%string(255)infile
+      !
+      printstring(vsn)
+      newline
+      emas3string("File to be fixed;file,uc;".default obj,infile)
+      emas3integer("Map yes or no;word,no,yes;no",map)
+      emas3integer("BC mode (yes or no);word,no,yes;no",BCmode)
+      i=rdfilead(infile)
+      %stop %if i=0
+      j=(integer(i)+4095)>>12;          ! chopsupe pages
+      conad=nwfilead("ichopt",j+xtra)
+      %stop %if conad=0
+      inbase=conad+xtra*4096
+      integer(conad)=integer(conad+8);  ! next free byte
+      integer(conad+4)=4096;            ! header length
+      move(integer(i),i,inbase);  ! chopsupe
+      integer(inbase)=j<<12;            ! stack base
+      move(irsize*4,addr(ipl rec(1)),conad+4096); ! IPL record
+      %if BCmode#0 %then integer(conad+4096)=0;! psw0 to all zeros
+      i=j+2;                            ! total pages
+      j=conad+8192;                     ! read CCWs
+      k=j+1024;                         ! seek/search data
+      datad=load address
+      n=2
+      track=0
+      %cycle
+         %for n=n,1,pptrkmo %cycle
+            integer(j)=rd!datad
+            integer(j+4)=cc!4096
+            datad=datad+4096
+            %if datad=x'20000' %then datad=x'21000'
+            ! leave hole for VM ipl simulator
+            j=j+8
+         %repeat
+         i=i-pptrkmo
+         %exit %if i<=0
+         track=track+1
+         move(7,addr(seek data(0)),k)
+         byteinteger(k+5)=track
+         integer(j)=seek!(k-(conad+4096))
+         integer(j+4)=cc!6
+         j=j+8
+         integer(j)=ss;                 ! RA 0
+         integer(j+4)=cc!1
+         j=j+8
+         integer(j)=sie!(k+2-(conad+4096))
+         integer(j+4)=cc!5
+         j=j+8
+         integer(j)=tic!(j-8-(conad+4096))
+         j=j+8
+         k=k+8
+         n=0
+      %repeat
+      integer(j-4)=4096;                ! unchain
+      move(ecsize*4,addr(entry code(1)),conad+x'2800'); ! entry code
+      !
+      unsatcode=0
+      unsatdata=0
+      codestart=load address
+      ldata==array(inbase+integer(inbase+24),ldataaf)
+                                        !load data
+      ofm==array(inbase+integer(inbase+28)+4,ofmaf)
+                                        !object file map
+      %cycle i=1,1,integer(inbase+integer(inbase+28))
+         base(i)=inbase+ofm(i)_start
+      %repeat
+!
+! Note:     CODELEN is set to include the SST, since they are 
+!           adjacent.
+!
+      codelen=ofm(1)_l + ofm(4)_l
+      glalen=ofm(2)_l
+      glastart=inbase+ofm(2)_start
+!
+      lbase(1)=ofm(1)_start+codestart;  !start of loaded code
+      lbase(2)=ofm(2)_start+codestart;  !start of loaded gla
+      lbase(4)=ofm(4)_start+codestart;  !start of loaded sst
+      lbase(5)=ofm(2)_l+lbase(2);       !start of loaded ust
+      lbase(6)=ofm(6)_start+codestart;! start of diag tables
+      lbase(10)=ofm(10)_start+codestart;! start of constant area
+      %if ofm(9)_l>0 %start
+         printstring(" Chopfix cant deal with 'ZGST' areas
+ PLease initialise all own arrays in Chopsupe
+")
+         %return
+%finish
+!
+! now go through code refs filling in info
+!
+      link=ldata(7);                    !static code refs
+      %while link#0 %cycle
+         cref==record(link+inbase)
+         findcodeep(cref_iden,co,gl,entp,flag)
+         loc=base(cref_refloc>>24)+cref_refloc&x'ffffff'
+         integer(loc)=co
+         integer(loc+4)=gl
+         integer(loc+8)=entp
+         integer(loc+12)=gl
+         link=cref_link
+      %repeat
+!
+! now deal with data refs
+!
+      link=ldata(9)
+      %while link#0 %cycle
+         dref==record(link+inbase)
+         refarray=(dref_refarray&x'7fffffff')+inbase
+                                        !and off common bit
+         n=integer(refarray)
+         refloc==array(refarray+4,reflocaf)
+         finddataep(dref_iden,ad,flag)
+         %cycle n=1,1,n
+            loc=base(refloc(n)>>24)+refloc(n)&x'ffffff'
+            integer(loc)=integer(loc)+ad
+         %repeat
+         link=dref_link
+      %repeat
+!
+! now deal with relocation requests
+!
+      link=ldata(14)
+      %while link#0 %cycle
+         rel==record(link+inbase)
+         %cycle n=1,1,rel_n;            !no of relocation entries in this block
+            areacode=rel_r(n)_arealoc>>24
+            areadisp=rel_r(n)_arealoc&x'ffffff'
+            basecode=rel_r(n)_baseloc>>24
+            basedisp=rel_r(n)_baseloc&x'ffffff'
+            loc=base(areacode)+areadisp
+            integer(loc)=integer(loc)+lbase(basecode)+basedisp
+         %repeat
+         link=rel_link
+      %repeat
+!
+! now print map of entry points
+!
+      %if map#0 %Start
+      printstring("name                          entry point")
+      newline
+      link=ldata(1);                    !head of code ep list
+      %while link#0 %cycle
+         cent==record(inbase+link)
+         analyse(cent,lput type,iden,link)
+         printstring(iden)
+         spaces(32-length(iden))
+         %if lput type=iput %then loc=lbase(1)+cent_ep offset %else %c
+            loc=lbase((cent_loc>>24)&x'f')+cent_loc&x'ffffff'
+         phex(loc)
+         newline
+         link=cent_link
+      %repeat
+!
+! now print map of data entries if any
+!
+      link=ldata(4);                    !head of data ep list
+      %if link#0 %start
+         newlines(2)
+         printstring( %c
+            "name                                 length     address
+")
+         %while link#0 %cycle
+            dent==record(inbase+link)
+            printstring(dent_iden)
+            spaces(32-length(dent_iden))
+            write(dent_l,10)
+            spaces(5)
+            phex(lbase(dent_a)+dent_disp)
+            newline
+            link=dent_link
+         %repeat
+         newlines(2)
+      %finish
+      %finish
+      selectoutput(0)
+!
+! now check for un-used entries
+!
+      link=ldata(1);                    !list head of code entries
+      %while link#0 %cycle
+         cent==record(inbase+link)
+         analyse(cent,lput type,iden,link)
+         rlink=ldata(7);                !head of code ref list
+         %while rlink#0 %cycle
+            cref==record(inbase+rlink)
+            %exit %if iden=cref_iden;   !entry is used
+            rlink=cref_link
+         %repeat
+         %if rlink=0 %and iden#entry name %start;    !entry is not referenced
+            printstring("**warning - procedure ".iden. %c
+               " not used")
+            newline
+         %finish
+         link=cent_link
+      %repeat
+      %if unsatcode=0=unsatdata %start
+         printstring("all refs filled")
+         newline
+      %finish %else %start
+         %if unsatcode>0 %start
+            write(unsatcode,1)
+            printstring("  unsatisfied code references")
+            newline
+         %finish
+         %if unsatdata>0 %then %start
+            write(unsatdata,1)
+            printstring("  unsatisfied data references")
+            newline
+         %finish
+      %finish
+      newline
+      findcodeep(entry name,i,gl,ep,flag)
+      %if flag#0 %then printstring("Entry point ".entry name." not found")
+      newline
+      integer(inbase+16)=ep;            ! entry point to header
+      integer(inbase+8)=x'100000';      ! stack top
+      newlines(2)
+      printstring("ICHOPT written ok")
+      %return
+%routine analyse(%record(centf)%name cent,%integername lput type, %c
+      %stringname iden,%integer link)
+%if 0<length(cent_iden)<32 %start
+      lput type=lput
+      iden=cent_iden
+%finish %else %if 0<length(cent_iden2)<32 %start
+      lput type=iput
+      iden=cent_iden2
+%finish %else %start
+      select output(0)
+      printstring("Invalid load data entry at offset ")
+      phex(link)
+      newline
+      %stop
+%finish
+%end
+%routine findcodeep(%string (31) entry, %integername co,gl,ep, flag)
+%integer link,lput type
+%record(centf)%name cent
+%string(31)iden
+      link=ldata(1)
+      %while link#0 %cycle
+         cent==record(inbase+link)
+         analyse(cent,lput type,iden,link)
+         %if entry=iden %start
+            co=lbase(1)
+            gl=lbase(2)
+            %if lput type=iput %start
+               ep=lbase(1)+cent_ep offset
+               co=co+cent_code offset
+               gl=gl+cent_gla offset
+            %finish %else ep=lbase(1) + cent_loc&x'ffffff'
+            flag=0
+            %return
+         %finish
+         link=cent_link
+      %repeat
+      co=0
+      gl=0
+      ep=0
+      printstring("unsat ref ".entry)
+      newline
+      flag=1
+      unsatcode=unsatcode+1
+      %end; ! findcodeep
+%routine finddataep(%string (31) entry, %integername ad, flag)
+%integer link
+%record(dentf)%name dent
+      link=ldata(4)
+      %while link#0 %cycle
+         dent==record(inbase+link)
+         %if entry=dent_iden %start
+            ad=lbase(dent_a)+dent_disp
+            flag=0
+            %return
+         %finish
+         link=dent_link
+      %repeat
+      %if entry=tops %start
+         ad=load address+8
+         flag=0
+         %return
+      %finish
+      printstring("unsat data ref ".entry)
+      newline
+      ad=0;                             !null value
+      flag=1
+      unsatdata=unsatdata+1
+%end;                                   !of finddataep
+%end;                                   !of fix
+%endoffile
+

@@ -1,0 +1,1621 @@
+
+%CONSTINTEGER YES=1,NO=0
+            
+!
+! THESE CODE ARE ARBITARY BUT THE TOP DECIMAL DIGIT GIVES THE NO OF BYTES
+! IN THE UNIT OF ADDRESSABILITY. BYTE ADDRESSED HOSTS BEING 1N ( also 0N) AND
+! 16 BIT WORD ADDRESSED HOSTS BEING 2N ETC
+%CONSTINTEGER VAX=08;                    ! Imp on Vax using F & G formats
+%CONSTINTEGER UNISYS=09;                ! Imp on UnisSys. Unix stack unswopped Vax reals
+%CONSTINTEGER EMAS=10;                  ! emas on 2900 (unsigned shorts)
+%CONSTINTEGER IBM=11;                   ! emas on 24 bit ibm hardware
+%CONSTINTEGER IBMXA=12;                 ! emas of XA 31 bit hardware
+%CONSTINTEGER WWC=13;                   ! WWc (Natsemi chip) completely swopped
+%CONSTINTEGER AMDAHL=14;                ! Emas on Amdahls guess at Xa Minor differences fron IBM)
+%CONSTINTEGER PERQ3=15;                 ! ICL packaged 68k chip Unix stack but not swopped
+%CONSTINTEGER GOULD=16;                 ! Gould unswopped forward stack. Needs 4&8 byte alined
+%CONSTINTEGER VNS=17;                   ! Unix on 2900 unsigned shorts params as
+                                        ! 2900. Long int available but not in Ecode
+%CONSTINTEGER EAMD=18;                  ! Amdahl via the Emachine
+%CONSTINTEGER DRS=19;                   ! Intel chip Unix stack and mostly swopped
+%CONSTINTEGER PERQ=20;                  ! Pos perq now obselete. Fully swopped forward stack
+%CONSTINTEGER PNX=21;                   ! ICL's perq2 Unix stack byte swopped (unsigned shorts)
+%CONSTINTEGER ACCENT=22;                ! Perq 1 under accent. obsolete now
+                                        ! ACCENT DIFFERS FROM PERQ ONLY IN
+                                        ! ASSEMBLES SEQUENCES&SYNTAX
+                                        ! AND GENERATOR
+%constinteger ORN=23
+%CONSTINTEGER UNSIGNEDSHORTS=1<<emas!1<<pnx!1<<vns
+%CONSTINTEGER LINTAVAIL=1<<IBM!1<<IBMXA!1<<amdahl!1<<EMAS{!1<<GOULD}
+%CONSTINTEGER LLREALAVAIL=1<<IBM!1<<IBMXA!1<<amdahl!1<<EMAS
+%CONSTINTEGER EMACHINE=1<<DRS!1<<WWC!1<<Vax!1<<GOULD!1<<PERQ3!1<<VNS!1<<EAMD!1<<ORN!1<<UniSys
+%CONSTINTEGER IBMFPFORMAT=1<<ibm!1<<ibmxa!1<<amdahl!1<<emas!1<<gould!1<<vns!1<<EAMD
+%constinteger VAXFPFORMAT=1<<Vax!1<<UniSys
+%constinteger IEEEFPFORMAT=1<<WWC!1<<PERQ3!1<<DRS!1<<PERQ!1<<accent!1<<ORN
+%CONSTINTEGER BYTESWOPPED=1<<PERQ!1<<ACCENT!1<<WWC!1<<Vax!1<<PNX!1<<ORN
+%CONSTINTEGER HALFSWOPPED=1<<PERQ!1<<ACCENT!1<<WWC!1<<Vax!1<<DRS!1<<ORN
+%CONSTINTEGER WORDSWOPPED=1<<PERQ!1<<ACCENT!1<<WWC!1<<Vax!1<<DRS!1<<ORN
+!
+! end of file hostcodes
+!
+%CONSTINTEGER TARGET=DRS
+%EXTERNALROUTINESPEC IOCP %ALIAS "s_iocp"(%INTEGER EP,N)
+%CONSTLONGREAL LOG10A=2.3025850929940456840179914546843642076011
+%CONSTLONGREAL PI=3.141592653589793238462643
+%CONSTLONGREAL R1= 1.2595802263029547@  1{R'41C98867F42983DF'}
+%CONSTLONGREAL R2=-8.6186317517509520@  1{R'C2562FB2813C6014'}
+%CONSTLONGREAL R3=-1.2766919133361079@  0{R'C1146D547FED8A3D'}
+%CONSTLONGREAL R4=-8.3921038065840512@ -2{R'C0157BD961F06C89'}
+%CONSTLONGREAL S1= 2.7096164294378656@  1{R'421B189E39236635'}
+%CONSTLONGREAL S2= 6.5581320451487386@  0{R'4168EE1BDE0C3700'}
+%CONSTLONGREAL S3= 2.1441643116703661@  0{R'41224E7F3CBDFE41'}
+%CONSTLONGREAL S4= 1.2676256708212610@  0{R'41144831DAFBF542'}
+%CONSTLONGREAL RT3= 1.7320508075688772@  0{R'411BB67AE8584CAA'}
+%CONSTLONGREAL PIBY6= 5.2359877559829887@ -1{R'40860A91C16B9B2C'}
+%CONSTLONGREAL PIBY2M1= 5.7079632679489661@ -1{R'40921FB54442D184'}
+%CONSTLONGREAL RT3M1=7.3205080756887728@ -1{R'40BB67AE8584CAA7'}
+%CONSTLONGREAL TANPIBY12= 2.6794919243112271@ -1{R'404498517A7B3559'}
+%CONSTLONGREAL PIBY4= 7.8539816339744816@ -1{R'40C90FDAA22168C2'}
+%CONSTLONGREAL A1= 7.5000000000000000@ -1{R'40C0000000000000'}
+%CONSTLONGREAL A2= 3.5398163397448309@ -2{R'3F90FDAA22168C23'}
+%CONSTLONGREAL SQRTHALF= 7.0710678118654753@ -1{R'40B504F333F9DE65'}
+%CONSTLONGREAL DEFALLT=SQRTHALF
+%CONSTLONGREAL MAX= 3.5371188760142201@ 15{R'4DC90FDAA22168C2'}
+%CONSTLONGREAL GREATEST= 7.2370055773322608@ 75{R'7FFFFFFFFFFFFFFF'}
+!*
+%CONSTLONGREAL half= 0.5
+%CONSTINTEGER ExpExcess= 1023
+%CONSTLONGREAL rteps= 1.49 @-8
+!    If mod(x) < rteps, the exponent field of x is less than ExpExcess-26.
+
+      %IF 1<<target&halfswopped#0 %THENSTART
+      %RECORDFORMAT rf(%LONGREAL a %ORHALFINTEGER alo,amd,aup,ahi)
+      %FINISHELSESTART
+      %RECORDFORMAT rf(%LONGREAL a %ORSHORT ahi,aup,amd,alo)
+      %FINISH
+!     ERROR ROUTINE
+%ROUTINE MLIBERR(%INTEGER N)
+      %if n=56 %then %signal %event 1,5;     ! tan overflow
+      %if n=53 %then %signalevent 1,6;     ! exp overflow
+      %if n=50 %then %signalevent 5,2;      !sqrt -ve
+      %if n=51 %or n=52 %then %signalevent 5,3;   ! log zero or -ve
+      %SIGNALEVENT 10,N
+%END;                                   ! MLIBERR
+
+%EXTERNALLONGREALFN ISIN %ALIAS "s_isin"(%LONGREAL INARG)
+!***********************************************************************
+%INTEGER N,N1,N0
+!*    IMP SIN ARGUMENT IN RADIANS                                      *
+!***********************************************************************
+%LONGREAL ARG,DIV,REM,RES
+%LONGREAL R1,R2,APPROX
+%CONSTLONGREAL S0=0.785398163397448307
+%CONSTLONGREAL S1=-0.0807455121882805396; !@-1
+%CONSTLONGREAL S2=0.00249039457018884507; !@-2
+%CONSTLONGREAL S3=-0.0000365762041589190506; !@-4
+%CONSTLONGREAL S4=0.000000313361622553306939; !@-6
+%CONSTLONGREAL S5=-0.00000000175715008354919024; !@-8
+%CONSTLONGREAL S6=0.00000000000687736352204187372; !@-11
+%CONSTLONGREAL C0=1.0
+%CONSTLONGREAL C1=-0.308425137534042457
+%CONSTLONGREAL C2=0.0158543442438154890; !@-1
+%CONSTLONGREAL C3=-0.000325991886927199623; !@-3
+%CONSTLONGREAL C4=0.00000359086044744883857; !@-5
+%CONSTLONGREAL C5=-0.0000000246113662387505408; !@-7
+%CONSTLONGREAL C6=0.000000000115006797403238400; !@-9
+%CONSTLONGREAL C7=-0.000000000000386315826585600000
+                                        !@-12
+%CONSTLONGREAL MDEFALLT=-DEFALLT
+      N1=0
+      %IF INARG<0 %THEN N1=4
+      ARG=MOD(INARG)
+      %IF ARG>=MAX %THENSTART
+         MLIBERR(54);                   ! ERROR(1, 2, 1, 0, 1, 0)
+         %IF N1=4 %THENRESULT=MDEFALLT %ELSERESULT=DEFALLT
+      %FINISH
+      DIV=ARG/PIBY4
+      N=INTPT(DIV)
+      REM=(ARG-N*A1-N*A2)/PIBY4
+      N0=(N+N1)&7
+      %IF N0&1=0 %THEN R1=REM %ELSE R1=1.0-REM
+      R2=R1*R1
+      %IF N0=0 %OR N0=3 %OR N0=4 %OR N0=7 %THEN %C
+         APPROX=((((((S6*R2+S5)*R2+S4)*R2+S3)*R2+S2)*R2+S1)*R2+S0)*R1 %ELSE %C
+         APPROX=((((((C7*R2+C6)*R2+C5)*R2+C4)*R2+C3)*R2+C2)*R2+C1)*R2+C0
+      %IF N0>3 %THENRESULT=-APPROX %ELSERESULT=APPROX
+%END
+%EXTERNALLONGREALFN ICOS %ALIAS "s_icos"(%LONGREAL INARG)
+!***********************************************************************
+!*    IMP COSINE ARGUMENT IN RADIANS                                   *
+!***********************************************************************
+%LONGREAL R1,R2,APPROX,ARG,DIV,REM,RES
+%INTEGER N0,N
+%CONSTLONGREAL S0=0.785398163397448307
+%CONSTLONGREAL S1=-0.0807455121882805396; !@-1
+%CONSTLONGREAL S2=0.00249039457018884507; !@-2
+%CONSTLONGREAL S3=-0.0000365762041589190506; !@-4
+%CONSTLONGREAL S4=0.000000313361622553306939; !@-6
+%CONSTLONGREAL S5=-0.00000000175715008354919024; !@-8
+%CONSTLONGREAL S6=0.00000000000687736352204187372; !@-11
+%CONSTLONGREAL C0=1.0
+%CONSTLONGREAL C1=-0.308425137534042457
+%CONSTLONGREAL C2=0.0158543442438154890; !@-1
+%CONSTLONGREAL C3=-0.000325991886927199623; !@-3
+%CONSTLONGREAL C4=0.00000359086044744883857; !@-5
+%CONSTLONGREAL C5=-0.0000000246113662387505408; !@-7
+%CONSTLONGREAL C6=0.000000000115006797403238400; !@-9
+%CONSTLONGREAL C7=-0.000000000000386315826585600000
+                                        !@-12
+      ARG=MOD(INARG)
+      %IF ARG>=MAX %THENSTART
+         MLIBERR(55);                   ! ERROR(1, 5, 1, 0, 1, 0)
+         %RESULT=DEFALLT
+      %FINISH
+      DIV=ARG/PIBY4
+      N=INTPT(DIV)
+      REM=(ARG-N*A1-N*A2)/PIBY4
+      N0=(N+2)&7
+      %IF N0&1=0 %THEN R1=REM %ELSE R1=1.0-REM
+      R2=R1*R1
+      %IF N0=0 %OR N0=3 %OR N0=4 %OR N0=7 %THEN %C
+         APPROX=((((((S6*R2+S5)*R2+S4)*R2+S3)*R2+S2)*R2+S1)*R2+S0)*R1 %ELSE %C
+         APPROX=((((((C7*R2+C6)*R2+C5)*R2+C4)*R2+C3)*R2+C2)*R2+C1)*R2+C0
+      %IF N0>3 %THENRESULT=-APPROX %ELSERESULT=APPROX
+%END
+%EXTERNALLONGREALFN ITAN %ALIAS "s_itan"(%LONGREAL ARG)
+!***********************************************************************
+%CONSTLONGREAL P0=0.108886004372816875@8
+!*    IMP TANGENT ARGUMENT IN RADIANS                                  *
+!***********************************************************************
+%CONSTLONGREAL P1=-0.895888440067680411@6
+%CONSTLONGREAL P2=0.141898542527617784@5
+%CONSTLONGREAL P3=-0.456493194386656319@2
+%CONSTLONGREAL Q0=0.138637966635676292@8
+%CONSTLONGREAL Q1=-0.399130951803516515@7
+%CONSTLONGREAL Q2=0.135382712805119094@6
+%CONSTLONGREAL Q3=-0.101465619025288534@4
+%CONSTLONGREAL LEASTDIV=1/GREATEST
+%INTEGER SIGN,Q,QM
+%LONGREAL DIV,REM,RES,W2
+      SIGN=0
+      %IF ARG<0 %THEN SIGN=1 %AND ARG=-ARG
+      %IF ARG>MAX %START
+         MLIBERR(56);                   ! ERROR(1, 14, 1, 0, 1, 0)
+         RES=1
+      %FINISHELSESTART
+         DIV=ARG/PIBY4
+         Q=INTPT(DIV)
+         REM=(ARG-Q*A1-Q*A2)/PIBY4
+         %IF Q&1#0 %THEN REM=1.0-REM
+         W2=REM*REM
+         RES=(((P3*W2+P2)*W2+P1)*W2+P0)/((((W2+Q3)*W2+Q2)*W2+Q1)*W2+Q0)*REM
+         QM=Q&3
+         %IF QM=1 %OR QM=2 %START
+            %IF RES<=LEASTDIV %START
+                                        ! ERROR(1, 14, 2, 0, 1, 0)
+               RES=GREATEST
+            %FINISHELSE RES=1.0/RES
+         %FINISH
+         %IF QM>1 %START
+            %IF SIGN=0 %THEN RES=-RES
+         %FINISHELSESTART
+            %IF SIGN=1 %THEN RES=-RES
+         %FINISH
+      %FINISH
+      %RESULT=RES
+%END
+%EXTERNALLONGREALFN AARCTAN %ALIAS "s_aarctan"(%LONGREAL X1)
+!***********************************************************************
+!*    ALGOL TYPE ONE PARAMETER ARCTANGENT                              *
+!***********************************************************************
+%LONGREAL XX1,XSQ,CONSTANT
+%INTEGER SIGN,INV
+      CONSTANT=0
+      %IF X1<0 %THEN SIGN=1 %AND XX1=-X1 %ELSE SIGN=0 %AND XX1=X1
+      %IF XX1>R'4110000000000000' %THEN XX1=1.0/XX1 %AND INV=1 %ELSE INV=0
+      %IF XX1>TANPIBY12 %THEN %C
+         XX1=(RT3M1*XX1-1.0+XX1)/(XX1+RT3) %AND CONSTANT=PIBY6
+      XSQ=XX1*XX1
+      XX1=XX1*(R1/(XSQ+S1+(R2/(XSQ+S2+(R3/(XSQ+S3+(R4/(XSQ+S4))))))))+CONSTANT
+      %IF INV=1 %THEN XX1=1.0-XX1+PIBY2M1
+      %IF SIGN=1 %THEN XX1=-XX1
+      %RESULT=XX1
+%END
+%EXTERNALLONGREALFN ILOG %ALIAS "s_ilog"(%LONGREAL IN)
+!***********************************************************************
+!*    IMP NATURAL LOGARITHIM. SINCE THE SCALING IS BEST DONE BY        *
+!*    DIRECTLY TAMPERING WITH THE EXPONENT DIFFERENT METHODS ARE       *
+!*    NEEDED FOR IBM &IEEEE REPRESENTATIONS                            *
+!***********************************************************************
+%CONSTLONGREAL MIN=-GREATEST
+%LONGREAL RESULT
+      %IF IN<=0 %START
+         %IF IN<0 %START
+            MLIBERR(51);                ! ERROR(1, PROCNO, 1, 0, 1, 0)
+            IN=-IN
+         %FINISHELSESTART
+            MLIBERR(52);                ! ERROR(1, PROCNO, 2, 0, 1, 0)
+            %RESULT=MIN
+         %FINISH
+      %FINISH
+      %IF 1<<TARGET&ibmfpformat#0 %START
+      %BEGIN
+      %INTEGER P,Q,SHORTF
+      %LONGREAL PRESULT,INARG2
+      %CONSTLONGREAL A1=0.594603557501360533
+      %CONSTLONGREAL A2=0.840896415253714543
+      %CONSTLONGREAL B1=0.75{R'40C0000000000000'}
+      %CONSTLONGREAL B2=0.25{R'4040000000000000'}
+      %CONSTLONGREAL LOGE2=R'40B17217F7D1CF7A'
+      %CONSTLONGREAL R0=-0.184416657749370267@2
+      %CONSTLONGREAL R1=-0.234508372303045254@2
+      %CONSTLONGREAL R2=-0.244294581969260792
+      %CONSTLONGREAL S0=-0.157942837832759265@2
+      %CONSTLONGREAL S1=-0.374252034640387355@1
+      %CONSTLONGREAL S2=-0.139586882716355509@1
+         P=BYTEINTEGER(ADDR(IN))-64
+         BYTEINTEGER(ADDR(IN))=0
+         SHORTF=INTEGER(ADDR(IN))
+         %IF SHORTF>=X'00400000' %START
+            %IF SHORTF>=X'00800000' %THEN Q=0 %ELSE Q=1
+         %FINISHELSESTART
+            %IF SHORTF>=X'00200000' %THEN Q=2 %ELSE Q=3
+         %FINISH
+         INTEGER(ADDR(IN))=(INTEGER(ADDR(IN))<<Q)!(INTEGER(ADDR(IN)+4)>>(32-Q))
+         INTEGER(ADDR(IN)+4)=INTEGER(ADDR(IN)+4)<<Q
+         BYTEINTEGER(ADDR(IN))=X'40'
+         %IF IN>0 %AND IN<SQRTHALF %START
+            IN=(IN-A1)/(IN+A1)
+            PRESULT=((4*P-Q)-B1)*LOGE2
+         %FINISHELSESTART
+            IN=(IN-A2)/(IN+A2)
+            PRESULT=((4*P-Q)-B2)*LOGE2
+         %FINISH
+         INARG2=IN*IN
+         RESULT=R0/(INARG2+S0+(R1/(INARG2+S1+(R2/(INARG2+S2)))))*IN+PRESULT
+      %END
+      %FINISH
+      %IF 1<<TARGET&ieeefpformat#0 %START
+      %BEGIN
+      %CONSTLONGREAL c1=  0.69335 93750,   {355/512 =  0.543 (octal)}
+                c2 = -0.21219 44400 54690 58277 @-3,
+                a0 = -0.64124 94342 37455 81147 @ 2,
+                a1 =  0.16383 94356 30215 34222 @ 2,
+                a2 = -0.78956 11288 74912 57267,
+                b0 = -0.76949 93210 84948 79777 @ 3,
+                b1 =  0.31203 22209 19245 32844 @ 3,
+                b2 = -0.35667 97773 90346 46171 @ 2
+      %INTEGER N
+      %LONGREAL f,zden,znum,z,w,xn,aw,bw,rz,rz2
+      %RECORD (rf) %NAME rr
+         F=IN
+         RR==RECORD(ADDR(F))
+         N=((rr_ahi&x'7ff0')>>4)-ExpExcess+1
+         rr_ahi=(rr_ahi&x'800f')+((ExpExcess-1)<<4)
+         %IF f>half %START
+            znum=(f-half)-half
+            zden=(f*half)+half
+         %FINISHELSESTART
+            N=N-1
+            znum=f-half
+            zden=(znum*half)+half
+         %FINISH
+         z=znum/zden
+         w=z*z
+         aw=(((a2*w)+a1)*w)+a0
+         bw=((((w+b2)*w)+b1)*w)+b0
+         rz2=(w*aw)/bw
+         rz=z+(z*rz2)
+         xn=float(N)
+         result=((xn*c2)+rz)+(xn*c1)
+      %END
+      %FINISH
+      %RESULT=result
+%END
+%EXTERNALLONGREALFN ISQRT %ALIAS "s_isqrt"(%LONGREAL ARG)
+!***********************************************************************
+!*    THIS ROUTINE SCALES WITH A LOOP AND HENCE IS VERY SLOW           *
+!*    MUCHFASTER M-C DEPENDENT SCALING IS POSSIBLE                     *
+!***********************************************************************
+%INTEGER I,J,h,n
+%LONGREAL Y,OLD,NEW,f,ta
+%RECORD (RF) %NAME RR
+      %IF ARG<0.0 %THEN MLIBERR(50) %AND ARG=-ARG
+      %IF ARG=0 %THENRESULT=0.0
+      %IF 1<<target&ibmfpformat#0 %START
+         J=1; i=byteinteger(addr(arg))-64
+         y=arg
+         byteinteger(addr(y))=64
+         %IF Y>0.34375 %THEN OLD=Y/2+0.4368 %ELSE OLD=Y/2+0.381
+         %CYCLE J=0,1,14
+            NEW=(OLD+Y/OLD)/2
+            %IF MOD(NEW-OLD)<0.000000000000005 %THENEXIT
+            OLD=NEW
+         %REPEAT
+         %IF I&1#0 %THEN NEW=NEW*4.0 %AND I=I-1
+         %if i#0 %then byteinteger(addr(new))=byteinteger(addr(new))+i//2
+         %RESULT=NEW
+      %FINISH
+      %IF 1<<target&ieeefpformat#0 %START
+         F=ARG
+         RR==RECORD(ADDR(F))
+         N=((rr_ahi&x'7ff0')>>4-ExpExcess)+1
+         rr_ahi=(rr_ahi&x'800f')+((ExpExcess-1)<<4)
+         TA=0.41731+(f*0.59016)
+         RR==RECORD(ADDR(TA))
+                                        !       Note: it can be shown that 3 Newtonian iterations gives
+                                        !       63.32 bits of accuracy hence the constraint on the loop
+         %FOR i=1,1,3 %CYCLE
+            TA=(TA+(f/TA))
+            rr_ahi=rr_ahi-(1<<4);       ! quick divide by 2
+         %REPEAT
+                                        !       if exponent was ODD multiply by square root 0.5
+         %IF N&1=1 %THEN TA=TA*sqrthalf %AND N=N+1
+                                        !       Now add N/2 to exponent of result
+
+         h=(N>>1)<<4
+         rr_ahi=(rr_ahi+h)&x'7fff'
+         %RESULT=TA
+      %FINISH
+%END
+%EXTERNALLONGREALFN IEXP %ALIAS "s_iexp"(%LONGREAL INARG)
+!************************************************************************
+!*    SEE NOTE FOR LOG                                                 *
+!***********************************************************************
+%LONGREAL result
+%CONSTLONGREAL UE=R'C2B437DF00000000'
+%CONSTLONGREAL E=R'42AEAC4D00000000'
+      %IF 1<<target&ibmfpformat#0 %START
+         %IF INARG>=E %THEN MLIBERR(53) %ANDRESULT=greatest
+                                        ! ERROR(1,98,1,0,1,0)
+         %IF INARG<=UE %THENRESULT=0
+      %BEGIN
+      %LONGREAL Y,w
+      %INTEGER B,YINT,P,NEGQ
+      %CONSTLONGREAL LOG2E=R'41171547652B82FE'
+      %CONSTLONGREAL C0=0.999999999999999993
+      %CONSTLONGREAL C1=-0.693147180559934648
+      %CONSTLONGREAL C2=0.240226506956369776
+      %CONSTLONGREAL C3=-0.0555041084024485261; !@-1
+      %CONSTLONGREAL C4=0.00961811709948153328; !@-2
+      %CONSTLONGREAL C5=-0.00133307347698115810; !@-2
+      %CONSTLONGREAL C6=0.000150737171272758723; !@-3
+      %CONSTLONGREALARRAY EXP2(0:15)=1.0,
+      0.957603280698573647,
+      0.917004043204671232,
+      0.878126080186649742,
+      0.840896415253714543,
+      0.805245165974627154,
+      0.771105412703970412,
+      0.738413072969749656,
+      0.707106781186547524,
+      0.677127773468446364,
+      0.648419777325504833,
+      0.620928906036742024,
+      0.594603557501360533,
+      0.569394317378345827,
+      0.545253866332628830,
+      0.522136891213706920
+         Y=INARG*LOG2E
+         %IF INARG>0 %START
+            YINT=INTPT(Y)+1
+            Y=YINT-Y
+            %UNLESS Y<1.0 %START
+               YINT=YINT-1
+               Y=0
+            %FINISH
+            %IF YINT&3=0 %THEN P=YINT>>2 %AND NEGQ=0 %ELSE %C
+               P=YINT>>2+1 %AND NEGQ=-(P<<2)+YINT
+         %FINISHELSESTART
+            %IF INARG<0 %THEN YINT=-INTPT(-Y) %ELSE YINT=INTPT(Y)
+            Y=YINT-Y
+            B=-YINT
+            P=-(B>>2)
+            %IF B&3=0 %THEN NEGQ=0 %ELSE NEGQ=(-P<<2)-B
+         %FINISH
+         W=Y
+         %IF W<R'4010000000000000' %THEN B=0 %ELSESTART
+            INTEGER(ADDR(W))=INTEGER(ADDR(W))<<4!INTEGER(ADDR(W)+4)>>28
+            B=INTEGER(ADDR(W))>>24
+            BYTEINTEGER(ADDR(W))=X'3F'
+            INTEGER(ADDR(W)+4)=INTEGER(ADDR(W)+4)<<4!8
+         %FINISH
+         W=((((((C6*W+C5)*W+C4)*W+C3)*W+C2)*W+C1)*W+C0)*EXP2(B)
+         %IF BYTEINTEGER(ADDR(W))=X'41' %START
+            %IF NEGQ#0 %THEN NEGQ=NEGQ+4 %ELSE P=P+1 %AND ->NOSHIFT
+         %FINISH
+         %IF NEGQ>0 %THENSTART;         ! OFTEN(ALWAYS?) NEGATIVE
+            INTEGER(ADDR(W))=INTEGER(ADDR(W))<<NEGQ!INTEGER(ADDR(W)+4)>> %C
+               (32-NEGQ)
+            INTEGER(ADDR(W)+4)=INTEGER(ADDR(W)+4)<<NEGQ
+         %FINISHELSESTART
+            NEGQ=-NEGQ
+            INTEGER(ADDR(W)+4)=INTEGER(ADDR(W)+4)>>NEGQ!INTEGER(ADDR(W))<< %C
+               (32-NEGQ)
+            INTEGER(ADDR(W))=INTEGER(ADDR(W))>>NEGQ
+         %FINISH
+NOSHIFT:
+         BYTEINTEGER(ADDR(W))=P+64
+         RESULT=W
+      %END
+      %FINISH
+      %IF 1<<target&ieeefpformat#0 %START
+         %IF inarg>709 %THEN mliberr(53) %ANDRESULT=GREATEST
+         %IF inarg<-709 %THENRESULT=0.0
+      %BEGIN
+      %CONSTLONGREAL c1=  0.69335 93750,
+                { 355/512 =  0.543 (octal)}
+                c2 = -0.21219 44400 54690 583 @-3,  {  1/ln(2)}
+                c3 =  0.14426 95040 88896 341 @ 1,
+  { 2**-2 - 2**-54, i.e 1/4 minus one in l.s. bit}
+                p0 =  0.24999 99999 99999 945,
+                p1 =  0.69436 00015 11792 852 @-2,
+                p2 =  0.16520 33002 68279 130 @-4,
+                q1 =  0.55553 86669 69001 188 @-1,
+                q2 =  0.49586 28849 05441 294 @-3
+
+      %LONGREAL xn,x1,x2,g,z,gpz,qz,r
+      %INTEGER n,h
+      %RECORD (RF) %NAME RR
+         R=INARG
+         rr==record(addr(R))
+         h=(rr_ahi&x'7ff0')>>4;         ! extract and right-align exponent
+
+                                        ! If x sufficiently close to zero, dexp(x) is 1.0
+
+         %IF h<(ExpExcess-53) %THEN RESULT=1.0 %ELSESTART
+            n=int(INARG*c3)
+            xn=float(n)
+            x1=float(int(INARG))
+            x2=INARG-x1
+            g=((x1-(xn*c1))+x2)-(xn*c2)
+
+                                        !      should really convert g to fixed point now
+
+            z=g*g
+            gpz=((((p2*z)+p1)*z)+p0)*g
+            qz=(((q2*z)+q1)*z)+half
+            r=half+(gpz/(qz-gpz))
+
+                                        !      then refloat the fixed point result - ho hum!
+
+            n=n+1
+
+                                        !      Now, add n to the exponent of r for the result
+
+            h=n
+            rr_ahi=(rr_ahi&x'800f')!((rr_ahi+(h<<4))&x'7ff0')
+            result=r
+         %FINISH
+      %END
+      %FINISH
+      %RESULT=result
+%END
+%EXTERNALLONGREALFN IARCTAN %ALIAS "s_iarctan"(%LONGREAL X2,X1)
+%LONGREAL XSQ,CONSTANT
+%LONGREAL Y,YSQ,X
+%INTEGER SIGN,INV,SIGN1,SIGN2
+      SIGN=1; SIGN1=1; SIGN2=1
+      CONSTANT=0
+      %IF X2<0 %THEN SIGN2=-1 %AND X2=-X2
+      %IF X1<0 %THEN SIGN1=-1 %AND X1=-X1
+      %IF X1=0 %AND X2=0 %START
+         MLIBERR(71);                   ! ERROR(1, 38, 1, 0, 1, 0)
+         X=0
+      %FINISHELSESTART
+         %IF X1>X2 %START
+            SIGN=-1
+            Y=X2/X1
+         %FINISHELSE Y=X1/X2
+         %IF Y>TANPIBY12 %THEN Y=(RT3M1*Y-1.0+Y)/(Y+RT3) %AND CONSTANT=PIBY6
+         YSQ=Y*Y
+         X=Y*(R1/(YSQ+S1+(R2/(YSQ+S2+(R3/(YSQ+S3+(R4/(YSQ+S4))))))))+CONSTANT
+         %IF SIGN=-1 %THEN X=1.0-X+PIBY2M1
+         %IF SIGN1=1 %START
+            %IF SIGN2=-1 %THEN X=PI-X
+         %FINISHELSESTART
+            %IF SIGN2=-1 %THEN X=X-PI %ELSE X=-X
+         %FINISH
+      %FINISH
+      %RESULT=X
+%END
+%EXTERNALLONGREALFN HYPTAN(%LONGREAL X)
+%CONSTLONGREAL A1=676440.765
+%CONSTLONGREAL A2=45092.124
+%CONSTLONGREAL A3=594.459
+%CONSTLONGREAL B1=2029322.295
+%CONSTLONGREAL B2=947005.29
+%CONSTLONGREAL B3=52028.55
+%CONSTLONGREAL B4=630.476
+%LONGREAL XSQ,NUM,DENOM,RES
+%INTEGER MINUS
+      MINUS=0
+      %IF X<=-0.54931 %THEN MINUS=1 %AND X=-X %ELSE MINUS=0
+      %IF (X>=0.54931 %AND X<20.101) %START
+         RES=1-(2.0/(IEXP(2.0*X)+1.0))
+         %IF MINUS=1 %THENRESULT=-RES %ELSERESULT=RES
+      %FINISH
+      %IF X>=20.101 %START
+         %IF MINUS=1 %THENRESULT=-1.0 %ELSERESULT=1.0
+      %FINISH
+      XSQ=X*X
+      NUM=XSQ*(A1+XSQ*(A2+XSQ*(A3+XSQ)))
+      DENOM=B1+XSQ*(B2+XSQ*(B3+XSQ*(B4+XSQ)))
+      %RESULT=(1-NUM/DENOM)*X
+%END
+%EXTERNALLONGREALFN COT(%LONGREAL X)
+%LONGREAL DENOM
+%CONSTLONGREAL MAX=1.0@15
+%CONSTLONGREAL NZERO=0.00000000000001;  !@-14
+      %IF X>MAX %THEN MLIBERR(66) %ELSESTART
+         DENOM=ISIN(X)
+         %IF MOD(DENOM)<=NZERO %THEN MLIBERR(67) %ELSERESULT=ICOS(X)/DENOM
+      %FINISH
+      %STOP
+%END
+%EXTERNALLONGREALFN IRADIUS %ALIAS "s_iradius"(%LONGREAL X,Y)
+!      %IF X*X>7@75 %OR X*X+Y*Y>7@75 %THEN MLIBERR(70)
+                                        ! IMERR(25, 10)
+      %RESULT=ISQRT(X*X+Y*Y)
+%END
+%EXTERNALLONGREALFN IARCSIN %ALIAS "s_iarcsin"(%LONGREAL X)
+%LONGREAL ARKSN,G,F,Q,Y,Y2
+%LONGREALARRAY DT(1:42)
+%INTEGER I,J,M,M2
+%CONSTLONGREAL DROOT=1.4142135623730950488
+%CONSTLONGREALARRAY DA(0:21)=0.0,
+                                   1.48666649328710346896,
+                                   0.03885303371652290716,
+                                   0.00288544142208447113,
+                                   0.00028842183344755366,
+                                   0.00003322367192785279,
+                                   0.00000415847787805283,
+                                   0.00000054965045259742,
+                                   0.00000007550078449372,
+                                   0.00000001067193805630,
+                                   0.00000000154218037928,
+                                   0.00000000022681145985,
+                                   0.00000000003383885639,
+                                   0.00000000000510893752,
+                                   0.00000000000077911392,
+                                   0.00000000000011983786,
+                                   .00000000000001856973,
+                                   .00000000000000289619,
+                                   .00000000000000045428,
+                                   .00000000000000007162,
+                                   .00000000000000001134,
+                                   .00000000000000000180
+      ARKSN=0.0
+      G=0.0
+      F=0.0
+      Q=0.0
+      I=0
+      J=1
+      DT(1)=1.0
+      %IF MOD(X)>1.0 %THEN MLIBERR(72)
+                                        ! IMERR(25, 1)
+      %IF (MOD(X)>=1./DROOT %AND MOD(X)<=1.0) %THEN %C
+         Y=ISQRT(1.0-X*X)*DROOT %ELSE Y=X*DROOT
+      DT(2)=Y
+      ARKSN=ARKSN+0.74333324664350173448
+      Y2=Y*2
+      %CYCLE M=2,1,21
+         G=ARKSN
+         M2=M<<1
+         DT(M2-1)=Y2*DT(M2-2)-DT(M2-3)
+         DT(M2)=Y2*DT(M2-1)-DT(M2-2)
+         ARKSN=ARKSN+DA(M)*DT(M2-1)
+         %IF MOD(G-ARKSN)<0.0000000000000000005 %THEN ->RESULT
+      %REPEAT
+RESULT:
+
+      %IF 1.0/DROOT<=MOD(X)<=1.0 %START
+         ARKSN=PI/2.0-ARKSN*Y
+         %IF X<0.0 %THENRESULT=-ARKSN %ELSERESULT=ARKSN
+      %FINISHELSERESULT=Y*ARKSN
+%END
+%EXTERNALLONGREALFN IARCCOS %ALIAS "s_iarccos"(%LONGREAL X)
+      %IF MOD(X)>1.0 %THEN MLIBERR(73)
+                                        ! IMERR(25, 2)
+      %RESULT=PI/2.0-IARCSIN(X)
+%END
+%EXTERNALLONGREALFN HYPSIN(%LONGREAL X)
+%LONGREAL Y,Z,XPOW
+      %IF MOD(X)>172.694 %THEN MLIBERR(60)
+                                        ! IMERR(25, 4)
+      %IF MOD(X)<0.3465736 %THEN %C
+         XPOW=X*X %ANDRESULT=X*(1.0+XPOW*(0.16666505+0.00836915*XPOW))
+      Y=0.5*IEXP(X)
+      Z=0.5*IEXP(-X)
+      %RESULT=Y-Z
+%END
+%EXTERNALLONGREALFN HYPCOS(%LONGREAL X)
+%LONGREAL Y,Z
+      %IF MOD(X)>172.694 %THEN MLIBERR(74)
+                                        ! IMERR(25, 5)
+      Y=0.5*IEXP(X)
+      Z=0.5*IEXP(-X)
+      %RESULT=Y+Z
+%END
+%EXTERNALLONGREALFN EXPTEN(%LONGREAL X)
+%INTEGER I
+      I=INTPT(X)
+      %IF X-I=0.0 %THENRESULT=10.0**I
+                                        !10@XZ=E@(X*LN10)
+      %RESULT=IEXP(LOG10A*X)
+%END
+%EXTERNALLONGREALFN LOGTEN(%LONGREAL X)
+      %IF X=1.0 %THENRESULT=0.0
+      %RESULT=0.4342944819032518276511289*ILOG(X)
+%END
+%EXTERNALLONGREALFN GAMMAFN(%LONGREAL X)
+%LONGREAL RX,G,RT
+%INTEGER K
+%CONSTLONGREALARRAY A(1:15)=0.99999999999999990,
+                            0.42278433509851812,
+                            0.41184033042198148,
+                            0.08157691940138868,
+                            0.07424900794340127,
+                           -0.00026695102875553,
+                            0.01115381967190670,
+                           -0.00285150124303465,
+                            0.00209975903507706,
+                           -0.00090834655742005,
+                            0.00046776781149650,
+                           -0.00020644763191593,
+                            0.00008155304980664,
+                           -0.00002484100538487,
+                            0.00000510635920726
+      %IF X>57 %THEN MLIBERR(65)
+      RX=1
+      %IF 2<=X<=3 %THEN ->G2
+      %IF X<2 %THEN ->G3
+G1:   X=X-1
+      RX=RX*X
+      %IF X<3 %THEN ->G2
+      ->G1
+G3:   %IF MOD(X)<1@-11 %THEN MLIBERR(63)
+      RX=RX/X
+      X=X+1
+      %IF X<2 %THEN ->G3
+G2:   G=-0.00000051132627267
+      RT=X-2
+      %CYCLE K=15,-1,1
+         G=G*RT+A(K)
+      %REPEAT
+      %RESULT=RX*G
+%END
+%EXTERNALLONGREALFN LOGGAMMA(%LONGREAL X)
+%LONGREAL U,YT,YR,FX,LX,MODD,SX
+%INTEGER IND,K
+%CONSTLONGREALARRAY A(1:7)=0.083333333333333,
+                          -0.002777777777778,
+                            0.000793650793651,
+                          -0.000595238095238,
+                            0.000841750841751,
+                          -0.001917520917527,
+                            0.006410256410256
+      YT=0.0
+      YR=4.2913@73
+      %IF X<=YT %THEN MLIBERR(64)
+      %IF X>=YR %THEN MLIBERR(66)
+      U=X
+      FX=0
+      %IF X<0 %THEN IND=1 %ELSE IND=-1
+      X=MOD(X)
+      %IF X>=13 %THEN ->G1
+      %IF X<2@-10 %THEN ->G6
+G2:   LX=LOG(X*X)/2
+      FX=FX+LX
+      X=X+1
+      %IF X<13 %THEN ->G2
+G1:   %IF IND=-1 %THEN ->G5
+      K=INTPT(X+5@-8)
+      %IF MOD(X-K)<2@-10 %THEN ->G6
+G5:   MODD=X*X
+      LX=-2.955065359477124@-2
+      SX=LX*X/MODD
+      %CYCLE K=7,-1,1
+         LX=(SX*X)/MODD+A(K)
+         SX=(LX*X)/MODD
+      %REPEAT
+      SX=SX-X-FX+0.918938533204673
+      LX=LOG(X*X)/2
+      SX=SX+(X-0.5)*LX
+      %IF IND=1 %THENSTART
+         FX=SIN(PI*U)
+         X=U*FX
+         MODD=PI/(X*X)
+         LX=LOG(X*MODD*X*MODD)/2
+         SX=LX-SX
+      %FINISH
+      %RESULT=SX
+      ->G7
+G6:   %RESULT=1@17
+G7:%END
+%EXTERNALLONGREALFN ERFN(%LONGREAL X)
+%LONGREAL A0,A1,B0,B1,Z,SUM,T,SA,SB,TEMP
+%INTEGER S,N,SC
+%CONSTLONGREAL EPS=0.0000000000000001;  !@-16
+%CONSTLONGREAL SQPI=1.772453850905516
+      %IF X=0 %THENRESULT=0
+      %IF X>0 %THEN S=1 %ELSE S=-1 %AND X=MOD(X)
+      Z=X*X
+      %IF X<1 %THENSTART
+         SUM=X
+         T=X
+         N=0
+E1:      N=N+1
+         T=-T*Z*(2*N-1)/(N*(2*N+1))
+         SUM=SUM+T
+         %IF MOD(T)>EPS %THEN ->E1
+         SUM=2*SUM/SQPI
+      %FINISHELSESTART
+         A0=0
+         A1=1
+         B0=1
+         B1=X
+         SUM=A1/B1
+         N=1
+E2:      N=N+1
+         SB=1
+E3:
+         TEMP=X*A1+(N-1)*A0/2
+         %IF MOD(TEMP)>1000 %THEN SA=1000 %ELSE SA=1
+         A0=A1/SA
+         A1=TEMP/SA
+         TEMP=X*B1+(N-1)*B0/2
+         %IF MOD(TEMP)>1000 %THEN SB=1000 %ELSE SB=0
+         B0=B1/SB
+         B0=TEMP/SB
+         N=N+SC
+         %IF SC=1 %THEN SC=0 %AND ->E3
+         T=(A1/B1)*(SA/SB)
+         %IF MOD(SUM-T)>EPS %THENSTART
+            SUM=T
+            ->E2
+         %FINISH
+         SUM=1-IEXP(-Z)*T/SQPI
+      %FINISH
+      %RESULT=S*SUM
+%END
+%EXTERNALLONGREALFN ERFNC(%LONGREAL X)
+      %RESULT=1-ERFN(X)
+%END
+%EXTERNALINTEGERFN BITS(%INTEGER X)
+%INTEGER I,J
+      J=0
+      J=J+X&1 %AND X=X>>1 %WHILE X#0
+      %RESULT=J
+%END
+%EXTERNALINTEGERFN PARITY(%INTEGER I)
+      %RESULT=1-(I&1)*2
+%END
+%EXTERNALROUTINE SOLVE LN EQ(%LONGREALARRAYNAME A,B, %INTEGER N,
+    %LONGREALNAME DET)
+%LONGREAL AMAX,CH
+%INTEGER I,J,J MAX,S
+      ->L3 %IF N>0
+      PRINTSTRING("
+      SOLVE LN EQ DATA FAULT: N=")
+      WRITE(N,2); NEWLINE; %STOP
+L3:   ->L1 %IF N>1
+      DET=A(1,1)
+      ->L2 %IF DET=0
+      B(1)=B(1)/DET
+      ->L2
+L1:   DET=1
+      %CYCLE I=1,1,N-1
+         A MAX=0; J MAX=0
+         %CYCLE J=I,1,N
+            ->L4 %IF MOD(A(J,I))<=AMAX
+            AMAX=MOD(A(J,I)); JMAX=J
+L4:      %REPEAT
+         ->L5 %IF J MAX=I
+         DET=-DET
+         ->L6 %IF J MAX#0
+         DET=0; ->L2
+L6:      %CYCLE J=I,1,N
+            CH=A(I,J)
+            A(I,J)=A(J MAX,J)
+            A(J MAX,J)=CH
+         %REPEAT
+         CH=B(I)
+         B(I)=B(J MAX)
+         B(J MAX)=CH
+L5:      CH=A(I,I)
+         DET=DET*CH
+         %CYCLE J=I+1,1,N
+            A MAX=A(J,I)/CH
+            %CYCLE S=I+1,1,N
+               A(J,S)=A(J,S)-A(I,S)*A MAX
+            %REPEAT
+            B(J)=B(J)-B(I)*A MAX
+         %REPEAT
+      %REPEAT
+      CH=A(N,N)
+      DET=DET*CH
+      ->L2 %IF DET=0
+      B(N)=B(N)/CH
+      %CYCLE I=N-1,-1,1
+         CH=B(I)
+         %CYCLE J=I+1,1,N
+            CH=CH-A(I,J)*B(J)
+         %REPEAT
+         B(I)=CH/A(I,I)
+      %REPEAT
+L2:
+%END
+%EXTERNALROUTINE DIV MATRIX(%LONGREALARRAYNAME A,B, %INTEGER N,M,
+    %LONGREALNAME DET)
+                                        ! A=INV(B)A:BNXN, ANXM
+%LONGREAL AMAX,CH
+%INTEGER I,J,JMAX,S,K
+      ->L3 %IF N>0
+      PRINTSTRING("
+      DIV MATRIX DATA FAULT N=")
+      WRITE(N,2)
+      NEWLINE; %STOP
+L3:   ->L1 %IF N>1
+      DET=B(1,1)
+      ->L2 %IF DET=0
+      %CYCLE I=1,1,M
+         A(1,I)=A(1,I)/DET
+      %REPEAT
+      ->L2
+L1:   DET=1
+      %CYCLE I=1,1,N-1
+         AMAX=0; JMAX=0
+         %CYCLE J=I,1,N
+            ->L4 %IF MOD(B(J,I))<=AMAX
+            AMAX=MOD(B(J,I)); JMAX=J
+L4:      %REPEAT
+         ->L5 %IF J MAX=I
+         DET=-DET
+         ->L6 %IF JMAX#0
+         DET=0; ->L2
+L6:      %CYCLE J=I,1,N
+            CH=B(I,J)
+            B(I,J)=B(JMAX,J)
+            B(JMAX,J)=CH
+         %REPEAT
+         %CYCLE K=1,1,M
+            CH=A(I,K)
+            A(I,K)=A(JMAX,K)
+            A(JMAX,K)=CH
+         %REPEAT
+L5:      CH=B(I,I)
+         DET=DET*CH
+         %CYCLE J=I+1,1,N
+            AMAX=B(J,I)/CH
+            %CYCLE S=I+1,1,N
+               B(J,S)=B(J,S)-B(I,S)*AMAX
+            %REPEAT
+            %CYCLE K=1,1,M
+               A(J,K)=A(J,K)-A(I,K)*AMAX
+            %REPEAT
+         %REPEAT
+      %REPEAT
+      CH=B(N,N)
+      DET=DET*CH
+      ->L2 %IF DET=0
+      %CYCLE K=1,1,M
+         A(N,K)=A(N,K)/CH
+      %REPEAT
+      %CYCLE I=N-1,-1,1
+         AMAX=B(I,I)
+         %CYCLE K=1,1,M
+            CH=A(I,K)
+            %CYCLE J=I+1,1,N
+               CH=CH-B(I,J)*A(J,K)
+            %REPEAT
+            A(I,K)=CH/AMAX
+         %REPEAT
+      %REPEAT
+L2:
+%END
+%EXTERNALROUTINE UNIT(%LONGREALARRAYNAME A, %INTEGER N)
+%INTEGER I,J
+      ->L10 %IF N>0
+      PRINTSTRING("
+MATRIX BOUND ZERO OR NEGATIVE")
+      NEWLINE
+      %MONITOR
+      %STOP
+L10:
+      %CYCLE I=1,1,N
+         %CYCLE J=1,1,N
+            A(I,J)=0
+         %REPEAT
+         A(I,I)=1
+      %REPEAT
+%END
+%EXTERNALROUTINE INVERT(%LONGREALARRAYNAME A,B, %INTEGER N, %LONGREALNAME DET)
+                                        ! A=INV B USING DIV MATRIX
+      ->L3 %IF N>0
+      PRINTSTRING("
+      INVERT DATA FAULT N=")
+      WRITE(N,2); NEWLINE; %STOP
+L3:   UNIT(A,N)
+      DIV MATRIX(A,B,N,N,DET)
+%END
+%EXTERNALLONGREALFN DET(%LONGREALARRAYNAME A, %INTEGER N)
+%LONGREALARRAY B(1:N); %LONGREAL DETVAL
+%INTEGER I
+      ->L10 %IF N>0
+      PRINTSTRING("
+MATRIX BOUND ZERO OR NEGATIVE")
+      NEWLINE
+      %MONITOR
+      %STOP
+L10:
+      %CYCLE I=1,1,N
+         B(I)=0
+      %REPEAT
+      SOLVE LN EQ(A,B,N,DETVAL)
+      %RESULT=DETVAL
+%END
+%EXTERNALROUTINE NULL(%LONGREALARRAYNAME A, %INTEGER N,M)
+%INTEGER I,J
+      ->L10 %IF N>0 %AND M>0
+      PRINTSTRING("
+MATRIX BOUND ZERO OR NEGATIVE")
+      NEWLINE
+      %MONITOR
+      %STOP
+L10:
+      %CYCLE I=1,1,N
+         %CYCLE J=1,1,M
+            A(I,J)=0
+         %REPEAT
+      %REPEAT
+%END
+%EXTERNALROUTINE ADD MATRIX(%LONGREALARRAYNAME A,B,C, %INTEGER N,M)
+%INTEGER I,J
+      ->L10 %IF N>0 %AND M>0
+      PRINTSTRING("
+MATRIX BOUND ZERO OR NEGATIVE")
+      NEWLINE
+      %MONITOR
+      %STOP
+L10:
+      %CYCLE I=1,1,N
+         %CYCLE J=1,1,M
+            A(I,J)=B(I,J)+C(I,J)
+         %REPEAT
+      %REPEAT
+%END
+%EXTERNALROUTINE SUB MATRIX(%LONGREALARRAYNAME A,B,C, %INTEGER N,M)
+%INTEGER I,J
+      ->L10 %IF N>0 %AND M>0
+      PRINTSTRING("
+MATRIX BOUND ZERO OR NEGATIVE")
+      NEWLINE
+      %MONITOR
+      %STOP
+L10:
+      %CYCLE I=1,1,N
+         %CYCLE J=1,1,M
+            A(I,J)=B(I,J)-C(I,J)
+         %REPEAT
+      %REPEAT
+%END
+%EXTERNALROUTINE COPY MATRIX(%LONGREALARRAYNAME A,B, %INTEGER N,M)
+%INTEGER I,J
+      ->L10 %IF N>0 %AND M>0
+      PRINTSTRING("
+MATRIX BOUND ZERO OR NEGATIVE")
+      NEWLINE
+      %MONITOR
+      %STOP
+L10:
+      %CYCLE I=1,1,N
+         %CYCLE J=1,1,M
+            A(I,J)=B(I,J)
+         %REPEAT
+      %REPEAT
+%END
+%EXTERNALROUTINE MULT MATRIX(%LONGREALARRAYNAME A,B,C, %INTEGER N,P,M)
+                                        ! A=B*C, A IS N X M
+%INTEGER I,J,K
+%LONGREAL R
+      ->L10 %IF N>0 %AND M>0 %AND P>0
+      PRINTSTRING("
+MATRIX BOUND ZERO OR NEGATIVE")
+      NEWLINE
+      %MONITOR
+      %STOP
+L10:
+      %CYCLE I=1,1,N
+         %CYCLE J=1,1,M
+            R=0
+            %CYCLE K=1,1,P
+               R=R+B(I,K)*C(K,J)
+            %REPEAT
+            A(I,J)=R
+         %REPEAT
+      %REPEAT
+%END
+%EXTERNALROUTINE MULT TR MATRIX(%LONGREALARRAYNAME A,B,C, %INTEGER N,P,M)
+%LONGREAL R
+                                        ! A=B*C, A IS N X M
+%INTEGER I,J,K
+      ->L10 %IF N>0 %AND M>0 %AND P>0
+      PRINTSTRING("
+MATRIX BOUND ZERO OR NEGATIVE")
+      NEWLINE
+      %MONITOR
+      %STOP
+L10:
+      %CYCLE I=1,1,N
+         %CYCLE J=1,1,M
+            R=0
+            %CYCLE K=1,1,P
+               R=R+B(I,K)*C(J,K)
+            %REPEAT
+            A(I,J)=R
+         %REPEAT
+      %REPEAT
+%END
+%EXTERNALROUTINE TRANS MATRIX(%LONGREALARRAYNAME A,B, %INTEGER N,M)
+                                        ! AN X M, B M X N
+%INTEGER I,J
+      ->L10 %IF N>0 %AND M>0
+      PRINTSTRING("
+MATRIX BOUND ZERO OR NEGATIVE")
+      NEWLINE
+      %MONITOR
+      %STOP
+L10:
+      %CYCLE I=1,1,N
+         %CYCLE J=1,1,M
+            A(I,J)=B(J,I)
+         %REPEAT
+      %REPEAT
+%END
+%EXTERNALREALFN RANDOM(%INTEGERNAME I, %INTEGER N)
+%REAL X
+%INTEGER J
+      ->L2 %IF N<0; ->L1 %IF N>1
+      %IF target=emas %THENSTART
+         J=I
+         *LSS_65539
+         *IMYD_J
+         *AND_X'000000007FFFFFFF'
+         *STUH_ %B
+         *ST_J
+         I=J
+      %FINISHELSE I=(65539*I)&X'7FFFFFFF'
+      %RESULT=0.0000000004656613*I
+L1:   X=0
+      %CYCLE N=1,1,N
+         X=X+RANDOM(I,1)
+      %REPEAT
+      %RESULT=X
+L2:   PRINTSTRING("NEGATIVE ARGUMENT IN RANDOM")
+      %MONITOR
+      %STOP
+%END
+%EXTERNALLONGREALFN LRANDOM( %INTEGERNAME I, %INTEGER N)
+%LONGREAL X
+%constinteger magic=65539
+%INTEGER J
+      ->L2 %IF N < 0; ->L1 %IF N > 1
+      %if target= emas %Start
+      J = I
+      *LSS_magic
+      *IMYD_J
+      *AND_X'000000007FFFFFFF'
+      *STUH_ %B
+       *ST_J
+      I = J
+      %finish %else %if target=ibm %or target=ibmxa %or target=amdahl %Start
+      j=i
+        *l_1,magic
+        *m_0,j
+         *sll_1,1
+      *srl_1,1
+        *st_1,j
+      i=j
+     %finish %else I=(magic*I)&X'7FFFFFFF'
+      %RESULT = 0.0000000004656613 * I
+L1:   X = 0
+      %CYCLE N=1,1,N; X = X + LRANDOM(I,1); %REPEAT; %RESULT = X
+L2:   PRINTSTRING("NEGATIVE ARGUMENT IN LRANDOM"); %MONITOR
+      %STOP
+%END;                                    !OF LRANDOM
+%EXTERNALROUTINE MOVE %ALIAS "s_move"(%INTEGER LENGTH,FROM,TO)
+%INTEGER I
+      %RETURNIF LENGTH<=0
+      %IF target=emas %THENSTART
+         I=X'18000000'!LENGTH
+         *LSS_FROM
+         *LUH_I
+         *LDTB_I
+         *LDA_TO
+         *MV_ %L = %DR
+      %FINISHELSEIF target=perq %OR TARGET=ACCENT %OR target=pnx %START
+         %CYCLE i=0,1,length>>2-1
+            halfinteger(to+i)=halfinteger(from+i)
+         %REPEAT
+      %FINISHELSESTART;                 ! ibm etc
+         %if FROM<=TO<=FROM+LENGTH %START
+            %CYCLE I=length-1,-1,0
+               byteinteger(to+i)=byteinteger(from+i)
+            %repeat
+         %else
+            %CYCLE i=0,1,length-1
+               byteinteger(to+i)=byteinteger(from+i)
+            %REPEAT
+         %finish
+      %FINISH
+%END
+%EXTERNALROUTINE FILL %ALIAS "s_fill"(%INTEGER LENGTH,FROM,FILLER)
+%INTEGER I,j
+      %RETURNIF LENGTH<=0
+      %IF target=emas %START
+         I=X'18000000'!LENGTH
+         *LDTB_I
+         *LDA_FROM
+         *LB_FILLER
+         *MVL_ %L = %DR
+      %FINISHELSEIF target=perq %OR TARGET=ACCENT %OR target=pnx %START
+         j=filler<<8!filler
+         %FOR i=0,1,length>>1-1 %CYCLE
+            halfinteger(from+i)=j
+         %REPEAT
+      %FINISHELSESTART
+         byteinteger(i)=filler %FOR i=FROM,1,FROM+length-1
+      %FINISH
+%END
+
+! IMP ROUTINES FOR DATE AND TIME
+%if target#DRS %then %start
+%EXTERNALLONGREALFN CPUTIME
+      %RESULT=1
+%END;                                   ! CPUTIME
+                                        !*
+%EXTERNALSTRINGFN DATE
+%STRING (10) D,T,U,V
+      D="YYYY.MM.DD"
+      T="HH:MM:SS"
+      %RESULT=D
+%END;                                   ! DATE
+                                        !*
+%EXTERNALSTRINGFN TIME
+%STRING (10) D,T
+      D="DD.MM.YY"
+      T="HH:MM:SS"
+      %RESULT=T
+%END
+%finish
+%EXTERNALINTEGERFN SIZE OF %ALIAS "s_sizeof"(%NAME X)
+!***********************************************************************
+!*    returns the size of a %NAME paramterer                           *
+!***********************************************************************
+%CONSTBYTEINTEGERARRAY BYTES(0:7)= 1(4),2,4,8,16
+%INTEGER I
+      %IF target=emas %START
+         *LSS_(%LNB +5)
+         *ST_I
+         %IF I&X'C2000000'#0 %THENRESULT=I&X'00FFFFFF'
+         I=(I>>27)&7
+      %FINISHELSEIF target=perq %or target=DRS %OR TARGET=ACCENT %START
+         **x+4; **=i
+         %IF i&7>=3 %THENRESULT=i>>16
+         i=(i>>4)&7
+      %FINISH%ELSE %IF target=pnx %START
+         *ILP2; **=i
+         %if i&7>=3 %THEN %RESULT=i>>16
+         i=(i>>4)&7
+      %FINISH %ELSE %IF TARGET=IBM %OR TARGET=IBMXA %OR TARGET=AMDAHL %START
+         *L_1,X; *ST_1,I
+         %RESULT=I>>16
+      %FINISH %else %if 1<<target&emachine#0 %then %start
+         **x; **=i
+         %result=i>>16
+      %finish
+      %RESULT=BYTES(I)
+%END
+%EXTERNALSTRING (255) %FN SUBSTRING %ALIAS "s_substring"(%STRINGNAME S,
+    %INTEGER I,J)
+%INTEGER k
+%STRING (255) HOLDS
+      %IF I<1 %OR I>J+1 %OR J>LENGTH(S) %THENSIGNALEVENT 5,7
+      J=J-I+1
+      LENGTH(HOLDS)=J
+      charno(holds,k)=charno(s,i+k-1) %FOR k=1,1,j
+      %RESULT=HOLDS
+%END
+%EXTERNALROUTINE CLOSE STREAM(%INTEGER STREAM)
+!      %IF STREAM>98 %OR STREAM<1 %OR COMREG(22)=STREAM           %C
+%OR COMREG(23)=STREAM %THEN SSERR(24)
+      IOCP(16,STREAM)
+%END
+
+%EXTERNALINTEGERFN SIGN %ALIAS "s_sign"(%LONGREAL VALUE)
+      %IF VALUE>0 %THENRESULT=1
+      %IF VALUE<0 %THENRESULT=-1
+      %RESULT=0
+%END
+%EXTERNALLONGREALFN MAXREAL %ALIAS "s_maxreal"
+      %RESULT=GREATEST
+%END
+%EXTERNALLONGREALFN MINREAL %ALIAS "s_minreal"
+      %RESULT=R'0010000000000000'
+%END
+%EXTERNALINTEGERFN MAXINT %ALIAS "s_maxint"
+      %RESULT=X'7FFFFFFF'
+%END
+%EXTERNALLONGREALFN EPSILON %ALIAS "s_epsilon"
+      %RESULT=R'3410000000000000'
+%END
+                                        ! NEEDS CHANGING FOR OTHER WLENGT
+%CONSTLONGREAL PMAX= 1@16
+%CONSTLONGREAL DZ= 0
+%CONSTLONGREAL D0= 0, D1 = 1
+%STRING(15)%FNSPEC SWRITE(%INTEGER VALUE,PLACES)
+!
+%if target#Gould %and target#DRS %start
+%EXTERNALROUTINE WRITE %ALIAS "s_write"(%INTEGER VALUE,PLACES)
+!***********************************************************************
+!*    SIMPLE MINDED ALL IMP VERSION NOT USING STRINGS                  *
+!***********************************************************************
+%INTEGER SIGN,WORK,PTR
+%BYTEINTEGERARRAY CH(0:15)
+      SIGN=' '
+      %IF VALUE=X'80000000' %THEN PRINTSTRING(SWRITE(VALUE,PLACES)) %AND %RETURN
+      %IF VALUE<0 %THEN SIGN='-' %AND VALUE=-VALUE
+      PTR=0
+      %CYCLE
+         WORK=VALUE//10
+         CH(PTR)=VALUE-10*WORK
+         VALUE=WORK
+         PTR=PTR+1
+      %REPEATUNTIL VALUE=0
+      %IF PLACES>PTR %THEN SPACES(PLACES-PTR)
+      WORK=PTR-1
+      PRINT SYMBOL(SIGN)
+      PRINT SYMBOL(CH(PTR)+'0') %FOR PTR=WORK,-1,0
+%END
+%finish
+%EXTERNALSTRING(15)%FN SWRITE %ALIAS "s_swrite"(%INTEGER VALUE,PLACES)
+!***********************************************************************
+!*    SIMPLE MINDED ALL IMP VERSION                                    *
+!***********************************************************************
+%STRING(1)SIGN
+%STRING(15)RES
+%INTEGER WORK,PTR
+%STRING(1)%ARRAY CH(0:15)
+      RES=""
+      SIGN=" "
+      %IF VALUE=X'80000000' %THEN %START
+         RES="-2147483548"
+         RES=" ".RES %FOR PTR=1,1,PLACES-10
+         %RESULT=RES
+      %FINISH
+      %IF VALUE<0 %THEN SIGN="-" %AND VALUE=-VALUE
+      PTR=0
+      %CYCLE
+         WORK=VALUE//10
+         CH(PTR)=TOSTRING(VALUE-10*WORK+'0')
+         VALUE=WORK
+         PTR=PTR+1
+      %REPEATUNTIL VALUE=0
+      RES=RES." " %FOR WORK=PTR,1,PLACES-1
+      WORK=PTR-1
+      RES=RES.SIGN
+      RES=RES.CH(PTR) %FOR PTR=WORK,-1,0
+      %RESULT=RES
+%END
+%EXTERNALSTRING(15)%FN ITOS %ALIAS "s_itos"(%INTEGER N)
+!***********************************************************************
+!*    SIMPLE PRINT WITH NO LEADING SPACE                               *
+!***********************************************************************
+%STRING(16)S
+%INTEGER SIGN, W, D
+      %RESULT = "0" %IF N = 0
+!
+      SIGN = 1
+      %IF N < 0 %START
+         SIGN = -1
+         %IF N = X'80000000' %THEN %RESULT="-2147483648"
+         N = -N
+      %FINISH
+      S = ""
+      %WHILE N > 0 %CYCLE
+         W = N // 10
+         D = N - W * 10
+         S = TOSTRING('0' + D) . S
+         N = W
+      %REPEAT
+      S = "-" . S %IF SIGN < 0
+      %RESULT = S
+%END; ! ITOS
+%CONSTSTRING(1)%ARRAY HEX(0:15)="0","1","2","3","4",
+               "5","6","7","8","9","A","B","C","D","E","F"
+%EXTERNALROUTINE PRHEX(%INTEGER VALUE, PLACES)
+%INTEGER I
+      %CYCLE I=PLACES<<2-4, -4, 0
+         PRINT STRING(HEX(VALUE>>I&15))
+      %REPEAT
+%END
+%EXTERNALSTRING(8)%FN HTOS %ALIAS "s_htos" (%INTEGER VALUE,PLACES)
+%INTEGER I
+%STRING(8)RES
+      RES=""
+      %FOR I=PLACES<<2-4,-4,0 %CYCLE
+         RES=RES.HEX(VALUE>>I&15)
+      %REPEAT
+      %RESULT=RES
+%END
+ %if Target#Gould %and target#DRS %then %Start
+%ROUTINESPEC PRINTFL(%LONGREAL X, %INTEGER N)
+%EXTERNALROUTINE PRINT %ALIAS "s_print"(%LONGREAL X, %INTEGER N,M)
+!***********************************************************************
+!*       PRINTS A REAL NUMBER (X) ALLOWING N PLACES BEFORE THE DECIMAL *
+!*       POINT AND M PLACES AFTER.IT REQUIRES (M+N+2) PRINT PLACES     *
+!*       UNLESS (M=0) WHEN  (N+1) PLACES ARE REQUIRED.                 *
+!*                                                                     *
+!*       A LITTLE CARE IS NEEDED TO AVOID UNNECESSARY LOSS OF ACCURACY *
+!*       AND TO AVOID OVERFLOW WHEN DEALING WITH VERY LARGE NUMBERS    *
+!***********************************************************************
+%LONGREAL Y,Z,ROUND,FACTOR
+%INTEGER I,J,L
+%BYTEINTEGER SIGN
+      M=M&63;                           ! DEAL WITH STUPID PARAMS
+      %IF N<0 %THEN N=1; N=N&31;        ! DEAL WITH STUPID PARAMS
+      X=X+DZ;                           ! NORMALISE
+      SIGN=' ';                         ! '+' IMPLIED
+      %IF X<0 %THEN SIGN='-'
+      Y=MOD(X);                         ! ALL WORK DONE WITH Y
+      ROUND=0.5/10**M;                  ! ROUNDING FACTOR
+      %IF Y>PMAX %OR N=0 %THENSTART;    ! MEANINGLESS FIGURES GENERATED
+         %IF N>M %THEN M=N;             ! FOR FIXED POINT PRINTING
+         PRINT FL(X,M);                 ! OF ENORMOUS NUMBERS
+         %RETURN;                       ! SO PRINT IN FLOATING FORM
+      %FINISH
+      I=0; Z=1; Y=Y+ROUND
+      %UNTIL Z>Y %CYCLE;                ! COUNT LEADING PLACES
+         I=I+1; Z=10*Z;                 ! NO DANGER OF OVERFLOW HERE
+      %REPEAT
+      SPACES(N-I);                      ! O.K FOR ZERO OR -VE SPACES
+      PRINT SYMBOL(SIGN)
+      J=I-1; Z=10**J
+      FACTOR=1/10
+      %CYCLE
+         %UNTIL J<0 %CYCLE
+            L=INT PT(Y/Z);              ! OBTAIN NEXT DIGIT
+            Y=Y-L*Z; Z=Z*FACTOR;        ! AND REDUCE TOTAL
+            PRINT SYMBOL(L+'0')
+            J=J-1
+         %REPEAT
+         %IF M=0 %THENRETURN;           ! NO DECIMAL PART TO BE O/P
+         PRINTSTRING(".")
+         J=M-1; Z=10**(J-1); M=0
+         Y=10*Y*Z
+      %REPEAT
+%END;                                   ! OF ROUTINE PRINT
+%EXTERNALROUTINE PRINTFL %ALIAS "s_printfl"(%LONGREAL X, %INTEGER N)
+!***********************************************************************
+!*       PRINTS IN FLOATING POINT FORMAT WITH N PLACES AFTER THE       *
+!*       DECIMAL POINT. ALWAYS TAKES N+7 PRINTING POSITIONS.           *
+!*       CARE REQUIRED TO AVOID OVERFLOW WITH LARGE X                  *
+!***********************************************************************
+%LONGREAL SIGN,ROUND,FACTOR,LB,UB
+%INTEGER COUNT,INC
+      ROUND=0.5/10**N;                  ! TO ROUND SCALED NO
+      LB=1-ROUND; UB=10-ROUND
+      SIGN=1
+      X=X+DZ;                           ! NORMALISE
+      %IF X=0 %THEN COUNT=-99 %ELSESTART
+         %IF X<0 %THEN X=-X %AND SIGN=-SIGN
+         INC=1; COUNT=0
+         FACTOR=1/10
+         %IF X<=1 %THEN FACTOR=10 %AND INC=-1
+                                        ! FORCE INTO RANGE 1->10
+         %WHILE X<LB %OR X>=UB %CYCLE
+            X=X*FACTOR; COUNT=COUNT+INC
+         %REPEAT
+      %FINISH
+      PRINT(SIGN*X,1,N)
+      PRINTSTRING("@")
+      WRITE(COUNT,2)
+%END;                                   ! OF ROUTINE PRINTFL
+%finish
+%CONSTLONGREAL IMAX=2147483647;         ! MAX INTEGER FOR 32 BIT WORD
+                                        ! NEEDS CHANGING FOR OTHER WLENGT
+%EXTERNALROUTINE READ %ALIAS "s#read"(%NAME OPND)
+!***********************************************************************
+!*       THIS ROUTINE IS THE IMP IMPLICITLY SPECIFIED ROUTINE WITH A   *
+!*       %NAME PARAMETER. TYPEBND AND ADR ARE A 64 BIT DESCRIPTOR TO   *
+!*       THE ACTUAL PARAMETER. THE BND FIELD HAS THE TYPE CODE IN IT   *
+!*       (=1 FOR INTEGER =2 FOR REAL).  FOR %SHORT %INTEGER, THE       *
+!*       PARAMETER WILL BE A STRING DESCRIPTOR OF LENGTH 2.            *
+!*                                                                     *
+!*       THE METHOD USED IS SIMPLE REPEATED MULTIPLICATION USING LONG  *
+!*       REAL VARIABLES. SOME ROUNDING ERRORS ARE INTRODUCED WHICH     *
+!*       COULD BE AVOIDED BY USING PACKED DECIMAL INSTNS WITH NECESSARY*
+!*       SCALING.                                                      *
+!***********************************************************************
+%INTEGER TYPE,PREC,FLAG,CURSYM;         ! FLAG= 0FOR'-',1 FOR '+'
+%INTEGER IVALUE,PARTYPE,TYPEBND,ADR
+      %IF 1<<TARGET&LINTAVAIL#0 %THEN %START
+      %LONGINTEGER LIVALUE
+      %FINISH
+      %IF 1<<TARGET&LLREALAVAIL#0 %START
+      %LONGLONGREAL RWORK,SCALE
+      %FINISHELSESTART
+      %LONGREAL RWORK,SCALE
+      %FINISH
+%SWITCH IL(3:6),RL(5:7)
+      FLAG=1; TYPE=0
+      %IF TARGET=EMAS %START
+         *LSD_OPND; *ST_TYPEBND
+      %finish %else %if TARGET=IBM %OR TARGET=IBMXA %OR TARGET=AMDAHL %START
+         *MVC_TYPEBND(8),OPND
+      %finish %else %if TARGET=PNX %START
+         **@OPND; **@TYPEBND; *CI8; *MVB
+      %finish %else %if target=perq %or target=drs %Start
+         **opnd+4; **=typebnd; adr=addr(opnd_
+      %finish %else %if 1<<target&Emachine#0 %start
+         **opnd; **=typebnd; adr=addr(opnd)
+      %finish
+      PARTYPE=TYPEBND&7
+      PREC=TYPEBND>>4&7
+      %IF TARGET=EMAS %START
+         %IF TYPEBND=X'58000002' %THENSTART
+            PARTYPE=1
+            PREC=4
+         %FINISHELSESTART
+            PREC=(TYPEBND>>27)&7
+         %FINISH
+         %IF TYPEBND=X'20000001' %THEN TYPEBND=X'58000002'
+      %FINISH
+      CURSYM=NEXT SYMBOL;               ! CARE NOT TO READ TERMINATOR
+                                        ! NOW IGNORE LEADING SPACES
+      %WHILE CURSYM=' ' %OR CURSYM=NL %CYCLE
+         SKIP SYMBOL
+         CURSYM=NEXT SYMBOL
+      %REPEAT
+      %IF CURSYM=X'19' %THENSIGNALEVENT 9,1
+                                        ! RECORD INITIAL MINUS
+      %IF CURSYM='-' %THEN FLAG=-1 %AND CURSYM='+'
+                                        ! MOVE OVER SIGN ONCE IT HAS
+                                        ! BEEN RECORDED IN FLAG
+      %IF CURSYM='+' %THENSTART
+         %CYCLE
+            SKIP SYMBOL
+            CURSYM=NEXT SYMBOL
+         %REPEATUNTIL CURSYM#' '
+      %FINISH
+      %IF '0'<=CURSYM %AND CURSYM<='9' %THENSTART
+         RWORK=CURSYM-'0';              ! KEEP TOTAL IN RWORK
+         TYPE=1;                        ! VALID DIGIT
+         %CYCLE
+            SKIP SYMBOL
+            CURSYM=NEXT SYMBOL
+            %EXITUNLESS '0'<=CURSYM %AND CURSYM<='9'
+            RWORK=10.0*RWORK+(CURSYM-'0'); ! CONTINUE EVALUATING
+         %REPEAT
+      %FINISHELSE RWORK=0
+      %IF CURSYM='.' %AND PARTYPE=2 %THENSTART
+         SCALE=10.0
+         %CYCLE
+            SKIP SYMBOL
+            CURSYM=NEXT SYMBOL
+            %EXITUNLESS '0'<=CURSYM %AND CURSYM<='9'
+            TYPE=1
+            RWORK=RWORK+(CURSYM-'0')/SCALE
+            SCALE=10.0*SCALE
+         %REPEAT
+      %FINISH
+!
+! THE VALUE HAS NOW BEEN READ INTO RWORK. THERE MIGHT BE AN EXPONENT
+! E.G. '1.7@10 '  IS VALID DATA FOR READ
+!
+      %IF (CURSYM='@' %OR CURSYM='&') %AND PARTYPE=2 %THENSTART
+         %IF TYPE=0 %THEN TYPE=1 %AND RWORK=1
+         SKIP SYMBOL;                   ! MOVE PAST THE '@'
+         READ(IVALUE);                  ! RECURSIVE CALL TO FIND EXPONENT
+         %IF IVALUE=-99 %THEN RWORK=0 %ELSE RWORK=RWORK*10.0**IVALUE
+      %FINISH
+      %SIGNALEVENT 4,1 %IF TYPE=0;      ! NO VALID DIGIT FOUND
+!
+! KNOCK NUMBER INTO RIGHT FORM
+!
+      %IF PARTYPE=1 %THENSTART
+         %IF 1<<TARGET&LINTAVAIL#0 %AND PREC=6 %THENSTART
+            LIVALUE=FLAG*LINT(RWORK)
+         %FINISHELSESTART
+            %IF RWORK>IMAX %THENSIGNALEVENT 1,1
+            IVALUE=FLAG*INT(RWORK)
+         %FINISH
+         ->IL(PREC)
+      %FINISH
+      %IF PARTYPE#2 %THENSIGNALEVENT 8,3; ! UNASSIGNED PARAMETER TYPE
+      %IF FLAG<0 %THEN RWORK=-RWORK
+      %IF PREC<5 %THEN PREC=5
+      ->RL(PREC)
+
+IL(6):                                  ! 64 BIT INTEGERS
+      %IF 1<<TARGET&LINTAVAIL#0 %THENSTART
+         LONGINTEGER(ADR)=LIVALUE
+         %RETURN
+      %FINISHELSESIGNALEVENT 8,3
+IL(5):                                  ! 32 BIT INTEGERS
+      INTEGER(ADR)=IVALUE
+      %RETURN
+IL(4):                                  ! 16 BIT REAL
+      HALFINTEGER(ADR)=IVALUE
+      %RETURN
+IL(3):                                  ! 8 BIT INTEGER
+      BYTEINTEGER(ADR)=IVALUE
+      %RETURN
+RL(5):                                  ! 32 BIT REAL
+      %IF TARGET=EMAS %THENSTART
+         *LSD_=X'7F'; *USH_=25
+         *OR_=1; *USH_=31;              ! ACC=X'7F00000080000000'
+         *AND_RWORK; *RAD_RWORK;        ! SOFTWARE ROUND
+         *STUH_(TYPEBND)
+      %FINISHELSE REAL(ADR)=RWORK
+      %RETURN
+RL(6):                                  ! 64 BIT REAL
+      %IF TARGET=EMAS %THENSTART
+         *LSD_=X'7F'; *USH_=56; *AND_RWORK
+         *SLSD_=1; *USH_=55; *AND_RWORK+8
+         *LUH_ %TOS; *RAD_RWORK;        ! SOFTWARE ROUND
+         *STUH_(TYPEBND)
+      %FINISHELSE LONGREAL(ADR)=RWORK
+      %RETURN
+RL(7):                                  ! 128 BIT REAL
+      %IF 1<<TARGET&LLREALAVAIL#0 %THENSTART
+         LONGLONGREAL(ADR)=RWORK
+      %FINISHELSESIGNALEVENT 8,3
+!
+!  %MONITOR (N) == FORCE FAULT NO N
+!  N=16    REAL INSTEAD OF INTEGER IN DATA
+!  N=14    SYMBOL IN DATA
+!
+%END
+%EXTERNALROUTINE READSTRING(%STRING (*) %NAME DEST)
+%INTEGER I,DELIM,LEN,MAXLEN; %STRING (1) T
+%STRING (255) S
+      LEN=0;                            !CURRENT LENGTH
+      MAXLEN=SIZE OF(DEST)-1;           !BOUND LESS 1 BYTE FOR LENGTH BYTE
+      READSYMBOL(I) %UNTIL I>32
+      %SIGNALEVENT 4,2 %UNLESS I='''' %OR I='"'; ! SYMBOL INSTEAD OF STRING
+      S=""; DELIM=I
+      %CYCLE
+         %IF NEXTSYMBOL=DELIM %START
+            SKIP SYMBOL
+            %EXITUNLESS NEXT SYMBOL=DELIM
+         %FINISH
+         %IF LEN>=MAXLEN %THENSIGNALEVENT 6,1
+         READITEM(T)
+         S=S.T
+         LEN=LEN+1
+      %REPEAT
+      DEST=S
+%END
+%EXTERNALROUTINE TEST %alias "c#test"
+%constlongrealarray scale (0:17)=1,1@10,1@20,1@30,1@40,1@50,1@60,1@65,1@66,
+       1@67,1@68,1@69,1@70,1@71,1@72,1@73,1@74,1@75;
+%INTEGER I
+%LONGREAL X
+      %if target=IBM %or target=ibmxa %or target=Amdahl %Start
+         *la_1,8; *sll_1,24; *spm_1
+      %finish
+      %FOR I=0,1,17 %CYCLE
+         X=4.0@-70*scale(i)
+         PRINTFL(X,3)
+         PRINTFL(X-ISQRT(X)**2,5)
+         PRINTFL(X-IEXP(ILOG(X)),4)
+         PRINTFL(1-(ISIN(X)**2+ICOS(X)**2),5)
+
+       printfl(x-tan(aarctan(x)),5)
+             printfl(x-tan(iarctan(1,x)),5)
+         NEWLINE
+      %REPEAT
+%END
+%ENDOFFILE

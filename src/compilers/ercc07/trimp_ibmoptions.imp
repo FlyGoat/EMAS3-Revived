@@ -1,0 +1,17 @@
+! SPDX-License-Identifier: MIT
+! Copyright (c) 2026 Jiaxun Yang <jiaxun.yang@flygoat.com>
+
+! Revival build settings missing from the selected archived steering fragment.
+! These are guest compiler settings, independent of the native host ABI.
+! NO is zero in the archived HOSTCODES catalogue.
+!
+! CRCALL in timp06s explains the optional early evaluation of nested calls.
+! ibmgen05s -> CALL COMING and CALL MADE save/restore FPHEAD, FPPTR and
+! LAST PAR REG, supporting nested calls without the optional extra pass.
+! This is the revival default, not a recovered historical declaration.
+%constantinteger UNNESTCALLS=0
+!
+! compiler_standards.mss 4b: IBM record value parameters are stacked.
+%constantinteger RECVALINWA=0
+! IBM values occupy positive offsets beyond GR11; CALL COMING advances WSPR.
+%constantinteger STACKDOWN=0

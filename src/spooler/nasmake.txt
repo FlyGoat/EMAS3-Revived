@@ -1,0 +1,14 @@
+parm map
+ug
+link
+:spool.NEWSTDIAG.Y
+:spool.sp.ynas
+:spool.readc.Y
+:spool.IOCP.y
+.end
+:sz
+vsmfix sz,st,sd
+newgen st,nasspbf
+rename st,nasspbf
+permit nasspbf,spoolr
+meter

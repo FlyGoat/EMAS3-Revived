@@ -1,0 +1,1650 @@
+! S05 - Command Interpreter - Support routines
+
+
+! parm nocheck  parm nocheck  parm nocheck  parm nocheck  parm nocheck  parm nocheck
+%end %oflist
+%include "SUBARC:SSOWNF3"
+   %list
+!
+!
+!***********************************************************************
+!*                                                                     *
+!*                  Conditional compilation constants                  *
+!*                                                                     *
+!***********************************************************************
+!
+
+%const %integer heapsize{BYTES}= X'8000'
+
+%const %string (9) prompt for command= "
+Command:"
+%const %string(10)command prompt key = "CMNDPROMPT"
+%const %string (10) option key= "SS#OPTIONS"
+%const %integer option vsn= 2
+%const %integer notes on= 1;             ! Zero to suppress generation of NOTES code
+! non-zero to include NOTES.
+!
+!
+!
+!***********************************************************************
+!*                                                                     *
+!*                   Initial values of SSOWN fields                    *
+!*                                                                     *
+!***********************************************************************
+!
+%const %integer optext= 1
+!
+!
+%const %byte %integer %array initval intmess(1:9)= %c
+10,10,'I','N','T',':','A',10,10
+!
+! %const %integer INITVAL ALLCONNECT = 1 - Hold off checking until routine can be loaded.
+! %const %integer INITVAL CKBITS=X'6A202020'
+%const %integer initval dirdiscon= 1;    !SET TO 1 WHEN DIRECTORY DISCONNECTED
+%const %integer initval fepmode= optext
+!* %const %integer initval intinprogress= 1
+%const %integer initval ssuglasize=X'00010000'
+%const %integer initval topfd= 1;        ! HIGHEST FD USED SO FAR THIS SESSION.
+%const %integer initval lastdcputime= -1000000000; ! Ensures DSETIT called first time. { in BCI}
+!***********************************************************************
+!*                                                                     *
+!*                              Constants                              *
+!*                                                                     *
+!***********************************************************************
+
+%const %integer abasefile= base seg << seg shift
+%const %real timefactor= 1000.0;         ! SECONDS = DCPUTIME/TIMEFACTOR.
+! ALLOCATIONS
+%const %integer segsize= 1 << seg shift
+
+
+! %const %long %integer defaultparm=X'0108000000000000';  !STACK SIZE SET BIT
+
+
+!***********************************************************************
+!*                                                                     *
+!*             DIRECTOR and SUPERVISOR Routine/fn/map spec             *
+!*                                                                     *
+!***********************************************************************
+
+%external %string %fn %spec modestr %alias "s#modestr"
+%external %routine %spec customise %alias "s#customise"
+%external %integer %fn %spec dasyncinh(%integer %name act)
+%external %integer %fn %spec dcputime
+%external %integer %fn %spec ddaynumber
+%external %integer %fn %spec dmode(%integer %name set, adr, cmd)
+%external %integer %fn %spec dsfi(%string %name fileindex, %integer %name fsys, type, set,
+   %string %name s, %integer %array %name i)
+!
+%external %integer %fn %spec dmessage(%string %name user, %integer %name len, act, invoc, fsys,
+   adr)
+%external %routine %spec changecontext
+%external %routine %spec mstop %alias "s#mstop"(%string (255) t, %integer r)
+%external %routine %spec signal %alias "emas3signal"(%integername class, %c
+   subclass)
+!
+!***********************************************************************
+!*                                                                     *
+!*                     %system Routine/fn/map spec                     *
+!*                                                                     *
+!***********************************************************************
+!
+%externalintegerfnspec dirtoss %alias "s#dirtoss" (%integer dflag)
+%externalroutinespec controlline %alias "s#controlline"(%stringname line,
+   %integername flag)
+! %external %integer %fn %spec compare %alias "s#compare"(%string (255) a, b)
+%external %string %fn %spec nexttemp %alias "s#nexttemp"
+%external %routine %spec prompt %alias "s#prompt"(%string (255) s)
+%external %routine %spec outfile %alias "S#OUTFILE"(%string (255) file, %integer size, hole,
+   prot, %integer %name conad, flag)
+%external %routine %spec changefilesize %alias "S#CHANGEFILESIZE"(%string (255) file,
+   %integer newsize, %integer %name flag)
+%external %routine %spec tidyfiles %alias "S#TIDYFILES"(%integer selectflag)
+%external %integer %fn %spec valid header %alias "s#validheader"(%integer conad)
+%external %routine %spec printline %alias "s#printline"(%string (255) s)
+%external %routine %spec psysmess %alias "s#psysmess"(%string (255) caller, %integer flag)
+%external %routine %spec init journal %alias "s#initjournal"
+%external %routine %spec relink %alias "S#RELINK"(%record (conff) %name cur, %integer newlevel)
+%external %routine %spec readprofile %alias "S#READPROFILE"(%string (11) key, %name info,
+   %integer %name version, uflag)
+%external %routine %spec writeprofile %alias "S#WRITEPROFILE"(%string (11) key, %name info,
+   %integer %name version, uflag)
+%external %routine %spec initialise heap %alias "s#initialiseheap"(%integer start, size)
+%external %routine %spec initloader %alias "S#INITLOADER"(%integer %name flag)
+%external %integer %fn %spec getheap %alias "s#getheap"(%integer len)
+%external %integer %fn %spec uinfi %alias "S#UINFI"(%integer i)
+%external %integer %fn %spec findfn %alias "S#FINDFN"(%string %name file, %integer fsys)
+%external %integer %fn %spec pageturns %alias "s#pageturns"
+%external %integer %fn %spec roundup %alias "S#ROUNDUP"(%integer n, round)
+%external %routine %spec batchstop %alias "s#batchstop"(%integer reason)
+%external %routine %spec closejournal %alias "S#CLOSEJOURNAL"
+%external %routine %spec connect %alias "S#CONNECT"(%string (255) file, %integer mode, hole,
+   prot, %integer %name fconad, ffiletype, fdatastart, fdataend, flag)
+%external %routine %spec console %alias "S#CONSOLE"(%integer ep, %integer %name p1, p2)
+%external %routine %spec disconnect %alias "S#DISCONNECT"(%string (255) file, %integer %name flag)
+%external %routine %spec fstatus %alias "S#FSTATUS"(%string (255) file, %integer act, value,
+   %integer %name flag)
+%external %routine %spec halt %alias "s#halt"
+%external %routine %spec setreturncode %alias "S#SETRETURNCODE"(%integer n)
+%external %routine %spec move %alias "S#MOVE"(%integer length, nfrom, nto)
+%external %integer %fn %spec outstream %alias "s#outstream"
+%external %routine %spec initialise io streams %alias "s#initialiseiostreams"
+%external %routine %spec useoptions %alias "S#USEOPTIONS"
+%external %string %fn %spec htos %alias "s#htos"(%integer n, p)
+%external %string %fn %spec itos %alias "s#itos"(%integer i)
+%external %routine %spec monparams %alias "s#monparams"(%string (255) template)
+%external %string %fn %spec uinfs %alias "s#uinfs"(%integer n)
+%external %string %fn %spec unpack date %alias "S#UNPACKDATE"(%integer np)
+%external %string %fn %spec unpack time %alias "S#UNPACKTIME"(%integer np)
+%external %routine %spec emas3helpinfo(%string %name xinfo)
+%external %routinespec stoj %alias "s#stoj" (%string(255)s)
+
+%const %integer max llen=255
+
+!-----------------------------------------------------------------------
+
+%externalroutine tell %alias "s#tell" (%string(6)user,
+   %string(255)text, %integername flag)
+
+   flag = dmessage(user, length(text), 1, 0, -1, addr(text)+1)
+   flag = dirtoss(flag) %unless flag = 0
+%end; ! tell
+
+!-----------------------------------------------------------------------
+
+%external %string %fn version %alias "S#SSVERSION"
+
+!  Produces date with a suffix in the range a-z representing (roughly) half-hour
+!  intervals from 08.00hrs
+
+%const %string (3) %array mo(1:12)= "JAN","FEB","MAR","APR","MAY","JUN",
+   "JUL","AUG","SEP","OCT","NOV","DEC"
+%integer ddi, mmi, hri, dateword
+%string (2) dd, mm, yy
+%string (15) wk
+   dateword = integer(abasefile+20)
+   wk = unpackdate(dateword)
+   wk -> dd.("/").mm.("/").yy
+   ddi = (charno(dd, 1)-'0')*10+charno(dd, 2)-'0'
+   mmi = (charno(mm, 1)-'0')*10+charno(mm, 2)-'0'
+   wk = unpacktime(dateword)
+   hri = ((charno(wk, 1)-'0')*10+charno(wk, 2)-'0')<<1+(charno(wk, 4)-'0')//3
+   ! This leaves hri with a number between 0 and 47 representing the hri-th
+   ! half-hour interval.  Make it into a number between 0 and 25 where 08.00
+   ! and earlier is 0 and 1, 2, ... represent successive half-hours,  with 25 representing
+   ! the balance to 23.59hrs
+   hri = hri-16
+   %if hri<0 %then hri = 0
+   %if hri>25 %then hri = 25
+
+   wk = dd." ".mo(mmi)."-(".tostring('a'+hri).")"
+   %result = wk
+%end;                                    ! version
+
+!-------------------------------------------------------------------------------
+
+%string %function pdfile(%integer ad, conad, offset, memnums)
+   {Fn returns member name within a pdfile which encompasses AD}
+%integer i, j, k, noffset, nmemnums, memstart
+%string (15) memname
+%const %integer sspdfiletype= 6
+   %result = "" %if memnums=0;           ! No members
+   j = conad+offset;                     ! Start of pdfile directory
+   %for i = 1, 1, memnums %cycle
+      k = j+(i-1)<<5;                    ! Addr of next directory record
+      memstart = integer(k)+conad
+      %if memstart<=ad<memstart+integer(memstart) %start
+         ! AD is somewhere in this member
+         memname = "_".string(k+4)
+         %if integer(memstart+12)=sspdfiletype %start
+            ! The member itself is a pdfile
+            noffset = integer(memstart+24)
+            nmemnums = integer(memstart+28)
+            %result = memname.pdfile(ad, memstart, noffset, nmemnums)
+         %finish
+         %result = memname
+      %finish
+   %repeat
+   %result = "";                         ! In case AD turns out to be in admin bit of pdfile
+%end;                                    ! of PDFILE
+!
+!-----------------------------------------------------------------------
+!
+%external %integer %fn var rec to profile %alias "s#varrectoprofile"(%integer ap, size, profvsn,
+   %string (11) profname)
+! Writes a variable-length record (1 to 4059 bytes) of SIZE bytes to the profile key PROFNAME
+! AP is the address of the data to be written
+%external %routine %spec write profile %alias "s#writeprofile"(%string (11) k, %long %integer x,
+   %integer %name vsn, flag)
+%external %routine %spec psysmess %alias "s#psysmess"(%string (255) txt, %integer flag)
+%long %integer x
+%integer len, adr, flag
+
+!   %if size>4059 %start
+!      printline("Dirlist too large!")
+!      %result=-1
+!   %finish
+   len = (size<<16)!X'33'
+   adr = ap
+   x = longinteger(addr(len))
+   profvsn = -1 %if size=0 { delete }
+   writeprofile(profname, x, profvsn, flag)
+!   %if flag>0 %start
+!      wrsn("Write profile flag =", flag)
+!      %result=flag
+!   %finish
+   psysmess("write profile", flag) %unless flag=0
+   %result = flag
+%end;                                    ! var rec to profile
+
+!-------------------------------------------------------------------------------
+
+%external %string %fn confile %alias "s#confile"(%integer ad)
+! Returns name of file connected at virtual address "ad" else null string
+! Updated to give full pdfile member names when appropriate. CMcC.
+%integer p, offset, memnums
+%record (conff) %name cur
+%string (255) res
+%const %integer sspdfiletype= 6
+
+   %if ssown_ssnote&4#0 %then monparams(">jr")
+   res=""
+   %for p = 0, 1, maxconf %cycle
+      %if ssown_conf(p)>0 %start
+         cur == record(ssown_conf(p))
+         %if cur_conad>0 %and cur_conad<=ad<cur_conad+cur_size %start
+            res = cur_file
+            !TRUNCATE SUFFIX
+            %if length(res)>8 %and substring(res, 8, 9)="T#" %then length(res) = length(res)-1
+            %exit %if cur_conad+32>ad %or integer(cur_conad+12)#sspdfiletype
+            ! If here then found a pdfile - which member is it
+            offset = integer(cur_conad+24)
+            memnums = integer(cur_conad+28)
+            res = res.pdfile(ad, cur_conad, offset, memnums)
+            %exit
+         %finish
+      %finish
+   %repeat
+   %if ssown_ssnote&4#0 %then monparams("<*res=".res)
+   %result = res
+%end;                                    ! of CONFILE
+
+!-------------------------------------------------------------------------------
+
+%external %integer %fn scarce %alias "s#scarce"
+
+   %if com_ration & ration mask >= com_ration >> scarcity shift %then %result = 1
+   %result = 0
+%end; ! scarce
+
+!-----------------------------------------------------------------------
+
+%external %routine funds %alias "S#FUNDS"
+%integer pence, dno
+%string (6) holder
+
+   printstring(uinfs(16) . " service, Subsys")
+   %if ssown_unsharedbgla = 0 %then space %else printsymbol('_')
+   printline(version)
+
+   printstring(date . " " . time)
+   printstring("  Users=" . itos(com_users - uinf_topexec))
+   printline("  Fsys=" . itos(ssown_ssownfsys))
+
+   %return %unless ssown_ssreason = ireason
+
+   dno = 33783 - ddaynumber
+   printstring(snl.">>>>>>      EMAS")
+   printstring(" goes on June 30th. Only " .itos(dno). " days left") %if dno > 1
+   printstring(" goes TOMORROW") %if dno = 1
+   printstring(" goes TODAY") %if dno = 0
+   printstring(" went on June 30th") %if dno < 0
+   printline(" !!      <<<<<<".snl)
+   %return
+
+   holder = uinfs(9) { this calls Director, hence uinf_funds is 'correct' }
+   %if holder#"" %then printstring("Group Holder : ".holder."    ")
+   pence = uinf_funds
+   printstring("Funds left : ")
+   print(pence/10000, 1, 2)
+   newline
+   %if funds on#0 %then %start
+      %if uinfi(2) = 1 %start  { interactive }
+         printstring("Scarcity/pre-emption at ")
+         printstring(itos(com_ration >> scarcity shift))
+         printsymbol('/')
+         printline(itos((com_ration >> pre empt shift) & ration mask))
+      %finish
+      %if scarce = 1 %start
+         ! INTERACTIVE USERS > SCARCITY LIMIT
+         ssown_scarcityfound = 1
+         printstring("**Resources are Scarce.")
+         %if pence=0 %then printstring("  You are liable to pre-emption.")
+         newline
+      %finish
+   %finish
+%end;                                    ! of FUNDS
+
+!-----------------------------------------------------------------------
+
+%external %long %real %fn cputime %alias "S#CPUTIME"
+   %result = dcputime/timefactor;        ! TIME IN SECONDS
+%end;                                    ! of CPUTIME
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn charge %alias "S#CHARGE"(%long %real %name cpu, %integer %name pt, ct)
+!RETURNS COST IN PENCE OF THIS SESSION SO FAR
+   cpu = cputime
+   pt = pageturns
+   ct = (com_secsfrmn-ssown_startsecs)//60
+   %if ct<0 %then ct = ct+1440;          !WRAPPED AROUND - ADD IN 24*60 MINS
+   %result = int(40*(cpu+pt/6000))  { Newsletter Sep 88 }
+%end;                                    ! of CHARGE
+
+!-----------------------------------------------------------------------
+
+%external %routine meter %alias "EMAS#METER"
+%integer ct, pt, pence, cost
+%long %real cpu
+%string (6) funds holder
+
+   emas3helpinfo("call pamhelp(HELPER:ONE.ONE41)")
+   pence = charge(cpu, pt, ct)
+   printstring(date." ".time."  CPU=")
+   print(cpu, 1, 2)
+   printstring(" Secs")
+   %if ssown_ssreason#batchreason %start
+      printstring(" CT=")
+      write(ct, 1)
+      printstring(" Mins")
+   %finish
+   printstring(" PT=")
+   write(pt, 1)
+   %if pence>0 %start;                   !MAY BE NO CHARGING FORMULA
+      printstring(" Ch=")
+      write(pence, 1)
+      printsymbol('p')
+   %finish
+   newline
+   %if funds on#0 %then %start
+      funds holder = uinfs(9) { dummy to get uinf_funds 'correct' }
+      cost = uinf_funds
+      printstring("Funds left : ")
+      print(cost/10000, 1, 2)
+      %if scarce = 1 %then %start
+         ! INTERACTIVE USERS > SCARCITY LIMIT
+         ssown_scarcityfound = 1
+         %if cost=0 %then printstring("  You are liable to pre-emption.") %else %c
+            printstring("  **Resources are Scarce.")
+      %finish
+      newline
+   %finish
+%end;                                    ! of METER
+!!
+!!
+%external %routine logoff2 %alias "s#logoff2"(%integer type)
+%string (31) w
+%integer j
+! actually does logoff
+! type=1..printing required, type=2..no printing
+! type=1..c#stop and c#quit, type=2..c#logoff.
+   batchstop(0) %if ssown_ssreason=batchreason
+   %if type=1 %start
+      ! Print for C#QUIT, C#STOP only
+      meter
+      w = uinfs(16)
+      w -> (".").w
+      printline(ssown_ssowner." Logged-off ".w)
+   %finish
+   closejournal;                      !CLOSE JOURNAL FILE - IF THERE IS ONE
+   ssown_stopping = 1;                ! Checked by contingency handling to
+                                      ! avoid problems
+                                      ! with contingencies during process
+                                      ! close-down.
+   j = -1;                            ! Makes CONSOLE(9,..) await completion
+                                      ! of REQUESTOUTPUT.
+   console(9, j, j);                  !TO CLEAR OUT ALL TT OUTPUT
+   halt
+%end;                                 ! LOGOFF2
+
+!------------------------------------ INNER STOP --------------------------------------
+
+!* %integer %fn inner stop(%integer where from)
+!   WHERE FROM   =   0   C#STOP,  C#QUIT
+!                    1   C#LOGOFF
+!                    2   S#LOGOFF
+!* %integer j, stackseg, type
+!*    *ST_11,j
+!*    stackseg = j>>segshift
+!*    type=1
+!*    type=2 %unless where from=0
+!*    %if stackseg=basestackseg %or where from=2 {S#LOGOFF} %start
+!*       logoff2(type)
+!*    %finishelsestart
+!*       signal(69,type); !signal STOP required
+!*    %finish
+!* %end;                                    ! of INNER STOP
+
+!---------------------------------------- QUIT ----------------------------------------
+
+%external %routine quit %alias "EMAS#QUIT"
+!*    setreturncode(inner stop(0))
+   signal(69,1); !c#stop..trappable
+%end;                                    ! of QUIT
+
+!---------------------------------------- STOP -----------------------------------------
+
+%external %routine stop %alias "EMAS#STOP"
+!*    setreturncode(inner stop(0))
+   signal(69,1); !c#stop..trappable
+%end;                                    ! of STOP
+
+!------------------------------------- LOGOFF ----------------------------------
+
+%external %routine logoff %alias "EMAS#LOGOFF"
+!*    setreturncode(inner stop(1))
+   signal(69,2); !c#logoff..trappable
+%end;                                    ! logoff
+
+!------------------------------------- SLOGOFF ----------------------------------
+
+%external %routine slogoff %alias "S#LOGOFF"
+!* %integer j
+!*    j=inner stop(2)
+   logoff2(2); !c#logoff..no printing, not trappable
+%end;                                    ! logoff
+
+!---------------------------------------- COMREG --------------------------------------
+
+%external %integer %map comreg %alias "S#COMREGMAP"(%integer n)
+
+   n = 0 %unless 0<=n<=60
+   %result == ssown_sscomreg(n)
+%end;                                    ! of COMREGMAP
+!
+!-----------------------------------------------------------------------
+!
+%external %integer %fn startswith %alias "S#STARTSWITH"(%string %name a, %string (255) b,
+   %integer chop)
+! This function returns zero if string A does not start with a copy
+! of string B, and returns a non-zero value if string B is the same as
+! the first characters of string A.  If CHOP is zero, then that is
+! the only effect of STARTSWITH.  If CHOP is non-zero, then STARTSWITH
+! also has the side effect of discarding the copy of B from the
+! beginning of A, so that A is 'shortened' by LENGTH (B) bytes.
+%string (255) x, y
+   %result = 1 %if b=""
+   %result = 0 %if length(b)>length(a)
+   %result = 0 %unless a->x.(b).y %and x=""
+   a = y %unless chop=0
+   %result = 1
+%end;                                    ! of STARTSWITH
+!
+!-----------------------------------------------------------------------
+!
+%integer %fn setmode internal (%string(255)prm, %stringname errors)
+%byte %integer %array %name resp
+%byte %integer %array parm(0:31)
+%string (31) %name sparm
+%integer c char ints, respi, nocrtransflg, flag
+%integer i, j, l, err, ip, pv
+%integer %array pval(1:18)
+%byte %integer %array area(0:127)
+%byte %integer %array %format areaf(0:127)
+
+%routine %spec append(%string (255) s)
+%integer %fn %spec ival
+%routine %spec getvalue(%integer %name iv)
+
+   {set initial values}
+   errors = ""
+   resp == array(addr(uinf_tmodes), areaf)
+   pval(i) = -1 %for i = 1, 1, 18
+   {scan all parms}
+   c char ints = 0 {don't bother to tell the FEP}
+   nocrtransflg = 0;                     !no change to crtrans req.
+   i = 1; l = length(prm)
+   %cycle
+      {skip leading blanks and commas}
+      %while i<=l %and (substring(prm, i, i)=" " %or substring(prm, i, i)=",") %cycle
+         i = i+1
+      %repeat
+      %exit %if i>l {exit parms all processed}
+      j = 1
+      {isolate parameter}
+      %while i<=l %and ','#charno(prm, i) %and charno(prm, i)#' ' %cycle
+         %if j<=31 %start
+            err = charno(prm, i)
+            %if 'a'<=err<='z' %then err = err-'a'+'A'
+            parm(j) = err
+            j = j+1
+         %finish
+         i = i+1
+      %repeat
+      parm(0) = j-1
+      sparm == string(addr(parm(0)))
+      {check off parameter values}
+      %if sparm="NOCONTROLCHARINTS" %start
+         c char ints = 2
+         %continue
+      %finish
+
+      %if sparm="CONTROLCHARINTS" %start
+         c char ints = 1
+         %continue
+      %finish
+
+      %if sparm="CRTRANSLATE" %then %start
+         nocrtransflg = 8!0
+         %continue
+      %finish
+      %if sparm="NOCRTRANSLATE" %then %start
+         nocrtransflg = 8!1
+         %continue
+      %finish
+
+      %if sparm="M" %or sparm="MSG" %or sparm="MESSAGE" %start
+         pval(4) = 0
+         %if ssown_term valid=0 %then pval(10) = 80 %else pval(10) = ssown_term_columns
+         pval(15) = 1
+         ssown_graphmode = 0
+         %continue
+      %finish
+      %if sparm="G" %or sparm="GRAPH" %start
+         pval(4) = 0
+         pval(10) = 0
+         pval(15) = 1
+         ssown_graphmode = 1
+         %continue
+      %finish
+      %if sparm="N" %or sparm="NATIVE" %start
+         pval(4) = 1
+         pval(10) = 0
+         pval(15) = 0
+         ssown_graphmode = 1; ! Changed by KY 23/06/88, from 0 to 1. Seems logical
+         %continue
+      %finish
+      %if sparm="T" %or sparm="TRANS" %or sparm="TRANSPARENT" %start
+         pval(4) = 0
+         pval(10) = 0
+         pval(15) = 1
+         ssown_graphmode = 0
+         %continue
+      %finish
+      %if sparm="E" %or sparm="ECHO" %then %start
+         pval(2) = 1
+         %continue
+      %finish
+      %if sparm="-E" %or sparm="NOECHO" %then %start
+         pval(2) = 0
+         %continue
+      %finish
+      ip = 1
+      %if parm(1)='W' %start
+         %if startswith(sparm, "WIDTH", 0)#0 %then ip = 6 %else ip = 2
+         getvalue(j)
+         pval(10) = j
+         %continue
+      %finish
+      %if parm(1)='F' %then %start
+         %if startswith(sparm, "FORWARD", 0)#0 %then ip = 8 %else ip = 2
+         getvalue(pv)
+         pval(3) = pv
+         %continue
+      %finish
+      %if parm(1)='T' %then %start
+         %if startswith(sparm, "TIMEOUT", 0)#0 %then ip = 8 %else ip = 2
+         getvalue(pv)
+         pval(4) = pv
+         %continue
+      %finish
+      %if parm(1)='C' %then %start
+         %if startswith(sparm, "CRPAD", 0)#0 %then ip = 6 %else ip = 2
+         getvalue(pv)
+         pval(9) = pv
+         %continue
+      %finish
+      %if parm(1)='L' %then %start
+         %if startswith(sparm, "LFPAD", 0)#0 %then ip = 6 %else ip = 2
+         getvalue(pv)
+         pval(14) = pv
+         %continue
+      %finish
+      %if parm(1)='P' %start
+         ip = 2
+         j = ival
+         getvalue(pv)
+         %if j<1 %or j>18 %start
+            append("parameter number must be between 1 and 18 (".sparm.")")
+         %finish %else pval(j) = pv
+         %continue
+      %finish
+      append("Parameter (".sparm.") not recognised")
+   %repeat
+
+   j = 3
+   area(1) = 255
+   area(2) = 2; {set parms}
+   %for i = 1, 1, 18 %cycle
+      %if pval(i)#-1 %and i#11 %start
+         area(j) = i; area(j+1) = pval(i)&x'ff'
+         {*} {write(area(j),4);write(area(j+1),4);newline}
+         j = j+2
+         ssown_setmodep(i) = pval(i)
+!   tell("ERCC04", "Setmode sets P12", flag) %if i = 12
+      %finish
+   %repeat
+   area(0) = j-1
+
+   %if errors="" %start
+      %if ssown_fepmode#c char ints#0 %start
+         console(18, c char ints, j)
+      %else
+         %if j=3 %and nocrtransflg=0 %start
+            printline("No parameters changed")
+         %finish
+      %finish
+      %if nocrtransflg#0 %then ssown_nocrtrans = nocrtransflg&1
+      l = 3
+      %while l<j %cycle
+         ip = j-l
+         %if ip>28 %then ip = 28
+         area(l-3) = ip+2
+         area(l-2) = 255
+         area(l-1) = 6 {set and read}
+         %if pval(10)>0 %start;          !actively set to a non-zero value
+            i = -1;                      !above indicates we are resetting message mode
+            console(9, i, i);            !flush pending output
+            ssown_ssitwidth = pval(10)
+            ssown_graphmode = 0;         !side-effect of setting width
+         %finish
+         %if ssown_erte process=0 {because ERTE does not respond} %start
+            i = dmode(2, addr(area(l-3)), 0)
+            %if i#0 %then %start
+               append("Failed to change parameters flag=".itos(i))
+               %exit
+            %finish
+         %finish
+         l = l+ip
+         i = 2
+         %while i<ip+2 %cycle
+            respi = resp(i)
+            %if respi&x'80'#0 %then %start
+               {15 edit/noedit always fails on tcp and is never faulted on camtec pad}
+               append("Setting of parameter number ".itos(respi&X'7F')." rejected") %unless %c
+                  respi&x'7f'=15
+            %finish %else %if respi<1 %or respi>18 %then %start
+               append("Unknown parameter number ".itos(respi)." reported from PAD.")
+               i = ip
+            %finish %else %if pval(respi)#resp(i+1) %then %start
+               append("Setting of parameter number ".itos(respi)." reported as ".itos(resp(i+1)))
+            %finish
+            i = i+2
+         %repeat
+      %repeat
+   %finish
+   %if errors="" %then err = 0 %and errors = "0" %else %c
+      err = ss100 failure %and ssown_ssfname = errors
+   %result = err
+
+%integer %fn ival
+%integer s
+
+   s = 0
+   %while ip<=parm(0) %and '0'<=parm(ip)<='9' %cycle
+      s = s*10+parm(ip)-'0'
+      ip = ip+1
+   %repeat
+   %result = s
+%end;                                    ! IVAL
+
+%routine getvalue(%integer %name iv)
+
+   %if parm(ip)#'=' %start
+      append("Expected = not found in ".sparm)
+      iv = 0
+      %return
+   %finish
+   ip = ip+1 {skip =}
+   iv = ival
+   %if ip<=parm(0) %start
+      append("Invalid character (".tostring(parm(ip)).") in integer")
+   %finish
+%end;                                    ! GETVALUE
+
+%routine append(%string (255) s)
+%integer rem
+
+   %return %if length(errors)>245
+   rem = 242-length(errors)
+   %if length(s)>rem %then errors = errors.substring(s, 1, rem)." etc".snl %else %c
+      errors = errors.s.snl
+%end;                                    ! append
+%end; ! setmode internal
+
+!---------------------------------------------------
+
+%stringfn decode mode(%string(19)m)
+%integer p
+%string(255)s
+   s = ""
+   %if length(m) = 19 %start
+      %cycle p = 1, 1, 18
+         s = s . "P" . itos(p) . "=" . itos(charno(m,p)) . ","
+      %repeat
+      s = s . "NO" %if ssown_fepmode = 2
+      s = s . "CONTROLCHARINTS" . ","
+      s = s . "NO" %if ssown_nocrtrans # 0
+      s = s . "CRTRANSLATE"
+   %finish
+   %result = s
+%end; ! decode mode
+
+!------------------------
+
+%stringfn coded mode
+%integer p
+%string(255)s
+   s = "1234567890123456789"
+   %cycle p = 1, 1, 18
+      charno(s, p) = ssown_setmodep(p)
+   %repeat
+   charno(s, 19) = (ssown_nocrtrans<<2) ! ssown_fepmode
+   %result = s
+%end; ! coded mode
+
+!--------------------------
+
+%external %integer %fn ssetmode %alias "s#setmode"(%string (255) prm)
+%integer err, p
+%string(255)errors
+   %if ssown_ssnote&4#0 %then monparams(">tr")
+   err = setmode internal(prm, errors)
+   ssown_coded mode(ssown_load level) = coded mode
+   %if ssown_ssnote&4#0 %then monparams("<tr*res=".errors)
+   %if ssown_ssowner = "ERCC04" %or ssown_ssowner = "ECSC03" %start
+      stoj("s#setmode(".decodemode(codedmode).")  res=".errors.", loadlevel=".itos(ssown_loadlevel))
+   %finish
+   %result = err
+%end;                                    ! of ssetmode
+
+!-----------------------------------------------------------------------
+
+%string %fn term string(%record (termf) %name term, %byte %integer ptr)
+
+   %if ptr=0 %then %result = "" %else %result = string(addr(term_string space)+ptr)
+%end;                                    ! term string
+!
+!-----------------------------------------------------------------------
+!
+%external %routine adjust load level %alias "s#adjustloadlevel"(%integer p)
+!   p = -1 decrement, call setmode if going to diff
+!        0 reset default and back to level basell
+!       +1 incr, copy setmode
+!       +2 c#, set all to current
+%integer j
+%string(255)w, prm
+%switch sw(-1:2)
+   printline("Adj ".itos(p)) %and %return %unless -1 <= p <= 2
+   -> sw(p)
+sw(-1):   ! decr
+   p = ssown_loadlevel
+   %unless ssown_codedmode(p) = ssown_codedmode(p-1) %start
+      prm = decode mode(ssown_codedmode(p-1))
+   j = setmode internal(prm, w)
+      %if ssown_ssowner = "ERCC04" %or ssown_ssowner = "ECSC03" %start
+         stoj("resetmode(".prm.") res=".w.", new loadlevel = ".itos(p-1))
+      %finish
+   %finish
+   ssown_loadlevel = p-1
+   %return
+sw(0):   ! reset default
+   %unless ssown_loadlevel = basell %start
+      j = setmode internal(decode mode(ssown_coded mode(basell)), w)
+      ssown_loadlevel = basell
+   %finish
+   %return
+sw(1):   ! increment
+   p = ssown_loadlevel+1
+   ssown_llinfo(p)_tab = ssown_tempoffset
+   ssown_llinfo(p)_gla = ssown_sscomreg(44)
+   ssown_llinfo(p)_istk = ssown_tempistk
+   monparams("=*to".itos(ssown_loadlevel)) %if ssown_ssnote&4>0
+   ssown_codedmode(p) = ssown_codedmode(p-1)
+   ssown_loadlevel = p
+   %return
+sw(2):   ! c#
+   %if ssown_loadlevel > basell %start
+      %cycle p = basell, 1, ssown_loadlevel-1
+         ssown_codedmode(p) = ssown_codedmode(ssown_loadlevel)
+      %repeat
+   %finish
+   %return
+%end; ! adjust load level
+
+!--------------------------
+
+%external %integer %fn samebytes %alias "S#SAMEBYTES"(%integer l, a1, a2)
+! Compares L bytes at A1 with L bytes at A2. Returns count of
+! bytes which match at start of the two areas: zero if the first
+! bytes are not the same, and L if the two areas are exactly the
+! same.
+!   P = 0
+!   %while P<L %and BYTE INTEGER(A1)=BYTE INTEGER(A2) %cycle
+!      P = P + 1
+!      A1 = A1 + 1
+!      A2 = A2 + 1
+!   %repeat
+
+   *L_0,a1
+   *L_2,a2
+   *L_1,L
+   *LR_3,1
+   *LR_15,1
+   *CLCL_0,2
+   *SR_15,1
+   *ST_15,L
+   %result = l
+%end;                                    ! of SAMEBYTES
+!
+!---------------------------- GETOPTIONS ---------------------------------------
+
+%external %routine get options %alias "s#getoptions"(%record (optionf) %name r)
+
+! reads options from profile file and validates/sets defaults
+
+%integer version, j, maxfkb
+
+   read profile(option key, r, version, j)
+!printline("version=".itos(version)."  flag=".itos(j)) %unless ssown_ssnote = 0
+   %if j=ss239 profile data short %start
+      %if version=1 %start
+         %if ssown_ssmaxfsize<1<<20 %then r_define size = ssown_ssmaxfsize>>10 %else %c
+            r_define size = 1<<10
+         r_i2 = 0
+         r_i3 = 0
+         r_c char ints = 0
+!         r_parity mask = 0
+         r_defaultttype = 4 { unspecified video }
+         r_journal pages = 16
+         write profile(option key, r, option vsn, j)
+!printline("write flag=".itos(j)) %unless ssown_ssnote = 0
+      %finish
+   %finish
+   maxfkb = ssown_ssmaxfsize>>10
+   %if j=0 %start { validate }
+      %if r_initworksize>maxfkb %then r_initworksize=maxfkb
+      %if r_ustacksize>maxfkb %then r_ustacksize=maxfkb
+      r_recorddiag = 16 %unless 16 <= r_recorddiag <= (1<<20)
+      j = 1 %unless r_arraydiag>=0
+      j = 1 %unless 0<=r_blanklines<=1
+      j = 1 %unless length(r_bstartfile)<32
+      j = 1 %unless 0<=r_echo<=2
+      j = 1 %unless length(r_fstartfile)<32
+      j = 1 %unless 512<=r_initworksize
+      j = 1 %unless 1<=r_itinsize<=32
+      j = 1 %unless 3<=r_itoutsize<=16
+      j = 1 %unless 0<=r_recall<=2
+      j = 1 %unless length(r_preloadfile)<32
+      j = 1 %unless 256<=r_ustacksize<=maxfkb
+      j = 1 %unless 0<=r_c char ints<=1
+      j = 1 %unless 64<=r_define size<=ssown_ssmaxfsize>>10
+!      j = 1 %unless 0<=r_parity mask<=1
+      j = 1 %unless 0<=r_defaultttype<=max terminals
+      j = 1 %unless 0<=r_autosearch<=2
+      j = 1 %unless 0<=r_basedirsearch<=1
+      r_journal pages = 16 %if r_journal pages=0
+      j = 1 %unless 16<=r_journal pages<256
+      j = 1 %unless 0 <= r_verbosity <= 2
+   %finish
+   %unless j=0 %start {set defaults }
+      printline("Reset OPTIONS")
+      r = 0
+      r_arraydiag = 10
+      r_recorddiag = 16
+      r_blanklines = 0 {on}
+      r_echo = 1 {part}
+      %if maxfkb<1024 %then r_initworksize =maxfkb %else r_initworksize=1024 {k}
+      r_itinsize = 1
+      r_itoutsize = 3
+      r_recall = 2 {perm}
+      r_ustacksize = 256
+      r_initparm = X'0108000000000000'
+      r_c char ints = 0
+      %if ssown_ssmaxfsize<1<<20 %then r_define size = ssown_ssmaxfsize>>10 %else %c
+         r_define size = 1<<10
+!      r_parity mask = 0
+      r_defaultttype = 4
+      r_autosearch = 0
+      r_journal pages = 16
+      r_verbosity = 0
+
+      write profile(option key, r, option vsn, j)
+!printline("write def flag=".itos(j)) %unless ssown_ssnote = 0
+   %finish
+%end;                                    ! get options
+!
+!-----------------------------------------------------------------------
+!
+%routine get term record
+%integer conad, type, start, end, flag, max terminals
+%record (termf) %array %format termsf(1:abs maxterminals)
+%record (termf) term
+%record (termf) %array %name terms
+
+   ssown_term valid = 0
+   connect("SS#CHSFILE", 0, 0, 2, conad, type, start, end, flag)
+   connect(chsfile, 0, 0, 2, conad, type, start, end, flag) %unless flag=0
+   %return %unless flag=0
+   max terminals = (integer(conad+8)-32)//sizeof(term)
+   %return %unless 0<ssown_ssterminal type<=maxterminals
+   terms == array(conad+start, termsf)
+   term = terms(ssown_ssterminaltype)
+   %return %if termstring(term, term_name)="" { empty slot }
+   ssown_term = term
+   %unless ssown_ssitwidth=term_columns %start
+      flag = ssetmode("P10=".itos(term_columns))
+      ssown_ssitwidth = term_columns
+   %finish
+   ssown_term valid = 1
+%end;                                    ! get term record
+!
+!-----------------------------------------------------------------------
+!
+%external %integer %fn match %alias "S#MATCH"(%string %name a1, a2)
+%integer j
+
+   %if ercc tcps=no %start
+      %result = 1 %if a1=a2
+   %else
+      %if length(a1)=length(a2) %and length(a2)>3 %start
+         j = samebytes(length(a2)-3, addr(a1)+4, addr(a2)+4)
+         %result = 1 %if j=length(a2)-3
+      %finish
+   %finish
+   %result = 0
+%end;                                    ! match
+!
+!------------------------------- STOREMATCH ----------------------------
+!
+%external %integer %fn storematch %alias "S#STOREMATCH"(%integer l, a1, a2)
+!  Returns  1   if L bytes from A1 are identical with L bytes from A2
+!           0   if they differ
+%integer j
+   j = samebytes(l, a1, a2)
+   %if j=l %then %result = 1 %else %result = 0
+%end;                                    ! storematch
+
+!----------------------------- GETTERMINALTYPE ---------------------------------
+
+%routine get terminal type(%record (optionf) %name r)
+%integer j, l
+%string (255) address
+
+   j = 0
+   %cycle
+      j = -1 %and %exit %if j>=r_max { not present }
+      address = string(addr(r_b(j+1)))
+      %exit %if match(address, uinf_itaddr)=1
+      j = j+2+length(address)
+   %repeat
+
+   %if j<0 %start
+      ssown_ssterminaltype = r_default t type
+   %else
+      ssown_ssterminaltype = r_b(j)
+      %if j>0 %start { bring this entry to top }
+         l = 2+length(address)
+         move(j, addr(r_b(0)), addr(r_b(l)))
+         r_b(0) = ssown_ssterminaltype
+         string(addr(r_b(1))) = address
+         writeprofile(option key, r, option vsn, j)
+      %finish
+   %finish
+   get term record
+%end;                                    ! get terminal type
+!
+!---------------------------------- USEOPTIONS -------------------------------------
+!
+%external %routine use options inner %alias "s#useoptionsinner"(%record (optionf) %name r)
+%integer flag
+%string (31) mode
+
+   ! AT ANY TIME
+
+   ssown_verbosity = r_verbosity %unless ssown_ssreason = batchreason
+   ssown_no auto search = r_autosearch
+   ssown_basedirsearch = r_basedirsearch
+   ssown_blanklines = r_blanklines
+   ssown_ssarraydiag = r_arraydiag
+   ssown_ssrecorddiag = r_recorddiag
+   ssown_dataechooption = r_echo
+   ssown_ssinitworksize = r_initworksize<<10
+!   ssown_paritymask = 255>>r_parity mask
+   ssown_default define size = r_define size<<10
+   ssown_ssitwidth = 80
+   %if ssown_useoptstarted=0 %then %start; ! AT Startup
+      ssown_journal pages = r_journal pages
+      longinteger(addr(ssown_sscomreg(27))) = r_initparm
+      ssown_avd == string(getheap(14))
+      ssown_avd = ssown_ssowner.":SS#DIR"
+      ssown_holdavd == string(getheap(14))
+      ssown_holdavd = ssown_avd
+!      ssown_preloadfile == string(get heap(length(r_preloadfile)+1))
+      ssown_ustacksize = r_ustacksize<<10
+
+      %if ssown_ssreason#batchreason %then %start
+         %if r_fstartfile#"" %start
+            ssown_astartfile = getheap(length(r_fstartfile)+1)
+            string(ssown_astartfile) = r_fstartfile
+         %finish
+         %if ssown_ssreason#testreason %start
+            ssown_itinlength = r_itinsize<<10
+            ssown_itoutlength = r_itoutsize<<10
+            ssown_ssjournal = r_recall
+            initjournal
+            get terminal type(r)
+            %if ssown_ssreason=dstartreason %start; !STARTED FROM OPER
+               console(4, 0 {ssown_ssoperno}, flag); !SSOWN_SSOPERNO CONTAIN OPER NUMBER
+            %finish %else %start;        !STARTED FROM INTERACTIVE TERMINAL
+               %if ssown_ssreason=dnewstartreason %then %start
+                  ssown_itinlength = 1024
+                  ssown_itoutlength = 3072
+               %finish
+               console(5, flag, flag) { initialise FEP }
+            %finish
+         %finish
+      %finish
+
+      initialise io streams
+
+      %if ssown_ssreason=batchreason %and r_bstartfile#"" %then %start; ! BACKGROUND
+         ssown_astartfile = getheap(length(r_bstartfile)+1)
+         string(ssown_astartfile) = r_bstartfile
+      %finish
+
+      ssown_setmodep(2) = 1 { echo on }
+      ssown_useoptstarted = 1
+   %finish %else %start;                 !not at startup
+
+      %if ssown_ssreason#batchreason %then %start; ! INTERACTVE
+         %if ssown_ssjournal#r_recall %then %start
+            closejournal
+            %if r_recall<2 {ie now TEMP or NONE} %then %start
+               fstatus(sspermjname, 5, 0, flag) {destroy at logoff} %if %c
+                  ssown_ssjournal=2 { was perm }
+            %finish
+            ssown_ssjournal = r_recall
+            initjournal
+         %finish
+      %finish
+   %finish
+   %if ssown_ssreason#batch reason %and r_c char ints+1#ssown_fepmode %start
+!printline("call setmode")
+      mode = "CONTROLCHARINTS"
+      mode = "NO".mode %if r_c char ints=1
+      flag = ssetmode(mode)
+   %finish
+%end;                                    ! of use options inner
+!
+!-----------------------------------------------------------------------
+!
+%external %routine useoptions %alias "S#USEOPTIONS"
+%record (optionf) r
+
+   get options(r)
+   use options inner(r)
+%end;                                    ! of use options
+!
+!-----------------------------------------------------------------------
+!
+%external %routine pamjoin %alias "s#pamjoin"(%string (255) files, %string %name concfile,
+   %integer %name flag)
+
+! Concatenates a list of files (or .in) to a temp file
+! Should add an FE param to control the interpretation of fortran files
+! At present only accepts char files.
+
+%integer nfiles, size, conad, type, dstart, dend, fno, pos, size2{dummy}
+%string (255) file
+%record %format ff(%integer start, len)
+%const %integer maxconfiles=64
+%record (ff) %array f(1:64)
+
+%integerfnspec extendfile
+%routinespec read from tt
+
+   nfiles = 0
+   size = 32
+!*    ssown_loadlevel = ssown_loadlevel+2
+   adjustloadlevel(+1)
+   adjustloadlevel(+1)
+   %while files#"" %cycle
+      %if nfiles=maxconfiles %then flag = 277 %and ->err
+      %unless files->file.("+").files %then file = files %and files = ""
+      %if file="" %or file=".NULL" %then %continue
+      nfiles = nfiles+1
+      %if charno(file, 1)='.' %start;    !device name
+         %if file#".IN" %start
+            flag = 388;                  !invalid device
+            ssown_ssfname = file
+            ->err
+         %finish
+         f(nfiles)_start = 0;            !get console input after checking all the files
+         f(nfiles)_len = 4096
+      %else
+         connect(file, 0, 0, 0, conad, type, dstart, dend, flag)
+         %if flag#0 %then ->err
+         flag = valid header(conad)
+         %if flag#0 %then ->err
+         %if type#sscharfiletype %then flag = 267 %and ->err
+         f(nfiles)_start = conad+dstart
+         f(nfiles)_len = dend-dstart
+      %finish
+      size = size+f(nfiles)_len
+   %repeat
+   %if nfiles=0 %then flag = 305 %and ->err; !no files specified
+   concfile = "t#join".nexttemp
+   size = (size+4095)&(\4095)
+   outfile(concfile, size, 0, 0, conad, flag)
+   %if flag#0 %then ->err
+   pos = conad+32
+   integer(conad+12) = sscharfiletype
+   %for fno = 1, 1, nfiles %cycle
+      %if f(fno)_start>0 %start;         !a file
+         size = conad-pos+f(fno)_len
+         %if size>integer(conad+8) %and extendfile#0 %then ->err
+         move(f(fno)_len, f(fno)_start, pos)
+         pos = pos+f(fno)_len
+      %else;                             !input from terminal
+         read from tt
+      %finish
+   %repeat
+   integer(conad) = pos-conad;           !adjust dataend
+err:
+   adjustloadlevel(-1)
+   file = ssown_shortname  { to preserve over call of tidyfiles }
+   tidyfiles(1)
+   ssown_shortname = file
+   adjustloadlevel(-1)
+
+
+%integer %fn extendfile
+
+   size = (size+4095)&(\4095)
+   changefilesize(concfile, size, flag)
+   %if flag=261 %start;                  !hole too small
+      pos = pos-conad;                   !save current pos
+      disconnect(concfile, flag)
+      changefilesize(concfile, size, flag)
+      %if flag=0 %then connect(concfile, 3, 0, 0, conad, type, dstart, dend, flag)
+      pos = pos+conad
+   %finish
+   %if flag=0 %then integer(conad+8) = size
+   %result = flag
+%end; ! extend file
+
+%routine read from tt
+%integer j
+   %on %event 9 %start
+      newline
+      %return
+   %finish
+   %if ssown_indefault=-90 %start { input from terminal }
+      printstring("Terminate input with control Y".snl)
+      prompt(":")
+   %finish
+   %cycle
+      readsymbol(j)
+      %if pos>=conad+size %start
+         size = size+4096
+         %if extendfile#0 %then %return
+      %finish
+      byteinteger(pos) = j
+      pos = pos+1
+   %repeat
+%end; ! resd from tt
+
+%end;                                    !of pamjoin
+!
+!-----------------------------------------------------------------------
+!
+%integerfn uc(%integer ch)
+   ch = ch - 32 %if 'a' <= ch <= 'z'
+   %result = ch
+%end
+
+!------------
+
+%integerfn alphanumeric(%integer ch)
+   %result = yes %if 'A' <= ch <= 'Z'
+   %result = yes %if 'a' <= ch <= 'z'
+   %result = yes %if '0' <= ch <= '9'
+   %result = no
+%end
+
+!----------
+
+%integerfn compare(%stringname line, word)
+%integer j, len
+   %result = no %if length(word) > length(line)
+   len = length(word)
+   %cycle j = 1, 1, len
+      %result = no %unless uc(charno(line,j)) = uc(charno(word,j))
+   %repeat
+   %result = yes %if length(line) = len
+   %result = yes %if alphanumeric(charno(line, len+1)) = no
+   %result = no
+%end
+
+!----------
+
+%external %routine pamhelp %alias "s#pamhelp"(%string %name file, com, param)
+%const %string (255) default= "SUBSYS:PAMHELPFILE"
+
+%record %format dirf1(%string (30) sec, %byte %integer per, %string (31) name,
+   %integer p1, p2, subs, link)
+%record (dirf1) %array %format diraf1(-1:130000)
+%record %format hf(%integer next, start, max, type, sum, time, adr, count)
+
+%recordformat dirf3(%byteinteger b1, b2, per, namelen,
+   %integer name adr, secno, parent, p1, p2, subs, link)
+%record(dirf3)%arrayformat diraf3(0:130000)
+%constinteger dhdrsize = 48
+
+%integer max, base, type, start, end, j, dira, conbase, s, savestream, print, flag
+%string (255) w
+%record (dirf1) %name d1
+%record(dirf3)%name d3
+%record (hf) %name h
+%record (dirf1) %array %name dir1
+%record(dirf3)%arrayname dir3
+%string(63)name
+%integer p1, p2, len
+
+
+%routinespec q(%integer p1, p2)
+%integerfnspec diff(%integer a, b)
+
+
+   savestream = outstream
+   selectoutput(0) %unless savestream=0
+   w = file
+   w = default %if w=""
+   connect(w, 0, 0, 0, base, type, start, end, flag)
+   %if flag#0 %then ->out
+   %if type#3 %start
+      ssown_ssfname = "helpfile ".w." is not a character file"
+      flag = 100
+      ->out
+   %finish
+
+   dira = base+96
+   h == record(base)
+!printline("H_COUNT=".itos(h_count)." B=".itos(integer(base+20))." D=".itos(integer(dira+20)))
+   %if h_count#2 %or diff(integer(base+20), integer(dira+20))>=5 %start
+      ssown_ssfname = "helpfile ".w." is not a VIEWed file"
+      flag = 100
+      ->out
+   %finish
+!printline("OK")
+
+   %if string(base+x'24') = "VIEWDIR3" %start
+      conbase = base + integer(base+4) - h_sum
+      dir3 == array(dira+32+dhdrsize, diraf3)
+      -> out %if dir3(0)_subs = 0
+      max = dir3(0)_link - 1
+   %finish %else %start
+      type = 1
+      conbase = base+h_start-h_sum-x'40000'
+      dir1 == array(dira+32, diraf1)
+      -> out %if dir1(0)_subs = 0
+      max = dir1(0)_link-1
+   %finish
+
+   printline("type=".itos(type).", max=".itos(max).", COM='".com."' PARAM='".param."'") %if ssown_job spacetrace&1>0
+
+   j = 0
+   print = 0
+   %cycle
+      %if type = 1 %start
+         d1 == dir1(j)
+         name = d1_name
+         p1 = d1_p1; p2 = d1_p2
+      %else
+         d3 == dir3(j)
+         len = d3_name len
+         len=63 %if len>63
+         move(len, conbase+d3_name adr, addr(name)+1)
+         length(name) = len
+         p1 = d3_p1; p2 = d3_p2
+      %finish
+printline("D_NAME=".name) %if ssown_job spacetrace&1>0
+      %if compare(name, com)=yes %start
+         %if param="" %start
+            q(p1+conbase, p2+conbase)
+            ->out
+         %finish
+         j = j+1
+         %if type=1 %then s = d1_subs %else s = d3_subs
+         ->out %if s<1
+         %cycle
+            %if type = 1 %start
+               d1 == dir1(j)
+            name = d1_name
+               p1 = d1_p1; p2 = d1_p2
+            %else
+               d3 == dir3(j)
+               len = d3_name len
+               len=63 %if len>63
+               move(len, conbase+d3_name adr, addr(name)+1)
+               length(name) = len
+               p1 = d3_p1; p2 = d3_p2
+            %finish
+printline("D___NAME=".name) %if ssown_job spacetrace&1>0
+            %if compare(name, param)=yes %start
+               q(p1+conbase, p2+conbase)
+               ->out
+            %finish
+            s = s-1
+            ->out %if s=0
+            %if type = 1 %then j = dir1(j)_link %else j = dir3(j)_link
+         %repeat
+      %finish
+      %if j = 0 %then j = 1 %else %start
+         %if type = 1 %then j = dir1(j)_link %else j = dir3(j)_link
+      %finish
+      %exit %unless 0 < j <= max
+   %repeat
+out:
+   %if flag=0 %and print=0 %start
+      flag = 100
+      ssown_ssfname = "no information found in helpfile ".w
+   %finish
+   %if flag#0 %then psysmess("HELP", flag)
+
+   %if flag=100 %start
+      w = ssown_ssfname."
+Command:".com."
+Keyword:".param
+      j = dmessage("HELPER", length(w), 1, 0, -1, addr(w)+1)
+   %finish
+
+   selectoutput(savestream) %unless savestream=0
+
+
+
+%routine q(%integer p1, p2)
+%const %integer top= 13
+%integer j, eof, k, ch, page
+%string (255) line, response
+%integerarray p(0:31)
+%switch sw(1:top)
+
+
+%integerfnspec type of(%stringname line)
+   j = p1
+   p(0) = j
+   eof = p2
+   page = 0
+   print = 0
+
+   %cycle
+      length(line) = 255
+      %cycle k = 1, 1, 255 { get next line from file }
+         %if j=eof %start
+            printline("Q ".htos(p1,8)." ".htos(p2,8)." ".itos(print)) %if ssown_job spacetrace&1>0
+            %return
+         %finish
+         ch = byteinteger(j)
+         j = j+1
+         %if ch=nl %start
+            length(line) = k-1
+            ->sw(type of(line))
+         %finish %else charno(line, k) = ch
+      %repeat
+
+sw(1): { !PAMSTOP }
+      printline(line) %unless line=""
+sw(2): { !STOP }
+      %return
+sw(top): { ordinary line }
+      %continue %if line="" %and print=0 { omit initial blank lines }
+
+      %if print = 20 %start
+         page = page + 1
+         p(page) = j
+         prompt("More...")
+         control line(response, k)
+         newline %and %return %unless k = 0
+         print = 0
+         %if response = "-" %and page > 1 %start
+            page = page - 2
+            j = p(page)
+            %continue
+         %finish
+      %finish
+
+      print = print+1
+      printline(line)
+sw(*): { unwanted line }
+   %repeat
+
+
+%integer %fn type of(%string %name line)
+%integer j
+%string (255) special, word, before
+
+   special = "!PAMSTOP&!STOP&!<>&!TITLE&!KEY&!ADDKEY&!PAGE&!SKIP&!PROMPT&!TOPIC&!MODE&!MAIL"
+   %cycle j = 1, 1, 255
+      %exit %if special=""
+      word = special %and special = "" %unless special->word.("&").special
+      %if line->before.(word) %and before="" %start
+         line = substring(line, length(word)+1, length(line))
+         %exit
+      %finish
+   %repeat
+   %result = j
+%end;                                    !of typeof
+
+%end;                                    !of q
+
+%integer %fn diff(%integer a, b)
+   %if a>=b %then %result = a-b %else %result = b-a
+%end; ! diff
+
+%end;                                    ! pamhelp
+
+!-----------------------------------------------------------------------
+
+%external %routine init subsys globals %alias "s#initsubsysglobals"
+! This is the initialisation routine for the subsystem.  It is entered once
+! from ssldr at the start of a session
+
+%integer bh, bglalen, aofm, glaseg, bglasize
+%integer i, j, flag, vsn
+%integer %array dsfipa(0:12)
+%string (255) dsfips
+%record (conff) %name cur
+!
+!
+!              Contingency           CLASS
+!
+!              Floating overflow         0
+!              Floating underflow        1
+!              Fixed overflow            2
+!              Decimal overflow          3
+!              Zero divide               4
+!              Bound check               5
+!              Size error                6
+!              B overflow                7
+!              Stack error               8
+!              Privilege                 9
+!              Descriptor               10
+!              String                   11
+!              Instruction              12
+!              Accumulator              13
+!              System Call              16
+!              Instruction counter      17
+!              Disc transfer fail       18
+!              Block wrong length       19
+!              ("should not occur")
+!              Hard store fault         20
+!              Illegal OUT              21
+!              Local Controller error   22
+!              Virtual store error      32
+!              Interval timer           64
+!              Single-character "INT:"  65
+!              Text message             66
+!              Off stack top            67
+!              Message from a process   68
+!
+! Of these, classes 64, 65, 66 and 68 are ASYNCHRONOUS and all the others
+! are SYNCHRONOUS.
+!
+
+
+! Initialise all the subsystem globals which are not 0 (or "").
+
+   ssown_topstk = x'7FFFFFFF';           ! Until altered by INITUSTK
+   ssown_intmess(i) = initval intmess(i) %for i = 9, -1, 1
+
+   j = dasyncinh(addr(ssown_ssinhibit))
+   ssown_parity mask = 255  { default to become 127, see emas3setp...m...}
+   ssown_lastrcode == ssown_sscomreg(24)
+   ssown_ssitwidth = 80
+   ssown_command prompt = prompt for command
+   ssown_startcomment = "/*"
+   ssown_endcomment = "*/"
+   ssown_fepmode = initval fepmode
+   ssown_topfd = initval topfd
+   ssown_lastdcputime = initval lastdcputime
+   ssown_ssuglasize = initval ssuglasize
+   ssown_loadlevel = basell
+
+   ! End of initialisations.
+
+   bh = roundup(integer(abasefile), segsize); !HOLE FOR BASEFILE
+   aofm = abasefile+integer(abasefile+28); !ADDRESS OF OBJECT FILE MAP
+   ssown_abgla = abasefile+bh;           ! GLA is connected immediately after the basefile.
+
+!    longinteger(addr(ssown_sscomreg(27))) = defaultparm;  !USE DEFAULT PROTEM - LATER TO COME FROM OPTION FILE
+   ssown_sscomreg(48) = X'0003D000';     !252K LESS MARGIN OF 8K
+   ssown_sscomreg(35) = ssown_abgla;     !ADDRESS OF BGLA
+   ssown_ssowner = uinf_user;            !EXTRACT INFO FROM UINF
+   ssown_job space index = ssown_ssowner
+   %if startswith(ssown_ssowner, "EYR", 0)=1 %and 'E'<=charno(ssown_ssowner,4)<='J' %start
+      ssown_erte process = yes
+      ssown_inhibitspooler = yes
+   %finish
+   ssown_path to be used = ssown_ssowner.usep
+   ssown_ssownfsys = uinf_fsys
+   ssown_job space fsys = ssown_ssownfsys
+   ssown_ssreason = 1<<uinf_reason
+   ssown_aiostat = uinf_aiostat
+   ssown_apageturns = uinf_aacctrec+4
+   ! AACTREC POINTS TO A RECORD OF THE
+   ! FORM (%integer LTIME, PAGETURNS, LLIMIT, SPARE)
+   !
+   ssown_ssinvocation = uinf_isuff;      ! Invocation number.
+   ssown_sssuffix = itos(ssown_ssinvocation); ! STRING TO BE ADDED TO END OF TEMP FILENAMES
+
+   ! Get the address of the GLA of the current routine (i.e., SSINIT) into GLASEG.
+   *st_13,glaseg
+
+   glaseg = glaseg>>segshift
+
+   %if glaseg#ssown_abgla>>segshift %then bglalen = 0 {Shared basegla} %else %c
+      bglalen = integer(aofm+20)+integer(aofm+56) %and ssown_unsharedbgla = 1
+   !LENGTH OF AREA 2(GLA)+LENGTH OF AREA 5(UST)
+
+   flag = dsfi(ssown_ssowner, ssown_ssownfsys, 17, 0, "", dsfipa)
+   %if flag=0 %and dsfipa(0)&256>0 %start
+      ssown_ssnote = dsfipa(0)
+      monparams("=")
+   %finish
+
+   changecontext;                        !TO LOSE SS AND DIRECTOR GLAP PAGES FROM WORKING SET
+   flag = dsfi(ssown_ssowner, ssown_ssownfsys, 12, 0, dsfips, dsfipa)
+   ssown_ssmaxfsize = dsfipa(0)<<10 { in bytes }
+
+   ssown_sscurbgla = ssown_abgla+bglalen; ! Available from here.
+   i = (ssown_sscurbgla+7)&(-8)
+   initialise heap(i, heapsize{BYTES})
+   ! Must do this as early as possible - we can't fill in CUR_FILE until we can call GETHEAP.
+   ssown_sscurbgla = i+heapsize{BYTES}
+
+   !-------------------------------------- BASEFILE -------------------------------------------
+   flag = findfn(uinf_basefile, -1)
+   cur == record(ssown_conf(ssown_confpos))
+   cur_conad = abasefile
+   cur_fsys = 0 { ipl fsys really } %if charno(uinf_basefile, 2)='#'
+   cur_size = (integer(abasefile)+x'FFF')>>12<<12
+   relink(cur, 1);                       ! Perm-connected
+   ssown_sscomreg(25) = 1 %and ssown_basefile = 1 %if uinf_basefile->(":TEST")
+   ! The 256-bit in COM 25 allows printing of Subsystem diagnostics (local variables etc).
+   ! Diagnostics for perm-loaded material were previously BRIEF.  They are not
+   ! printed at the terminal, but do appear in the recall file or on the batch
+   ! journal.  Clear this bit to suppress such printing.
+   ssown_sscomreg(25) = ssown_sscomreg(25)!256
+
+   !----------------------------- PUT #BGLA INTO SSOWN_CONF TABLE --------------------------
+
+   flag = findfn(ssown_ssowner.":#BGLA".ssown_sssuffix, -1)
+   cur == record(ssown_conf(ssown_confpos))
+   cur_rup = 0 { to inhibit change access }
+   relink(cur, 1)
+   bglasize = cur_size-x'8000';          ! Last 8 pages used for SSOWN
+   ssown_ssmaxbgla = ssown_abgla+bglasize-1; !LAST BYTE IN BGLA
+
+   !------------------------------ Put the #STK file into the connected file table --------------------
+
+   flag = findfn(ssown_ssowner.":#STK".ssown_sssuffix, -1)
+   relink(cur, 1)
+
+
+   ssown_sscomreg(11) = com_trans+256;   !ADDRESS OF ETOI TABLE
+   ssown_sscomreg(12) = com_trans;       !ADDRESS OF ITOE TABLE
+   ssown_dirdiscon = initval dirdiscon
+
+   ssown_outf == ssown_fd(maxfd)
+   ssown_outf_accessroute = 10;          !.NULL provisional until INIT IO STREAMS called
+
+   initloader(flag)
+   %if flag#0 %then mstop("Flag=".itos(flag), 129)
+
+   useoptions
+   customise
+
+   dsfips = modestr
+   ssown_coded mode(ssown_loadlevel) = coded mode
+
+   vsn = 3
+   readprofile(command prompt key, dsfips, vsn, j)
+   %if j = 0 %and vsn = 3 %and dsfips # "" %start
+      ssown_command prompt = dsfips
+      ssown_prompt type = ssown_prompt type ! 2
+   %finish
+%end;                                    ! of INIT SUBSYS GLOBALS
+!
+!-----------------------------------------------------------------------
+!
+%external %routine command prompt %alias "s#commandprompt"(%string (255) s)
+%string(1)null
+
+   %if s="" %start
+      ssown_command prompt = prompt for command
+      ssown_prompt type = ssown_prompt type&1 { doesn't need translating }
+      null = ""
+      write profile(command prompt key, null, -1, 0)
+   %else
+      ssown_command prompt = s
+      ssown_prompt type = ssown_prompt type!2 { does need translating - possibly }
+      write profile(command prompt key, s, 3, 0)
+   %finish
+%end;                                    ! command prompt
+
+!-----------------------------------------------------------------------
+
+%end %of %file

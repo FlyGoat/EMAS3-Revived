@@ -1,0 +1,7 @@
+link
+diag4y
+y
+.end
+yy
+vsmfix yy,ivolums,vd
+destroy yy

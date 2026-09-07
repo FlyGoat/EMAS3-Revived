@@ -1,0 +1,13 @@
+parm map
+link
+newstdiagy
+fty
+confy
+iocpy
+.end
+fz
+vsmfix fz,ft,fd
+newgen ft,iftrans
+rename ft,iftrans
+destroy fz
+parm nocheck,noarray

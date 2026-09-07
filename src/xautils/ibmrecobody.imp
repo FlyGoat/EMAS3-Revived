@@ -1,0 +1,667 @@
+%const %integer oneh=1, twoh=2, threeh=3
+%const %integer no ops=0<<2, one op=1<<2, two ops=2<<2, three ops=3<<2
+%const %integer null=oneh
+
+%const %integer rr=1, rrb=2, rre=3, rx=4, rs=5, si=6, sfm=7, ssa=8, ssb=9, ssc=10, sse=11
+%const %integer extend1=12, extend2=13, extend3=14{this latter for the (*370*) opcodes}
+
+%const %integer lastc=extend3
+
+
+%const %byte %integer %array types(0:255)= %c
+{00} null,
+{01} null,
+{02} null,
+{03} null,
+{04 SET PROGRAM MASK               } rr<<4  !one op  !oneh,
+{05 BRANCH AND LINK                } rr<<4  !two ops  !oneh,
+{06 BRANCH ON COUNT                } rr<<4  !two ops  !oneh,
+{07 BRANCH ON CONDITION            } rr<<4  !two ops  !oneh,
+{08 SET STORAGE KEY                } rr<<4  !two ops  !oneh,
+{09 INSERT STORAGE KEY        *370*} rr<<4  !two ops  !oneh,
+{0A SUPERVISOR CALL           *370*} rrb<<4 !one op   !oneh,
+{0B BRANCH AND SET MODE            } rr<<4  !two ops  !oneh,
+{0C BRANCH AND SAVE AND SET MODE   } rr<<4  !two ops  !oneh,
+{0D BRANCH AND SAVE                } rr<<4  !two ops  !oneh,
+{0E MOVE LONG                      } rr<<4  !two ops  !oneh,
+{0F COMPARE LOGICAL LONG           } rr<<4  !two ops  !oneh,
+{10 LOAD POSITIVE                  } rr<<4  !two ops  !oneh,
+{11 LOAD NEGATIVE                  } rr<<4  !two ops  !oneh,
+{12 LOAD AND TEST                  } rr<<4  !two ops  !oneh,
+{13 LOAD COMPLEMENT                } rr<<4  !two ops  !oneh,
+{14 AND                            } rr<<4  !two ops  !oneh,
+{15 COMPARE LOGICAL                } rr<<4  !two ops  !oneh,
+{16 OR                             } rr<<4  !two ops  !oneh,
+{17 EXCLUSIVE OR                   } rr<<4  !two ops  !oneh,
+{18 LOAD                           } rr<<4  !two ops  !oneh,
+{19 COMPARE                        } rr<<4  !two ops  !oneh,
+{1A ADD                            } rr<<4  !two ops  !oneh,
+{1B SUBTRACT                       } rr<<4  !two ops  !oneh,
+{1C MULTIPLY                       } rr<<4  !two ops  !oneh,
+{1D DIVIDE                         } rr<<4  !two ops  !oneh,
+{1E ADD LOGICAL                    } rr<<4  !two ops  !oneh,
+{1F SUBTRACT LOGICAL               } rr<<4  !two ops  !oneh,
+{20 LOAD POSITIVE (LONG)           } rr<<4  !two ops  !oneh,
+{21 LOAD NEGATIVE (LONG)           } rr<<4  !two ops  !oneh,
+{22 LOAD AND TEST (LONG)           } rr<<4  !two ops  !oneh,
+{23 LOAD COMPLEMENT                } rr<<4  !two ops  !oneh,
+{24 HALVE (LONG)                   } rr<<4  !two ops  !oneh,
+{25 LOAD ROUNDED (EXTENDED TO LONG)} rr<<4  !two ops  !oneh,
+{26 MULTIPLY (EXTENDED)            } rr<<4  !two ops  !oneh,
+{27 MULTIPLY (LONG TO EXTENDED)    } rr<<4  !two ops  !oneh,
+{28 LOAD (LONG)                    } rr<<4  !two ops  !oneh,
+{29 COMPARE (LONG)                 } rr<<4  !two ops  !oneh,
+{2A ADD NORMALISED (LONG)          } rr<<4  !two ops  !oneh,
+{2B SUBTRACT NORMALISED (LONG)     } rr<<4  !two ops  !oneh,
+{2C MULTIPLY (LONG)                } rr<<4  !two ops  !oneh,
+{2D DIVIDE (LONG)                  } rr<<4  !two ops  !oneh,
+{2E ADD UNNORMALISED (LONG)        } rr<<4  !two ops  !oneh,
+{2F SUBTRACT UNNORMALISED (LONG)   } rr<<4  !two ops  !oneh,
+{30 LOAD POSITIVE (SHORT)          } rr<<4  !two ops  !oneh,
+{31 LOAD NEGATIVE (SHORT)          } rr<<4  !two ops  !oneh,
+{32 LOAD AND TEST (SHORT)          } rr<<4  !two ops  !oneh,
+{33 LOAD COMPLEMENT (SHORT)        } rr<<4  !two ops  !oneh,
+{34 HALVE (SHORT)                  } rr<<4  !two ops  !oneh,
+{35 LOAD ROUNDED (LONG TO SHORT)   } rr<<4  !two ops  !oneh,
+{36 ADD NORMALISED (EXTENDED)      } rr<<4  !two ops  !oneh,
+{37 SUBTRACT NORMALISED (EXTENDED) } rr<<4  !two ops  !oneh,
+{38 LOAD (SHORT)                   } rr<<4  !two ops  !oneh,
+{39 COMPARE (SHORT)                } rr<<4  !two ops  !oneh,
+{3A ADD NORMALISED (SHORT)         } rr<<4  !two ops  !oneh,
+{3B SUBTRACT NORMALISED (SHORT)    } rr<<4  !two ops  !oneh,
+{3C MULTIPLY (SHORT TO LONG)       } rr<<4  !two ops  !oneh,
+{3D DIVIDE (SHORT)                 } rr<<4  !two ops  !oneh,
+{3E ADD UNNORMALISED (SHORT)       } rr<<4  !two ops  !oneh,
+{3F SUBTRACT UNNORMALISED (SHORT)  } rr<<4  !two ops  !oneh,
+{40 STORE HALFWORD                 } rx<<4  !two ops  !twoh,
+{41 LOAD ADDRESS                   } rx<<4  !two ops  !twoh,
+{42 STORE CHARACTER                } rx<<4  !two ops  !twoh,
+{43 INSERT CHARACTER               } rx<<4  !two ops  !twoh,
+{44 EXECUTE                        } rx<<4  !two ops  !twoh,
+{45 BRANCH AND LINK                } rx<<4  !two ops  !twoh,
+{46 BRANCH ON COUNT                } rx<<4  !two ops  !twoh,
+{47 BRANCH ON CONDITION            } rx<<4  !two ops  !twoh,
+{48 LOAD HALFWORD                  } rx<<4  !two ops  !twoh,
+{49 COMPARE HALFWORD               } rx<<4  !two ops  !twoh,
+{4A ADD HALFWORD                   } rx<<4  !two ops  !twoh,
+{4B SUBTRACT HALFWORD              } rx<<4  !two ops  !twoh,
+{4C MULTIPLY HALFWORD              } rx<<4  !two ops  !twoh,
+{4D BRANCH AND SAVE                } rx<<4  !two ops  !twoh,
+{4E CONVERT TO DECIMAL             } rx<<4  !two ops  !twoh,
+{4F CONVERT TO BINARY              } rx<<4  !two ops  !twoh,
+{50 STORE                          } rx<<4  !two ops  !twoh,
+{51} null,
+{52} null,
+{53} null,
+{54 AND                            } rx<<4  !two ops  !twoh,
+{55 COMPARE LOGICAL                } rx<<4  !two ops  !twoh,
+{56 OR                             } rx<<4  !two ops  !twoh,
+{57 EXCLUSIVE OR                   } rx<<4  !two ops  !twoh,
+{58 LOAD                           } rx<<4  !two ops  !twoh,
+{59 COMPARE                        } rx<<4  !two ops  !twoh,
+{5A ADD                            } rx<<4  !two ops  !twoh,
+{5B SUBTRACT                       } rx<<4  !two ops  !twoh,
+{5C MULTIPLY                       } rx<<4  !two ops  !twoh,
+{5D DIVIDE                         } rx<<4  !two ops  !twoh,
+{5E ADD LOGICAL                    } rx<<4  !two ops  !twoh,
+{5F SUBTRACT LOGICAL               } rx<<4  !two ops  !twoh,
+{60 STORE (LONG)                   } rx<<4  !two ops  !twoh,
+{61} null,
+{62} null,
+{63} null,
+{64} null,
+{65} null,
+{66} null,
+{67 MULTIPLY (LONG TO EXTENDED)    } rx<<4  !two ops  !twoh,
+{68 LOAD (LONG)                    } rx<<4  !two ops  !twoh,
+{69 COMPARE (LONG)                 } rx<<4  !two ops  !twoh,
+{6A ADD NORMAILSED (LONG)          } rx<<4  !two ops  !twoh,
+{6B SUBTRACT NORMALISED (LONG)     } rx<<4  !two ops  !twoh,
+{6C MULTIPLY (LONG)                } rx<<4  !two ops  !twoh,
+{6D DIVIDE (LONG)                  } rx<<4  !two ops  !twoh,
+{6E ADD UNNORMAILSED (LONG)        } rx<<4  !two ops  !twoh,
+{6F SUBTRACT UNNORMALISED (LONG)   } rx<<4  !two ops  !twoh,
+{70 STORE (SHORT)                  } rx<<4  !two ops  !twoh,
+{71} null,
+{72} null,
+{73} null,
+{74} null,
+{75} null,
+{76} null,
+{77} null,
+{78 LOAD (SHORT)                   } rx<<4  !two ops  !twoh,
+{79 COMPARE (SHORT)                } rx<<4  !two ops  !twoh,
+{7A ADD NORMALISED (SHORT)         } rx<<4  !two ops  !twoh,
+{7B SUBTRACT NORMALISED (SHORT)    } rx<<4  !two ops  !twoh,
+{7C MULITPLY (SHORT TO LONG)       } rx<<4  !two ops  !twoh,
+{7D DIVIE (SHORT)                  } rx<<4  !two ops  !twoh,
+{7E ADD UNNORMALISED (SHORT)       } rx<<4  !two ops  !twoh,
+{7F SUBTRACT UNNORMALISED (SHORT)  } rx<<4  !two ops  !twoh,
+{80 SET SYSTEM MASK                } sfm<<4  !one op  !twoh,
+{81} null,
+{82 LOAD PSW                       } sfm<<4  !one op  !twoh,
+{83 DIAGNOSE                       } sfm<<4  !one op  !twoh,
+{84} null,
+{85} null,
+{86 BRANCH ON INDEX HIGH           } rs<<4  !three ops  !twoh,
+{87 BRANCH ON INDEX LOW OR EQUAL   } rs<<4  !three ops  !twoh,
+{88 SHIFT RIGHT SINGLE LOGICAL     } rs<<4  !two ops  !twoh,
+{89 SHIFT LEFT SINGLE LOGICAL      } rs<<4  !two ops  !twoh,
+{8A SHIFT RIGHT SINGLE             } rs<<4  !two ops  !twoh,
+{8B SHIFT LEFT SINGLE              } rs<<4  !two ops  !twoh,
+{8C SHIFT RIGHT DOUBLE LOGICAL     } rs<<4  !two ops  !twoh,
+{8D SHIFT LEFT DOUBLE LOGICAL      } rs<<4  !two ops  !twoh,
+{8E SHIFT RIGHT DOUBLE             } rs<<4  !two ops  !twoh,
+{8F SHIFT LEFT DOUBLE              } rs<<4  !two ops  !twoh,
+{90 STORE MULTIPLE                 } rs<<4  !three ops  !twoh,
+{91 TEST UNDER MASK                } si<<4  !two ops  !twoh,
+{92 MOVE (IMMEDIATE)               } si<<4  !two ops  !twoh,
+{93 TEST AND SET                   } sfm<<4  !one op  !twoh,
+{94 AND (IMMEDIATE)                } si<<4  !two ops  !twoh,
+{95 COMPARE LOGICAL (IMMEDIATE)    } si<<4  !two ops  !twoh,
+{96 OR (IMMEDIATE)                 } si<<4  !two ops  !twoh,
+{97 EXCLUSIVE OR (IMMEDIATE)       } si<<4  !two ops  !twoh,
+{98 LOAD MULTIPLE                  } rs<<4  !three ops  !twoh,
+{99 TRACE                          } rs<<4  !three ops  !twoh,
+{9A} null,
+{9B} null,
+{9C00 START I/O                    } extend3<<4  !one op  !twoh,
+{9D00 TEST I/O                     } extend3<<4  !one op  !twoh,
+{9E00 HALT I/O                     } extend3<<4  !one op  !twoh,
+{9F00 TEST CHANNEL                 } extend3<<4  !one op  !twoh,
+{A0} null,
+{A1} null,
+{A2} null,
+{A3} null,
+{A4} null,
+{A5} null,
+{A6} null,
+{A7} null,
+{A8} null,
+{A9} null,
+{AA} null,
+{AB} null,
+{AC STORE THEN AND SYSTEM MASK     } si<<4  !two ops  !twoh,
+{AD STORE THEN OR SYSTEM MASK      } si<<4  !two ops  !twoh,
+{AE SIGNAL PROCESSOR               } rs<<4  !three ops  !twoh,
+{AF MONITOR CALL                   } si<<4  !two ops  !twoh,
+{B0} null,
+{B1 LOAD REAL ADDRESS              } rx<<4  !two ops  !twoh,
+{B202 STORE CPU ID                 } extend1<<4  !one op  !twoh,
+{B3} null,
+{B4} null,
+{B5} null,
+{B6 STORE CONTROL                  } rs<<4  !three ops  !twoh,
+{B7 LOAD CONTROL                   } rs<<4  !three ops  !twoh,
+{B8} null,
+{B9} null,
+{BA COMPARE AND SWAP               } rs<<4  !three ops  !twoh,
+{BB COMPARE DOUBLE AND SWAP        }  rs<<4  !three ops  !twoh,
+{BC}  null,
+{BD COMPARE LOGICAL CHARACTERS UNDER MASK }  rs<<4  !three ops  !twoh,
+{BE STORE CHARACTERS UNDER MASK    }  rs<<4  !three ops  !twoh,
+{BF INSERT CHARACTERS UNDER MASK   }  rs<<4  !three ops  !twoh,
+{C0}  null,
+{C1}  null,
+{C2}  null,
+{C3}  null,
+{C4}  null,
+{C5}  null,
+{C6}  null,
+{C7}  null,
+{C8}  null,
+{C9}  null,
+{CA}  null,
+{CB}  null,
+{CC}  null,
+{CD}  null,
+{CE}  null,
+{CF}  null,
+{D0}  null,
+{D1 MOVE NUMERICS                  }  ssb<<4  !two ops  !threeh,
+{D2 MOVE (CHARACTER)               }  ssa<<4  !two ops  !threeh,
+{D3 MOVE ZONES                     }  ssb<<4  !two ops  !threeh,
+{D4 AND (CHARACTER)                }  ssa<<4  !two ops  !threeh,
+{D5 COMPARE LOGICAL (CHARACTER)    }  ssa<<4  !two ops  !threeh,
+{D6 OR (CHARACTER)                 }  ssa<<4  !two ops  !threeh,
+{D7 EXCLUSIVE OR (CHARACTER)       }  ssa<<4  !two ops  !threeh,
+{D8}  null,
+{D9 MOVE WITH KEY                  }  ssc<<4  !three ops  !threeh,
+{DA MOVE TO PRIMARY                }  ssc<<4  !three ops  !threeh,
+{DB MOVE TO SECONDARY              }  ssc<<4  !three ops  !threeh,
+{DC TRANSLATE                      }  ssa<<4  !two ops  !threeh,
+{DD TRANSLATE AND TEST             }  ssa<<4  !two ops  !threeh,
+{DE EDIT                           }  ssa<<4  !two ops  !threeh,
+{DF EDIT AND MARK                  }  ssa<<4  !two ops  !threeh,
+{E0}  null,
+{E1}  null,
+{E2}  null,
+{E3}  null,
+{E4}  null,
+{E500 LOAD ADDRESS SPACE PARAMETERS }  extend2<<4  !two ops  !threeh,
+{E6}  null,
+{E7}  null,
+{E8}  null,
+{E9}  null,
+{EA}  null,
+{EB}  null,
+{EC}  null,
+{ED}  null,
+{EE}  null,
+{EF}  null,
+{F0 SHIFT AND ROUND DECIMAL        }  ssc<<4  !three ops  !threeh,
+{F1 MOVE WITH OFFSET               }  ssb<<4  !two ops  !threeh,
+{F2 PACK                           }  ssb<<4  !two ops  !threeh,
+{F3 UNPACK                         }  ssb<<4  !two ops  !threeh,
+{F4}  null,
+{F5}  null,
+{F6}  null,
+{F7}  null,
+{F8 ZERO AND ADD                   }  ssb<<4  !two ops  !threeh,
+{F9 COMPARE DECIMAL                }  ssb<<4  !two ops  !threeh,
+{FA ADD DECIMAL                    }  ssb<<4  !two ops  !threeh,
+{FB SUBTRACT DECIMAL               }  ssb<<4  !two ops  !threeh,
+{FC MULTIPLY DECIMAL               }  ssb<<4  !two ops  !threeh,
+{FD DIVIDE DECIMAL                 }  ssb<<4  !two ops  !threeh,
+{FE}  null,
+{FF}  null
+
+%const %string (5) %array mnems(0:255)= %c
+"","","","","SPM","BALR","BCTR","BCR","SSK","ISK","SVC","BSM","BASSM","BASR",
+"MVCL","CLCL", "LPR","LNR","LTR","LCR","NR","CLR","OR","XR","LR","CR","AR",
+"SR","MR","DR","ALR","SLR", "LPDR","LNDR","LTDR","LCDR","HDR","LRDR","MXR",
+"MXDR","LDR","CDR","ADR","SDR","MDR","DDR","AWR", "SWR", "LPER","LNER","LTER",
+"LCER","HER","LRER","AXR","SXR","LER","CER","AER","SER","MER","DER","AUR",
+"SUR", "STH","LA","STC","IC","EX","BAL","BCT","BC","LH","CH","AH","SH","MH",
+"BAS","CVD","CVB", "ST","","","","N","CL","O","X","L","C","A","S","M","D","AL",
+"SL", "STD","","","","","","","MXD","LD","CD","AD","SD","MD","DD","AW","SW",
+ "STE","","","","","","","","LE","CE","AE","SE","ME","DE","AU","SU",
+ "SSM","","LPSW","DG","","","BXH","BXLE","SRL","SLL","SRA","SLA","SRDL","SLDL","SRDA","SLDA",
+ "STM","TM","MVI","TS","NI","CLI","OI","XI","LM","TRACE","","","","","","",
+ "","","","","","","","","","","","","STNSM","STOSM","SIGP","MC",
+ "","LRA","STIDP","","","","STCTL","LCTL","","","CS","CDS","","CLM","STCM","ICM",
+ "","","","","","","","","","","","","","","","",
+ "","MVN","MVC","MVZ","NC","CLC","OC","XC","","MVCK","MVCP","MVCS","TR","TRT","ED","EDMK",
+ "","","","","","LASP","","","","","","","","","","",
+ "SRP","MVO","PACK","UNPK","","","","","ZAP","CP","AP","SP","MP","DP","",""
+
+! The following array contains type for the extended mnemonics. X'02'-X'3C' are for the
+! B2 opcodes.  X'3C'+1 to X'3C'+2 are for the E5 opcodes.  X'3C'+3 to X'3C'+5
+! are for the 9C (*370*) opcodes.  X'3C'+5 to X'3C'+6 are for the 9D (*370*).
+! X'3C'+7 to X'3C'+8 are for the 9E  (*370*) opcodes.  X'3C'+9 to X'3C'+A are
+! for the 9F (*370*) opcodes.
+
+%const %byte %integer %array etypes(X'02':X'3C'+2+3+2+2+2)= %c
+{B202 STORE CPU ID                 } sfm<<4  !one op  !twoh,
+{B203 STORE CHANNEL ID        *370*} sfm<<4  !one op  !twoh,
+{B204 SET CLOCK                    } sfm<<4  !one op  !twoh,
+{B205 STORE CLOCK                  } sfm<<4  !one op  !twoh,
+{B206 SET CLOCK COMPARATOR         } sfm<<4  !one op  !twoh,
+{B207 STORE CLOCK COMPARATOR       } sfm<<4  !one op  !twoh,
+{B208 SET CPU TIMER                } sfm<<4  !one op  !twoh,
+{B209 STORE CPU TIMER              } sfm<<4  !one op  !twoh,
+{B20A SET PSW KEY FROM ADDRESS     } sfm<<4  !two ops !twoh,
+{B20B INSERT PSW KEY               } sfm<<4  !no ops  !twoh,
+{B20C} null,
+{B20D PURGE TLB                    } sfm<<4  !no ops  !twoh,
+{B20E-B20F} null,null,
+{B210 SET PREFIX                   } sfm<<4  !one op  !twoh,
+{B211 STORE PEFIX                  } sfm<<4  !one op  !twoh,
+{B212 STORE CPU ADDRESS            } sfm<<4  !one op  !twoh,
+{B213 RESET REFERENCE BIT     *370*} sfm<<4  !one op  !twoh,
+{B214 START INTERPRETIVE EXXCUTION } sfm<<4  !one op  !twoh,
+{B215-B217} null,null,null,
+{B218 PROGRAM CALL                 } sfm<<4  !one op  !twoh,
+{B219 SET ADDRESS SPACE CONTROL    } sfm<<4  !one op  !twoh,
+{B21A-20} null(7),
+{B221 INVALIDATE PAGE TABLE ENTRY  } rre<<4  !two ops !twoh,
+{B222 INSERT PROGRAM MASK          } rre<<4  !one op  !twoh,
+{B223 INSERT VIRTUAL STORAGE KEY   } rre<<4  !two ops !twoh,
+{B224 INSERT ADDRESS SPACE CONTROL } rre<<4  !one op  !twoh,
+{B225 SET SECONDARY ASN            } rre<<4  !one op  !twoh,
+{B226 EXTRACT PRIMARY ASN          } rre<<4  !one op  !twoh,
+{B227 EXTRACT SECONDARY ASN        } rre<<4  !one op  !twoh,
+{B228 PROGRAM TRANSFER             } rre<<4  !two ops !twoh,
+{B229 INSERT STORAGE KEY EXTENDED  } rre<<4  !two ops !twoh,
+{B22A RESET REFERENCE BIT EXTENDED } rre<<4  !two ops !twoh,
+{B22B SET STORAGE KEY EXTENDED     } rre<<4  !two ops !twoh,
+{B22C TEST BLOCK                   } rre<<4  !two ops !twoh,
+{B22D DIVIDE (EXTENDED)            } rre<<4  !two ops !twoh,
+{B22E} null,
+{B22F} null,
+{B230 CLEAR SUBCHANNEL             } sfm<<4  !one op  !twoh,
+{B231 HALT SUBCHANNEL              } sfm<<4  !one op  !twoh,
+{B232 MODIFY SUBCHANNEL            } sfm<<4  !one op  !twoh,
+{B233 START SUBCHANNEL             } sfm<<4  !one op  !twoh,
+{B234 STORE SUBCHANNEL             } sfm<<4  !one op  !twoh,
+{B235 TEST SUBCHANNEL              } sfm<<4  !one op  !twoh,
+{B236 TEST PENDING INTERRUPTION    } sfm<<4  !one op  !twoh,
+{B237 SET ADDRESS LIMIT            } sfm<<4  !one op  !twoh,
+{B238 RESUME SUBCHANNEL            } sfm<<4  !one op  !twoh,
+{B239 STORE CHANNEL REPORT WORD    } sfm<<4  !one op  !twoh,
+{B23A STORE CHANNEL PATH STATUS    } sfm<<4  !one op  !twoh,
+{B23B RESET CHANNEL PATH           } sfm<<4  !one op  !twoh,
+{B23C SET CHANNEL MONITOR          } sfm<<4  !one op  !twoh,
+{E500 LOAD ADDRESS SPACE PARAMETERS } sse<<4  !two ops !threeh,
+{E501 TEST PROTECTION              } sse<<4  !two ops !threeh,
+{9C00 START I/O               *370*} sfm<<4  !one op  !twoh,
+{9C01 START I/O FAST RELEASE  *370*} sfm<<4  !one op  !twoh,
+{9C02 RESUME I/O              *370*} sfm<<4  !one op  !twoh,
+{9D00 TEST I/O                *370*} sfm<<4  !one op  !twoh,
+{9D01 CLEAR I/O               *370*} sfm<<4  !one op  !twoh,
+{9E00 HALT I/O                *370*} sfm<<4  !one op  !twoh,
+{9E01 HALT DEVICE             *370*} sfm<<4  !one op  !twoh,
+{9F00 TEST CHANNEL            *370*} sfm<<4  !one op  !twoh,
+{9F01 CLEAR CHANNEL           *370*} sfm<<4  !one op  !twoh
+! The following array contains the extended mnemonics. X'02'-X'3C' are for the
+! B2 opcodes.  X'3C'+1 to X'3C'+2 are for the E5 opcodes.  X'3C'+3 to X'3C'+5
+! are for the 9C (*370*) opcodes.  X'3C'+5 to X'3C'+6 are for the 9D (*370*).
+! X'3C'+7 to X'3C'+8 are for the 9E  (*370*) opcodes.  X'3C'+9 to X'3C'+A are
+! for the 9F (*370*) opcodes.
+
+%const %string (5) %array emnems(X'02':X'3C'+2+3+2+2+2)= %c
+ "STIDP", "STIDC"{B203 *370*}, "SCK", "STCK", "SCKC", "STCKC", "SPT",
+ "STPT", "SPKA", "IPK", ""{B20C}, "PTLB", ""(2){B20E,B20F}, "SPX",
+ "STPX", "STAP", "RRB"{B213 *370*}, "SIE", ""(3){B215-B217}, "PC", "SAC", ""(7){B21A-B220}, "IPTE",
+ "IPM", "IVSK", "IAC", "SSAR", "EPAR", "ESAR", "PT",
+ "ISKE", "RRBE", "SSKE", "TB", "DXR", ""(2){B22E,B2F}, "CSCH",
+ "HSCH", "MSCH", "SSCH", "STSCH", "TSCH", "TPI", "SAL",
+ "RSCH", "STCRW", "STCPS", "RCHP", "SCHM", "LASP", "TPROT",
+ {9C}  "SIO", "SIOF", "RIO", {9D} "TIO", "CLRIO", {9E} "HIO", "HDV", {9F} "TCH",  "CLRCH"
+
+
+!------------------------------------- IBMRECODE -------------------------------
+
+
+
+!  Parameters  xstart, finish  are the virtual addresses between which recoding
+!                              is to be performed.
+!  Parameter   cax             is the address, corresponding to start, which is
+!                              to be printed at the first instruction recoded
+!                              (and incremented for following instructions).
+
+%integer halfwords, type, jj, nopds, opcode, ix, curbasereg, yy
+%integer b2, b3, b4, b5, b6, h2, h3, hex1, hex2, testval, printline, basereg
+%integer lineno
+%string (255) wk
+%switch isw(0:lastc)
+
+
+%routine printcode(%integer halfwords) {param must be one, two or three}
+%integer j, top
+%string (6) wk
+%switch ap(1:3)
+      PRINTSTRING(HTOS(cax, 8))
+      PRINTSTRING("  ")
+      TOP = HALFWORDS << 1  { ie 2, 4 or 6 }
+      %CYCLE J = 0, 1, 7
+         %IF J < TOP %C
+         %THEN printstring(htos(byteinteger(xstart+j), 2)) %C
+         %ELSE PRINTSTRING("  ")
+      %REPEAT
+%end {printcode}
+
+%routine bd(%integer half)
+%integer twelve bits
+   twelve bits=half&x'FFF'
+   %if twelve bits>36 %start
+      %if hex1=0 %then hex1=twelve bits %else hex2=twelve bits
+   %finish
+   write(twelve bits, 4); printstring("(")
+   write(half>>12, 2); printstring(")")
+%end {bd}
+
+%routine xbd(%integer x, half)
+%integer twelve bits
+   twelve bits=half&x'FFF'
+   %if twelve bits>36 %start
+      %if hex1=0 %then hex1=twelve bits %else hex2=twelve bits
+   %finish
+   write(twelve bits, 4); printstring("(")
+   write(x, 2); printstring(",")
+   write(half>>12, 2); printstring(")")
+%end {xbd}
+
+%routine establish full lineno
+%integer halfwords, opcode, b2, b3, h2, basereg
+%if XIMPLP64=1 %start
+%longinteger kstart,y
+%finish %else %start
+%integer kstart,y
+%finish
+   y=xstart
+   kstart=xstart-1024
+   kstart=xstart>>sshift<<sshift %if kstart<xstart>>sshift<<sshift
+   %while kstart<y %cycle
+      opcode=byteinteger(kstart)
+      b2=byteinteger(kstart+1); b3=byteinteger(kstart+2);
+      h2=b3<<8!byteinteger(kstart+3)
+      halfwords=types(opcode)&3
+      ! Update lineno, if poss
+      %if opcode=x'92' {mvi} %start
+         basereg=b3>>4
+         %if 5<=basereg<=10 %start
+            %if basereg#curbasereg %then lineno=0 %and curbasereg=basereg
+            %if h2&x'FFF'=2 %then lineno=(lineno&x'FFFF00FF')!b2<<8 %else %if h2&x'FFF'=3 %then %c
+               lineno=(lineno&x'FFFFFF00')!b2
+         %finish
+      %finish
+      kstart=kstart+halfwords<<1
+   %repeat
+%end {establish full lineno}
+
+!-------------------------------------------------------------------------------
+!                              |         H2        |        H3     |
+!       ilc          |    B2   |   B3    |   B4    |   B5   |  B6  |
+!
+!           0        |8        |16       |24       |32
+!          +---------+----+----+
+!   RRa   0|   OP    | R1 | R2 |
+!          +---------+----+----+
+!
+!          +---------+---------+
+!     b   0|   OP    |   R1    |
+!          +---------+---------+
+!
+!          +-------------------+----+----+----+----+
+!   RREa  2|        OP         |\\\\\\\\\| R1 | R2 |
+!          +-------------------+----+----+----+----+
+!
+!          +-------------------+----+----+----+----+
+!      b  2|        OP         |\\\\\\\\\| R1 |\\\\|
+!          +-------------------+----+----+----+----+
+!
+!          +---------+----+----+----+--------------+
+!   RX    1|   OP    | R1 | X1 | B2 |      D2      | Note: ilc is 2 for LRA
+!          +---------+----+----+----+--------------+       instruction only
+!
+!          +---------+----+----+----+--------------+
+!   RS    2|   OP    | R1 | R3 | B2 |      D2      |
+!          +---------+----+----+----+--------------+
+!
+!          +---------+----+----+----+--------------+
+!   SI    2|   OP    |    I2   | B1 |      D1      |
+!          +---------+----+----+----+--------------+
+!
+!          +-------------------+----+--------------+
+!   S     2|          OP       | B2 |      D2      |
+!   (sfm)  +-------------------+----+--------------+
+!
+!          +---------+----+----+----+--------------+----+-------------+
+!   SSa   3|   OP    |    L    | B1 |      D1      | B2 |      D2     |
+!          +---------+----+----+----+--------------+----+-------------+
+!
+!                    +----+----+
+!     b              | L1 | L2 |
+!                    +----+----+
+!
+!                    +----+----+
+!     c              | R1 | R3 |
+!                    +----+----+
+!
+!          +-------------------+----+--------------+----+-------------+
+!   SSE   3|         OP        | B1 |      D1      | B2 |      D2     |
+!          +-------------------+----+--------------+----+-------------+
+!
+!
+!-------------------------------------------------------------------------------
+
+
+!--------------------------------- body ----------------------------------------
+
+!
+   lineno=0; curbasereg=-1; printline=0
+
+   xstart=xstart&(\1); cax=cax&(\1)
+   yy=finish-xstart; yy=6 %if yy<6
+   hex1=0; hex2=0
+
+   %while xstart<finish %cycle
+      opcode=byteinteger(xstart)
+      b2=byteinteger(xstart+1); b3=byteinteger(xstart+2);
+      b4=byteinteger(xstart+3); b5=byteinteger(xstart+4)
+      b6=byteinteger(xstart+5)
+      h2=b3<<8!b4
+      h3=b5<<8!b6
+      jj=types(opcode)
+      type=jj>>4
+      halfwords=jj&3
+      nopds=(jj>>2)&3
+      %if type<extend1 %start
+         printcode(halfwords)
+         wk=mnems(opcode)
+         WK = WK . " " %WHILE LENGTH(WK) < 5
+         printstring(WK)
+      %finish
+      ->isw(type)
+
+isw(rrb):
+      write(b2, 4)
+      ->out
+
+isw(rre):
+      b2=b4
+isw(rr):
+      write(b2>>4, 4)
+      %if nopds>1 %then printstring(",") %and write(b2&15, 1)
+      ->out
+
+isw(rx):
+      write(b2>>4, 4)
+      %if nopds>1 %then printstring(",") %and xbd(b2&15, h2)
+      ->out
+
+isw(rs):
+      write(b2>>4, 4)
+      %if nopds>2 %then printstring(",") %and write(b2&15, 2)
+      %if nopds>1 %then printstring(",") %and bd(h2)
+      ->out
+
+isw(si):
+      ! Update lineno, if poss
+      %if opcode=x'92' {mvi} %start
+         basereg=h2>>12&15
+         %if 5<=basereg<=10 %start
+            %if curbasereg<0 %then establish full lineno
+            %if basereg#curbasereg %then lineno=0 %and curbasereg=basereg
+            %if h2&x'FFF'=2 %then lineno=(lineno&x'FFFF00FF')!b2<<8 %else %if h2&x'FFF'=3 %then %c
+               lineno=(lineno&x'FFFFFF00')!b2
+            %if b5=x'92' {mvi} {also} %then printline=0 {defer printing} %else printline=1
+         %finish
+      %finish
+
+      bd(h2)
+      %if nopds>1 %then printstring(",") %and write(b2, 1)
+      ->out
+
+isw(sfm):
+      bd(h2)
+      ->out
+
+isw(ssa):
+      xbd(b2+1, h2)
+      %if nopds>1 %then printstring(",") %and bd(h3)
+      ->out
+
+isw(ssb):
+isw(ssc):
+      xbd(b2>>4+1, h2)
+      %if nopds>1 %then printstring(",") %and xbd(b2&15+1, h3)
+      %if nopds>2 %then printstring(",") %and write(b2&15, 2)
+      ->out
+
+isw(sse):
+      bd(h2)
+      %if nopds>1 %then printstring(",") %and bd(h3)
+      ->out
+
+isw(extend3):
+      %if X'00'<=b2<=X'02' %start
+         ix=x'3C'+2+1+b2
+         %if opcode>x'9C' %start
+            %if b2=2 %then ->fail
+            ix=ix+3
+         %finish
+         %if opcode>x'9D' %then ix=ix+2
+         %if opcode>x'9E' %then ix=ix+2
+         ->ext1
+      %finish
+      ->fail
+
+isw(extend2):
+      %if X'00'<=b2<=X'01' %then ix=X'3C'+1+b2 %and ->ext1
+      ->fail
+
+isw(extend1):
+      %unless X'02'<=b2<=X'3C' %and etypes(b2)#null %then printcode(1) %and ->fail
+      ix=b2
+ext1:
+      jj=etypes(ix)
+      type=jj>>4
+      halfwords=jj&3
+      nopds=(jj>>2)&3
+      printcode(halfwords)
+      wk=emnems(ix)
+      WK = WK . " " %WHILE LENGTH(WK) < 5
+      printstring(WK)
+      %if nopds=no ops %then ->out
+      ->isw(type)
+isw(*):
+fail:
+      halfwords=1
+out:
+      %if hex1>0 %or hex2>0 %start
+!         spaces(68-outpos)
+printstring("     ")
+         printstring(" X")
+         wk=htos(hex1, 8)
+         wk -> ("0") . WK %while charno(wk, 1)='0'
+         printstring(wk)
+         %if hex2>0 %start
+            wk=htos(hex2, 8)
+            wk -> ("0") . WK %while charno(wk, 1)='0'
+            printstring(" x")
+            printstring(wk)
+         %finish
+         hex1=0; hex2=0
+      %finish
+      %if printline#0 %start
+!         printline=outpos
+!         %if printline<61 %start
+!            spaces(61-printline)
+printstring("   ")
+            printstring("Code for line"); write(lineno, 1)
+            printline=0
+!         %finish {else defer printing till there's room}
+      %finish
+      PRINTSYMBOL(NL)
+      cax=cax+halfwords<<1
+      xstart=xstart+halfwords<<1
+   %repeat
+   %return
+nonvalid area:
+   printstring("RECODE: address validation fails")
+   PRINTSYMBOL(NL)
+%end; ! NCODE
+%endoffile
+

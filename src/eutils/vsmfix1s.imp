@@ -1,0 +1,283 @@
+%constinteger XIMPLP64=0
+! minimal fixer for volums, spoolr, etc.
+! fixes only static precedure refs,data refs and relocations.
+! if dynamic procedure refs found, fails.
+!
+%record %format rf(%integer arealoc, baseloc)
+%record %format relf(%integer link, n, %record (rf) %array r(1:2000))
+%record %format ofmf(%integer start, l, prop)
+%if XIMPLP64=1 %start
+%recordformat rrf(%longinteger conad,%integer filetype,datastart,dataend)
+%finish %else %start
+%record %format rrf(%integer conad, filetype, datastart, dataend)
+%finish
+%record %format centf(%integer link, (%integer refloc, %string (31) ref iden %or %integer code offset, gla offset,
+   ep offset, pword, %string (31) entry iden))
+%record %format dentf(%integer link, disp, l, a, %string (31) iden)
+%record %format dreff(%integer link, refarray, l, %string (31) iden)
+!**** system and external specs******
+%external %integer %fn %spec outstream %alias "S#OUTSTREAM"
+
+%external %routine %spec emas3(%string %name comand, parameters, %integer %name flag)
+
+%external %routine %spec psysmes %alias "S#PSYSMES"(%integer root, flag)
+
+%external %routine %spec trim %alias "S#TRIM"(%string (255) nfile, %integer %name flag)
+
+%external %routine %spec disconnect %alias "S#DISCONNECT"(%string (255) nfile, %integer %name flag)
+
+%external %routine %spec connect %alias "S#OLDCONNECT"(%string (255) file, %integer mode, hole, prot,
+   %record (rrf) %name r, %integer %name flag)
+
+%if XIMPLP64=1 %start
+%external%routine%spec outfile %alias "S#OUTFILE"(%string(255) nfile,%integer nfilesize,%integer nhole,%integer nprot,%long%integer%name conad,%integer%name flag)
+%finish %else %start
+%external %routine %spec outfile %alias "S#OUTFILE"(%string (255) nfile, %integer nfilesize, nhole, nprot,
+   %integer %name conad, flag)
+%finish
+
+%if XIMPLP64=1 %start
+%external%routine%spec move %alias "S#MOVE"(%integer nlength,%long%integer nfrom,%long%integer nto)
+%finish %else %start
+%external %routine %spec move %alias "S#MOVE"(%integer nlength, nfrom, nto)
+%finish
+
+%external %routine %spec phex %alias "S#PHEX"(%integer %name ni)
+
+%external %string %fn %spec itos %alias "S#ITOS"(%integer nn)
+%external %routine %spec getinteger %alias "S#GETINTEGER"(%string (255) vector, %integer %name value)
+%external %routine %spec getstring %alias "S#GETSTRING"(%string (255) vector, %string %name value)
+%external %routine %spec setreturncode %alias "s#setreturncode"(%integer flag)
+%external %routine %spec setfname %alias "S#SETFNAME"(%string (255) fname)
+!
+!--------------------------------------------------------------------------
+%routine w(%string (255) s)
+   printstring(s)
+   newline
+%end;                                    ! w
+!
+%external %routine vsmfix %alias "c#vsmfix"
+!
+   %integer co, gl, entp, pword, seg size, codestart
+   %integer areacode, areadisp, basecode, basedisp, n, repstream
+   %integer unsatdat, unsatcode, curoutstream, blocks
+   %integer flag, inbase, outbase, loc, i, link, len, outlen, refarray, ad
+   %string (31) in, out, list, target
+   %integer glastart
+   %integer %array base(1:10);           !area start addresses in  file 'out'
+   %integer %array lbase(1:10);          !area start addresses when loaded
+   %integer %array %format ldataaf(0:14)
+   %integer %array %format reflocaf(1:1000)
+   %integer %array %name ldata, oldata, refloc
+   %integer %name dirref
+   %record (centf) %name cent, ocent
+   %record (dentf) %name dent
+   %record (ofmf) %array %format ofmaf(1:10)
+   %record (ofmf) %array %name ofm
+   %record (relf) %name rel
+   %record (rrf) rr
+   %record (dreff) %name dref
+!
+   %routine findcodeep(%string (31) entry, %integer %name co, gl, ep, pword, flag)
+      %integer link
+      %record (centf) %name cent
+      link = ldata(1)
+      %while link#0 %cycle
+         cent == record(inbase+link)
+         %if entry=cent_entry iden %start
+            co = lbase(1)+cent_codeoffset
+            gl = lbase(2)+cent_glaoffset
+            ep = lbase(1)+(cent_epoffset&x'7FFFFFFF')
+            pword = cent_pword
+            flag = 0
+            %return
+         %finish
+         link = cent_link
+      %repeat
+      co = 0
+      gl = 0
+      ep = 0
+      pword = 0
+      w("unsat ref ".entry)
+      flag = 1
+      unsatcode = unsatcode+1
+   %end;                                 ! findcodeep
+!
+   %routine finddataep(%string (31) entry, %integer %name ad, flag)
+      %integer link
+      %record (dentf) %name dent
+      link = ldata(4)
+      %while link#0 %cycle
+         dent == record(inbase+link)
+         %if entry=dent_iden %start
+            ad = lbase(dent_a)+dent_disp
+            flag = 0
+            %return
+         %finish
+         link = dent_link
+      %repeat
+      printstring("unsat data ref ".entry)
+      newline
+      ad = 0
+      flag = 1
+      unsatdat = unsatdat+1
+   %end;                                 ! finddataep
+!
+   %routine printboth(%string (255) s)
+!prints message terminated by newline on both streams curoutstream and 1
+      w(s)
+      selectoutput(curoutstream)
+      w(s)
+      selectoutput(repstream)
+   %end;                                 ! print both
+!
+   getstring("File;file,object,exist;?;The object file to be fixed", in)
+   getstring("Outfile;file,write;?;Where to output the fixed file", out)
+   getinteger("Report;route,out,char;t#report;The report file/dev", repstream)
+   getstring("Target machine;lcword,amdahl,370;amdahl;", target)
+   %if target="amdahl" %start
+      seg size = 1<<20-1
+      codestart = 75<<20
+   %finish %else %if target="370" %start
+      seg size = 1<<16-1
+      codestart = 75<<16
+   %finish
+   curoutstream = outstream
+   selectoutput(repstream)
+   printboth(target." fix 12/12/84")
+   w("input: ".in)
+   w("output: ".out)
+   unsatcode = 0
+   unsatdat = 0
+   connect(in, 0, 0, 0, rr, flag);       !connect input file - read
+   ->err %if flag#0
+   inbase = rr_conad
+   len = rr_dataend
+   outlen = len
+   outfile(out, outlen, 0, 0, outbase, flag)
+   ->err %if flag#0
+   move(len, inbase, outbase);           !copy file to 'out'
+   ldata == array(inbase+integer(inbase+24), ldataaf); !load data
+   oldata == array(outbase+integer(outbase+24), ldataaf); ! in out put file
+   ofm == array(inbase+integer(inbase+28)+4, ofmaf); !object file map
+   %cycle i = 1, 1, 10
+      base(i) = outbase+ofm(i)_start
+   %repeat
+   glastart = (codestart+rr_dataend+seg size)&(\segsize)
+   lbase(1) = ofm(1)_start+codestart;    !start of loaded code
+   lbase(2) = glastart{ ofm(2)_start+codestart}; !start of loaded gla
+   lbase(3) = 0;                         !no plt
+   lbase(4) = ofm(4)_start+codestart { UNTIL FILE fused ?? }
+   lbase(6) = ofm(6)_start+codestart;    !start of loaded diagnostics
+   lbase(7) = lbase(2)+ofm(2)_l;         !start of loaded statics
+   lbase(5) = lbase(7)+ofm(7)_l;         !start of loaded ust
+   lbase(8) = lbase(5)+ofm(5)_l;         !start of loaded io tables
+   lbase(9) = lbase(8)+ofm(8)_l;         !start of loaded zero ust
+   lbase(10) = ofm(10)_start+codestart;  !start of loaded diagnostics
+   %if ldata(8)#0 %start
+      setfname("object file contains dynamic procedure refs.")
+      flag = 100
+      ->err
+   %finish
+!now go through code refs filling in info
+   link = ldata(7);                      !static code refs
+   dirref == oldata(7);                  ! to leave unsat dirrefs on chain
+   %while link#0 %cycle
+      cent == record(link+inbase)
+      ocent == record(link+outbase);     ! same one in output
+      findcodeep(cent_ref iden, co, gl, entp, pword, flag)
+      %if flag=0 %start;                 ! the ref was found
+         loc = base(cent_ref loc>>24)+cent_ref loc&x'ffffff'
+         integer(loc) = co
+         integer(loc+4) = gl
+         integer(loc+8) = entp
+         %unless integer(loc+12)=pword %start
+            printboth("param mismatch - ".cent_ref iden)
+            spaces(3); phex(integer(loc+12))
+            spaces(3); phex(pword); newline
+         %finish
+         integer(loc+12) = gl
+      %finish %else %start;              ! not found. chain it on dirref
+         dirref = link
+         dirref == ocent_link
+      %finish
+      link = cent_link
+   %repeat
+   dirref = 0;                           ! to terminate dirref chain
+!
+! now data refs
+   link = ldata(9)
+   %while link#0 %cycle
+      dref == record(link+inbase)
+      refarray = (dref_refarray&x'7fffffff')+inbase; ! off common bit
+      n = integer(refarray)
+      refloc == array(refarray+4, reflocaf)
+      finddataep(dref_iden, ad, flag)
+      %for n = 1, 1, n %cycle
+         loc = base(refloc(n)>>24)+refloc(n)&x'ffffff'
+         integer(loc) = integer(loc)+ad
+      %repeat
+      link = dref_link
+   %repeat
+
+   link = ldata(14);                     ! now deal with relocation requests
+   %while link#0 %cycle
+      rel == record(link+inbase)
+      %cycle n = 1, 1, rel_n;            ! no of relocation entries in this block
+         areacode = rel_r(n)_arealoc>>24
+         areadisp = rel_r(n)_arealoc&x'ffffff'
+         basecode = rel_r(n)_baseloc>>24
+         basedisp = rel_r(n)_baseloc&x'ffffff'
+         %if basedisp&x'00800000'#0 %then basedisp = basedisp!x'ff000000'; !propagate sign
+         loc = base(areacode)+areadisp
+         integer(loc) = integer(loc)+lbase(basecode)+basedisp
+      %repeat
+      link = rel_link
+   %repeat
+!
+! now a map of data entries
+   link = ldata(4)
+   %if link#0 %start
+      w("name                        length              address")
+      %while link#0 %cycle
+         dent == record(inbase+link)
+         printstring(dent_iden)
+         spaces(32-length(dent_iden))
+         write(dent_l, 10)
+         spaces(5)
+         phex(lbase(dent_a)+dent_disp)
+         newline
+         link = dent_link
+      %repeat
+   %finish
+!now print map of entry points
+   w("name                            code      gla       ep        pword")
+   link = ldata(1);                      !head of code ep list
+   %while link#0 %cycle
+      cent == record(inbase+link)
+      printstring(cent_entry iden)
+      spaces(32-length(cent_entry iden))
+      phex(lbase(1)+cent_code offset); spaces(2)
+      phex(lbase(2)+cent_gla offset); spaces(2)
+      phex(lbase(1)+cent_ep offset); spaces(2)
+      phex(cent_pword)
+      integer(outbase+16) = lbase(1)+cent_ep offset %and printstring(" ***") %if cent_entry iden="START"
+      newline
+      link = cent_link
+   %repeat
+!
+   integer(outbase+8) = ofm(2)_start;    !start of glap
+   integer(outbase+12) = ofm(2)_l+ofm(5)_l; ! LENGTH OF glap
+!
+   blocks = (integer(outbase)+4095)>>12; !no of 4k blocks
+   trim(out, flag)
+   disconnect(out, flag)
+   %if unsatcode=0 %then printboth("all refs filled") %else printboth(itos(unsatcode)."  unsatisfied code references")
+   %if unsatdat=0 %then printboth("all data refs filled") %else printboth(itos(unsatdat)." unsatisfied data refs")
+   printboth("number of 4k blocks: ".itos(blocks))
+   flag = 0
+err:
+   selectoutput(0)
+   setreturncode(flag)
+%end;                                    ! vsmfix
+%end %of %file

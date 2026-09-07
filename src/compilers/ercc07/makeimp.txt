@@ -1,0 +1,5 @@
+parm nocheck,maxdict
+imp ercc07:itrimp_ibmponeas+ercc07:poneb02s,ip12y,l0
+imp ercc07:itrimp_ibmptwoas+timp03s,ip23y,l1
+imp ercc07:itrimp_ibmoptas+opt03s,iopt3y,l2
+imp ibmgen05s,igen5y,l5

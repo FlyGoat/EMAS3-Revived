@@ -1,0 +1,4187 @@
+!
+%CONSTSTRING (3) VSN="6C"
+%CONSTSTRING (9) VDATE=" 14/11/88"
+%CONSTINTEGER STBASE=x'2000'
+%CONSTINTEGER GLOBAL SEGS=64
+%CONSTINTEGER PT STEP=MIN PT SIZE
+      %IF XA=YES %START
+      %CONSTINTEGER STL=3;              ! segment table length for CR1
+      %CONSTINTEGER ISEG=x'20';         ! STE invalid bit
+      %CONSTINTEGER IPAGE=x'400';       ! PTE invalid bit
+      %CONSTINTEGER CBIT=X'10';         ! COMMON bit
+      %CONSTINTEGER ICR0=x'00b00400';   ! 4K pages, 1M segments & CPT enable
+      %OWNINTEGERARRAYFORMAT PTF(0:4095)
+      %OWNINTEGERARRAYNAME PTABLE
+      %FINISHELSEIF XA=AMDAHL %START
+      %CONSTINTEGER STL=x'03000000'
+      %CONSTINTEGER ISEG=1
+      %CONSTINTEGER IPAGE=8
+      %CONSTINTEGER CBIT=0
+      %CONSTINTEGER ICR0=x'80900400'
+      %OWNSHORTINTEGERARRAYFORMAT PTF(0:4095)
+      %OWNSHORTINTEGERARRAYNAME PTABLE
+      %FINISHELSESTART
+      %CONSTINTEGER STL=x'03000000'
+      %CONSTINTEGER ISEG=1
+      %CONSTINTEGER IPAGE=8
+      %CONSTINTEGER CBIT=0
+      %CONSTINTEGER ICR0=x'80800400';   ! 4K pages, 64K segs
+      %OWNSHORTINTEGERARRAYFORMAT PTF(0:4095)
+      %OWNSHORTINTEGERARRAYNAME PTABLE
+      %FINISH
+!
+!
+%INCLUDE "ercc07:ibmsup_comf370"
+%INCLUDE "ercc07:IBMSUP_page0f"
+!
+%RECORDFORMAT PARMF(%INTEGER DEST,SRCE,(%INTEGER P1,P2,P3,P4,P5,P6 %ORSTRING (23) TEXT))
+%STRINGFNSPEC STRHEX(%INTEGER N)
+%STRINGFNSPEC STRINT(%INTEGER N)
+%STRINGFNSPEC HTOS(%INTEGER VAL,PL)
+%ROUTINESPEC MONITOR(%STRING (63) S)
+!
+%ROUTINESPEC DUMPTABLE(%INTEGER T,A,L)
+%ROUTINESPEC PKMONREC(%STRING (23) TEXT, %RECORD (PARMF) %NAME P)
+%ROUTINESPEC PTREC(%RECORD (PARMF) %NAME P)
+%EXTERNALROUTINESPEC OPER(%RECORD (PARMF) %NAME OP)
+%ROUTINESPEC PDISC(%RECORD (PARMF) %NAME P)
+%EXTERNALROUTINESPEC DEVIO(%RECORD (PARMF) %NAME P)
+%ROUTINESPEC PRINTER(%RECORD (PARMF) %NAME P)
+%EXTERNALROUTINESPEC TAPE(%RECORD (PARMF) %NAME P)
+%ROUTINESPEC OPMESS2(%INTEGER OPER, %STRING (63) MESS)
+%ROUTINESPEC OPER RELAY(%RECORD (PARMF) %NAME P)
+%ROUTINESPEC OPMESS(%STRING (63) S)
+%ROUTINESPEC WAIT(%INTEGER MSECS)
+%ROUTINESPEC COMREP(%RECORD (PARMF) %NAME P)
+%ROUTINESPEC PARSE COM(%INTEGER SRCE, %STRINGNAME S)
+%ROUTINESPEC TIMEEVAL(%INTEGER FLAG)
+%INTEGERFNSPEC STOI(%STRINGNAME S)
+!
+%RECORDFORMAT PARMXF(%INTEGER DEST,SRCE,P1,P2,P3,P4,P5,P6,LINK)
+%INTEGERFNSPEC PP INIT(%RECORD (PARMXF) %ARRAYNAME SPACE, %INTEGER SIZE)
+%ROUTINESPEC MORE PP SPACE
+%ROUTINESPEC RETURN PP CELL(%INTEGER CELL)
+%ROUTINESPEC PON(%RECORD (PARMF) %NAME P)
+%ROUTINESPEC POFF(%RECORD (PARMF) %NAME P)
+%ROUTINESPEC INHIBIT(%INTEGER SERVICE)
+%ROUTINESPEC UNINHIBIT(%INTEGER SERVICE)
+%CONSTINTEGER MAXCSERV=64
+%CONSTINTEGER PARMCELLS=128
+%RECORDFORMAT PARMAF(%INTEGER DEST,SRCE, %INTEGERARRAY P(1:6))
+%CONSTINTEGER PCELLSIZE=36
+%EXTERNALINTEGER PARMDES
+%EXTERNALINTEGER PARMASL,PARMAD
+%RECORDFORMAT SERVF(%INTEGER P,L)
+%OWNRECORD (SERVF) %ARRAY SERVA(0:MAXCSERV)=0(*)
+%OWNRECORD (PARMXF) %ARRAYNAME PARM
+!
+%OWNINTEGER KERNELQ=0,SERVICE
+%CONSTINTEGER EPAGES PER BLOCK=32,ZERO PAGE ADDR=x'1000'
+%CONSTINTEGER DITSIZE=4,DDENT EX SIZE=768
+%CONSTINTEGER SLOT SIZE=32,SLDEVTAB HDR SIZE=32
+%CONSTINTEGER SENSE LENGTH=24
+%CONSTINTEGER PROCA SIZE=32
+%CONSTINTEGER OPERLOG SIZE=48*40+8,PERFORM REC SIZE=1280
+%CONSTINTEGER PROCESS PICTURE SIZE=40*(6+MAXPROCS//3)+8
+%CONSTINTEGER DIRSITE=x'200'
+%EXTERNALLONGINTEGER KMON=x'0000000000000000'
+%OWNINTEGER POFFMON=0,NEXTPT,COM BASE
+%OWNINTEGER STORE BLOCKS,STORE EPAGES,SYSTEM STORE BLOCKS
+%OWNINTEGER OCPTYPE,CPUID,CICH=NO,VM=NO,TICKS=0,RESERVES=0
+%owninteger smask=0
+%CONSTINTEGERARRAYNAME SEGTAB=STBASE
+%CONSTINTEGER DLVN SIZE=100
+%CONSTINTEGER DENT SIZE=192
+%INCLUDE "ercc07:IBMSUP_dtform2s"
+%INCLUDE "ERCC07:IBMSUP_xaioform"
+%RECORDFORMAT SLOTF(%BYTEINTEGER FLAGS,DEVTYPE,ATTN,LINK, %INTEGER TIMEOUT,DEV ENT SIZE,
+   DEV ENTA,ALT CUU,CUU,MNEM, %BYTEINTEGER BPTR,QHD,SP,STATE)
+%RECORDFORMAT CFHF(%INTEGER SIZE,SP1,NDISCS,NSLDEVS,HI CUU,ITINT,INSPERSEC,SP2,END)
+                                        ! config file header
+%RECORDFORMAT CFDEF(%INTEGER TYPE,MNEM,CUU,ALT CUU,TIMEOUT,SP1,SP2,SP3)
+                                        ! disc entry
+!%RECORDFORMAT cfsdef==slotf;           ! slow device
+!
+!     the following array is the config file
+!     here protem ultimately tacked onto CHOPSUPE by CHOPFIX
+!
+%CONSTINTEGER CP=3,CR=4,MT=5,LP=6,OP=8,MP=9,FE=14
+      %IF XA=AMDAHL %START
+      %INCLUDE "ercc07:IBMSUP_configv7"
+      %FINISHELSEIF XA=NO %START
+      %INCLUDE "ercc07:IBMSUP_config370"
+      %ELSE
+	%include "confignass"
+      %FINISH
+!
+%CONSTINTEGER PROP ENTRY LEN=40
+%CONSTINTEGER PROP LENGTH=PROP ENTRY LEN*5
+%CONSTINTEGERARRAY PROPERTIES(0:PROP LENGTH//4-1)= %C
+      19,404,3,4096,19*404*3,0,0,0,0,41,          { 3330 == eds100 }
+      19,808,3,4096,19*808*3,0,0,0,0,41,          { 3330 == eds200 }
+      30,555,4,4096,30*555*4,0,0,0,0,28,          { 3350 }
+      12,959,7,4096,12*959*7,0,0,0,0,24,          { 3375 }
+      15,885,10,4096,15*885*10,0,0,0,0,21         { 3380 }
+!
+!     tracks,cyls,ppertrk,blksize,totpages,sp*4,sectindx
+!
+%CONSTINTEGER DCYLS=100;                ! max cyls for VM minidisc
+!
+%RECORDFORMAT PROPFORM(%INTEGER TRACKS,CYLS,PPERTRK,BLKSIZE,TOTPAGES,SP1,SP2,SP3,KEYLEN,
+   SECTINDX)
+!
+%CONSTBYTEINTEGERARRAY HEXDS(0:15)='0','1','2','3','4','5','6','7',
+                                   '8','9','A','B','C','D','E','F'
+!
+%CONSTBYTEINTEGERARRAY SERV TAB(1:MAXCSERV)= %C
+      0,0,0,4,5,6,0(3),10,0,0,0,0(3),
+      0(15),32,
+      33,0,35,36,37,38,0(8),47,48,
+      49,50,51,0,0,54,0(3),58,59,60,0,62,0,0
+!
+!   master translate tables
+!
+%CONSTINTEGER TRTABS=5
+%CONSTINTEGER TRTAB SIZE=256
+%CONSTBYTEINTEGERARRAY ITOETAB(0:255)= %C
+      X'00',X'01',X'02',X'03', X'37',X'2D',X'2E',X'2F',
+      X'16',X'05',X'25',X'0B', X'0C',X'0D',X'0E',X'0F',
+      X'10',X'11',X'12',X'13', X'3C',X'3D',X'32',X'26',
+      X'18',X'19',X'3F',X'27', X'1C',X'1D',X'1E',X'1F',
+      X'40',X'5A',X'7F',X'7B', X'5B',X'6C',X'50',X'7D',
+      X'4D',X'5D',X'5C',X'4E', X'6B',X'60',X'4B',X'61',
+      X'F0',X'F1',X'F2',X'F3', X'F4',X'F5',X'F6',X'F7',
+      X'F8',X'F9',X'7A',X'5E', X'4C',X'7E',X'6E',X'6F',
+      X'7C',X'C1',X'C2',X'C3', X'C4',X'C5',X'C6',X'C7',
+      X'C8',X'C9',X'D1',X'D2', X'D3',X'D4',X'D5',X'D6',
+      X'D7',X'D8',X'D9',X'E2', X'E3',X'E4',X'E5',X'E6',
+      X'E7',X'E8',X'E9',X'AD', X'e0',X'BD',X'71',X'6D',
+      X'79',X'81',X'82',X'83', X'84',X'85',X'86',X'87',
+      X'88',X'89',X'91',X'92', X'93',X'94',X'95',X'96',
+      X'97',X'98',X'99',X'A2', X'A3',X'A4',X'A5',X'A6',
+      X'A7',X'A8',X'A9',X'C0', X'4f',X'D0',X'5f',X'07',
+      X'20',X'21',X'22',X'23', X'24',X'15',X'06',X'17',
+      X'28',X'29',X'2A',X'2B', X'2C',X'09',X'0A',X'1B',
+      X'30',X'31',X'1A',X'33', X'34',X'35',X'36',X'08',
+      X'38',X'39',X'3A',X'3B', X'04',X'14',X'3E',X'E1',
+      X'4A',X'42',X'43',X'44', X'45',X'46',X'47',X'48',
+      X'49',X'51',X'52',X'53', X'54',X'55',X'56',X'57',
+      X'58',X'59',X'62',X'63', X'64',X'65',X'66',X'67',
+      X'68',X'69',X'70',X'6a', X'72',X'73',X'74',X'75',
+      X'76',X'77',X'78',X'80', X'8A',X'8B',X'8C',X'8D',
+      X'8E',X'8F',X'90',X'9A', X'9B',X'9C',X'9D',X'9E',
+      X'9F',X'A0',X'AA',X'AB', X'AC',X'41',X'AE',X'AF',
+      X'B0',X'B1',X'B2',X'B3', X'B4',X'B5',X'a1',X'B7',
+      X'B8',X'B9',X'BA',X'BB', X'BC',X'B6',X'BE',X'BF',
+      X'CA',X'CB',X'CC',X'CD', X'CE',X'CF',X'DA',X'DB',
+      X'DC',X'DD',X'DE',X'DF', X'EA',X'EB',X'EC',X'ED',
+      X'EE',X'EF',X'FA',X'FB', X'FC',X'FD',X'FE',X'FF'
+%CONSTBYTEINTEGERARRAY ETOITAB(0:255)= %C
+      x'00',x'01',x'02',x'03', x'9C',x'09',x'86',x'7F',
+      x'97',x'8D',x'8E',x'0B', x'0C',x'0D',x'0E',x'0F',
+      x'10',x'11',x'12',x'13', x'9D',x'85',x'08',x'87',
+      x'18',x'19',x'92',x'8F', x'1C',x'1D',x'1E',x'1F',
+      x'80',x'81',x'82',x'83', x'84',x'0A',x'17',x'1B',
+      x'88',x'89',x'8A',x'8B', x'8C',x'05',x'06',x'07',
+      x'90',x'91',x'16',x'93', x'94',x'95',x'96',x'04',
+      x'98',x'99',x'9A',x'9B', x'14',x'15',x'9E',x'1A',
+      x'20',x'D5',x'A1',x'A2', x'A3',x'A4',x'A5',x'A6',
+      x'A7',x'A8',x'A0',x'2E', x'3C',x'28',x'2B',x'7c',
+      x'26',x'A9',x'AA',x'AB', x'AC',x'AD',x'AE',x'AF',
+      x'B0',x'B1',x'21',x'24', x'2A',x'29',x'3B',x'7e',
+      x'2D',x'2F',x'B2',x'B3', x'B4',x'B5',x'B6',x'B7',
+      x'B8',x'B9',x'bb',x'2C', x'25',x'5F',x'3E',x'3F',
+      x'BA',x'5e',x'BC',x'BD', x'BE',x'BF',x'C0',x'C1',
+      x'C2',x'60',x'3A',x'23', x'40',x'27',x'3D',x'22',
+      x'C3',x'61',x'62',x'63', x'64',x'65',x'66',x'67',
+      x'68',x'69',x'C4',x'C5', x'C6',x'C7',x'C8',x'C9',
+      x'CA',x'6A',x'6B',x'6C', x'6D',x'6E',x'6F',x'70',
+      x'71',x'72',x'CB',x'CC', x'CD',x'CE',x'CF',x'D0',
+      x'D1',x'de',x'73',x'74', x'75',x'76',x'77',x'78',
+      x'79',x'7A',x'D2',x'D3', x'D4',x'5B',x'D6',x'D7',
+      x'D8',x'D9',x'DA',x'DB', x'DC',x'DD',x'E5',x'DF',
+      x'E0',x'E1',x'E2',x'E3', x'E4',x'5D',x'E6',x'E7',
+      x'7B',x'41',x'42',x'43', x'44',x'45',x'46',x'47',
+      x'48',x'49',x'E8',x'E9', x'EA',x'EB',x'EC',x'ED',
+      x'7D',x'4A',x'4B',x'4C', x'4D',x'4E',x'4F',x'50',
+      x'51',x'52',x'EE',x'EF', x'F0',x'F1',x'F2',x'F3',
+      x'5c',x'9F',x'53',x'54', x'55',x'56',x'57',x'58',
+      x'59',x'5A',x'F4',x'F5', x'F6',x'F7',x'F8',x'F9',
+      x'30',x'31',x'32',x'33', x'34',x'35',x'36',x'37',
+      x'38',x'39',x'FA',x'FB', x'FC',x'FD',x'FE',x'FF'
+%CONSTBYTEINTEGERARRAY UPPER CASE ISO(0:255)= %C
+      0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,
+      16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,
+      32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,
+      48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,
+      64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,
+      80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,
+      96,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,
+      80,81,82,83,84,85,86,87,88,89,90,123,124,125,126,127,
+      128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,
+      144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,
+      160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,175,
+      176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,191,
+      192,193,194,195,196,197,198,199,200,201,202,203,204,205,206,207,
+      208,209,210,211,212,213,214,215,216,217,218,219,220,221,222,223,
+      224,225,226,227,228,229,230,231,232,233,234,235,236,237,238,239,
+      240,241,242,243,244,245,246,247,248,249,250,251,252,253,254,255
+%CONSTBYTEINTEGERARRAY LOWER CASE ISO(0:255)= %C
+      0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,
+      16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,
+      32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,
+      48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,
+      64,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,
+      112,113,114,115,116,117,118,119,120,121,122,91,92,93,94,95,
+      96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,
+      112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,
+      128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,
+      144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,
+      160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,175,
+      176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,191,
+      192,193,194,195,196,197,198,199,200,201,202,203,204,205,206,207,
+      208,209,210,211,212,213,214,215,216,217,218,219,220,221,222,223,
+      224,225,226,227,228,229,230,231,232,233,234,235,236,237,238,239,
+      240,241,242,243,244,245,246,247,248,249,250,251,252,253,254,255
+!%CONSTBYTEINTEGERARRAY E TO E TAB(0:255)= %C
+!      {for the 403x printer}
+!      {maps c0->8b ({), d0->9b (right curly), 79->9d (grave), e0->bc (backslash)}
+!      {71->8e (circumflex), 9c for unprintable characters}
+!      x'9c',x'9c',x'9c',x'9c', x'9c',x'9c',x'9c',x'9c',
+!      x'9c',x'9c',x'9c',x'9c', x'0C',x'0D',x'9c',x'9c',
+!      x'9c',x'9c',x'9c',x'9c', x'9c',x'25',x'9c',x'9c',
+!      x'9c',x'9c',x'9c',x'9c', x'9c',x'9c',x'9c',x'9c',
+!      x'9c',x'9c',x'9c',x'9c', x'9c',x'25',x'9c',x'9c',
+!      x'9c',x'9c',x'9c',x'9c', x'9c',x'9c',x'9c',x'2f',
+!      x'9c',x'9c',x'9c',x'9c', x'9c',x'9c',x'9c',x'9c',
+!      x'9c',x'9c',x'9c',x'9c', x'9c',x'9c',x'9c',x'9c',
+!      x'40',x'9c',x'9c',x'9c', x'9c',x'9c',x'9c',x'9c',
+!      x'9c',x'9c',x'4A',x'4B', x'4C',x'4D',x'4E',x'4F',
+!      x'50',x'9c',x'9c',x'9c', x'9c',x'9c',x'9c',x'9c',
+!      x'9c',x'9c',x'5A',x'5B', x'5C',x'5D',x'5E',x'5F',
+!      x'60',x'61',x'9c',x'9c', x'9c',x'9c',x'9c',x'9c',
+!      x'9c',x'9c',x'9c',x'6B', x'6C',x'6D',x'6E',x'6F',
+!      x'9c',x'8e',x'9c',x'9c', x'9c',x'9c',x'9c',x'9c',
+!      x'9c',x'9D',x'7A',x'7B', x'7C',x'7D',x'7E',x'7F',
+!      x'9c',x'81',x'82',x'83', x'84',x'85',x'86',x'87',
+!      x'88',x'89',x'9c',x'8B', x'8C',x'8D',x'8E',x'8F',
+!      x'9c',x'91',x'92',x'93', x'94',x'95',x'96',x'97',
+!      x'98',x'99',x'9c',x'9B', x'9C',x'9D',x'9E',x'9F',
+!      x'9c',x'9c',x'A2',x'A3', x'A4',x'A5',x'A6',x'A7',
+!      x'A8',x'A9',x'9c',x'AB', x'AC',x'AD',x'AE',x'AF',
+!      x'B0',x'B1',x'B2',x'B3', x'B4',x'B5',x'B6',x'B7',
+!      x'B8',x'B9',x'9c',x'BB', x'BC',x'BD',x'BE',x'BF',
+!      x'8B',x'C1',x'C2',x'C3', x'C4',x'C5',x'C6',x'C7',
+!      x'C8',x'C9',x'9c',x'9c', x'9c',x'9c',x'9c',x'9c',
+!      x'9B',x'D1',x'D2',x'D3', x'D4',x'D5',x'D6',x'D7',
+!      x'D8',x'D9',x'9c',x'9c', x'9c',x'9c',x'9c',x'9c',
+!      x'bc',x'9c',x'E2',x'E3', x'E4',x'E5',x'E6',x'E7',
+!      x'E8',x'E9',x'9c',x'9c', x'9c',x'9c',x'9c',x'9c',
+!      x'F0',x'F1',x'F2',x'F3', x'F4',x'F5',x'F6',x'F7',
+!      x'F8',x'F9',x'9c',x'9c', x'9c',x'9c',x'9c',x'9c'
+%const %byteinteger %array e to e(0:255) = %c
+      x'9f',x'9f',x'9f',x'9f', x'9f',x'9f',x'9f',x'9f',
+      x'9f',x'9f',x'9f',x'9f', x'0C',x'0D',x'9f',x'9f',
+      x'9f',x'9f',x'9f',x'9f', x'9f',x'25',x'9f',x'9f',
+      x'9f',x'9f',x'9f',x'9f', x'9f',x'9f',x'9f',x'9f',
+      x'9f',x'9f',x'9f',x'9f', x'9f',x'25',x'9f',x'9f',
+      x'9f',x'9f',x'9f',x'9f', x'9f',x'9f',x'9f',x'9f',
+      x'9f',x'9f',x'9f',x'9f', x'9f',x'9f',x'9f',x'9f',
+      x'9f',x'9f',x'9f',x'9f', x'9f',x'9f',x'9f',x'9f',
+      x'40',x'9f',x'9f',x'9f', x'9f',x'9f',x'9f',x'9f',
+      x'9f',x'9f',x'4A',x'4B', x'4C',x'4D',x'4E',x'4F',
+      x'50',x'9f',x'9f',x'9f', x'9f',x'9f',x'9f',x'9f',
+      x'9f',x'9f',x'5A',x'5B', x'5C',x'5D',x'5E',x'5F',
+      x'60',x'61',x'9f',x'9f', x'9f',x'9f',x'9f',x'9f',
+      x'9f',x'9f',x'6a',x'6B', x'6C',x'6D',x'6E',x'6F',
+      x'9f',x'71',x'9f',x'9f', x'9f',x'9f',x'9f',x'9f',
+      x'9f',x'79',x'7A',x'7B', x'7C',x'7D',x'7E',x'7F',
+      x'9f',x'81',x'82',x'83', x'84',x'85',x'86',x'87',
+      x'88',x'89',x'9f',x'8B', x'9f',x'9f',x'9f',x'9f',
+      x'9f',x'91',x'92',x'93', x'94',x'95',x'96',x'97',
+      x'98',x'99',x'9f',x'9B', x'9f',x'9f',x'9f',x'9f',
+      x'9f',x'9f',x'A2',x'A3', x'A4',x'A5',x'A6',x'A7',
+      x'A8',x'A9',x'9f',x'9f', x'9f',x'AD',x'9f',x'9f',
+      x'9f',x'9f',x'9f',x'9f', x'9f',x'9f',x'9f',x'9f',
+      x'9f',x'9f',x'9f',x'9f', x'9f',x'BD',x'9f',x'9f',
+      x'c0',x'C1',x'C2',x'C3', x'C4',x'C5',x'C6',x'C7',
+      x'C8',x'C9',x'9f',x'9f', x'9f',x'9f',x'9f',x'9f',
+      x'd0',x'D1',x'D2',x'D3', x'D4',x'D5',x'D6',x'D7',
+      x'D8',x'D9',x'9f',x'9f', x'9f',x'9f',x'9f',x'9f',
+      x'e0',x'9f',x'E2',x'E3', x'E4',x'E5',x'E6',x'E7',
+      x'E8',x'E9',x'9f',x'9f', x'9f',x'9f',x'9f',x'9f',
+      x'F0',x'F1',x'F2',x'F3', x'F4',x'F5',x'F6',x'F7',
+      x'F8',x'F9',x'9f',x'9f', x'9f',x'9f',x'9f',x'9f'
+
+!
+%CONSTINTEGER PSNO=x'360000';           ! printer sno
+%CONSTINTEGER PBUFFAD=x'4000';          ! printer buffer addr
+%if xa=yes %start
+   %constlonginteger disawait=x'a000080000000'
+%else
+   %CONSTLONGINTEGER DISAWAIT=x'A000000000000'
+%finish
+%CONSTLONGINTEGER LONE=x'0000000000000001'
+%OWNLONGINTEGER PSW,WPSW
+%ROUTINE CHOP01
+!
+%ROUTINESPEC ITIMER
+%EXTERNALROUTINESPEC DLABEL(%RECORD (PARMF) %NAME P)
+%EXTERNALROUTINESPEC FORMAT(%RECORD (PARMF) %NAME P)
+%EXTERNALROUTINESPEC BMOVE(%RECORD (PARMF) %NAME P)
+%EXTERNALROUTINESPEC DISC(%RECORD (PARMF) %NAME P)
+%ROUTINESPEC GET EPAGE(%RECORD (PARMF) %NAME P)
+%ROUTINESPEC RETURN EPAGE(%RECORD (PARMF) %NAME P)
+%ROUTINESPEC CONFIG
+%ROUTINESPEC GET REAL STORE(%INTEGERNAME BYTES)
+%ROUTINESPEC LOAD SUP(%RECORD (PARMF) %NAME P)
+%ROUTINESPEC ACTIVATE SUP
+%ROUTINESPEC NULL SERVICE(%RECORD (PARMF) %NAME P)
+%INTEGERFNSPEC SENSE CPU(%INTEGER HISPORT,%INTEGERNAME STATUS)
+!
+%OWNLONGINTEGER TIMER=x'00000000f4240000'
+%INTEGER I,J,K,SEGLEN,NJ,MYPORT,LAST REAL BYTE,TOPS,IPLDEV,COM SEG SIZE
+%INTEGER PROPADDR,CFADDR,CFEPTR,DTABLEA,DITADDR,SDTABLEA
+%SWITCH SERVROUT(1:MAXCSERV)
+%RECORD (PARMF) P
+%RECORD (PARMAF) PA
+%RECORD (PARMXF) %ARRAY PARMSPACE(0:PARMCELLS)
+%RECORD (DTFORM) %NAME DEV
+%RECORD (SLOTF) %NAME DSLOT
+      %IF XA=YES %START
+      %RECORD (IRBF) IRB;               ! for xa interupt response
+      %FINISH
+%RECORD (CFHF) %NAME CFH
+%RECORD (CFDEF) %NAME CFDE
+%RECORD (SLOTF) %NAME CFSDE
+%RECORD (PROPFORM) %NAME PROP
+%INTEGERARRAY SPEC PAGE(0:2*PAGESIZE//4-1);  ! 2 pages for bmove
+%STRING (8) PREFIX
+!
+      PSW=DISAWAIT!x'c01c01'
+      WPSW=DISAWAIT!x'0300000000000000'
+      ->GO;                             ! branch around int. labels
+IOINTL:->IOINT
+EXINTL:->EXINT
+PINTL:
+      *stm_0,15,2048(0)
+      *l_0,0(10); *st_0,2112
+      ->PINT
+MCINTL:
+      *stm_0,15,2048(0)
+      ->MCINT
+SVCINTL:
+      *stm_0,15,2048(0)
+      ->SVCINT
+!
+GO: 
+      I=x'00080000';                    ! ec mode with mcheck masked
+      *l_0,i
+      *la_1,<iointl>; *stm_0,1,120
+      *la_1,<exintl>; *stm_0,1,88
+      *la_1,<pintl>; *stm_0,1,104
+      *la_1,<mcintl>; *stm_0,1,112
+      *la_1,<svcintl>; *stm_0,1,96
+      %if xa=yes %start
+         integer(124)=integer(124)!x'80000000'; ! 31 bit address mode
+	 integer(92)=integer(92)!x'80000000'
+	 integer(108)=integer(108)!x'80000000'
+	 integer(116)=integer(116)!x'80000000'
+	 integer(100)=integer(100)!x'80000000' 
+      %finish
+!
+      PARMAD=PP INIT(PARMSPACE,PARMCELLS)
+      %FOR I=0,1,1023 %CYCLE
+         SPEC PAGE(I)=0
+      %REPEAT
+      P=0; PA=0
+      INHIBIT(47);                      ! hold oper msgs
+      %FOR I=0,1,1 %CYCLE
+         OPMESS(".")
+      %REPEAT
+      OPMESS("..... EMAS/370 .....")
+      %FOR I=0,1,1 %CYCLE
+         OPMESS(".")
+      %REPEAT
+!
+      IPLDEV=INTEGER(184);              ! (in ec mode)
+      *stidp_i
+      PREFIX=""
+      CPUID=I<<8>>8
+      I=I>>24
+      %IF I=x'ff' %THEN VM=YES %AND PREFIX="VM/"
+      OPMESS(PREFIX."Chopsupe ".VSN.VDATE)
+      J=J>>16
+      %IF J>>8=x'04' %THEN PREFIX="V/".HTOS(J>>4&15,1) %ELSEIF J>>8=x'01' %THEN %C
+         PREFIX="370/".HTOS(J&x'fff',3) %ELSE PREFIX=HTOS(J,4)
+      OPMESS(PREFIX." Ipl'ed from ".HTOS(IPLDEV,3))
+      OCPTYPE=I<<24!J
+!
+      CONFIG;                           ! grope store etc.
+!
+      %FOR I=0,1,GLOBAL SEGS-1 %CYCLE;  ! ST to null
+         SEGTAB(I)=ISEG
+      %REPEAT
+      NEXTPT=STBASE+GLOBAL SEGS*4
+      PTABLE==ARRAY(NEXTPT,PTF)
+      %FOR I=0,1,(4096-GLOBAL SEGS*4)//PTE SIZE-1 %CYCLE;  ! PTEs to null
+         PTABLE(I)<-IPAGE
+      %REPEAT
+      SEGTAB(SEGTAB SEG)=NEXTPT;        ! STE & PT seg tab
+      %IF PTE SIZE=4 %START
+         INTEGER(NEXTPT)=STBASE
+      %FINISHELSESTART
+         SHORTINTEGER(NEXTPT)=STBASE>>8
+      %FINISH
+      NEXTPT=(NEXTPT+PT STEP+1)&(-PT STEP)
+!
+      *stctl_0,0,i
+      I=I&x'ff07ff7f'!ICR0;             ! DAT control bits etc.
+      J=STBASE!STL
+      *lctl_0,1,i
+      *l_1,j; *la_2,24 {18};            ! SSK 1
+      %IF XA=YES %START
+         *sske_2,1
+      %FINISHELSEIF XA=AMDAHL %START
+         *ssk_2,1
+      %FINISHELSESTART
+         *ssk_2,1; *la_1,2048(1); *ssk_2,1
+      %FINISH
+!
+      %IF XA=NO %THEN SEGLEN=3<<28 %ELSE SEGLEN=0
+      SEGTAB(PBSEG)=NEXTPT!SEGLEN!CBIT; ! printer buffer
+      PTABLE==ARRAY(NEXTPT,PTF)
+      %FOR I=0,1,3 %CYCLE
+         J=PBUFFAD+I*PAGESIZE
+         K=J
+         %IF PTE SIZE=2 %THEN J=J>>8
+         PTABLE(I)<-J
+         *l_1,k; *la_2,24 {18};         ! SSK 1
+         %IF XA=YES %START
+            *sske_2,1
+         %FINISHELSEIF XA=AMDAHL %START
+            *ssk_2,1
+         %FINISHELSESTART
+            *ssk_2,1; *la_1,2048(1); *ssk_2,1
+         %FINISH
+      %REPEAT
+      NEXTPT=(NEXTPT+(I+1)*PTE SIZE+PT STEP-1)&(-PT STEP)
+      %IF XA=YES %START
+         i=x'ff000000'; *lctl_6,6,i;	! i/o int. subclass mask
+      %FINISH
+      BYTEINTEGER(PBUFFAD)=NL
+!
+      CFH==RECORD(ADDR(CONFIG FILE(0)))
+      CFEPTR=ADDR(CFH_END)
+      J=0
+      %FOR I=1,1,CFH_NSLDEVS %CYCLE
+         CFSDE==RECORD(ADDR(CFH)+(CFH_NDISCS+I)*CF ENTRY SIZE)
+         CFSDE_DEV ENT SIZE = (CFSDE_DEV ENT SIZE+7) & X'FFFFFFF8'
+                                        ! round up to ensure any CCWs aligned correctly
+         J=J+CFSDE_DEV ENT SIZE
+      %REPEAT
+      J=J+((ADDR(COM_END)-ADDR(COM_OCPTYPE))+PROCA SIZE*(MAXPROCS+1) %C
+         +PROCESS PICTURE SIZE+PERFORM REC SIZE+PROP LENGTH+((CFH_NDISCS+CFH_NSLDEVS) %C
+         *DITSIZE+31))&(-32)
+      %IF XA#YES %THEN J=J+CFH_HI CUU+4;  ! int steering table space
+      J=J+(DLVN SIZE+(TRTAB SIZE*TRTABS+31))&(-32)+(CFH_NDISCS+CFH_NSLDEVS) %C
+         *DENT SIZE+CFH_NDISCS*DDENT EX SIZE+CFH_NSLDEVS*SLOT SIZE+SLDEVTAB HDR         SIZE+ %C
+         OPERLOG                     SIZE
+      COM SEG SIZE=J
+      GET REAL STORE(J)
+      J=J//PAGESIZE-1
+      %IF XA=NO %THEN SEGLEN=J<<28 %ELSE SEGLEN=J//(PT STEP//PTE SIZE)
+      SEGTAB(COM SEG)=NEXTPT!SEGLEN!CBIT
+      PTABLE==ARRAY(NEXTPT,PTF)
+      %FOR J=0,1,J %CYCLE
+         K=LAST REAL BYTE+J*PAGESIZE
+         NJ=K
+         %IF PTE SIZE=2 %THEN NJ=NJ>>8
+         PTABLE(J)<-NJ
+         *l_1,k; *la_2,16 {10};         ! key 1, read permitted
+         %IF XA=YES %START
+            *sske_2,1
+         %FINISHELSEIF XA=AMDAHL %START
+            *ssk_2,1
+         %FINISHELSESTART
+            *ssk_2,1; *la_1,2048(1); *ssk_2,1
+         %FINISH
+      %REPEAT
+      NEXTPT=(NEXTPT+(J+1)*PTE SIZE+PT STEP-1)&(-PT STEP)
+      COM BASE=LAST REAL BYTE
+      COM==RECORD(COM BASE)
+      COM=0
+      *stck_i;                          ! timeeval will report if invalid
+      COM_IPLTIME=I
+      COM_OCPTYPE=OCPTYPE
+      COM_CPUID=CPUID
+      COM_SLIPL=IPLDEV&x'ffff'
+      COM_SEPGS=STORE EPAGES
+      COM_NDISCS=CFH_NDISCS
+      COM_NSLDEVS=CFH_NSLDEVS
+      *stap_MYPORT
+      MYPORT=MYPORT>>16
+      OPMESS("Ipl cpu port ".HTOS(MYPORT,1))
+      COM_OCPPORT(1)=MYPORT
+      COM_OCPPREFIX(1)=OCP PREFIX(1)
+      I=1
+      %FOR J=1,1,15 %CYCLE
+         %IF J#MYPORT %AND SENSE CPU(J,K)#3 %START
+            I=I+1
+            COM_OCPPORT(I)=J
+            COM_OCPPREFIX(I)=OCP PREFIX(I)
+            OPMESS("cpu ".HTOS(I,1)." port ".HTOS(J,1))
+         %FINISH
+         %EXIT %IF I=MAX CPUS
+      %REPEAT
+      COM_NOCPS=I
+      COM_DIRSITE=DIRSITE
+      COM_PAGESIZE=PAGESIZE
+      COM_MAXPROCS=MAXPROCS
+      COM_ITINT=CFH_ITINT
+      COM_INSPERSEC=CFH_INSPERSEC
+      ! COM_TSLICE=X'1000'
+      COM_INPTR=PBSEG<<SSHIFT
+      COM_OUTPTR=PBSEG<<SSHIFT
+      STRING(ADDR(COM_SUPVSN))=VSN;     ! for compatibility check
+      K=ADDR(COM_END)
+      COM_PROCAAD=COMSEG<<SSHIFT!(K-COM BASE)
+      K=K+PROCA SIZE*(MAXPROCS+1)
+      COM_PROC PICTAD=COMSEG<<SSHIFT!(K-COM BASE)
+      K=K+PROCESS PICTURE SIZE
+      COM_PERFORMAD=COMSEG<<SSHIFT!(K-COM BASE)
+      K=K+PERFORM REC SIZE
+      PROPADDR=K
+      %FOR I=0,1,PROP LENGTH//4-1 %CYCLE
+         INTEGER(K)=PROPERTIES(I)
+         K=K+4
+      %REPEAT
+      K=(K+31)&(-32)
+      COM_TRANS=K
+      J=ADDR(ITOETAB(0))
+      %FOR NJ=0,1,TRTABS-1 %CYCLE
+         %FOR I=0,1,TRTAB SIZE//4-1 %CYCLE
+            INTEGER(K)=INTEGER(J)
+            J=J+4
+            K=K+4
+         %REPEAT
+      %REPEAT
+      COM_DLVNADDR=K
+      %FOR I=0,1,DLVN SIZE-1 %CYCLE
+         BYTEINTEGER(K)=254
+         K=K+1
+      %REPEAT
+      %IF XA#YES %START
+         COM_STEER INT=K
+         %FOR I=0,1,CFH_HI CUU %CYCLE
+            BYTEINTEGER(K)=255
+            K=K+1
+         %REPEAT
+      %FINISH
+!
+!     construct the device tables
+!
+      K=(K+3)&(-4)
+      DITADDR=K
+      COM_DITADDR=DITADDR
+      DTABLEA=((DITADDR+4*COM_NDISCS+4*COM_NSLDEVS)+31)&(-32)
+      %FOR I=1,1,COM_NDISCS %CYCLE
+         CFDE==RECORD(CFEPTR)
+         INTEGER(DITADDR)=DTABLEA
+         DEV==RECORD(DTABLEA)
+         DEV=0
+         DEV_PROPADDR=PROPADDR+PROP ENTRY LEN*CFDE_TYPE
+         %IF VM=YES %START;             ! restrict size
+            PROP==RECORD(DEV_PROPADDR)
+            PROP_CYLS=DCYLS
+            PROP_TOTPAGES=PROP_CYLS*PROP_TRACKS*PROP_PPERTRK
+         %FINISH
+         DEV_CUU=CFDE_CUU
+         DEV_ALT CUU=CFDE_ALT CUU
+         %IF XA#YES %START
+            BYTEINTEGER(COM_STEER INT+DEV_CUU)=I-1
+            %UNLESS DEV_ALT CUU=0 %THEN BYTEINTEGER(COM_STEER INT+DEV_ALT CUU)=I-1
+         %FINISH
+         DEV_CCWA=DTABLEA+DENT SIZE
+         %IF CCW Format=1 %START
+            integer(dev_CCWA)=X'04200000'!sense length
+            integer(dev_CCWA+4)=addr(dev_SENSE1)
+         %else
+            INTEGER(DEV_CCWA)=x'04000000'!ADDR(DEV_SENSE1);  ! set up sense
+            INTEGER(DEV_CCWA+4)=x'20000000'!SENSE LENGTH
+         %finish
+         DEV_CCWA=DEV_CCWA+8
+         DEV_TIMEOUT=CFDE_TIMEOUT
+         DEV_DLVN=-1
+         DEV_MNEMONIC=CFDE_MNEM
+         DEV_SEMA=-1
+         DTABLEA=DTABLEA+DENT SIZE+DDENT EX SIZE
+         DITADDR=DITADDR+DITSIZE
+         CFEPTR=CFEPTR+CF ENTRY SIZE
+      %REPEAT
+      COM_SLDEV TABAD=DTABLEA
+      DTABLEA=DTABLEA+SLDEVTAB HDR SIZE
+      SDTABLEA=DTABLEA+COM_NSLDEVS*SLOT SIZE
+      %FOR I=1,1,COM_NSLDEVS %CYCLE
+         DSLOT==RECORD(DTABLEA)
+         CFSDE==RECORD(CFEPTR)
+         DSLOT=CFSDE
+         DSLOT_DEV ENTA=SDTABLEA
+         INTEGER(DITADDR)=SDTABLEA
+         DEV==RECORD(SDTABLEA)
+         DEV=0
+         DEV_MNEMONIC=DSLOT_MNEM
+         %IF DSLOT_DEVTYPE=FE %THEN COM_FEPS=COM_FEPS!1<<(16+DEV_MNEMONIC&15)
+         DEV_CUU=DSLOT_CUU
+         DEV_ALT CUU=CFSDE_ALT CUU
+         %IF XA#YES %START
+            BYTEINTEGER(COM_STEER INT+DEV_CUU)=x'80'!(I-1)
+            COM_CHANNELT=COM_CHANNELT!1<<(DEV_CUU>>8)
+            %UNLESS DEV_ALT CUU=0 %THEN BYTEINTEGER(COM_STEER INT+DEV_ALT CUU)=x'80'!(I-1)
+         %FINISH
+         DEV_CCWA=SDTABLEA+DENT SIZE
+         DEV_SENSE DATAD=ADDR(DEV_SENSE1)
+         %IF CCW Format=1 %START
+            integer(dev_CCWA)=X'04200000'!sense length
+            integer(dev_CCWA+4)=dev_sense datad
+         %else
+            INTEGER(DEV_CCWA)=x'04000000'!dev_sense datad
+            INTEGER(DEV_CCWA+4)=x'20000000'!SENSE LENGTH
+         %finish
+         DEV_UA AD=DEV_CCWA+8
+         DEV_UA SIZE=CFSDE_DEV ENT SIZE-8
+         %IF DSLOT_DEVTYPE=LP %THEN DEV_TRTAB AD=COM_TRANS+TRTAB SIZE*(TRTABS-1)
+         DEV_TIMEOUT=DSLOT_TIMEOUT
+	 DEV_SDSEMA=-1
+         DSLOT_TIMEOUT=0
+         CFEPTR=CFEPTR+CF ENTRY SIZE
+         DITADDR=DITADDR+DITSIZE
+         DTABLEA=DTABLEA+SLOT SIZE
+         SDTABLEA=SDTABLEA+DENT SIZE+CFSDE_DEV ENT SIZE
+      %REPEAT
+      INTEGER(COM_SLDEV TABAD)=SDTABLEA-COM_SLDEV TABAD
+      INTEGER(COM_SLDEV TABAD+4)=SLDEVTAB HDR SIZE
+      INTEGER(COM_SLDEV TABAD+12)=SDTABLEA;  ! operlog space
+      INTEGER(SDTABLEA)=OPERLOG SIZE-8
+!
+      *l_0,zeropageaddr; *l_1,pagesize;  ! clear the zero page at x1000
+      *lr_2,0; *slr_3,3; *mvcl_0,2
+!     integer(zeropageaddr)=M'ZPAG'
+!
+!   initialise device drivers
+!
+      P_DEST=x'300002'
+      P_P1=COM_SLDEVTABAD
+      P_P2=0
+      P_P3=ADDR(COM)
+      DEVIO(P)
+      P_DEST=0
+      DISC(P)
+      P_DEST=PSNO
+      PRINTER(P)
+!                                       initialise clock etc.
+      COM_DATE0=8
+      COM_TIME0=8
+      COM_DATE1=m'00/0'
+      COM_DATE2=m'0/00'
+      COM_TIME1=m'00.0'
+      COM_TIME2=m'0.00'
+      TIMEEVAL(1)
+!
+!-------------------- main service loop ---------------------------------
+!
+SERVE:
+      %IF TICKS>5*60 %START
+         TIMEEVAL(1)
+         TICKS=0
+      %FINISH
+      SMASK=0;                          ! synchronous ints. only
+      *ssm_smask
+!
+!%CYCLE;                                 ! main service loop
+MSLOOP:
+!      %EXIT %IF kernelq=0
+      ->ENDLOOP %IF KERNELQ=0
+      SERVICE=SERVA(KERNELQ)_L
+NEXT: %IF SERVA(SERVICE)_P>0 %START;    ! if uninhibited
+         P_DEST=SERVICE<<16
+         POFF(P)
+         %IF POFFMON#0 %THEN PKMONREC("Service ".STRINT(SERVICE)." called",P)
+         %IF SERVICE>64 %OR SERV TAB(SERVICE)=0 %THEN NULL SERVICE(P) %AND ->NEXT
+         ->SERVROUT(SERVICE)
+      %FINISH
+      %IF SERVICE=KERNELQ %THEN KERNELQ=0 %ELSE SERVA(KERNELQ)_L=SERVA(SERVICE)_L
+      SERVA(SERVICE)_L=0
+!%REPEAT
+      ->MSLOOP
+ENDLOOP:
+!
+!----------------------------------------
+!
+      SMASK=x'02000000';                ! allow peri. ints
+      *ssm_smask
+      SMASK=0;                          ! mask external & peri. ints
+      *ssm_smask
+      UNINHIBIT(47);                    ! let oper msgs go
+      SMASK=x'02000000';                ! allow peri. ints
+      *ssm_smask
+      *spt_timer;                       ! set cpu timer for 1 sec.
+!
+      *lpsw_wpsw;                       ! idle
+      ->SERVE
+!
+!----------------------------------------
+!
+SERVROUT(4):
+      NULL SERVICE(P)
+      ->NEXT
+SERVROUT(5):
+      GET EPAGE(P)
+      ->NEXT
+SERVROUT(6):
+      RETURN EPAGE(P)
+      ->NEXT
+SERVROUT(10):
+                                        ! was elapsed int
+      ->NEXT
+SERVROUT(32):
+      DISC(P)
+      ->NEXT
+SERVROUT(33):
+      PDISC(P)
+      ->NEXT
+SERVROUT(35):
+      DLABEL(P)
+      ->NEXT
+SERVROUT(36):
+SERVROUT(37):
+      BMOVE(P)
+      ->NEXT
+SERVROUT(38):
+      FORMAT(P)
+      ->NEXT
+SERVROUT(47):
+      OPER RELAY(P)
+      ->NEXT
+SERVROUT(48):
+      DEVIO(P)
+      ->NEXT
+SERVROUT(49):
+      TAPE(P)
+      ->NEXT
+SERVROUT(50):
+SERVROUT(51):
+      OPER(P)
+      ->NEXT
+SERVROUT(54):
+      PRINTER(P)
+      ->NEXT
+SERVROUT(58):
+      ACTIVATE SUP
+      ->NEXT
+SERVROUT(59):
+      LOAD SUP(P)
+      ->NEXT
+SERVROUT(62):
+      COMREP(P)
+      ->NEXT
+!
+!------------------------------------------------------------------------
+!
+!
+!---------------------------- interrupt entry points --------------------
+!
+!---------------------------------------- machine check
+MCINT:
+      PSW=DISAWAIT!x'0cccccccc'
+      *lpsw_psw
+!
+!---------------------------------------- external
+EXINT:
+      I=INTEGER(132);                   ! for ec mode was 24 in bc mode
+      %IF I&x'1005'=x'1005' %THEN ITIMER
+      %UNLESS I&x'ff7f'=x'1005' %START;  ! & other external
+         OPMESS("External int?: ".HTOS(I,4))
+      %FINISH
+      ->SERVE
+!
+!---------------------------------------- peripheral
+IOINT:
+                                        !
+                                        ! parameters of the interrupt pon
+                                        ! on non XA machines
+                                        ! P_P1 = channel unit interupting
+                                        ! P_P2 and P_P3 are the csw1&2 from page 0
+                                        ! P_P4 is the device slot via a chopsupe table
+                                        !
+                                        ! on XA machines
+                                        ! P_P1 is the IP which has the virtad of the device slot
+                                        ! P_P2&P3 are words 1&2 of SCSW (very close to csw1&2)
+                                        ! P_P3 is SCSW word 0 (no nonxa equivalent)
+                                        ! P_P5 is the extended Subchannel status word
+                                        !
+      %IF XA=YES %START
+         I=PAGE0_XASIW
+         J=PAGE0_XAIOIP;                ! ineterupt param is addres of deviceslot
+         *basr_3,0
+         *using_3
+         *l_1,i
+         *la_2,irb
+         *tsch_0(2)
+         *bc_1,<failcc>;                ! failed to get interrupt data
+         *drop_3
+         P_P1=J
+         P_DEST=INTEGER(J);             !_iserv in slot is the interrupt service
+         P_SRCE=M'INT'
+         P_P2=IRB_CSW1
+         P_P3=IRB_CSW2
+         P_P4=IRB_KEYCNTR
+         P_P5=IRB_XSTATUSW
+         %IF (P_DEST>>16)=32 %THEN DISC(P) %ELSE DEVIO(P)
+         ->SERVE
+FAILCC:  OPMESS("cc=3 on get int response")
+         ->SERVE
+      %ELSE
+         P_DEST=3
+         P_P1=INTEGER(184)&x'fff';      ! for ec mode was 56 in bc mode
+         P_P2=INTEGER(64);              ! csw0
+         P_P3=INTEGER(68);              ! csw1
+         I=BYTEINTEGER(COM_STEER INT+P_P1)
+         P_P4=I;                        ! dev slot
+         %IF I<128 %THEN DISC(P) %ELSEIF I#255 %THEN DEVIO(P) %ELSESTART
+         %unless  p_p1&255=0 %and p_P3=0 %then %Start
+               OPMESS("Int. from ".HTOS(P_P1,3)." ???")
+               PKMONREC("Surprise int:",P)
+            %finish
+         %FINISH
+      %FINISH
+      ->SERVE
+!
+!---------------------------------------- program error
+PINT:
+      I=INTEGER(140);                   ! for ec mode.  was 44 in bc mode
+      PSW=DISAWAIT!I&x'ffffff'!x'0ce000000'
+      *lpsw_psw
+!
+!---------------------------------------- svc
+SVCINT:
+      I=INTEGER(136);                   ! for ec mode was wrongly set to 36 for bc mode
+                                        ! it should have been 32
+      PSW=DISAWAIT!I!x'0a'<<24
+      *lpsw_psw
+!
+!
+!------------------------------------------------------------------------
+!
+%OWNINTEGER INDX1=0,INDX2=0
+%ROUTINE GET EPAGE(%RECORD (PARMF) %NAME P)
+%CONSTINTEGER GESNO=x'50000'
+      P_P4=ADDR(SPEC PAGE(0))
+      %IF INDX1=0 %THEN INDX1=999 %AND P_P2=999 %ELSE %C
+         INDX2=1000 %AND P_P2=1000 %AND P_P4=P_P4+PAGESIZE
+      %IF INDX1#0#INDX2 %THEN INHIBIT(GESNO>>16)
+      P_DEST=P_SRCE
+      P_SRCE=GESNO
+      PON(P) %IF P_DEST#0
+%END
+!
+!------------------------------------------------------------------------
+!
+%ROUTINE RETURN EPAGE(%RECORD (PARMF) %NAME P)
+%CONSTINTEGER GESNO=x'50000'
+      %IF P_P2=999 %THEN INDX1=0 %ELSEIF P_P2=1000 %THEN INDX2=0 %ELSE %C
+         OPMESS("Return epage?? ".STRINT(P_P2))
+      UNINHIBIT(GESNO>>16)
+%END
+!
+!------------------------------------------------------------------------
+!
+%ROUTINE GET REAL STORE(%INTEGERNAME BYTES)
+%INTEGER I
+      BYTES=(BYTES+4095)&(-4096)
+      I=LAST REAL BYTE
+      LAST REAL BYTE=I-BYTES
+! check ok
+%END
+!
+!------------------------------------------------------------------------
+!
+%CONSTINTEGER SSN=2, CODESEG=4 { & 5-7 for 64K segs }, GLASEG=8
+%OWNINTEGER SLOAD=0,CODE,GLA,EP
+%ROUTINE LOAD SUP(%RECORD (PARMF) %NAME P)
+%CONSTINTEGER PDISCSNO=x'210000', LSNO=x'3b0000'
+%SWITCH INACT(0:3)
+%INTEGER I,J,K,ACT
+%OWNINTEGER DEV,PAGE,BASE PAGE,COUNT,CODESIZE,GLASIZE,DONT ENTER
+      ACT=P_DEST&255
+      ->INACT(ACT)
+INACT(0):
+      DEV=P_P1
+      %IF DEV<0 %THEN OPMESS("Give fsys number") %ANDRETURN
+      COM_SUPLVN=DEV
+      COM_DCODEDA=COM_DIRSITE&x'ffff'!DEV<<24
+      BASE PAGE=P_P2
+      PAGE=P_P2
+      DONT ENTER=P_P3
+      P_P2=DEV<<24!PAGE
+      P_P3=ADDR(SPEC PAGE(0))
+      P_SRCE=LSNO!1
+!
+PONIT:
+      P_DEST=PDISCSNO!1
+      PON(P)
+      %RETURN
+!
+INACT(1):
+      %IF P_P2#0 %THEN ->TRANS FAIL
+      CODE SIZE=(SPEC PAGE(6)-SPEC PAGE(1)+4095)&x'7ffff000'
+      GLA SIZE=(SPEC PAGE(0)-SPEC PAGE(6)+4095)&x'7ffff000'
+      %UNLESS 0<CODESIZE<256*1024 %AND 0<GLASIZE<48*1024 %THEN OPMESS("Bad header") %ANDRETURN
+      CODE=SPEC PAGE(3)
+      GLA=SPEC PAGE(4)
+      EP=SPEC PAGE(7)
+!
+! CODE
+!
+      J=CODE SIZE
+      GET REAL STORE(J)
+      J=J//PAGESIZE-1
+      %IF XA=NO %START
+         %FOR K=0,1,J//16 %CYCLE;       ! STEs
+            SEGTAB(CODESEG+K)=(NEXTPT+K*32)!15<<28
+         %REPEAT
+      %FINISHELSESTART
+         SEGLEN=J//16
+         %IF XA=AMDAHL %THEN SEGLEN=SEGLEN<<28
+         SEGTAB(CODESEG)=NEXTPT!SEGLEN!CBIT
+      %FINISH
+      PTABLE==ARRAY(NEXTPT,PTF)
+      %FOR J=0,1,J %CYCLE;              ! fill in page table
+         K=LAST REAL BYTE+J*PAGESIZE
+         I=K
+         %IF PTE SIZE=2 %THEN I=I>>8
+         PTABLE(J)<-I
+         *l_1,k; *la_2,32 {20};         ! SSK 2
+         %IF XA=YES %START
+            *sske_2,1
+         %FINISHELSEIF XA=AMDAHL %START
+            *ssk_2,1
+         %FINISHELSESTART
+            *ssk_2,1; *la_1,2048(1); *ssk_2,1
+         %FINISH
+      %REPEAT
+      NEXTPT=(NEXTPT+(J+1)*PTE SIZE+PT STEP-1)&(-PT STEP)
+      COUNT=0
+!
+CPAGE:                                  ! read code page
+      P_SRCE=LSNO!2
+      P_P1=COUNT
+      P_P2=DEV<<24!(PAGE+COUNT)
+      P_P3=LAST REAL BYTE+(COUNT*PAGESIZE)
+      ->PONIT
+!
+INACT(2):                               ! code page read
+      %IF P_P2#0 %THEN ->TRANS FAIL
+      COUNT=COUNT+1
+      %IF COUNT*PAGESIZE<CODE SIZE %THEN ->CPAGE
+!
+! GLA
+!
+      J=GLA SIZE
+      GET REAL STORE(J)
+      J=J//PAGESIZE-1
+      %IF XA=NO %THEN SEGLEN=J<<28 %ELSESTART
+         SEGLEN=J//16
+         %IF XA=AMDAHL %THEN SEGLEN=SEGLEN<<28
+      %FINISH
+      SEGTAB(GLASEG)=NEXTPT!SEGLEN!CBIT
+      PTABLE==ARRAY(NEXTPT,PTF)
+      %FOR J=0,1,J %CYCLE;              ! fill in page table
+         K=LAST REAL BYTE+J*PAGESIZE
+         I=K
+         %IF PTE SIZE=2 %THEN I=I>>8
+         PTABLE(J)<-I
+         *l_1,k; *la_2,16 {10};         ! SSK 1
+         %IF XA=YES %START
+            *sske_2,1
+         %FINISHELSEIF XA=AMDAHL %START
+            *ssk_2,1
+         %FINISHELSESTART
+            *ssk_2,1; *la_1,2048(1); *ssk_2,1
+         %FINISH
+      %REPEAT
+      NEXTPT=(NEXTPT+(J+1)*PTE SIZE+PT STEP-1)&(-PT STEP)
+      PAGE=PAGE+COUNT
+      COUNT=0
+!
+GPAGE:                                  ! read GLA page
+      P_SRCE=LSNO!3
+      P_P2=DEV<<24!(PAGE+COUNT)
+      P_P3=LAST REAL BYTE+(COUNT*PAGESIZE)
+      ->PONIT
+!
+INACT(3):                               ! GLA page read
+      %IF P_P2#0 %THEN ->TRANS FAIL
+      COUNT=COUNT+1
+      %IF COUNT*PAGESIZE<GLA SIZE %THEN ->GPAGE
+!
+      COM_SLIPL=COM_SLIPL!DEV<<24!BASE PAGE>>4<<16
+      OPMESS("Supervisor loaded")
+      %IF XA=AMDAHL %AND CICH=NO %START;               ! change CPUID
+         P_DEST=X'20000C'
+         P_P1=0
+         P_P2=0
+         DISC(P)
+         I=LVNS(DEV); J=CPUIDS(I)
+         %UNLESS J=COM_CPUID %START
+            COM_CPUID=J
+            OPMESS("CPUID changed to ".SCPUIDS(I))
+         %FINISH
+      %FINISH
+      %IF DONT ENTER=0 %THEN P_DEST=x'3a0000' %AND PON(P)
+                                        ! activate
+      %RETURN
+!
+TRANSFAIL:
+      OPMESS("Load failed")
+%END
+!
+!------------------------------------------------------------------------
+!
+!
+%CONSTINTEGER MAX EPAGES=EPAGES PER BLOCK*8*64;  ! 64 meg
+%RECORDFORMAT STOREF(%SHORTINTEGER FLAGS,USERS,%integer LINK,%shortinteger BLINK,FLINK)
+%OWNRECORD (STOREF) %ARRAYFORMAT STOREAF(0:MAX EPAGES)
+%OWNRECORD (STOREF) %ARRAYNAME STORE
+!
+%ROUTINE ACTIVATE SUP
+%CONSTINTEGER STOREFSIZE=12;            ! store array recsize
+%CONSTINTEGER MAX PT SIZE=(STORE PT SIZE*PTE SIZE+PT STEP-1)&(-PT STEP)
+%CONSTINTEGER STACK BASE=x'8000'
+%CONSTINTEGER STACK PAGES PER OCP=4
+%INTEGER I,J,K,STACK PAGES,FFREEP,FSTASL,BSTASL,TOTAL EPAGES
+!
+      STACK PAGES=STACK PAGES PER OCP*COM_NOCPS
+      FFREEP=STACK BASE>>12+STACK PAGES;   ! first free epage
+      TOTAL EPAGES=STORE BLOCKS*EPAGES PER BLOCK
+      COM_SEPGS=TOTAL EPAGES
+      I=TOTAL EPAGES*STOREFSIZE+MAX PT SIZE
+      GET REAL STORE(I)
+      J=I//PAGESIZE-1
+      %IF XA=NO %THEN SEGLEN=J<<28 %ELSE SEGLEN=max pt size//pt step-1
+      SEGTAB(storeseg)=LAST REAL BYTE!SEGLEN!CBIT
+      PTABLE==ARRAY(LAST REAL BYTE,PTF)
+      %FOR I=0,1,MAX PT SIZE//PTE SIZE-1 %CYCLE
+         PTABLE(I)=IPAGE;               ! invalidate
+      %REPEAT
+      %FOR J=0,1,J %CYCLE;              ! PTEs
+         K=LAST REAL BYTE+J*PAGESIZE
+         I=K
+         %IF PTE SIZE=2 %THEN I=I>>8
+         PTABLE(J)<-I
+         *l_1,k; *la_2,24 {18};         ! SSK 1
+         %IF XA=YES %START
+            *sske_2,1
+         %FINISHELSEIF XA=AMDAHL %START
+            *ssk_2,1
+         %FINISHELSESTART
+            *ssk_2,1; *la_1,2048(1); *ssk_2,1
+         %FINISH
+      %REPEAT
+      STORE==ARRAY(LAST REAL BYTE+MAX PT SIZE,STOREAF)
+      %FOR I=0,1,TOTAL EPAGES-1 %CYCLE;  ! initialise store array
+         STORE(I)=0
+         STORE(I)_USERS=32767
+      %REPEAT
+      FSTASL=FFREEP
+      %IF COM_NOCPS>1 %START
+         %FOR I=1,1,COM_NOCPS %CYCLE
+            %IF COM_OCPPREFIX(I)=-1 %START;         ! take from free list
+               COM_OCPPREFIX(I)=FSTASL<<12
+               FSTASL=FSTASL+1
+            %FINISH
+            k=com_ocpprefix(i);
+            *l_1,k; *la_2,24 {18};         ! SSK 1
+            %IF XA=YES %START
+               *sske_2,1
+            %FINISHELSEIF XA=AMDAHL %START
+            *ssk_2,1
+            %FINISHELSESTART
+               *ssk_2,1; *la_1,2048(1); *ssk_2,1
+            %FINISH
+         %REPEAT
+      %FINISH
+      J=FSTASL
+      BSTASL=TOTAL EPAGES-1
+      K=PAGESIZE*(SYSTEM STORE BLOCKS-1)+x'20000';  ! end of supervisor store
+      %FOR I=FSTASL+1,1,BSTASL %CYCLE;  ! forward links
+         %CONTINUEIF LAST REAL BYTE<=I*PAGESIZE
+         STORE(J)_FLINK=I
+         J=I
+      %REPEAT
+      %UNLESS J=I %THEN BSTASL=J;       ! supervisor at end of store
+      STORE(BSTASL)_FLINK=0
+      STORE(FSTASL)_BLINK=0
+      I=FSTASL
+      K=1;                              ! free epages
+      %UNTIL I=BSTASL %CYCLE;           ! blinks
+         J=I
+         STORE(I)_USERS=0
+         I=STORE(I)_FLINK
+         STORE(I)_BLINK=J
+         K=K+1
+      %REPEAT
+      STORE(I)_USERS=0
+      STORE(0)_LINK=K;                  ! free epages
+      STORE(0)_FLINK=FSTASL;            ! for supervisor
+      STORE(0)_BLINK=BSTASL
+!
+      %IF XA=NO %THEN SEGLEN=2<<28 %ELSE SEGLEN=0
+      SEGTAB(PAGE0SEG)=NEXTPT!SEGLEN
+      PTABLE==ARRAY(NEXTPT,PTF)
+      PTABLE(0)=0
+      *la_1,0; *la_2,24 {18};           ! SSK 1
+      %IF XA=YES %START
+         *sske_2,1
+      %FINISHELSEIF XA=AMDAHL %START
+         *ssk_2,1
+      %FINISHELSESTART
+         *ssk_2,1; *la_1,2048(1); *ssk_2,1
+      %FINISH
+      I=ZERO PAGE ADDR
+      %IF PTE SIZE=2 %THEN I=I>>8
+      PTABLE(1)<-I
+      *l_1,zeropageaddr; *la_2,16 {10};  ! SSK 1
+      %IF XA=YES %START
+         *sske_2,1
+      %FINISHELSEIF XA=AMDAHL %START
+         *ssk_2,1
+      %FINISHELSESTART
+         *ssk_2,1; *la_1,2048(1); *ssk_2,1
+      %FINISH
+      PTABLE(2)=IPAGE;                  ! RTV PTE (with invalid set)
+      NEXTPT=(NEXTPT+3*PTE SIZE+PT STEP-1)&(-PT STEP)
+      %IF XA=NO %THEN SEGLEN=(STACK PAGES-1)<<28 %ELSE %C
+                      SEGLEN=(STACK PAGES-1)//(PT STEP//PTE SIZE)
+      SEGTAB(SSN)=NEXTPT!SEGLEN!CBIT
+      PTABLE==ARRAY(NEXTPT,PTF)
+      %FOR I=0,1,STACK PAGES-1 %CYCLE;  ! stack space
+         K=STACK BASE+I*PAGESIZE
+         J=K
+         %IF PTE SIZE=2 %THEN J=J>>8
+         PTABLE(I)<-J
+         *l_1,k; *la_2,24 {18};         ! SSK 1
+         %IF XA=YES %START
+            *sske_2,1
+         %FINISHELSEIF XA=AMDAHL %START
+            *ssk_2,1
+         %FINISHELSESTART
+            *ssk_2,1; *la_1,2048(1); *ssk_2,1
+         %FINISH
+      %REPEAT
+      NEXTPT=(NEXTPT+(I+1)*PTE SIZE+PT STEP-1)&(-PT STEP)
+      SLOAD=1
+!
+! Supervisor entered from itimer
+!
+%END
+!
+!------------------------------------------------------------------------
+!
+%ROUTINE CONFIG
+%INTEGER SPSW,FCODE
+%INTEGER I,J,K
+      FCODE=0;
+      SPSW=INTEGER(108)
+      *basr_15,0
+      *using_15
+      *la_1,<tops>; *st_1,108; *drop_15
+      %if xa=yes %start
+         integer(108)=integer(108)!x'80000000'
+      %finish
+!
+!   grope store size
+!
+      *st_11,i
+      I=(I+8191)&(-PAGESIZE)
+      %CYCLE
+         *l_0,i; *l_1,pagesize;         ! clear - pe if off top of store
+         *lr_2,0; *slr_3,3; *mvcl_0,2
+         i=i+pagesize
+      %REPEAT
+TOPS:
+      fcode=integer(140)&127;     ! ec mode - for bc mode test 40
+      %unless fcode=5 %or fcode=6 %start; ! address or spec error
+         PSW=DISAWAIT!x'0c0c0c0c0'
+         *lpsw_psw
+      %FINISH
+xvimeg:
+      INTEGER(108)=SPSW
+      OPMESS(STRINT(I//1024)."Kb of store found")
+      %IF I>STORE LIMIT %THEN I=STORE LIMIT;  ! max required
+      OPMESS(STRINT(I//1024)."Kb in use")
+      STORE EPAGES=I//PAGESIZE
+      STORE BLOCKS=STORE EPAGES//EPAGES PER BLOCK
+      SYSTEM STORE BLOCKS=STORE BLOCKS
+      LAST REAL BYTE=I
+      TOPS=LAST REAL BYTE
+      %FOR I=0,4096,TOPS-4096 %CYCLE;   ! SSK 7 as default
+         *l_1,i; *la_2,120 {78}
+         %IF XA=YES %START
+            *sske_2,1
+         %FINISHELSEIF XA=AMDAHL %START
+            *ssk_2,1
+         %FINISHELSESTART
+            *ssk_2,1; *la_1,2048(1); *ssk_2,1
+         %FINISH
+      %REPEAT
+%END
+!
+!------------------------------------------------------------------------
+!
+%ROUTINE ITIMER
+%OWNINTEGER TIMES=0
+%RECORD (PARMF) P
+%INTEGER I,J,R11,R12,R13,R14
+      %IF SLOAD=1 %AND RESERVES=0 %START; ! supervisor loaded & no reserves o/s
+                                        ! relocate COM addresses
+         COM_DLVNADDR=(COM_DLVNADDR-COM BASE)!COM SEG<<SSHIFT
+         COM_DITADDR=(COM_DITADDR-COM BASE)!COM SEG<<SSHIFT
+         INTEGER(COM_SLDEV TABAD+12)=(INTEGER(COM_SLDEV TABAD+12)-COM BASE)!COM SEG<<SSHIFT
+         COM_SLDEVTABAD=(COM_SLDEVTABAD-COM BASE)!COM SEG<<SSHIFT
+         %IF XA#YES %THEN COM_STEER INT=(COM_STEER INT-COM BASE)!COM SEG<<SSHIFT
+         COM_CATTAD=(COM_CATTAD-COM BASE)!COM SEG<<SSHIFT
+         COM_TRANS=(COM_TRANS-COM BASE)!COM SEG<<SSHIFT
+         COM_STOREAAD=store0ad
+         P_DEST=x'30000a'
+         P_P1=COM BASE
+         DEVIO(P);                      ! relocate DEVIO's tables
+         P_DEST=x'20000a'
+         DISC(P);                       ! & DISC's
+         R11=SSN<<SSHIFT
+         R12=CODE
+         R13=GLA
+         R14=x'faceface'
+         PSW=PSW0!EP&(~x'0004000000000000')
+         %FOR I=0,4096,TOPS-4096 %CYCLE;  ! remove change/ref bits
+            *l_1,i
+            %IF XA=YES %START
+               *iske_0,1; *srl_0,3; *sll_0,3; *sske_0,1
+            %FINISHELSEIF XA=AMDAHL %START
+               *isk_0,1; *srl_0,3; *sll_0,3; *ssk_0,1
+            %FINISHELSESTART
+               *isk_0,1; *srl_0,3; *sll_0,3
+               *ssk_0,1; *la_1,2048(1); *ssk_0,1
+            %FINISH
+         %REPEAT
+         I=x'ffff'; *lctl_8,8,i;        ! unmask monitor calls
+         I=ADDR(R11); J=ADDR(PSW)
+         *l_1,i; *l_2,j; *lm_11,14,0(1)
+         *lpsw_0(2);                    ! enter supervisor
+      %FINISH
+!
+      TICKS=TICKS+1
+      TIMES=TIMES+1
+      %IF TIMES&3=0 %START
+         P_DEST=X'200005';      ! disc tick
+         PON(P)
+         P_DEST=PSNO
+         PON(P)
+      %FINISH
+%END
+!
+!------------------------------------------------------------------------
+!
+%ROUTINE NULL SERVICE(%RECORD (PARMF) %NAME P)
+      PKMONREC("Unsupported service",P)
+%END
+!
+!------------------------------------------------------------------------
+%integerfn issue sigp(%integer param,hisport,order,%integername status)
+!***********************************************************************
+!*    Sends an order to another CPU                                    *
+!***********************************************************************
+%integer cc
+      *SR_0,0; *LM_1,4,Param
+      *SIGP_0,2,0(3)
+      *ST_0,0(4);                   ! into status
+      *IPM_1; *SRL_1,28(0); *st_1,CC
+      %result=CC
+%end
+%integerfn sense CPU(%integer Hisport,%integername Status)
+!***********************************************************************
+!*    Sends a Sense to other CPU waits a while for a reply             *
+!***********************************************************************
+%integer count,CC
+      Count=0
+      %cycle
+         CC=issue sigp(0,Hisport,1{Send Status},Status)
+         %exit %if CC#2;                  ! Anything but BUSY
+         Count=Count+1
+      %repeat %until count>=1000000
+      %result=cc
+%end
+!------------------------------------------------------------------------
+!
+%END
+!*
+!************************************************************************
+!*
+!
+%EXTERNALINTEGERFN REALISE(%INTEGER VAD)
+      %RESULT=VAD
+%END
+!
+%EXTERNALROUTINE MOVE(%INTEGER LEN,FROM,TO)
+      %RETURNIF LEN<=0
+      *l_0,to; *l_1,len
+      *l_2,from; *lr_3,1
+      *mvcl_0,2
+%END
+!
+!------------------------------------------------------------------------
+!
+%EXTERNALROUTINE ITOE(%INTEGER AD,LEN)
+%INTEGER I
+      %RETURNIF LEN<=0
+      I=ADDR(ITOETAB(0))
+      *l_1,len; *l_2,ad; *l_3,i
+      *la_0,256
+      *basr_15,0
+      *using_15
+      *clr_1,0; *bc_4,<lt256>
+      *tr_0(256,2),0(3)
+      *alr_2,0; *slr_1,0
+      *bcr_15,15
+LT256:*ltr_1,1; *bc_8,<end>
+      *bctr_1,0; *ex_1,<tr>
+END:  %RETURN
+TR:   *tr_0(0,2),0(3)
+      *drop_15
+%END
+!
+!------------------------------------------------------------------------
+!
+%EXTERNALROUTINE ETOI(%INTEGER AD,LEN)
+%INTEGER I
+      %RETURNIF LEN<=0
+      I=ADDR(ETOITAB(0))
+      *l_1,len; *l_2,ad; *l_3,i
+      *la_0,256
+      *basr_15,0
+      *using_15
+      *clr_1,0; *bc_4,<lt256>
+      *tr_0(256,2),0(3)
+      *alr_2,0; *slr_1,0
+      *bcr_15,15
+LT256:*ltr_1,1; *bc_8,<end>
+      *bctr_1,0; *ex_1,<tr>
+END:  %RETURN
+TR:   *tr_0(0,2),0(3)
+      *drop_15
+%END
+!
+!------------------------------------------------------------------------
+!
+%ROUTINE PTREC(%RECORD (PARMF) %NAME P)
+%INTEGER I,J,SPTR,VAL
+%STRING (120) S
+      LENGTH(S)=120;                    ! sidestep charno check
+      SPTR=1
+      %FOR I=ADDR(P),4,ADDR(P)+28 %CYCLE
+         VAL=INTEGER(I)
+         %FOR J=28,-4,0 %CYCLE
+            CHARNO(S,SPTR)=HEXDS((VAL>>J)&15)
+            SPTR=SPTR+1
+         %REPEAT
+         CHARNO(S,SPTR)=' '
+         SPTR=SPTR+1
+      %REPEAT
+      %FOR I=ADDR(P)+8,1,ADDR(P)+31 %CYCLE
+         J=BYTEINTEGER(I)
+         %IF J<32 %OR J>95 %THEN J='_'
+         CHARNO(S,SPTR)=J
+         SPTR=SPTR+1
+      %REPEAT
+      CHARNO(S,SPTR)=NL
+      LENGTH(S)=SPTR
+      PRINTSTRING(S)
+%END
+!
+!------------------------------------------------------------------------
+!
+%EXTERNALROUTINE PKMONREC(%STRING (23) TEXT, %RECORD (PARMF) %NAME P)
+      PRINTSTRING(TEXT)
+      SPACE
+      PTREC(P)
+%END
+!
+!------------------------------------------------------------------------
+!
+%EXTERNALROUTINE DUMPTABLE(%INTEGER TABLE,ADD,LENGTH)
+%OWNINTEGER NEXT
+%INTEGER I,K,AD,END,SPTR,VAL
+%STRING (132) S
+      AD=ADDR(S)
+      NEXT=NEXT+1; ADD=ADD&(-4)
+      PRINTSTRING("
+****    Supervisor  dump    table: ".STRINT(TABLE)."    addr ")
+      PRINTSTRING(STRHEX(ADD)."    length: ".STRINT(LENGTH))
+      PRINTSTRING("    dump no: ".STRINT(NEXT)."****")
+      NEWLINE
+      END=ADD+LENGTH; I=1
+      S=" "
+      %UNTIL ADD>=END %CYCLE
+         %IF ADD+32>COM_SEPGS*PAGESIZE %START
+            PRINTSTRING("address validation fails
+")
+            %RETURN
+         %FINISH
+         %IF I=0 %START
+            %FOR K=ADD,4,ADD+28 %CYCLE
+               ->ON %IF INTEGER(K)#INTEGER(K-32)
+            %REPEAT
+            S="0"; ->UP
+         %FINISH
+ON:
+         BYTEINTEGER(AD+2)='('; SPTR=3
+         %FOR I=28,-4,0 %CYCLE
+            BYTEINTEGER(AD+SPTR)=HEXDS((ADD>>I)&15)
+            SPTR=SPTR+1
+         %REPEAT
+         BYTEINTEGER(AD+SPTR)=')'
+         BYTEINTEGER(AD+SPTR+1)=' '
+         SPTR=SPTR+2
+         %FOR K=ADD,4,ADD+28 %CYCLE
+            VAL=INTEGER(K)
+            %FOR I=28,-4,0 %CYCLE
+               BYTEINTEGER(AD+SPTR)=HEXDS((VAL>>I)&15)
+               SPTR=SPTR+1
+            %REPEAT
+            BYTEINTEGER(AD+SPTR)=' '
+            SPTR=SPTR+1
+         %REPEAT
+         BYTEINTEGER(AD+SPTR)=' '
+         SPTR=SPTR+1
+         %FOR K=ADD,1,ADD+31 %CYCLE
+            I=BYTEINTEGER(K)&x'7f'
+            %UNLESS 32<=I<=95 %THEN I=' '
+            BYTEINTEGER(AD+SPTR)=I
+            SPTR=SPTR+1
+         %REPEAT
+         BYTEINTEGER(AD+SPTR)=' '
+         SPTR=SPTR+1
+         BYTEINTEGER(AD+SPTR)=NL
+         BYTEINTEGER(ADDR(S))=SPTR
+         PRINTSTRING(S)
+         S=" "
+UP:      ADD=ADD+32
+         I=0
+      %REPEAT
+      NEWLINE
+%END
+!
+!------------------------------------------------------------------------
+!
+%CONSTINTEGER BUFFLIM=PBUFFAD+x'4000'
+%OWNINTEGER INPTR=PBUFFAD,OUTPTR=PBUFFAD,PAVAIL=0
+%OWNINTEGER BUSY,INTPEND,TESTPEND=0,INIT=0
+%EXTERNALROUTINE IOCP %ALIAS "S#IOCP"(%INTEGER EP,N)
+%CONSTINTEGER VALENT=x'280a8'
+%RECORD (PARMF) Q
+%INTEGER I,J,ADR,L,OLDINPTR,SYM,NLSEEN
+%STRING (63) S
+      ->END %UNLESS VALENT&1<<EP#0
+      LENGTH(S)=63
+      OLDINPTR=INPTR
+      NLSEEN=0
+      %IF EP=17 %START;                 ! repeated symbols
+         L=N>>8&63
+         J=L
+         %WHILE J>0 %CYCLE
+            CHARNO(S,J)=N&127
+            J=J-1
+         %REPEAT
+         ADR=ADDR(S)+1
+      %FINISHELSESTART
+         %IF EP>=7 %START;              ! printstring
+            L=BYTEINTEGER(N)
+            ADR=N+1
+         %FINISHELSESTART;              ! printsymbol & printch
+            L=1
+            ADR=ADDR(N)+3
+         %FINISH
+      %FINISH
+      I=1
+      %WHILE I<=L %CYCLE
+         ->END %IF BUSY=1;              ! buffer busy discard o/p
+         J=INPTR+1
+         %IF J>=BUFFLIM %THEN J=PBUFFAD
+         %IF J#OUTPTR %START;           ! room for current char
+            SYM=BYTEINTEGER(ADR)
+            BYTEINTEGER(J)=SYM
+            %IF SYM=NL %THEN NLSEEN=1
+            ADR=ADR+1
+            INPTR=J
+            I=I+1
+         %FINISHELSE BUSY=1 %ANDRETURN
+      %REPEAT
+      %RETURNIF PAVAIL=0
+      %IF OLDINPTR=OUTPTR %AND NLSEEN#0 %THEN Q_DEST=PSNO %AND PON(Q)
+END:%END
+!
+!------------------------------------------------------------------------
+!
+%ROUTINE PRINTER(%RECORD (PARMF) %NAME P)
+%ROUTINESPEC ETOE(%INTEGER AD,LEN)
+%INTEGER I,J
+%OWNBYTEINTEGERARRAY BUFFER(0:133)=0(*)
+%IF CCW Format=0 %START
+      %RECORD %FORMAT ccwf(%INTEGER cmdadr, %BYTE %INTEGER flags,sp, %SHORT %INTEGER len)
+%ELSE
+      %RECORD %FORMAT ccwf(%BYTE cmd,flags, %SHORT len, %INTEGER adr)
+%FINISH
+%OWNRECORD (CCWF) %NAME CCW
+%RECORD (DTFORM) %NAME D
+%OWNINTEGER MNEM=m'LP0',TRANSTABAD=0
+%RECORD (PARMF) Q
+%SWITCH DACT(0:8)
+      %IF INIT=0 %START
+         Q=0
+         Q_DEST=x'30000b'
+         Q_SRCE=PSNO!7
+         Q_P1=m'LP'
+         Q_P2=PSNO!2;                   ! ints. to act 2
+         PON(Q)
+         INIT=1
+      %FINISH
+      ->DACT(P_DEST&15)
+NEXTLINE:
+      BUFFER(0)=0
+DACT(0):                                ! clock tick
+      %IF INTPEND#0 %OR TESTPEND#0 %OR PAVAIL=0 %THEN ->END
+      %IF INPTR=OUTPTR %THEN ->UNBUSY
+      I=BUFFER(0)
+      %CYCLE
+         J=BYTEINTEGER(OUTPTR)
+         BYTEINTEGER(OUTPTR)=0
+         OUTPTR=OUTPTR+1
+         %IF OUTPTR>=BUFFLIM %THEN OUTPTR=PBUFFAD
+         %IF J=10 %OR J=12 %OR I=132 %START
+            %IF I=132 %THEN J=10
+            J=32 %IF J=10
+            I=I+1
+            BUFFER(I)=J
+            BUFFER(0)=I
+            CCW_LEN=I
+            ITOE(ADDR(BUFFER(1)),I)
+            ETOE(ADDR(BUFFER(1)),I)
+            ->PRINT
+         %FINISH
+         %IF J#13 %THEN I=I+1 %AND BUFFER(I)=J
+         %IF INPTR=OUTPTR %THEN BUFFER(0)=I %AND ->UNBUSY
+      %REPEAT
+PRINT:
+      INTPEND=1
+PRINTI:
+      P_DEST=x'30000c'
+      P_SRCE=PSNO!8
+      P_P1=ADDR(CCW)
+      P_P2=INIT
+      P_P3=0
+      PON(P)
+      ->END
+DACT(8):                                ! request rejected
+      OPMESS("Main lp request reject")
+      OPMESS("flag = ".HTOS(P_P1,4))
+      TESTPEND=1
+      ->END
+      PSW=DISAWAIT!P_P1
+      *lpsw_psw
+      INTPEND=0
+      ->END
+DACT(1):                                ! not used
+      TESTPEND=1
+      ->ATTN
+!
+DACT(2):                                ! printer i/o termination
+      J=P_P2>>24
+      %if p_p2&x'000f0000'#0 %then testpend=1 %and ->end; ! channel error == no printer
+      %IF J=x'0c' %START;               ! normal term
+         integer(addr(ccw))=integer(addr(ccw))&x'7fffffff'; ! unset initial ff
+         INTPEND=0
+         ->NEXTLINE
+      %FINISH
+      %IF J=4 %AND INTPEND=4 %THEN INTPEND=x'20' %AND ->END
+      %IF J=x'20' %AND INTPEND=x'20' %THEN INTPEND=0 %AND TESTPEND=1 %AND ->END
+      %IF J=4 %THEN ->ATTN
+      %IF INTPEND=0 %START
+         PKMONREC("LP int?:",P)
+         OPMESS("Main lp int???")
+         ->END
+      %FINISH
+                                        ! abterm
+      OPMESS("Attend main lp ".HTOS(J,2))
+      %IF J=x'0a' %THEN INTPEND=4 %ELSE INTPEND=0 %AND TESTPEND=1
+      ->END
+ATTN:                                   ! attention
+      %IF TESTPEND#0 %THEN TESTPEND=0 %AND ->PRINT
+      ->END
+DACT(6):                                ! reset printer
+      Q=0
+      Q_DEST=x'300005'
+      Q_SRCE=PSNO;                      ! reply ignored
+      Q_P1=MNEM
+      PON(Q);                           ! de-allocate
+      Q_DEST=x'30000b'
+      Q_SRCE=PSNO!7
+      Q_P1=m'LP'
+      Q_P2=PSNO!2
+      PON(Q);                           ! re-allocate
+      PAVAIL=0
+      INTPEND=0
+      ->NEXTLINE
+DACT(7):                                ! reply from allocate
+      %IF P_P1#0 %THEN OPMESS("Main lp alloc fails ".STRINT(P_P1)) %ELSESTART
+         INTPEND=0
+         PAVAIL=1
+         TESTPEND=0
+         INIT=P_P2
+         MNEM=P_P6
+         D==RECORD(P_P3)
+         TRANSTABAD=D_TRTABAD
+         CCW==RECORD(D_UA AD)
+         %IF CCW Format=0 %START
+            ccw_cmdadr=x'89'<<24!addr(buffer(1))
+            integer(addr(ccw)+8)=x'04000000'!addr(d_sense1)
+            integer(addr(ccw)+12)=x'20000004'
+         %ELSE
+            ccw_cmd=x'89';  ! initial command has form feed set
+            ccw_adr=addr(buffer(1))
+            integer(addr(ccw)+8)=x'04200004'
+            integer(addr(ccw)+12)=addr(D_sense1)
+         %FINISH
+         ccw_flags=x'60'
+      %FINISH
+      ->NEXTLINE
+UNBUSY:                                 ! restart on buffer o'flow
+      %IF BUSY=1 %START
+         BUSY=0; PRINTSTRING("
+*** output lost ***
+")
+      %FINISH
+      ->END
+!
+%ROUTINE ETOE(%INTEGER AD,LEN)
+      %RETURNIF TRANSTABAD=0 %OR LEN<=0
+      *l_1,len; *l_2,ad; *l_3,transtabad
+      *basr_15,0; *using_15
+      *bctr_1,0; *ex_1,<tr>; *drop_15
+      %RETURN
+TR:   *tr_0(0,2),0(3)
+%END
+!
+END:
+%END
+!
+!------------------------------------------------------------------------
+!
+%EXTERNALROUTINE STOP %ALIAS "S#STOP"
+      PSW=DISAWAIT!x'd1ed'
+      *lpsw_psw
+%END
+!
+!------------------------------------------------------------------------
+!
+%EXTERNALROUTINE NDIAG %ALIAS "S#NDIAG"(%INTEGER PC,LNB,FAULT,XTRA)
+%OWNINTEGER TIMES=0
+      ->STOP %IF TIMES>4
+      TIMES=TIMES+1
+      PRINTSTRING("
+monitor entered from line")
+      WRITE(SHORTINTEGER(LNB+2),1)
+      PRINTSTRING(" starting at line")
+      WRITE(SHORTINTEGER(LNB),1)
+      NEWLINE
+      PRINTSTRING("pc = ".HTOS(PC,8)."
+lnb = ".HTOS(LNB,8)."
+fault = ".HTOS(FAULT,3)."
+xtra = ".HTOS(XTRA,8)."
+")
+      %RETURNIF FAULT=0
+STOP:
+      PSW=DISAWAIT!x'd1ad1a'
+      *lm_0,3,pc; *lh_4,2(1)
+      *lpsw_psw
+%END
+!
+!------------------------------------------------------------------------
+!
+%EXTERNALROUTINE PRHEX(%INTEGER N)
+      PRINTSTRING(STRHEX(N))
+%END
+!
+!------------------------------------------------------------------------
+!
+%ROUTINE MONITOR(%STRING (63) S)
+      PRINTSTRING(S)
+      NEWLINE
+      %MONITOR
+      %STOP
+%END
+!
+!------------------------------------------------------------------------
+!
+%ROUTINE DPON(%RECORD (PARMF) %NAME P, %INTEGER DELAY)
+      PON(P)
+%END
+!
+!------------------------------------------------------------------------
+!
+%ROUTINE PUTONQ(%INTEGER SERVICE)
+%RECORD (SERVF) %NAME SERV,SERVQ
+      SERV==SERVA(SERVICE)
+      %IF KERNELQ=0 %THEN SERV_L=SERVICE %ELSESTART
+         SERVQ==SERVA(KERNELQ)
+         SERV_L=SERVQ_L
+         SERVQ_L=SERVICE
+      %FINISH
+      KERNELQ=SERVICE
+%END
+!
+!------------------------------------------------------------------------
+!
+%INTEGERFN PPINIT(%RECORD (PARMXF) %ARRAYNAME PARMSPACE, %INTEGER LASTCELL)
+%INTEGER I,CELLS,PARMAD
+%RECORD (PARMXF) %NAME HDCELL
+      PARMAD=ADDR(PARMSPACE(0))
+      PARM==PARMSPACE
+      CELLS=LASTCELL
+      HDCELL==PARM(0)
+      HDCELL_DEST=LASTCELL
+      HDCELL_SRCE=LASTCELL
+      HDCELL_P1=LASTCELL+1
+      %FOR I=1,1,CELLS-1 %CYCLE
+         PARM(I)_LINK=I+1
+      %REPEAT
+      PARM(CELLS)_LINK=1
+      PARMASL=CELLS
+      PARMDES=PARMAD
+      %RESULT=PARMAD
+%END
+!
+!------------------------------------------------------------------------
+!
+%ROUTINE MORE PPSPACE
+      MONITOR("Parm asl empty")
+%END
+!
+!------------------------------------------------------------------------
+!
+%EXTERNALROUTINE PON(%RECORD (PARMF) %NAME P)
+%RECORD (SERVF) %NAME SERV
+%RECORD (PARMXF) %NAME ACELL,SCELL,NCELL
+%INTEGER SERVICE,NEWCELL,SERVP
+      SERVICE=P_DEST>>16
+      %UNLESS 0<SERVICE<=MAXCSERV %THEN PKMONREC("Invalid pon:",P) %ANDRETURN
+      %IF PARMASL=0 %THEN MORE PPSPACE
+      ACELL==PARM(PARMASL)
+      NEWCELL=ACELL_LINK
+      NCELL==PARM(NEWCELL)
+      %IF NEWCELL=PARMASL %THEN PARMASL=0 %ELSE ACELL_LINK=NCELL_LINK
+      NCELL<-P
+      SERV==SERVA(SERVICE)
+      SERVP=SERV_P&x'7fffffff'
+      %IF SERVP=0 %THEN NCELL_LINK=NEWCELL %ELSESTART
+         SCELL==PARM(SERVP)
+         NCELL_LINK=SCELL_LINK
+         SCELL_LINK=NEWCELL
+      %FINISH
+      SERV_P=SERV_P&x'80000000'!NEWCELL
+      %IF SERV_P>0 %AND SERV_L=0 %THEN PUTONQ(SERVICE)
+%END
+!
+!------------------------------------------------------------------------
+!
+%ROUTINE FASTPON(%INTEGER CELL)
+%RECORD (PARMF) %NAME P
+      P==RECORD(ADDR(PARM(CELL)))
+      PON(P)
+      RETURN PP CELL(CELL)
+%END
+!
+!------------------------------------------------------------------------
+!
+%EXTERNALINTEGERFN NEWPPCELL
+%INTEGER NEWCELL
+%RECORD (PARMXF) %NAME ACELL
+      %IF PARMASL=0 %THEN MORE PPSPACE
+      ACELL==PARM(PARMASL)
+      NEWCELL=ACELL_LINK
+      %IF NEWCELL=PARMASL %THEN PARMASL=0 %ELSE ACELL_LINK=PARM(NEWCELL)_LINK
+      %RESULT=NEWCELL
+%END
+!
+!------------------------------------------------------------------------
+!
+%ROUTINE POFF(%RECORD (PARMF) %NAME P)
+%RECORD (SERVF) %NAME SERV
+%RECORD (PARMXF) %NAME ACELL,CCELL,SCELL
+%INTEGER SERVICE,CELL,SERVP
+      SERVICE=P_DEST>>16
+      %UNLESS 0<SERVICE<=MAXCSERV %START
+         PKMONREC("Invalid poff:",P)
+         P_DEST=0
+         %RETURN
+      %FINISH
+      SERV==SERVA(SERVICE)
+      SERVP=SERV_P
+      %IF SERVP<=0 %THEN P_DEST=0 %ANDRETURN
+      SCELL==PARM(SERVP)
+      CELL=SCELL_LINK
+      CCELL==PARM(CELL)
+      P<-CCELL
+      %IF CELL=SERV_P %THEN SERV_P=0 %ELSE SCELL_LINK=CCELL_LINK
+      %IF PARMASL=0 %THEN CCELL_LINK=CELL %ELSESTART
+         ACELL==PARM(PARMASL)
+         CCELL_LINK=ACELL_LINK
+         ACELL_LINK=CELL
+      %FINISH
+      PARMASL=CELL
+%END
+!
+!------------------------------------------------------------------------
+!
+%EXTERNALROUTINE RETURN PPCELL(%INTEGER CELL)
+%RECORD (PARMXF) %NAME ACELL,CCELL
+      CCELL==PARM(CELL)
+      %IF PARMASL=0 %THEN CCELL_LINK=CELL %ELSESTART
+         ACELL==PARM(PARMASL)
+         CCELL_LINK=ACELL_LINK
+         ACELL_LINK=CELL
+      %FINISH
+      PARMASL=CELL
+%END
+!
+!------------------------------------------------------------------------
+!
+%ROUTINE INHIBIT(%INTEGER SERVICE)
+%RECORD (SERVF) %NAME SERV
+      %UNLESS 0<=SERVICE<=MAXCSERV %START
+         PRINTSTRING("Invalid inhibit: ".STRINT(SERVICE))
+         NEWLINE
+         %RETURN
+      %FINISH
+      SERV==SERVA(SERVICE)
+      SERV_P=SERV_P!x'80000000'
+%END
+!
+!------------------------------------------------------------------------
+!
+%ROUTINE UNINHIBIT(%INTEGER SERVICE)
+%RECORD (SERVF) %NAME SERV
+      %UNLESS 0<=SERVICE<=MAXCSERV %START
+         PRINTSTRING("Invalid uninhibit: ".STRINT(SERVICE))
+         NEWLINE
+         %RETURN
+      %FINISH
+      SERV==SERVA(SERVICE)
+      SERV_P=SERV_P&x'7fffffff'
+      %IF SERV_L=0 %AND SERV_P#0 %THEN PUTONQ(SERVICE)
+%END
+!
+!------------------------------------------------------------------------
+!
+%STRINGFN STRHEX(%INTEGER VALUE)
+      %RESULT=HTOS(VALUE,8)
+%END
+!
+!------------------------------------------------------------------------
+!
+%EXTERNALROUTINE WRITE %ALIAS "S#WRITE"(%INTEGER I,PL)
+%STRING (31) S
+%STRING (1) SIGN
+%INTEGER J,VALUE
+      SIGN=" "
+      %IF I<0 %START
+         SIGN="-"
+         %IF I=x'80000000' %THEN I=x'7fffffff' %ELSE I=-I
+      %FINISH
+      S=STRINT(I)
+      J=PL-LENGTH(S)
+      SPACES(J) %IF J>0
+      PRINTSTRING(SIGN.S)
+%END
+!
+!------------------------------------------------------------------------
+!
+%EXTERNALSTRINGFN HTOS(%INTEGER VALUE,PLACES)
+%CONSTSTRING (1) %ARRAY HEX(0:15)="0","1","2","3","4","5","6","7","8",
+      "9","a","b","c","d","e","f"
+%STRING (8) S
+%INTEGER I
+      S=""
+      I=0
+      %WHILE I<PLACES %CYCLE
+         S<-HEX(VALUE&15).S
+         VALUE=VALUE>>4
+         I=I+1
+      %REPEAT
+      %RESULT=S
+%END
+!
+!------------------------------------------------------------------------
+!
+%STRINGFN STRINT(%INTEGER VALUE)
+%STRING (16) S
+%STRING (1) SIGN
+%INTEGER J
+      SIGN=""
+      S=""
+      %IF VALUE<0 %START
+         SIGN="-"
+         %IF VALUE=x'80000000' %THEN VALUE=x'7fffffff' %ELSE VALUE=-VALUE
+      %FINISH
+      %CYCLE
+         J=VALUE
+         VALUE=VALUE//10
+         J=J-VALUE*10+'0'
+         S=TOSTRING(J).S
+         %EXITIF VALUE<=0
+      %REPEAT
+      %RESULT=SIGN.S
+%END
+!
+!------------------------------------------------------------------------
+!
+%ROUTINE OPMESS2(%INTEGER OPER, %STRING (63) MESS)
+%RECORD (PARMF) P
+      P_DEST=x'2f0007'!OPER<<8
+      P_SRCE=0
+      P_TEXT<-MESS
+      PON(P)
+%END
+!
+!------------------------------------------------------------------------
+!
+%ROUTINE OPMESS(%STRING (63) MESS)
+      OPMESS2(0,MESS)
+%END
+!
+!------------------------------------------------------------------------
+!
+%ROUTINE OPER RELAY(%RECORD (PARMF) %NAME P)
+      %IF KMON>>47&1#0 %THEN PKMONREC("Oper relay: ",P)
+      P_DEST=P_DEST&x'ffff'!x'320000'
+      PON(P)
+%END
+!
+!------------------------------------------------------------------------
+!
+%ROUTINE WAIT(%INTEGER MSECS)
+%END
+!
+!------------------------------------------------------------------------
+!
+%INTEGERFN STOI(%STRINGNAME S)
+%STRING (50) P
+%INTEGER SIGN,AD,I,J,HEX
+!%LONGINTEGER total
+%INTEGER TOTAL
+      HEX=0; TOTAL=0; SIGN=1
+      AD=ADDR(P)
+      ->NULLS %IF S=""
+L1:   I=CHARNO(S,1);                    ! 1st char
+      %IF I=' ' %THEN S->(" ").S %AND ->L1;  ! lose leading spaces
+      %IF I='-' %THEN S->("-").S %AND SIGN=-1 %AND ->L1
+      %IF I='X' %THEN S->("X").S %AND HEX=1 %AND ->L1
+      P=S
+      %UNLESS S->P.(" ").S %THEN S=""
+      I=1
+      %WHILE I<=BYTEINTEGER(AD) %CYCLE
+         J=BYTEINTEGER(AD+I)
+         ->FAULT %UNLESS '0'<=J<='9' %OR (HEX#0 %AND 'A'<=J<='F')
+         %IF HEX=0 %THEN TOTAL=10*TOTAL %ELSE TOTAL=TOTAL<<4+9*J>>6
+         TOTAL=TOTAL+J&15; I=I+1
+      %REPEAT
+      %IF HEX#0 %AND I>9 %THEN ->FAULT
+      J<-TOTAL
+      %IF I>1 %THENRESULT=SIGN*J
+FAULT:
+      S=P." ".S
+NULLS:
+      %RESULT=x'80808080'
+%END
+!
+!------------------------------------------------------------------------
+!
+%ROUTINE KTIME(%INTEGERNAME H,M,S, %INTEGER DAYSECS)
+      M=DAYSECS//60
+      H=M//60
+      S=DAYSECS-DAYSECS//60*60
+      M=M-H*60
+%END
+!
+!------------------------------------------------------------------------
+!
+%ROUTINE KDATE(%INTEGERNAME D,M,Y, %INTEGER K)
+%INTEGER W
+      K=K+693902;                       ! days since caesars bday
+      W=4*K-1
+      Y=W//146097
+      K=W-146097*Y
+      D=K//4
+      K=(4*D+3)//1461
+      D=4*D+3-1461*K
+      D=(D+4)//4
+      M=(5*D-3)//153
+      D=5*D-3-153*M
+      D=(D+5)//5
+      Y=K
+      %IF M<10 %THEN M=M+3 %ELSE M=M-9 %AND Y=Y+1
+%END
+!
+!------------------------------------------------------------------------
+!
+%INTEGERFN KDAY(%INTEGER D,M,Y)
+      %IF M>2 %THEN M=M-3 %ELSE M=M+9 %AND Y=Y-1
+      %RESULT=1461*Y//4+(153*M+2)//5+D+58
+%END
+!
+!------------------------------------------------------------------------
+!
+%ROUTINE SETAD(%INTEGER VALUE,AD)
+%INTEGER I,J
+      I=VALUE-VALUE//100*100
+      J=I//10
+      J=J<<8
+      J=J+(I-I//10*10)
+      J=J+x'3030'
+      *l_1,ad
+      *ic_0,j+2; *stc_0,0(1)
+      *ic_0,j+3; *stc_0,1(1)
+%END
+!
+!------------------------------------------------------------------------
+!
+%ROUTINE TIMEEVAL(%INTEGER FLAG)
+%INTEGER D,M,Y,HR,MIN,SEC,JDAY,DAYSECS,AD,RTC1,RTC2
+%CONSTINTEGER TTOTSECS=x'f424'*2,HTSECSIN24HRS=86400//2
+      *basr_15,0
+      *using_15
+      *stck_rtc1
+      *bc_8,<stclok>; *drop_15
+      OPMESS("TOD clock invalid")
+      RTC1=0; RTC2=0
+STCLOK:
+      SEC=TTOTSECS
+      *l_2,rtc1; *l_3,rtc2;
+      *srdl_2,16; *l_4,sec
+      *dr_2,4;                          ! to seconds//2
+      *st_3,rtc1
+      JDAY=RTC1//HTSECSIN24HRS
+      DAYSECS=(RTC1-JDAY*HTSECSIN24HRS)*2
+      COM_TOJDAY=JDAY
+      KDATE(D,M,Y,JDAY)
+      KTIME(HR,MIN,SEC,DAYSECS)
+      AD=ADDR(COM_DATE1)
+      SETAD(D,AD)
+      SETAD(M,AD+3)
+      SETAD(Y,AD+6)
+      SETAD(HR,AD+12)
+      SETAD(MIN,AD+15)
+      SETAD(SEC,AD+18)
+      %IF FLAG#0 %THEN OPMESS("DT=".STRING(AD-1)." ".STRING(AD+11))
+%END
+!
+!------------------------------------------------------------------------
+!
+%EXTERNALROUTINE PARSE COM(%INTEGER SRCE, %STRINGNAME S)
+%INTEGERFNSPEC TAPEPLACE(%INTEGERNAME A,B, %STRINGNAME S, %INTEGER F)
+%INTEGERFNSPEC DISCPLACE(%INTEGERNAME A,B, %STRINGNAME S, %INTEGER F)
+%INTEGERFNSPEC GET MNEM(%STRINGNAME S)
+%OWNINTEGER SRCESERV
+%CONSTINTEGER LIMIT=31,COMREP=x'3e0000'
+%CONSTBYTEINTEGERARRAY PARAMS(1:LIMIT)=2,1,0,0,0,0,0,2,2,0,0,
+                                        1,2,0,1(3),2(3),0,0,1,0(8)
+%CONSTSTRING (8) %ARRAY COMMAND(1:LIMIT)="PON ","SRCE ","PLOT ",
+            "PLOD ","LABEL ","ILABEL ","FORMAT ","SPARE ",
+            "SLOAD ","DUMP ","PRIME ","POFFMON","KMON ",
+            "UNPLOT ","INH ","UNINH ","DIRVSN ","DT ",
+            "XDUMP ","REP ","RTOCP","DDUMP ","SHOW ","DEVIO ",
+            "B ","F ","CPUID ","ADDPATH ","REMPATH ","RESERVE ","RELEASE "
+%SWITCH SWT(1:LIMIT)
+%RECORD (PARMF) PP
+%INTEGERARRAY DATA(1:6)
+%INTEGER I,J,K,SV,WORK,OP,D,M,Y,HR,MIN
+%CONSTINTEGER UNASSIGNED=x'80808080'
+%CONSTINTEGER SECSIN24HRS=86400
+%CONSTSTRING (3) %ARRAY DOW(0:6)="MON","TUE","WED","THU","FRI","SAT","SUN"
+%LONGINTEGER L
+%STRING (80) P,Q
+!
+      LENGTH(S)=LENGTH(S)-1 %WHILE LENGTH(S)>0 %AND CHARNO(S,LENGTH(S))=' '
+      %RETURNIF LENGTH(S)=0
+!
+      PP=0
+      OP=SRCE>>8&7
+      I=LENGTH(S)-1
+      J=ADDR(S)+1
+      K=ADDR(UPPER CASE ISO(0))
+      *basr_15,0
+      *using_15
+      *l_1,i; *l_2,j; *l_3,k
+      *ex_1,<tr>
+      ->GO
+TR:   *tr_0(0,2),0(3)
+      *drop_15
+GO:
+      %FOR SV=1,1,LIMIT %CYCLE
+         ->FOUND %IF S->Q.(COMMAND(SV)).P %AND Q=""
+      %REPEAT
+ERR:
+      OPMESS2(OP,"????".S)
+      %RETURN
+!
+FOUND:
+      Q<-S
+      %IF LENGTH(Q)>23 %START
+         %FOR I=23,-1,1 %CYCLE
+            %EXITIF CHARNO(Q,I)=' '
+         %REPEAT
+         I=I-1
+         I=23 %IF I=0
+         J=LENGTH(Q)
+         LENGTH(Q)=I
+         OPMESS2(OP,Q) %UNLESS 25<=SV<=26;	! not F or B
+         LENGTH(Q)=J-I
+         %FOR K=1,1,J-I %CYCLE
+            CHARNO(Q,K)=BYTEINTEGER(ADDR(Q)+K+I)
+         %REPEAT
+      %FINISH
+      OPMESS2(OP,Q) %UNLESS 25<=SV<=26
+!
+      J=PARAMS(SV)
+      K=1
+      %WHILE K<=J %CYCLE
+         DATA(K)=STOI(P)
+         ->ERR %IF DATA(K)=UNASSIGNED
+         K=K+1
+      %REPEAT
+      ->SWT(SV)
+!
+SWT(1):                                 ! pon
+      PP_DEST=DATA(1)<<16!DATA(2)
+      %FOR K=0,1,5 %CYCLE
+         I=STOI(P)
+         %IF I=UNASSIGNED %AND P#"" %AND CHARNO(P,1)='"' %AND P->("""").Q.("""").P %START
+            STRING(ADDR(PP_P1)+4*K)=Q
+            K=K+LENGTH(Q)//4
+         %FINISHELSE INTEGER(ADDR(PP_P1)+4*K)=I
+      %REPEAT
+      PP_SRCE=SRCESERV
+POUT:
+      PKMONREC("Oper command",PP)
+      PON(PP)
+      %RETURN
+!
+SWT(2):                                 ! srce = srce serv for pon
+      SRCESERV=DATA(1)
+      %RETURN
+!
+SWT(3):                                 ! plot t f d pge npages
+      PP_DEST=x'240000'
+      PP_SRCE=COMREP!SRCE&x'ff00'
+      ->ERR %UNLESS TAPEPLACE(PP_P2,PP_P3,P,1)=0
+      ->ERR %UNLESS DISCPLACE(PP_P4,PP_P5,P,1)=0
+      I=STOI(P)
+      ->ERR %UNLESS I>0
+      PP_P1=x'04020000'+I
+      PP_P6=m'PLOT'
+      ->POUT
+!
+SWT(4):                                 ! plod fd fp td tp np
+      PP_DEST=x'240000'
+      PP_SRCE=COMREP!SRCE&x'ff00'
+      ->ERR %UNLESS DISCPLACE(PP_P2,PP_P3,P,1)=0
+      ->ERR %UNLESS DISCPLACE(PP_P4,PP_P5,P,1)=0
+      I=STOI(P)
+      ->ERR %UNLESS I>0
+      PP_P1=x'02020000'+I
+      PP_P6=m'PLOD'
+      ->POUT
+!
+SWT(5):                                 ! label
+SWT(6):                                 ! ilabel
+      PP_DEST=x'230000'
+      PP_SRCE=0
+      PP_P1=GET MNEM(P)
+      ->ERR %IF PP_P1=0
+      ->ERR %UNLESS LENGTH(P)=6
+      STRING(ADDR(PP_P2))=P
+      PP_P4=I-5
+      PP_P5=m'DISC'
+      PP_P6=m'LABL'
+      ->POUT
+!
+SWT(7):                                 ! format mnem lc uc lt ut
+      PP=0
+      PP_DEST=x'260000'
+      PP_P1=GET MNEM(P)
+      ->ERR %IF PP_P1=0
+      K=STOI(P)
+      %IF K<0 %THEN PP_P2=K %ELSE PP_P2=K<<16!STOI(P)
+      K=STOI(P)
+      %IF K<0 %THEN PP_P3=K %ELSE PP_P3=K<<16!STOI(P)
+      ->POUT
+!
+SWT(8):                                 ! spare
+      %RETURN
+!
+SWT(9):                                 ! sload dec page
+      %IF COM_DATE2&x'ffff'<m'78' %THEN OPMESS("Date & time??") %ANDRETURN
+      PP=0
+      PP_DEST=x'3b0000'
+      PP_P1=DATA(1)
+      PP_P2=DATA(2)
+      ->POUT
+!
+SWT(10):                                ! dump t d pages
+      PP_DEST=x'240000'
+      PP_SRCE=COMREP
+      ->ERR %UNLESS TAPEPLACE(PP_P4,PP_P5,P,0)=0
+      ->ERR %UNLESS DISCPLACE(PP_P2,PP_P3,P,0)=0
+      I=STOI(P)
+      ->ERR %UNLESS I>0
+      PP_P1=x'02040000'+I
+      PP_P6=m'DUMP'
+      ->POUT
+SWT(11):                                ! prime t d npages
+      PP_DEST=x'240000'
+      PP_SRCE=COMREP
+      ->ERR %UNLESS TAPEPLACE(PP_P2,PP_P3,P,0)=0
+      ->ERR %UNLESS DISCPLACE(PP_P4,PP_P5,P,0)=0
+      I=STOI(P)
+      ->ERR %UNLESS I>0
+      PP_P1=x'04020000'+I
+      PP_P6=m'PRME'
+      ->POUT
+!
+SWT(12):                                ! poffmon
+      POFFMON=DATA(1)
+      %RETURN
+!
+SWT(13):                                ! kmon
+      I=DATA(1)
+      J=DATA(2)
+      ->ERR %UNLESS 0<=J<=1
+      L=LONE<<I
+      KMON=KMON&(L!!x'ffffffffffffffff')
+      %IF J=1 %THEN KMON=KMON!L
+      COM_KMON=KMON
+      %RETURN
+!
+SWT(14):                                ! unplot
+      PP_DEST=x'240000'
+      PP_SRCE=COMREP!SRCE&x'ff00'
+      ->ERR %UNLESS DISCPLACE(PP_P2,PP_P3,P,1)=0
+      ->ERR %UNLESS TAPEPLACE(PP_P4,PP_P5,P,1)=0
+      I=STOI(P)
+      ->ERR %UNLESS I>0
+      PP_P1=x'02040000'+I
+      PP_P6=m'PLOT'
+      ->POUT
+!
+SWT(15):                                ! inhibit
+      INHIBIT(DATA(1))
+      %RETURN
+!
+SWT(16):                                ! uninhibit
+      UNINHIBIT(DATA(1))
+      %RETURN
+!
+SWT(17):                                ! dirvsn
+      COM_DIRSITE=x'200'+(DATA(1)&3)*128
+      %RETURN
+!
+SWT(18):                                ! dt date time
+      WORK=DATA(1);                     ! date
+      I=WORK//100
+      Y=WORK-I*100;                     ! year
+      D=I//100;                         ! day
+      M=I-D*100;                        ! month
+      ->ERR %UNLESS 1<=D<=31 %AND 1<=M<=12 %AND Y>=84
+      %IF M>2 %THEN M=M-3 %ELSE M=M+9 %AND Y=Y-1
+      J=1461*Y//4+(153*M+2)//5+D+58
+      ->ERR %UNLESS P->(DOW(J-J//7*7)).Q
+      WORK=DATA(2);                     ! time
+      HR=WORK//100;                     ! hours
+      MIN=WORK-HR*100;                  ! minutes
+      ->ERR %UNLESS 0<=HR<=23 %AND 0<=MIN<60
+      L=LENGTHENI(J)*SECSIN24HRS
+      L=(L+60*(60*HR+MIN))*1000000;     ! microsecs since 1/1/1900
+      L=L<<12;                          ! TOD units
+      COM_IPLTIME=INTEGER(ADDR(L))
+      *basr_15,0; *using_15
+      *sck_l; *bc_8,<sok>; *drop_15
+      OPMESS("TOD not enabled")
+SOK:  TIMEEVAL(0)
+      %RETURN
+!
+SWT(19):                                ! xdump
+      DUMPTABLE(32,DATA(1),DATA(2))
+      %RETURN
+SWT(20):                                ! rep at with
+      I=DATA(1)
+      J=INTEGER(I); INTEGER(I)=DATA(2)
+      OPMESS2(OP,STRHEX(DATA(2))." reps ".STRHEX(J))
+      %RETURN
+!
+SWT(21):                                ! rtocp - return to vm/cp
+      %UNLESS VM=YES %THEN OPMESS("VM/CP not active!") %ANDRETURN
+      *basr_15,0
+      *using_15
+      *la_0,<ret>; *st_0,i; *drop_15
+      PSW=LENGTHENI(SMASK)<<56!DISAWAIT!I
+      *lpsw_psw
+RET:
+      %RETURN
+!
+SWT(22):                                ! DDUMP disc page
+      PP_DEST=x'240000'
+      PP_SRCE=COMREP!SRCE&x'ff00'
+      PP_P1=x'02050001'
+      PP_P4=0
+      PP_P5=0
+      ->ERR %UNLESS DISCPLACE(PP_P2,PP_P3,P,1)=0
+      ->POUT
+!
+SWT(23):                                ! show addr len
+      I=DATA(1)
+      J=STOI(P)
+      %IF J<0 %THEN J=8
+      %IF I+J>COM_SEPGS*PAGESIZE %THEN ->ERR
+      %CYCLE
+         OPMESS(HTOS(I,4)." ".HTOS(INTEGER(I),8)." ".HTOS(INTEGER(I+4),8))
+         I=I+8; J=J-8
+         %EXITIF J<=0
+      %REPEAT
+      %RETURN
+!
+SWT(24):                                ! devio <text>
+      ->ERR %IF LENGTH(P)>23
+      PP_DEST=x'300001'
+      PP_SRCE=SRCE
+      PP_TEXT=P
+      ->POUT
+!
+SWT(25):                                ! B (page back) screen
+      PP_P1=-1
+      ->PBPF
+SWT(26):                                ! F (page forward) screen
+      PP_P1=1
+PBPF:
+      I=STOI(P)
+      %IF I=UNASSIGNED %THEN I=0
+      PP_P2=I
+      PP_DEST=SRCE>>8<<8!18
+      PP_SRCE=0
+      ->POUT
+!
+SWT(27):                                ! CPUID a/b/c
+      I=0
+      %CYCLE
+         ->ERR %IF I>NCPUIDS
+         %EXIT %IF P=SCPUIDS(I)
+         I=I+1
+      %REPEAT
+      COM_CPUID=CPUIDS(I)
+      OPMESS("CPUID IS ".P." (".HTOS(COM_CPUID,8).")")
+      CICH=YES;                         ! id changed
+      %RETURN
+SWT(28):                                ! ADDPATH dev rte
+      PP_P3=0
+      ->ARPATH
+SWT(29):                                ! REMPATH dev route
+      PP_P3=1
+ARPATH:
+      ->ERR %UNLESS P->P.(" ").Q %AND LENGTH(P)=4
+      PP_DEST=X'20000B'
+      PP_P1=INTEGER(ADDR(P)+1)
+      PP_P2=STOI(Q)
+      ->ERR %IF PP_P2=UNASSIGNED
+      ->POUT
+!
+SWT(30):                                 ! RESERVE dev
+      PP_P2=0
+      ->RRDEV
+SWT(31):                                 ! RELEASE dev
+      PP_P2=1
+RRDEV:
+      ->ERR %UNLESS LENGTH(P)=4
+      PP_DEST=X'20000C'
+      PP_P1=INTEGER(ADDR(P)+1)
+      ->POUT
+!
+%INTEGERFN GET MNEM(%STRINGNAME S)
+%INTEGER I,J
+%STRING (15) P
+      J=0
+      P=""
+      %IF S->P.(" ").S %AND LENGTH(P)=4 %THEN STRING(ADDR(I)+3)=P
+      %RESULT=J
+%END
+!
+%INTEGERFN DISCPLACE(%INTEGERNAME A,B, %STRINGNAME S, %INTEGER FLAG)
+%INTEGER I,J,K
+%STRING (63) P
+      I=STOI(S)
+      B=0; K=0
+      %IF I>=0 %THEN %START
+         P = HTOS(I,2)
+         A = (M'FD00' & X'FFFF0000')!(CHARNO(P,1)<<8)!(CHARNO(P,2))
+         -> PAGE
+      %FINISH
+AGN:
+      %RESULT=1 %UNLESS S->P.(" ").S
+      ->AGN %IF P=""
+      %RESULT=1 %UNLESS LENGTH(P)=6
+      %FOR I=0,1,5 %CYCLE
+         BYTEINTEGER(ADDR(J)+I)=CHARNO(P,I+1)
+      %REPEAT
+      A=J; B=K
+PAGE:
+      %IF FLAG#0 %START
+         I=STOI(S)
+         %IF I<0 %THENRESULT=1
+         B=B&x'ffff0000'+I
+      %FINISH
+      %RESULT=0
+%END
+!
+%INTEGERFN TAPEPLACE(%INTEGERNAME A,B, %STRINGNAME S, %INTEGER FLAG)
+%INTEGER I,J,K
+%STRING (63) P
+      I=STOI(S); B=1; K=1
+      %IF I>=0 %THEN A=x'0031006e'+I %AND ->CHAP
+AGN:
+      %RESULT=1 %UNLESS S->P.(" ").S
+      ->AGN %IF P=""
+      %RESULT=1 %UNLESS LENGTH(P)=6
+      STRING(ADDR(J))=P
+      A=J; B=K
+CHAP:
+      %IF FLAG#0 %START
+         I=STOI(S)
+         %IF I<0 %THENRESULT=1
+         B=B&x'ffffff00'+I&255
+      %FINISH
+      %RESULT=0
+%END
+%END
+!
+!------------------------------------------------------------------------
+!
+%ROUTINE COMREP(%RECORD (PARMF) %NAME P)
+%SWITCH SW(0:1)
+      ->SW(P_DEST&15)
+SW(0):
+      %IF P_P1=0 %THEN OPMESS("Load ok") %ELSE OPMESS("Load failed ".STRHEX(P_P1))
+      %RETURN
+SW(1):
+      %IF P_P2#0 %THEN OPMESS("Dealloc fails - ".STRING(ADDR(P_P3)))
+%END
+!
+!------------------------------------------------------------------------
+!
+%ROUTINE SEMALOOP(%INTEGERNAME SEMA)
+%END
+!
+!
+!------------------------------------------------------------------------
+!
+!
+! these are the xa routines for starting and halting i-o. When compiled with
+! XA=NO they use the 370 instructions to get approximately the same effect
+!
+%EXTERNALINTEGERFN SSCH(%INTEGER SLOTADDR,CCWRADDR,KEY)
+!***********************************************************************
+!*     start the device whose slot is at slotaddr and returns the cc   *
+!*       as the result. uses the alternate path where relevant         *
+!***********************************************************************
+%CONSTINTEGER BUSY=x'10000000'
+%RECORD (ORBF) ORB
+%RECORD (DTFORM) %NAME DEVSLOT
+%INTEGER I,CC,CUU,ACC
+      DEVSLOT==RECORD(SLOTADDR)
+      I=DEVSLOT_CUU
+      %IF XA=YES %START
+         ORB_IP=SLOTADDR
+         ORB_KEYTAGS=x'0040ff00'!ccw format<<23!(CCWRADDR&x'80000000')>>8!(KEY<<28)
+                                        ! format 1 chains have top bit set pro tem
+         ORB_CPADDR=CCW RADDR&x'7fffffff'
+         *l_1,i
+         *ssch_orb
+         *ipm_1
+         *srl_1,28
+         *st_1,cc
+      %ELSE
+         PAGE0_CAW=CCWRADDR!(KEY<<28)
+         *l_1,i
+         *sio_0(1)
+         *balr_1,0
+         *sll_1,2
+         *srl_1,30
+         *st_1,cc
+         %IF DEVSLOT_ALT CUU#0 %AND (CC>=2 %OR (CC=1 %AND %C
+            PAGE0_CSW2=x'50000000' {smod&busy})) %START
+            I=DEVSLOT_ALT CUU
+            *l_1,i
+            *sio_0(1)
+            *balr_1,0
+            *sll_1,2
+            *srl_1,30
+            *st_1,acc
+            %IF ACC<CC %THEN CC=ACC %AND DEVSLOT_STATS3=DEVSLOT_STATS3+1
+         %FINISH
+      %FINISH
+      %RESULT=CC
+%END
+%EXTERNALINTEGERFN TSCH(%INTEGER SLOTADDR, %RECORD (IRBF) %NAME IRB)
+!***********************************************************************
+!*    tests the device whose slot is at slotaddr and returns the cc    *
+!*    relevant information is stored in the response block by xa       *
+!*    in non xa the csws are obtained and put into the response block  *
+!*    note cc0 and cc1 are reversed between 370 and XA but this routine*
+!*    always returns the actual condition code. The only exception is  *
+!*    on channel busy or dev not available when the alternate 370 path *
+!*    may be tried.                                                    *
+!***********************************************************************
+%CONSTINTEGER BUSY=x'10000000'
+%RECORD (DTFORM) %NAME DEVSLOT
+%INTEGER I,CC,CUU,ACC
+      DEVSLOT==RECORD(SLOTADDR)
+      I=DEVSLOT_CUU
+      %IF XA=YES %START
+         *l_1,i; *l_2,irb
+         *tsch_0(2)
+         *ipm_1
+         *srl_1,28
+         *st_1,cc
+      %ELSE
+         *l_1,i
+         *tio_0(1)
+         *balr_1,0
+         *sll_1,2
+         *srl_1,30
+         *st_1,cc
+         %IF CC=1 %THEN IRB_CSW1=PAGE0_CSW1 %AND IRB_CSW2=PAGE0_CSW2
+         %IF DEVSLOT_ALT CUU#0 %AND (CC>=2) %START
+            I=DEVSLOT_ALT CUU
+            *l_1,i
+            *tio_0(1)
+            *balr_1,0
+            *sll_1,2
+            *srl_1,30
+            *st_1,acc
+            %IF ACC=1 %THEN IRB_CSW1=PAGE0_CSW1 %AND IRB_CSW2=PAGE0_CSW2
+            %IF ACC<CC %THEN CC=ACC
+         %FINISH
+      %FINISH
+      %RESULT=CC
+%END
+%EXTERNALINTEGERFN HSCH(%INTEGER SLOTADDR)
+!***********************************************************************
+!*    halts the device whose slot is at slotaddr and returns the cc    *
+!*    no relevant information is stored in the response block by xa    *
+!*    in non xa the csws are obtained and put into page0 on cc=1       *
+!*    On dev not available the alternate 370 path is tried             *
+!***********************************************************************
+%CONSTINTEGER BUSY=x'10000000'
+%RECORD (DTFORM) %NAME DEVSLOT
+%INTEGER I,CC,CUU,ACC
+      DEVSLOT==RECORD(SLOTADDR)
+      I=DEVSLOT_CUU
+      %IF XA=YES %START
+         *l_1,i
+         *hsch_I {param is a dummy}
+         *ipm_1
+         *srl_1,28
+         *st_1,cc
+      %ELSE
+         *l_1,i
+         *hio_0(1)
+         *balr_1,0
+         *sll_1,2
+         *srl_1,30
+         *st_1,cc
+         %IF DEVSLOT_ALT CUU#0 %AND CC=3 %START
+            I=DEVSLOT_ALT CUU
+            *l_1,i
+            *hio_0(1)
+            *balr_1,0
+            *sll_1,2
+            *srl_1,30
+            *st_1,acc
+            %IF ACC<CC %THEN CC=ACC
+         %FINISH
+      %FINISH
+      %RESULT=CC
+%END
+%EXTERNAL %INTEGER %FN CSCH(%INTEGER SLOTADDR)
+!***********************************************************************
+!*    Clears down the subchannel and returns the cc                    *
+!*    Used after deallocate in Idevs to minimise problems with FEPs    *
+!***********************************************************************
+%CONST %INTEGER BUSY=x'10000000'
+%RECORD (DTFORM) %NAME DEVSLOT
+%INTEGER I,CC,CUU,ACC
+      DEVSLOT==RECORD(SLOTADDR)
+      I=DEVSLOT_CUU
+      %IF XA=YES %START
+         *L_1,i
+         *CSCH_0(0)
+         *IPM_1
+         *SRL_1,28
+         *ST_1,cc
+      %ELSE
+         OPMESS("Generation Blunder")
+      %FINISH
+      %RESULT=CC
+%END
+%EXTERNALINTEGERFN STSCH(%INTEGER SLOTADDR, %RECORD (SCHIBF) %NAME SCHIB)
+!***********************************************************************
+!*    Stores the subchannel info block into schib and returns the cc   *
+!***********************************************************************
+%CONSTINTEGER BUSY=x'10000000'
+%RECORD (DTFORM) %NAME DEVSLOT
+%INTEGER I,CC,CUU,ACC
+      DEVSLOT==RECORD(SLOTADDR)
+      I=DEVSLOT_CUU
+      %IF XA=YES %START
+         *l_1,i
+         *l_2,schib
+         *stsch_0(2)
+         *ipm_1
+         *srl_1,28
+         *st_1,cc
+      %ELSE
+         OPMESS("Generation Blunder")
+      %FINISH
+      %RESULT=CC
+%END
+%EXTERNALINTEGERFN MSCH(%INTEGER SLOTADDR, %RECORD (SCHIBF) %NAME SCHIB)
+!***********************************************************************
+!*    Modifies the subchannel info block with schib and returns the cc *
+!***********************************************************************
+%CONSTINTEGER BUSY=x'10000000'
+%RECORD (DTFORM) %NAME DEVSLOT
+%INTEGER I,CC,CUU,ACC
+      DEVSLOT==RECORD(SLOTADDR)
+      I=DEVSLOT_CUU
+      %IF XA=YES %START
+         *l_1,i
+         *l_2,schib
+         *msch_0(2)
+         *ipm_1
+         *srl_1,28
+         *st_1,cc
+      %ELSE
+         OPMESS("Generation Blunder")
+      %FINISH
+      %RESULT=CC
+%END
+!------------------------------------------------------------------------
+!
+%RECORDFORMAT LABFORM(%BYTEINTEGERARRAY VOL(0:5), %BYTEINTEGER S1,S2,S3,S4,ACCESS,
+   %BYTEINTEGERARRAY RES(1:20), %BYTEINTEGER C1,C2,AC1,AC2,TPC1,TPC2,BF1,BF2,
+   %BYTEINTEGERARRAY POINTER(0:3),IDENT(1:14))
+%RECORDFORMAT CCWF(%INTEGER CMDAD, %BYTEINTEGER FLAGS,SP, %SHORTINTEGER LEN)
+%RECORDFORMAT PQF(%INTEGER ADDT,CCWA,P1,P2,P3,P4,P5,P6,LINK)
+%CONSTINTEGER NORMALT=x'0c000000',ERRT=x'02000000',ATTNT=x'80000000'
+%CONSTINTEGER OFFLINE=x'40000000',LOGGING=x'00001000'
+%CONSTINTEGER CUEND=x'20000000'
+%CONSTINTEGER SMOD=x'40000000'
+%CONSTINTEGER DISCSNO=x'200000',PDISCSNO=x'210000'
+%CONSTINTEGER SCHEDSNO=x'30000'
+%OWNBYTEINTEGERARRAYFORMAT LVNF(0:99)
+%OWNBYTEINTEGERARRAYNAME LVN
+%OWNINTEGER DITADDR=0,NDISCS=0,CHANNELQ=0
+!
+%EXTERNALROUTINE DISC(%RECORD (PARMF) %NAME P)
+%ROUTINESPEC READ DLABEL(%RECORD (DTFORM) %NAME DDT)
+%ROUTINESPEC LABREAD ENDS
+%ROUTINESPEC UNLOAD(%RECORD (DTFORM) %NAME DDT)
+%STRINGFNSPEC MTOS(%INTEGER M)
+%ROUTINESPEC SENSE(%RECORD (DTFORM) %NAME DDT)
+%ROUTINESPEC DREPORT(%RECORD (DTFORM) %NAME DDT, %RECORD (PARMF) %NAME P)
+%INTEGERFNSPEC FIRE CHAIN(%INTEGER CCWA,Q)
+%RECORD (DTFORM) %NAME DDT
+%RECORD (PROPFORM) %NAME PROP
+%RECORD (LABFORM) %NAME LABEL
+%RECORD (SCHIBF) SCHIB
+%RECORD (CCWF) %NAME CCW
+%RECORD (PQF) %NAME CQ
+%CONSTINTEGER BUSY=x'10000000'
+%CONSTINTEGER NOSTARTMASK=x'ffff0000'!!(BUSY!SMOD!CUEND)
+%CONSTINTEGER DEAD=0,CONNIS=1,RLABIS=2,DCONNIS=3,AVAIL=4,PAGTIS=5
+%CONSTINTEGER PAGSIS=6,INOP=7,PAVAIL=10,PCLAIMD=11,PTRANIS=12
+%CONSTINTEGER PSENIS=13,SPTRANIS=14,RLABSIS=15,RESERVE=16,RELEASE=17
+%CONSTINTEGER RESPX=1<<CONNIS!1<<RLABIS!1<<DCONNIS!1<<PAGTIS! %C
+      1<<PAGSIS!1<<PTRANIS!1<<PSENIS!1<<SPTRANIS!1<<RLABSIS! %C
+             1<<RESERVE!1<<RELEASE
+%CONSTINTEGER PAGIO=1<<PAGTIS!1<<PAGSIS
+%CONSTINTEGER PRIVIO=1<<PTRANIS!1<<PSENIS!1<<SPTRANIS
+%OWNINTEGER INITINH=0,LABREADS=0,CURRTICK=0
+%INTEGER ACT,I,J,SLOT,PTR,CSW1,CSW2,ACUU
+%INTEGERNAME PRTE,ARTE
+%STRING (40) S
+%STRING (6) PREVLAB
+%SWITCH INACT(0:12),AINT,FINT,NINT(0:17)
+!
+      ACT=P_DEST&x'ffff'
+      %IF KMON>>32&1#0 %THEN  PKMONREC("DISC:",P)
+      %IF ACT>=64 %THEN ->ACT64
+      ->INACT(ACT)
+!
+INACT(0):                               !initialisation
+      %RETURNUNLESS NDISCS=0
+      NDISCS=COM_NDISCS
+      DITADDR=COM_DITADDR
+      LVN==ARRAY(COM_DLVNADDR,LVNF)
+      %FOR I=0,1,99 %CYCLE
+         LVN(I)=254
+      %REPEAT
+      INITINH=1
+      %FOR J=0,1,NDISCS-1 %CYCLE
+         DDT==RECORD(INTEGER(DITADDR+4*J))
+         DDT_ISERV=DISCSNO+3
+         DDT_SLOT=J
+         %IF XA=YES %START
+            I=STSCH(ADDR(DDT),SCHIB);   ! get sub channel info
+            %IF I#3 %START
+               SCHIB_IP=ADDR(DDT)
+               SCHIB_FLAGS=SCHIB_FLAGS!x'80';  ! enambled
+               I=MSCH(ADDR(DDT),SCHIB);  ! make operable
+            %FINISH
+         %FINISH %ELSE %UNLESS DDT_ALT CUU=0 %START
+            PRTE==DDT_UA SIZE { not used in disc }
+            ARTE==DDT_UA AD
+            PRTE=DDT_CUU
+            ARTE=DDT_ALT CUU
+            DDT_ALT CUU=0;             ! prime route only
+         %FINISH
+         LABREADS=LABREADS+1
+         DDT_STATE=RLABIS
+         READ DLABEL(DDT)
+      %REPEAT
+      P_DEST=PDISCSNO
+      PDISC(P)
+      P_DEST=x'a0001'
+      P_SRCE=0
+      P_P1=DISCSNO!5
+      P_P2=3
+      PON(P)
+      %RETURN
+!
+INACT(1):                               ! claim for dedicated use
+      PTR=P_P3; I=PTR
+      %UNLESS 0<=PTR<NDISCS %START
+         %FOR I=0,1,NDISCS-1 %CYCLE
+            DDT==RECORD(INTEGER(DITADDR+4*I))
+            ->HIT %IF PTR=DDT_MNEMONIC %OR DDT_LABEL=STRING(ADDR(P_P3))
+         %REPEAT
+         ->CLAIM FAILS
+      %FINISHELSE DDT==RECORD(INTEGER(DITADDR+4*I))
+HIT:
+      %IF P_P2>0 %START
+         %IF DDT_STATE=PAVAIL %OR (DDT_STATE=AVAIL %AND DDT_DLVN<0) %START
+            DDT_STATE=PCLAIMD
+            DDT_REPSNO=P_P2
+            ->REPLY
+         %FINISHELSE ->CLAIM FAILS
+      %FINISHELSESTART
+         %IF DDT_STATE#PCLAIMD %THEN OPMESS("Duff dev returned") %ANDRETURN
+         DDT_STATE=PAVAIL
+         DDT_REPSNO=0
+         DDT_CURCYL=0
+         OPMESS(MTOS(DDT_MNEMONIC)." unused")
+         %IF P_P2<0 %THEN SENSE(DDT) %AND DDT_STATE=CONNIS
+         %RETURN
+      %FINISH
+REPLY:
+      P_P2=DISCSNO+64+I
+      P_P3=I
+      P_P4=DDT_MNEMONIC
+      STRING(ADDR(P_P5))=DDT_LABEL
+SEND:
+      P_DEST=P_SRCE
+      P_SRCE=DISCSNO!1
+      PON(P)
+      %RETURN
+CLAIM FAILS:
+      P_P2=0
+      ->SEND
+!
+INACT(2):                               ! paged request
+      DDT==RECORD(P_P1)
+      %IF DDT_STATE#AVAIL %OR P_SRCE&x'ffff0000'#PDISCSNO %THEN ->REJECT
+      DDT_STATE=PAGTIS
+      DDT_ID=P_P1
+      I=FIRE CHAIN(DDT_CCWA,YES)
+      %RETURN
+!
+ACT64:                                  ! private chains
+      SLOT=ACT&63
+      DDT==RECORD(INTEGER(DITADDR+4*SLOT))
+      %IF DDT_STATE#PCLAIMD %THEN ->REJECT
+      DDT_REPSNO=P_SRCE
+      DDT_ID=P_P1
+      %IF P_P2<0 %THEN DDT_STATE=SPTRANIS %ELSE DDT_STATE=PTRANIS
+      I=FIRE CHAIN(DDT_CCWA,YES)
+      %RETURN
+REJECT:
+      %IF DDT_STATE=INOP %THEN ->REPLY INOP
+      PKMONREC("DISC rejects:",P)
+      P_DEST=P_SRCE
+      P_P2=-1
+      P_SRCE=DISCSNO+64+SLOT
+      PON(P)
+      %RETURN
+!
+INACT(5):                               ! clock tick
+      CURRTICK=CURRTICK+1
+      %FOR J=0,1,NDISCS-1 %CYCLE
+         DDT==RECORD(INTEGER(DITADDR+4*J))
+!         %IF CURRTICK-DDT_STICK>=DDT_TIMEOUT %AND RESPX&1<<DDT_STATE#0 %THEN ->TOUT
+         %IF CURRTICK-DDT_STICK>=DDT_TIMEOUT %AND RESPX&1<<DDT_STATE#0 %START
+            OPMESS(MTOS(DDT_MNEMONIC)." timed out")
+            I=HSCH(ADDR(DDT))
+            P=0
+            P_DEST=DISCSNO+3
+            %IF XA=YES %THEN P_P1=ADDR(DDT) %ELSE P_P1=DDT_CUU
+            P_P2=-1;                     ! timeout
+            P_P3=ERRT
+            P_P4=J
+            PON(P)
+         %FINISH
+      %REPEAT
+      ->WAYOUT
+TOUT:                                   ! timed out
+      OPMESS(MTOS(DDT_MNEMONIC)." timed out")
+      I=HSCH(ADDR(DDT))
+      P=0
+      P_DEST=DISCSNO+3
+      %IF XA=YES %THEN P_P1=ADDR(DDT) %ELSE P_P1=DDT_CUU
+      P_P2=-1;                          ! timeout
+      P_P3=ERRT
+      P_P4=J
+      PON(P)
+      %RETURN
+!
+INACT(9):                               ! for testing 'things'
+      %IF P_P1=1 %START;                ! display devs
+         %FOR I=0,1,NDISCS-1 %CYCLE
+            DDT==RECORD(INTEGER(DITADDR+4*I))
+            %IF DDT_ALT CUU=0 %THEN S="none" %ELSE S=HTOS(DDT_ALT CUU,3)
+            OPMESS(MTOS(DDT_MNEMONIC)." (".HTOS(DDT_CUU,3)."/".S.") ". %C
+               DDT_LABEL." ".STRINT(DDT_STATE)." ".STRINT(DDT_STATS2)." ".STRINT %C
+               (DDT_STATS3)." ".STRINT(DDT_STATS4))
+         %REPEAT
+      %FINISH
+      %RETURN
+!
+INACT(10):                              ! relocate tables
+      %FOR I=0,1,NDISCS-1 %CYCLE
+         DDT==RECORD(INTEGER(DITADDR+4*I))
+         INTEGER(DITADDR+4*I)=(INTEGER(DITADDR+4*I)-COM BASE)!COM SEG<<SSHIFT
+         DDT_PROPADDR=(DDT_PROPADDR-COM BASE)!COM SEG<<SSHIFT
+         DDT_CCWA=(DDT_CCWA-COM BASE)!COM SEG<<SSHIFT
+      %REPEAT
+      %RETURN
+!
+INACT(11):                              ! reconfigure route
+                                        ! p_p1=mnem, p_p2=route, p_p3=action
+      S=MTOS(P_P1)." "
+      %FOR J=0,1,NDISCS-1 %CYCLE
+         DDT==RECORD(INTEGER(DITADDR+4*J))
+         %IF DDT_MNEMONIC=P_P1 %START
+            %IF P_P3=0 %START;          ! add route
+               %IF DDT_ALT CUU=0 %THEN DDT_ALT CUU=P_P2 %AND S=S."now "
+               S=S."has ".HTOS(DDT_CUU,3)."/".HTOS(DDT_ALT CUU,3)
+            %FINISHELSESTART
+               %IF DDT_ALT CUU=0 %THEN S=S.HTOS(DDT_CUU,3)." is only route" %ELSESTART
+                  I=0
+                  %IF DDT_ALT CUU=P_P2 %THEN DDT_ALT CUU=0 %ELSEIF DDT_CUU=P_P2 %THEN %C
+                     DDT_CUU=DDT_ALT CUU %AND DDT_ALT CUU=0 %ELSE I=1
+                  %IF I=0 %THEN S=S."has ".HTOS(DDT_CUU,3) %ELSE S=S.HTOS(P_P2,3)."???"
+               %FINISH
+            %FINISH
+            OPMESS(S)
+            %RETURN
+         %FINISH
+      %REPEAT
+      OPMESS(S."???")
+      %RETURN
+!
+INACT(12):                              ! reserve/release dev(s)
+                                        ! p_p1=mnem, p_p2=action
+      S=MTOS(P_P1)." "
+      %FOR J=0,1,NDISCS-1 %CYCLE
+         DDT==RECORD(INTEGER(DITADDR+4*J))
+         %IF DDT_MNEMONIC=P_P1 %OR P_P1=0=P_P2 %START
+            %IF RESPX&1<<DDT_STATE#0 %AND P_P1#0 %START
+               PON(P)
+               %RETURN
+            %FINISH
+            %IF P_P2=0 %START;          ! reserve dev
+               %IF P_P1=0 %START;       ! check all
+                  %IF DDT_STATE=DEAD %START
+                     %IF DDT_ALT CUU=0 %THEN DDT_CUU=DDT_CUU&255!X'300'
+                        ! probably another system's disc but unswitched so ...
+                        ! force chan 3. (use REMPATH/ADDPATH to change by hand)
+                     %CONTINUE
+                  %FINISH %ELSE %IF DDT_STATE#AVAIL %THEN %CONTINUE
+                     ! leave non-EMAS discs alone
+                  DDT_ALT CUU=0 %IF CPUIDS(LVNS(DDT_DLVN&255))#CPUID
+                     ! disc from another system so only one route
+                  %CONTINUE %IF DDT_ALT CUU#0
+               %FINISH
+               RESERVES=RESERVES+1
+               INTEGER(DDT_CCWA)=X'B4000000'!REALISE(ADDR(DDT_SENSE1))
+               INTEGER(DDT_CCWA+4)=24
+               DDT_STATE=RESERVE
+               I=FIRE CHAIN(DDT_CCWA,YES)
+               %RETURN %UNLESS P_P1=0
+            %FINISH %ELSE %START;       ! release device
+               INTEGER(DDT_CCWA)=X'94000000'!REALISE(ADDR(DDT_SENSE1))
+               INTEGER(DDT_CCWA+4)=24
+               DDT_STATE=RELEASE
+               I=FIRE CHAIN(DDT_CCWA,YES)
+               %RETURN
+            %FINISH
+         %FINISH
+      %REPEAT
+      OPMESS(S."???") %UNLESS P_P1=0
+      %RETURN
+!
+INACT(3):                               ! interrupt
+      %IF XA=YES %START
+         DDT==RECORD(P_P1)
+         ACUU=DDT_CUU
+         SLOT=DDT_SLOT
+         CSW1=P_P2
+         CSW2=P_P3
+      %ELSE
+         ACUU=P_P1
+         CSW1=P_P2
+         CSW2=P_P3
+         SLOT=P_P4
+         DDT==RECORD(INTEGER(DITADDR+4*SLOT))
+      %FINISH
+      %IF CSW2=CUEND %THEN ->WAYOUT
+      %IF DDT_STATE<0 {still queued} %THEN ->FINT(DEAD)
+      %IF CSW2&x'7fff0000'=NORMALT %THEN ->NINT(DDT_STATE)
+      %IF CSW2&ATTNT#0 %OR CSW2=x'04000000' {devend unsolicited} %THEN ->AINT(DDT_STATE)
+      ->FINT(DDT_STATE)
+WAYOUT:
+      %UNLESS CHANNELQ=0 %START;        ! try waiting I/Os
+         CQ==PARM(CHANNELQ)
+         DDT==RECORD(CQ_ADDT)
+         I=CHANNELQ
+         CHANNELQ=CQ_LINK
+         DDT_STATE=IMOD(DDT_STATE)
+         J=FIRE CHAIN(CQ_CCWA,YES)
+         RETURN PP CELL(I)
+      %FINISH
+      %RETURN
+!
+NINT(AVAIL):
+FINT(AVAIL):
+NINT(PAVAIL):
+FINT(PAVAIL):
+NINT(PCLAIMD):
+FINT(PCLAIMD):
+NINT(DEAD):
+FINT(DEAD):
+      PRINTSTRING("DISC int (".HTOS(P_P1,3).")  CSW: ".HTOS(CSW1,8)." ".HTOS(CSW2,
+         8)." state ".STRINT(DDT_STATE)." ???
+")
+      %IF CSW2&x'02000000'#0 %THEN DDT_STATE=CONNIS %AND SENSE(DDT)
+      %RETURN
+NINT(CONNIS):                           ! sense terminates
+      DDT_STATE=RLABIS
+      LABREADS=LABREADS+1
+      READ DLABEL(DDT)
+      %RETURN
+!
+NINT(RLABIS):                           ! label read
+   %UNLESS XA=YES %START
+      PRTE==DDT_UA SIZE
+      %UNLESS PRTE=0 %START
+         ARTE==DDT_UA AD
+         %IF PRTE=DDT_CUU %START;      ! prime route
+            DDT_CUU=ARTE;              ! try alternate
+            READ DLABEL(DDT)
+            %RETURN
+         %FINISH %ELSE %START;         ! both done
+            %UNLESS PRTE<0 %THEN DDT_CUU=PRTE %AND DDT_ALT CUU=ARTE
+            PRTE=0; ARTE=0
+         %FINISH
+      %FINISH
+PLABEL:
+   %FINISH
+      LABREAD ENDS
+      LABEL==RECORD(DDT_CCWA+40)
+      ETOI(ADDR(LABEL),6)
+      PREVLAB=DDT_LABEL
+      %FOR I=0,1,5 %CYCLE
+         BYTEINTEGER(ADDR(DDT_LABEL)+1+I)=LABEL_VOL(I)
+      %REPEAT
+      LENGTH(DDT_LABEL)=6
+!
+!  check label but note that VM does not allow a full 80 byte write (it seems)
+!
+      %IF ((VM=NO %AND LABEL_ACCESS=x'c5') %OR VM=YES) %AND '0'<=LABEL_VOL(4)<='9' %AND %C
+         '0'<=LABEL_VOL(5)<='9' %START
+         %FOR I=0,1,3 %CYCLE
+            BYTEINTEGER(ADDR(DDT_BASE)+I)=LABEL_POINTER(I)
+         %REPEAT
+         %IF VM=YES %THEN DDT_BASE=x'800'
+         S=" EMAS"
+         I=(LABEL_VOL(4)&x'f')*10+LABEL_VOL(5)&x'f'
+         %IF SLOT#LVN(I)<254 %THEN ->DUPLICATE
+         LVN(I)=SLOT
+         DDT_DLVN=I!x'80000000'
+         DDT_STATE=AVAIL
+      %FINISHELSESTART
+         DDT_BASE=0
+         DDT_STATE=PAVAIL
+         DDT_DLVN=-1
+         S=" frgn"
+      %FINISH
+      DDT_STATS1=0
+      DDT_STATS2=0
+LOAD MESS:
+      OPMESS(MTOS(DDT_MNEMONIC)." loaded ".DDT_LABEL.S)
+      ->WAYOUT
+DUPLICATE:
+      OPMESS("Duplicate disc lvn")
+      OPMESS("Re-label disc on ".MTOS(DDT_MNEMONIC))
+      DDT_DLVN=-1
+      DDT_STATE=PAVAIL
+      ->WAYOUT
+!
+FINT(CONNIS):                           ! sense fails
+      DDT_STATE=DEAD
+      ->WAYOUT
+!
+FINT(RLABIS):                           ! label read fails
+      LABREAD ENDS
+      DDT_CSW1=CSW1
+      DDT_CSW2=CSW2
+      DDT_STATE=RLABSIS
+      SENSE(DDT)
+      %RETURN
+!
+FINT(RLABSIS):
+      DDT_SENSE1=OFFLINE
+NINT(RLABSIS):
+   %UNLESS XA=YES %START
+      PRTE==DDT_UA SIZE
+      %UNLESS PRTE=0 %START
+         ARTE==DDT_UA AD
+         %IF PRTE<0 %START;            ! both routes failed
+            PRTE=0; ARTE=0
+            OPMESS(MTOS(DDT_MNEMONIC)." inop - no routes")
+            DDT_STATE=DEAD
+            ->WAYOUT
+         %FINISH %ELSE %IF PRTE=DDT_CUU %START
+            PRTE=PRTE!X'80000000';     ! mark prime failed
+            DDT_CUU=ARTE;              ! try alternate
+            LABREADS=LABREADS+1
+            DDT_STATE=RLABIS
+            READ DLABEL(DDT)
+            %RETURN
+         %FINISH %ELSE %START;         ! alternate failed
+            DDT_CUU=PRTE
+            PRTE=0; ARTE=0
+            ->PLABEL;                  ! process label
+         %FINISH
+      %FINISH
+   %FINISH
+      %IF DDT_SENSE1&OFFLINE=OFFLINE %START
+         OPMESS(MTOS(DDT_MNEMONIC)." offline thru ".HTOS(ACUU,3))
+         %UNLESS DDT_ALT CUU=0 %START;  ! swap routes
+            %UNLESS DDT_ALT CUU=ACUU %THEN DDT_CUU=DDT_ALT CUU
+            DDT_ALT CUU=0
+            LABREADS=LABREADS+1
+            ddt_state=rlabis
+            READ DLABEL(DDT);           ! try again
+         %FINISHELSE DDT_STATE=DEAD %AND ->WAYOUT
+         %RETURN
+      %ELSE
+         DDT_LABEL="nolabl"
+         DDT_DLVN=-1
+         DDT_STATE=PAVAIL
+         OPMESS(MTOS(DDT_MNEMONIC)." loaded no label")
+         DDT_BASE=0
+         P_DEST=0
+         ->COM1
+      %FINISH
+!
+NINT(DCONNIS):
+FINT(DCONNIS):                          ! unload complete
+      DDT_STATE=DEAD
+UNLDED:
+      OPMESS(MTOS(DDT_MNEMONIC)." unloaded")
+      %IF DDT_DLVN#-1 %THEN LVN(DDT_DLVN&255)=255
+      ->WAYOUT
+!
+AINT(RLABIS):
+      LABREAD ENDS
+AINT(DEAD):
+AINT(CONNIS):
+AINT(RLABSIS):
+      PRINTSTRING("attntn while initng ".HTOS(P_P1,3)." ".STRHEX(CSW1).STRHEX(CSW2)."
+")
+      DDT_STATE=CONNIS
+      SENSE(DDT)
+AINT(DCONNIS):
+      %RETURN
+!
+AINT(AVAIL):
+AINT(PAVAIL):
+AINT(PAGTIS):
+AINT(PAGSIS):
+      %RETURN
+!
+AINT(INOP):
+      %RETURN
+!
+NINT(INOP):
+FINT(INOP):
+REPLY INOP:
+      P_P3=ERRT
+      P_P4=0
+      P_P5=NORMALT
+      P_DEST=PDISCSNO!10
+      P_SRCE=DISCSNO
+      DDT_ID=ADDR(DDT)
+      DDT_SENSE2=OFFLINE
+      ->COM2
+!
+FINT(SPTRANIS):
+NINT(PTRANIS):
+NINT(SPTRANIS):
+      P_DEST=DDT_REPSNO
+      P_SRCE=DISCSNO+64+SLOT
+      P_P1=DDT_ID
+      P_P2=0
+      P_P3=CSW1
+      P_P4=CSW2
+      PON(P)
+      DDT_STATE=PCLAIMD
+      ->WAYOUT
+!
+FINT(PAGTIS):
+FINT(PTRANIS):
+      DDT_CSW1=CSW1
+      DDT_CSW2=CSW2
+      DDT_STATE=DDT_STATE+1
+      SENSE(DDT)
+      %RETURN
+!
+NINT(PAGTIS):
+      P_DEST=PDISCSNO!10
+      P_SRCE=DISCSNO!2
+      P_P1=DDT_ID
+      P_P2=0
+      DDT_STATE=AVAIL
+      PDISC(P)
+      ->WAYOUT
+!
+FINT(PAGSIS):
+NINT(PAGSIS):
+      P_DEST=PDISCSNO!10
+      P_SRCE=DISCSNO!2
+      DDT_STATE=AVAIL
+      ->COM1
+!
+NINT(PSENIS):
+FINT(PSENIS):
+      P_DEST=DDT_REPSNO
+      P_SRCE=DISCSNO+64+SLOT
+      DDT_STATE=PCLAIMD
+COM1:
+      P_P3=DDT_CSW1
+      P_P4=DDT_CSW2
+      P_P5=CSW1
+COM2:
+      P_P1=DDT_ID
+      P_P2=1
+      P_P6=DDT_SENSE1
+      %IF DDT_SENSE1&OFFLINE=OFFLINE %START
+         OPMESS(MTOS(DDT_MNEMONIC)." offline thru ".HTOS(ACUU,3))
+         %UNLESS DDT_ALT CUU=0 %START;  ! abandon route
+            %IF DDT_ALT CUU#ACUU %THEN DDT_CUU=DDT_ALT CUU;  ! swap routes
+            DDT_ALT CUU=0
+            P_P6=P_P6&(\(OFFLINE)) %IF P_DEST&x'ffff0000'=PDISCSNO
+                                        ! PDISC will retry
+         %FINISHELSE DDT_STATE=INOP
+      %FINISH
+      DREPORT(DDT,P)
+      PON(P) %UNLESS P_DEST=0
+      ->WAYOUT
+!
+NINT(RESERVE):NINT(RELEASE):
+      %IF DDT_STATE=RESERVE %START
+         OPMESS(MTOS(DDT_MNEMONIC)." reserved")
+         RESERVES=RESERVES-1
+         READ DLABEL(DDT)
+         LABREADS=LABREADS+1
+         DDT_STATE=RLABIS
+      %FINISH %ELSE %START
+         DDT_STATE=DEAD
+         OPMESS(MTOS(DDT_MNEMONIC)." released")
+      %FINISH
+      ->WAYOUT
+FINT(RESERVE):FINT(RELEASE):
+AINT(RESERVE):AINT(RELEASE):
+      %IF DDT_STATE=RESERVE %START
+         RESERVES=RESERVES-1
+         S=" reserve"
+       %FINISH %ELSE S=" release"
+      OPMESS(MTOS(DDT_MNEMONIC).S." fails")
+      DDT_STATE=DEAD
+      SENSE(DDT)
+      ->WAYOUT
+!
+INACT(*):                               ! sink
+      PKMONREC("DISC act?:",P)
+      %RETURN
+!
+AINT(*):                                ! private atts
+      P_DEST=DDT_REPSNO
+      P_SRCE=DDT_SLOT+64
+      P_P1=0
+      P_P2=0
+      P_P3=CSW1
+      P_P4=CSW2
+      PON(P) %UNLESS P_DEST=0
+      %RETURN
+!
+%STRINGFN MTOS(%INTEGER M)
+!***********************************************************************
+!*    Turn integer m into a string                                     *
+!***********************************************************************
+%INTEGER I,J
+      I=4; J=M
+      %RESULT=STRING(ADDR(I)+3)
+%END
+!
+%ROUTINE READ DLABEL(%RECORD (DTFORM) %NAME DDT)
+!***********************************************************************
+!*    Read 80 byte vol label from cyl/track/sector 0/0/0               *
+!***********************************************************************
+%INTEGER I,RAD
+      I=DDT_CCWA
+      RAD=REALISE(I)
+      %IF CCW Format=0 %THEN %START
+         INTEGER(I)=x'13000000';         ! recalibrate
+         INTEGER(I+4)=x'60000001'
+         INTEGER(I+8)=x'31000000'!(RAD+32); ! search id eq
+         INTEGER(I+12)=x'60000005'
+         INTEGER(I+16)=x'08000000'!(RAD+8); ! tic
+         INTEGER(I+20)=0
+         INTEGER(I+24)=x'06000000'!(RAD+40); ! read data
+         INTEGER(I+28)=x'20000050'
+      %ELSE
+         integer(I)=X'13600001'
+         integer(I+4)=0
+         integer(I+8)=X'31600005'
+         integer(I+12)=RAD+32
+         integer(I+16)=x'08000000'
+         integer(I+20)=RAD+8
+         integer(I+24)=X'06200050'
+         integer(I+28)=RAD+40
+      %FINISH
+      INTEGER(I+32)=0;                  ! cchh = 0
+      INTEGER(I+36)=0;                  ! r0
+      I=FIRE CHAIN(I,YES)
+%END
+!
+%ROUTINE LABREAD ENDS
+!***********************************************************************
+!*    Called when vol label read to uninhibit if required              *
+!***********************************************************************
+      LABREADS=LABREADS-1
+      %IF INITINH=1 %AND LABREADS=0 %THEN INITINH=0 %AND UNINHIBIT(SCHEDSNO>>16)
+%END
+!
+%ROUTINE Q REQUEST(%INTEGER CCWA,CC,CSW2)
+!***********************************************************************
+!*    All routes give channel busy so queue request for later retry    *
+!***********************************************************************
+%INTEGERNAME LINK
+%INTEGER I
+      DDT_STATS4=DDT_STATS4+1
+      DDT_STATE=-IMOD(DDT_STATE);       ! set state -ve for qeued
+      LINK==CHANNELQ
+      %WHILE LINK#0 %CYCLE
+         CQ==PARM(LINK)
+         LINK==CQ_LINK
+      %REPEAT
+      LINK=NEW PP CELL
+      CQ==PARM(LINK)
+      CQ=0
+      CQ_ADDT=ADDR(DDT)
+      CQ_CCWA=CCWA
+      CQ_P1=CC
+      CQ_P2=CSW2
+%END
+!
+%ROUTINE SENSE(%RECORD (DTFORM) %NAME DDT)
+!***********************************************************************
+!*    Perform a sense either for initial status or because of an       *
+!*     abnormal termination. A sense CCW is always at ddt_ccwa-8.      *
+!***********************************************************************
+%INTEGER I,J,K,D
+      %IF XA#YES %AND ACUU=DDT_ALT CUU>0 %START
+         DDT_ALT CUU=DDT_CUU
+         DDT_CUU=ACUU
+      %FINISH
+      %FOR J=1,1,4 %CYCLE
+         I=FIRE CHAIN(DDT_CCWA-8,NO)
+         %IF I<=0 %THENRETURN;    ! device started or termination sent
+         PRINTSTRING("DISC sense fails ".STRINT(I)." on ".MTOS(DDT_MNEMONIC)." CSW: ".HTOS %C
+            (PAGE0_CSW1,8)." ".HTOS(PAGE0_CSW2,8)." via ".HTOS(DDT_CUU,3)."state ".strint(ddt_state))
+         NEWLINE
+      %REPEAT
+      I=FIRE CHAIN(DDT_CCWA-8,YES);     ! queu it after 4 tries
+%END
+!
+%INTEGERFN FIRE CHAIN(%INTEGER CCWA,Q)
+!***********************************************************************
+!*    Fire the CCW chain at ccwa. If all routes are busy and q=yes     *
+!*     then q the request until a channel becomes free                 *
+!***********************************************************************
+%RECORD (PARMF) P
+%RECORD (IRBF) IRB
+%INTEGER I,J,CUU,RCCWA
+      CUU=DDT_CUU
+      DDT_STICK=CURRTICK
+      %IF VA MODE=YES %START
+         *l_1,ccwa; *lra_0,0(1); *st_0,rccwa
+      %FINISHELSE RCCWA=CCWA
+REFIRE:
+      I=SSCH(ADDR(DDT),RCCWA,0)
+      %RESULT=0 %IF I=0;                ! I/O fired
+      %IF XA=YES %THEN J=TSCH(ADDR(DDT),IRB) %ELSESTART
+         IRB=0
+         IRB_CSW1=PAGE0_CSW1
+         IRB_CSW2=PAGE0_CSW2
+      %FINISH
+      %UNLESS I=2 %OR (I=1 %AND IRB_CSW2&NOSTARTMASK=0) %START
+                                        ! unless busy with no errors
+         %IF I=3 %START;                ! CUU inop
+            IRB_CSW1=0
+            IRB_CSW2=ERRT
+         %FINISH
+         P_DEST=DISCSNO!3;              ! pon abterm
+         P_SRCE=m'FIRE'
+         %IF XA=YES %THENSTART
+            P_P1=ADDR(DDT)
+            P_P4=IRB_KEYCNTR
+            P_P5=IRB_XSTATUSW
+         %ELSE
+            P_P1=CUU
+            P_P4=BYTEINTEGER(COM_STEER INT+P_P1)
+         %FINISH
+         P_P2=IRB_CSW1
+         P_P3=IRB_CSW2
+         disc(P)
+         %RESULT=-1;          ! not started but termination sent
+      %FINISH
+      %IF Q=YES %THEN Q REQUEST(CCWA,I,IRB_CSW2) %ANDRESULT=0 %ELSERESULT=1
+%END
+!
+%ROUTINE DREPORT(%RECORD (DTFORM) %NAME DDT, %RECORD (PARMF) %NAME P)
+!***********************************************************************
+!*    Print failure report                                             *
+!***********************************************************************
+%INTEGER I,J
+      PRINTSTRING("&& disc transfer ".DDT_LABEL." on ".MTOS(DDT_MNEMONIC)." (".HTOS(ACUU,
+         3).") fails ".STRING(ADDR(COM_DATE0)+3)." ".STRING(ADDR(COM_TIME0)+3))
+      PRINTSTRING("
+csw1 = ".STRHEX(P_P3)." csw2 = ".STRHEX(P_P4)."
+ccws (@ ".STRHEX(DDT_CCWA).") : ")
+      I=DDT_CCWA
+      %CYCLE
+         NEWLINE
+         PRINTSTRING(STRHEX(INTEGER(I))." ".STRHEX(INTEGER(I+4)))
+         J=INTEGER(I)
+         %UNLESS J>>24=8 %START
+            %EXITIF INTEGER(I+4)&x'40000000'=0
+         %FINISH
+         I=I+8
+      %REPEAT
+      NEWLINE
+      %IF DDT_SENSE1&LOGGING=LOGGING %START
+         PRINTSTRING("Statistical usage/error log data present
+")
+      %FINISH
+      PRINTSTRING("sense data :")
+      %FOR I=0,1,SHORTINTEGER(DDT_CCWA-2)//4-1 %CYCLE
+         PRINTSTRING(" ".STRHEX(INTEGER(ADDR(DDT_SENSE1)+4*I)))
+      %REPEAT
+      NEWLINE
+%END
+!
+!
+%END
+!
+!------------------------------------------------------------------------
+!
+%ROUTINE PDISC(%RECORD (PARMF) %NAME P)
+%CONSTINTEGERARRAY CMD(1:4)=x'06000000',x'05000000'(2),x'06000000'
+%RECORDFORMAT REQFORM(%INTEGER DEST, %BYTEINTEGER FAULTS,FCCW,LCCWP1,REQTYPE, %INTEGER IDENT,
+   CYLINK,COREADDR,CYL,TRKSECT,STOREX,REQLINK)
+%RECORD (DTFORM) %NAME DDT
+%RECORD (PROPFORM) %NAME PROP
+%RECORD (PARMXF) %NAME ACELL
+%RECORD (REQFORM) %NAME REQ,ENTRY
+%CONSTINTEGER TRANOK=0,TRANWITHERR=1,TRANREJECT=2,NOTTRANNED=3
+%CONSTINTEGER ABORTED=4,PTACT=5,POUTACT=6
+%CONSTINTEGER RETRIES=7,MAXTRANS=5
+%ROUTINESPEC QUEUE(%INTEGERNAME QHEAD, %INTEGER REQ,CYL)
+%ROUTINESPEC PTREPLY(%RECORD (REQFORM) %NAME REQ, %INTEGER FAIL)
+%SWITCH PDA(0:11)
+%OWNINTEGER INIT=0
+%INTEGERNAME LINK
+%INTEGER SEMA
+%INTEGER I,J,K,ACT,UNIT,LUNIT,CYL,TRACK,SECT,CELL,SECSTAT
+%INTEGER CCWA,SEEKA,SECTINDX,ERRCCW,UNRECOVERED,NEXTCELL,SRCE,FAIL,FCCW
+%INTEGER STOREX,L,PRIO,NEXTSEEK
+!
+      ACT=P_DEST&x'ffff'
+      %IF KMON>>33&1#0 %THEN PKMONREC("pdisc:",P)
+      ->PDA(ACT)
+!
+PDA(0):                                 ! initialise
+      %RETURNIF INIT#0
+      %FOR I=0,1,NDISCS-1 %CYCLE
+         DDT==RECORD(INTEGER(DITADDR+4*I))
+         DDT_QSTATE=0
+         DDT_LQLINK=0
+         DDT_UQLINK=0
+         DDT_TRLINK=0
+         DDT_CURCYL=0
+      %REPEAT
+      INIT=1
+      %RETURN
+!
+PDA(1):                                 ! read
+PDA(2):                                 ! write
+PDA(3):                                 ! write + check
+PDA(4):                                 ! check read
+                                        ! p_p2=dpage,p_p3=addr
+      SRCE=P_SRCE&x'7fffffff'
+      UNIT=P_P2>>24
+      %IF UNIT>99 %THEN ->REJECT
+      J=P_P2&x'ffffff'
+      LUNIT=LVN(UNIT)
+      ->REJECT %IF LUNIT>=NDISCS
+      DDT==RECORD(INTEGER(DITADDR+4*LUNIT))
+      PROP==RECORD(DDT_PROPADDR)
+      I=J//PROP_PPERTRK
+      SECT=J-I*PROP_PPERTRK+1
+      CYL=I//PROP_TRACKS
+      TRACK=I-CYL*PROP_TRACKS
+      %IF CYL>PROP_CYLS %THEN ->REJECT
+      %IF PARMASL=0 %THEN MORE PPSPACE
+      ACELL==PARM(PARMASL)
+      CELL=ACELL_LINK
+      REQ==PARM(CELL)
+      %IF CELL=PARMASL %THEN PARMASL=0 %ELSE ACELL_LINK=REQ_REQLINK
+      P_SRCE=ACT
+      REQ<-P
+      REQ_DEST=SRCE
+      REQ_CYLINK=0
+      REQ_CYL=CYL
+      REQ_TRKSECT=(TRACK<<8!SECT)<<8
+      REQ_REQLINK=0
+      %IF DDT_QSTATE=0 %OR CYL>=DDT_CURCYL %THEN QUEUE(DDT_UQLINK,CELL,CYL) %ELSE %C
+         QUEUE(DDT_LQLINK,CELL,CYL)
+      ->INIT TRANSFER %IF DDT_QSTATE=0
+      %RETURN
+!
+REJECT:
+      PKMONREC("*** pdisc rejects",P)
+      P_DEST=SRCE
+      P_SRCE=PDISCSNO!ACT
+      P_P2=TRANREJECT
+      %IF ACT=PTACT %THEN PTREPLY(P,2) %ELSE PON(P)
+      %RETURN
+!
+INIT TRANSFER:
+      CELL=DDT_UQLINK
+      REQ==PARM(CELL)
+      DDT_UQLINK=REQ_REQLINK
+      CYL=REQ_CYL
+      CCWA=DDT_CCWA
+      SEEKA=CCWA+MAXTRANS*48-8
+      PROP==RECORD(DDT_PROPADDR)
+      SECTINDX=PROP_SECTINDX
+      %IF CYL=DDT_CURCYL#0 %THEN NEXTSEEK=x'1b000000' %ELSE NEXT SEEK=x'07000000'
+                                        ! '07' = seek cyl/head: '1b' = seek head
+      FCCW=0; I=0
+      %CYCLE
+         NEXTCELL=REQ_CYLINK
+         %IF CCW Format=0 %START
+            INTEGER(CCWA)=nextseek!SEEKA
+            INTEGER(CCWA+4)=x'40000006'
+         %ELSE
+            integer(CCWA)=nextseek!X'400006'
+            integer(CCWA+4)=SEEKA
+         %FINISH
+         CCWA=CCWA+8
+         %IF CCW Format=0 %START
+            INTEGER(CCWA)=x'23000000'!(SEEKA+7)
+            INTEGER(CCWA+4)=x'40000001'
+         %ELSE
+            integer(CCWA)=X'23400001'
+            integer(CCWA+4)=SEEKA+7
+         %FINISH
+         CCWA=CCWA+8
+         %IF CCW Format=0 %START
+            INTEGER(CCWA)=x'31000000'!(SEEKA+2)
+            INTEGER(CCWA+4)=x'40000005'
+            INTEGER(CCWA+8)=x'08000000'!(CCWA)
+            INTEGER(CCWA+12)=0
+         %ELSE
+            integer(CCWA)=X'31400005'
+            integer(CCWA+4)=SEEKA+2
+            integer(CCWA+8)=X'08000000'
+            integer(CCWA+12)=CCWA
+         %FINISH
+         CCWA=CCWA+16
+         %IF CCW Format=0 %START
+            INTEGER(CCWA)=CMD(REQ_REQTYPE&255)!REQ_COREADDR
+            INTEGER(CCWA+4)=x'40000000'!PAGESIZE
+         %ELSE
+            integer(CCWA)=CMD(REQ_REQTYPE&255)!x'00400000'!pagesize
+            integer(CCWA+4)=REQ_COREADDR
+         %FINISH
+         INTEGER(SEEKA)=CYL
+         INTEGER(SEEKA+4)=REQ_TRKSECT!((REQ_TRKSECT>>8&255-1)*SECTINDX)
+         CCWA=CCWA+8
+         SEEKA=SEEKA-8
+         I=I+1
+         REQ_REQLINK=DDT_TRLINK
+         DDT_TRLINK=CELL
+         FCCW=(CCWA-DDT_CCWA)>>2
+         REQ_LCCWP1=FCCW
+         CELL=NEXT CELL
+         %IF CELL=0 %THEN ->DECHAIN
+         REQ==PARM(CELL)
+         %EXITIF I=MAXTRANS
+      %REPEAT
+      REQ_REQLINK=DDT_UQLINK
+      DDT_UQLINK=CELL
+!
+DECHAIN:
+      %IF I=0 %THEN ->DOMORE
+      %IF CCW Format=0 %THEN INTEGER(CCWA-4)=INTEGER(CCWA-4)&x'bfffffff' %ELSE %C
+         integer(CCWA-8)=integer(CCWA-8)&X'FFBFFFFF'
+      DDT_STATS2=DDT_STATS2+1
+      P_DEST=DISCSNO!2
+      P_SRCE=PDISCSNO!10
+      P_P1=ADDR(DDT)
+      DDT_QSTATE=1
+      DDT_CURCYL=CYL
+      DISC(P)
+      %RETURN
+!
+PDA(10):
+      DDT==RECORD(P_P1)
+      CELL=DDT_TRLINK
+      %IF P_P2=0 %START
+         %WHILE CELL#0 %CYCLE
+            REQ==PARM(CELL)
+            J=REQ_REQLINK
+            INTEGER(ADDR(REQ)+4)=PDISCSNO
+            REQ_CYLINK=0
+            FASTPON(CELL)
+            CELL=J
+         %REPEAT
+         DDT_TRLINK=0
+DOMORE:
+         %IF DDT_UQLINK=0 %THEN DDT_UQLINK=DDT_LQLINK %AND DDT_LQLINK=0
+         ->INIT TRANSFER %IF DDT_UQLINK#0
+         DDT_QSTATE=0
+         %RETURN
+      %FINISH
+      DDT_STATS1=DDT_STATS1+1
+      %IF P_P3=0 %THEN ERRCCW=0 %ELSE ERRCCW=(P_P3-DDT_CCWA)>>3
+      SEC STAT=P_P6
+      UNRECOVERED=1
+      FAIL=NOT TRANNED
+      CYL=DDT_CURCYL
+      %WHILE CELL#0 %CYCLE
+         REQ==PARM(CELL)
+         DDT_TRLINK=REQ_REQLINK
+         %IF REQ_LCCWP1<=ERRCCW %OR REQ_FAULTS>RETRIES %START
+            %IF REQ_LCCWP1<=ERRCCW %THEN REQ_CYLINK=TRAN OK %ELSE REQ_CYLINK=FAIL
+            %IF REQ_CYLINK#0 %START
+               PKMONREC("pdisc transfer fails",P)
+            %FINISH
+            INTEGER(ADDR(REQ)+4)=PDISCSNO
+            FASTPON(CELL)
+         %FINISHELSESTART
+            REQ_CYLINK=0
+            %IF REQ_FCCW<=ERRCCW<=REQ_LCCWP1 %AND UNRECOVERED#0 %THEN REQ_FAULTS=REQ_FAULTS+1
+            QUEUE(DDT_UQLINK,CELL,CYL)
+         %FINISH
+         CELL=DDT_TRLINK
+      %REPEAT
+      %IF SEC STAT&OFFLINE=OFFLINE %THEN DDT_QSTATE=2 %ANDRETURN
+      ->DOMORE
+!
+PDA(11):
+      DDT==RECORD(INTEGER(DITADDR+4*P_P1))
+      DDT_TRLINK=0
+      DDT_CURCYL=0
+      ->DOMORE
+!
+PDA(7):                                 ! special tests
+      %RETURN
+!
+!
+PDA(*):
+      PKMONREC("pdisc act??",P)
+      %RETURN
+!
+%ROUTINE QUEUE(%INTEGERNAME LINK, %INTEGER CELL,CYL)
+%RECORD (REQFORM) %NAME REQ,ENTRY,NEXTREQ
+%INTEGER NEXTCELL,AD
+      REQ==PARM(CELL)
+      NEXTCELL=LINK
+      ENTRY==PARM(NEXTCELL)
+      %IF NEXTCELL=0 %OR CYL<ENTRY_CYL %START
+         LINK=CELL
+         REQ_REQLINK=NEXTCELL
+         %RETURN
+      %FINISH
+      %CYCLE
+         ->QONCYL %IF CYL=ENTRY_CYL
+         NEXTCELL=ENTRY_REQLINK
+         %EXITIF NEXTCELL=0
+         NEXTREQ==PARM(NEXTCELL)
+         %EXITIF NEXTREQ_CYL>CYL
+         ENTRY==NEXTREQ
+      %REPEAT
+      REQ_REQLINK=NEXTCELL
+      ENTRY_REQLINK=CELL
+      %RETURN
+QONCYL:
+      REQ_CYLINK=ENTRY_CYLINK
+      ENTRY_CYLINK=CELL
+%END
+!
+%ROUTINE PTREPLY(%RECORD (REQFORM) %NAME REQ, %INTEGER FAIL)
+%END
+!
+%END
+!
+!------------------------------------------------------------------------
+!
+%EXTERNALROUTINE DLABEL(%RECORD (PARMF) %NAME P)
+%RECORD (LABFORM) %NAME LABEL
+%RECORD (DTFORM) %NAME DDT
+%RECORD (PROPFORM) %NAME PROP
+%OWNBYTEINTEGERARRAY VLAB(0:80)=0,x'40'(10),x'c5',x'40'(20),
+      0(8),0(3),40,x'40'(37)
+%OWNINTEGER STATE,MNEM,SLOT,DSNO,IPL
+%OWNSTRING (6) VOLID
+%CONSTINTEGER SERVNO=x'230000'
+%SWITCH SW(0:2)
+%INTEGER I,J,ACT
+!
+      ACT=P_DEST&255
+      %IF ACT=0 %AND STATE#0 %THEN OPMESS("labeller busy") %ANDRETURN
+      ->SW(ACT)
+SW(0):
+      MNEM=P_P1
+      VOLID<-STRING(ADDR(P_P2))
+      IPL=P_P4
+      P_DEST=x'200001'
+      P_SRCE=SERVNO!1
+      P_P1=m'LABL'
+      P_P2=SERVNO!1
+      P_P3=MNEM
+      PON(P)
+      STATE=1
+      %RETURN
+SW(1):
+      %IF P_P2=0 %THEN OPMESS("labeller claim fails") %AND STATE=0 %ANDRETURN
+      SLOT=P_P3
+      DSNO=P_P2
+      STRING(ADDR(VLAB(0)))=VOLID
+      LABEL==RECORD(ADDR(VLAB(1)))
+      ITOE(ADDR(LABEL),6)
+      DDT==RECORD(INTEGER(COM_DITADDR+4*SLOT))
+      PROP==RECORD(DDT_PROPADDR)
+      I=PROP_CYLS
+      LABEL_C1=I>>8
+      LABEL_C2=I&255
+      LABEL_TPC2=PROP_TRACKS
+      LABEL_POINTER(3)=x'40'
+      LABEL_ACCESS=x'C5'
+      %IF IPL = 0 %THEN %START
+         %IF VM = YES %THEN %START
+            OPMESS("VM disc: ILABEL assumed")
+         %FINISH
+      %ELSE
+         LABEL_POINTER(2)=8
+         LABEL_POINTER(3)=0
+      %FINISH
+      I=DDT_CCWA
+      %IF CCW Format=0 %THEN %START
+         INTEGER(I)=x'13000000';         ! recalibrate
+         INTEGER(I+4)=x'60000001'
+         INTEGER(I+8)=x'31000000'!(i+32); ! search id eq
+         INTEGER(I+12)=x'60000005'
+         INTEGER(I+16)=x'08000000'!(i+8); ! tic
+         INTEGER(I+20)=0
+         INTEGER(I+24)=x'05000000'!addr(vlab(1));  ! write data
+         INTEGER(I+28)=x'20000050'
+      %ELSE
+         integer(I)=X'13600001'
+         integer(I+4)=0
+         integer(I+8)=X'31600005'
+         integer(I+12)=i+32
+         integer(I+16)=x'08000000'
+         integer(I+20)=i+8
+         integer(I+24)=X'05200050'
+         integer(I+28)=addr(vlab(1))
+      %FINISH
+      INTEGER(I+32)=0
+      INTEGER(I+36)=0
+      P_DEST=DSNO
+      P_SRCE=SERVNO!2
+      P_P1=m'labw'
+      PON(P)
+      STATE=3
+      %RETURN
+SW(2):
+      %IF P_P2=0 %THEN OPMESS(" labelled ok") %ELSE OPMESS("labeller fails")
+      P_DEST=x'200001'
+      P_P3=SLOT
+      STATE=0
+      P_P2=-1
+      PON(P)
+%END
+!
+!------------------------------------------------------------------------
+!
+%EXTERNALROUTINE FORMAT(%RECORD (PARMF) %NAME P)
+%RECORDFORMAT COUNT FORM(%SHORTINTEGER CYL,TRACK, %BYTEINTEGER SECTOR,KL, %SHORTINTEGER DL)
+%OWNINTEGERARRAY SEEK DATA(0:1)=0(*)
+%OWNBYTEINTEGERARRAY COUNT DATA(0:160)=0(*)
+%RECORD (COUNT FORM) %NAME COUNT
+%RECORD (DTFORM) %NAME DDT
+%RECORD (PROPFORM) %NAME PROP
+%OWNINTEGER STATE,MNEM,SLOT,DSNO,CCWA,CADDR
+%OWNINTEGER TRACK,LTRACK,UTRACK,CYL,LCYL,UCYL,PPTRK,BLKSIZE
+%OWNBYTEINTEGER FM=x'c0'
+%CONSTINTEGER SERVNO=x'260000',BUSY=x'10000000',CU END=x'20000000'
+%SWITCH SW(0:2)
+%INTEGER I,J,ACT
+!
+      %IF KMON>>38&1#0 %THEN PKMONREC("format:",P)
+      ACT=P_DEST&255
+      %IF ACT=0 %AND STATE#0 %THEN OPMESS("formatter busy") %ANDRETURN
+      ->SW(STATE)
+SW(0):
+      MNEM=P_P1
+      CYL=P_P2; TRACK=P_P3
+      P_DEST=DISCSNO!1
+      P_P1=m'FRMR'
+      P_P2=SERVNO!2
+      P_SRCE=SERVNO!1
+      P_P3=MNEM
+      PON(P)
+      STATE=1
+      %RETURN
+SW(1):
+      %IF P_P2=0 %START
+         OPMESS("formatter claim fails")
+         STATE=0
+         %RETURN
+      %FINISH
+      SLOT=P_P3
+      DDT==RECORD(INTEGER(COM_DITADDR+4*SLOT))
+      PROP==RECORD(DDT_PROPADDR)
+      DSNO=P_P2
+      %IF CYL=-1 %THEN LCYL=0 %AND UCYL=PROP_CYLS-1 %ELSE LCYL=CYL>>16 %AND UCYL=CYL&x'ffff'
+      %IF TRACK=-1 %THEN LTRACK=0 %AND UTRACK=PROP_TRACKS-1 %ELSE %C
+         LTRACK=TRACK>>16 %AND UTRACK=TRACK&x'ffff'
+      ->FAIL %UNLESS 0<=LTRACK<=UTRACK %AND UTRACK<PROP_TRACKS %AND 0<=LCYL<=UCYL %AND %C
+         UCYL<PROP_CYLS
+      PPTRK=PROP_PPERTRK
+      BLKSIZE=PROP_BLKSIZE
+      CYL=LCYL
+      CCWA=DDT_CCWA
+      CCWA=CCWA+8;                      ! space for SFM
+      CADDR=ADDR(COUNT DATA(0))
+      %UNTIL CYL>UCYL %CYCLE
+         TRACK=LTRACK
+         %UNTIL TRACK>UTRACK %CYCLE
+            %if ccw format=0 %start
+               INTEGER(CCWA-8)=x'1f000000'!ADDR(FM);  ! SFM
+               INTEGER(CCWA-4)=x'40000001'
+            %else
+	       integer(ccwa-8)=x'1f400001'
+	       integer(ccwa-4)=addr(fm)
+	    %finish             
+            SEEK DATA(0)=CYL
+            SEEK DATA(1)=TRACK<<16
+            %if ccw format=0 %start
+               INTEGER(CCWA)=x'07000000'!ADDR(SEEK DATA(0));  ! seek
+               INTEGER(CCWA+4)=x'40000006'
+               INTEGER(CCWA+8)=x'39000000'!ADDR(SEEK DATA(0))+2; ! search HA equal
+               INTEGER(CCWA+12)=x'40000004'
+               INTEGER(CCWA+16)=x'08000000'!CCWA+8
+               INTEGER(CCWA+20)=0
+            %else
+	       integer(ccwa)=x'07400006'
+	       integer(ccwa+4)=addr(seek data(0))
+               integer(ccwa+8)=x'39400004'
+	       integer(ccwa+12)=addr(seek data(0))+2
+	       integer(ccwa+16)=x'08000000'
+	       integer(ccwa+20)=ccwa+8
+	    %finish
+            COUNT==RECORD(CADDR)
+            COUNT=0
+            COUNT_CYL=CYL
+            COUNT_TRACK=TRACK
+            COUNT_DL=80
+            %if ccw format=0 %start
+               INTEGER(CCWA+24)=x'15000000'!ADDR(COUNT); ! write R0
+               INTEGER(CCWA+28)=x'60000008'
+            %else
+	       integer(ccwa+24)=x'15600008'
+	       integer(ccwa+28)=addr(count)
+	    %finish
+            %FOR I=1,1,PPTRK %CYCLE
+               COUNT==RECORD(CADDR+8*I)
+               COUNT_CYL=CYL
+               COUNT_TRACK=TRACK
+               COUNT_SECTOR=I
+               COUNT_DL=BLKSIZE
+               COUNT_KL=0
+               %if ccw format=0 %start
+                  INTEGER(CCWA+32+8*(I-1))=x'1d000000'!ADDR(COUNT);  ! write CKD
+                  INTEGER(CCWA+36+8*(I-1))=x'60000008'
+               %else
+	          integer(ccwa+32+8*(i-1))=x'1d600008'
+		  integer(ccwa+36+8*(i-1))=addr(count)
+               %finish
+            %REPEAT
+            %if ccw format=0 %then INTEGER(CCWA+36+8*(I-1))=x'20000008' %c
+	       %else integer(ccwa+32+8*(i-1))=x'1d200008'
+            P_DEST=DSNO
+            P_SRCE=SERVNO!2
+            P_P1=CYL<<16!TRACK
+            PON(P)
+            STATE=2
+            %RETURN
+SW(2):
+            %IF P_P2#0 %START
+               %CONTINUEIF P_P4&BUSY=BUSY %OR P_P4=CU END;  ! retry
+               DUMPTABLE(5,CCWA-8,100)
+               DUMPTABLE(6,ADDR(COUNT DATA(0)),160)
+               OPMESS("cyl ".STRINT(CYL)." trk ".STRINT(TRACK)." faulty")
+            %FINISH
+            TRACK=TRACK+1
+         %REPEAT
+         CYL=CYL+1
+      %REPEAT
+      OPMESS("format complete")
+      ->FIN
+FAIL:
+      OPMESS("formatter fails")
+FIN:
+      P_DEST=DISCSNO!1
+      P_P3=SLOT
+      P_P2=-1
+      STATE=0
+      PON(P)
+%END
+!
+!------------------------------------------------------------------------
+!
+%EXTERNALROUTINE BMOVE(%RECORD (PARMF) %NAME P)
+%INTEGERFNSPEC CHECK(%INTEGERNAME MNEM,PAGE, %INTEGER RTYPE)
+%RECORDFORMAT BME(%INTEGER DEST,SRCE,STEP,COUNT,FDEV,TODEV,L,FDINF1,FDINF2,TODINF1,TODINF2,
+   IDENT,CORE,CDEX,UFAIL,WTRANS,FVL1,FVL2,TVL1,TVL2)
+%OWNRECORD (BME) %ARRAY BMS(1:4)=0(*)
+%RECORD (BME) %NAME BM
+%OWNINTEGER MASK=0
+%CONSTINTEGER TAPE POSN=9,FILE POSN=8,WRITE=2,READ PAGE=1
+%CONSTINTEGER WRITETM=10,MAX TRANS=16,REWIND=17
+%CONSTINTEGER REQSNO=x'240000',PRIVSNO=x'250000',MAXMASK=x'1e',
+      GETPAGE=x'50000',RETURN PAGE=x'60000',
+      CLAIM TAPE=x'31000c',RELEASE TAPE=x'310007',
+      COMREP=x'3e0001'
+%INTEGER I,INDEX,FILE,SNO,FAIL
+%SWITCH STEP(1:12)
+      %IF KMON&1<<(P_DEST>>16)#0 %THEN PKMONREC("move:",P)
+      %IF P_DEST>>16=PRIVSNO>>16 %START
+         INDEX=P_DEST&255
+         %IF 1<<INDEX&MASK=0 %START
+            PRINTSTRING("move rejects :-")
+            PTREC(P)
+            %RETURN
+         %FINISH
+         BM==BMS(INDEX)
+         FAIL=P_P2
+         ->STEP(BM_STEP)
+      %FINISH
+      %FOR INDEX=1,1,4 %CYCLE
+         %IF MASK&1<<INDEX=0 %THENEXIT
+      %REPEAT
+      BM==BMS(INDEX)
+      MASK=MASK!1<<INDEX
+      %IF MASK=MAXMASK %THEN INHIBIT(REQSNO>>16)
+      BM_DEST=P_DEST
+      BM_SRCE=P_SRCE
+      BM_FDEV=P_P1>>24
+      BM_TODEV=P_P1>>16&255
+      BM_L=P_P1&x'ffff'
+      BM_FDINF1=P_P2
+      BM_FDINF2=P_P3
+      BM_TODINF1=P_P4
+      BM_TODINF2=P_P5
+      BM_IDENT=P_P6
+      BM_COUNT=0; BM_STEP=0
+      BM_UFAIL=0; BM_FVL1=0; BM_FVL2=0
+      BM_WTRANS=0; BM_TVL1=0; BM_TVL2=0
+      %IF BM_FDEV=2 %AND CHECK(BM_FDINF1,BM_FDINF2,READPAGE)#0 %THEN ->REQFAIL
+      %IF BM_TODEV=2 %AND CHECK(BM_TODINF1,BM_TODINF2,WRITE)#0 %THEN ->REQFAIL
+      %IF BM_TODEV=3 %AND (BM_TODINF2>2 %OR BM_TODINF2<0) %THEN ->REQFAIL
+      P_DEST=GETPAGE
+      BM_STEP=0
+PONIT:
+      P_SRCE=PRIVSNO!INDEX
+      BM_STEP=BM_STEP+1
+      PON(P)
+      %RETURN
+!
+STEP(1):
+      BM_CDEX=P_P2
+      BM_CORE=P_P4
+      %IF BM_FDEV=5 %START
+         %FOR I=BM_CORE,4,BM_CORE+PAGESIZE-4 %CYCLE
+            INTEGER(I)=0
+         %REPEAT
+      %FINISH
+      ->FDEVPOSD %UNLESS BM_FDEV=4
+      %IF BM_FDINF1>>24#0 %START
+         P_DEST=CLAIM TAPE
+         P_P2=x'00040001'
+         P_P3=BM_FDINF1; P_P4=BM_FDINF2; P_P6=0
+         BM_FVL1=BM_FDINF1; BM_FVL2=BM_FDINF2
+         BM_STEP=1
+         ->PONIT
+!
+STEP(2):
+         %IF P_P2#0 %THEN ->POSFAIL
+         BM_FDINF1=P_P3
+         BM_FDINF2=BM_FDINF2&255
+      %FINISH
+      SNO=BM_FDINF1
+      BM_STEP=2
+      FILE=BM_FDINF2&255
+!
+TAPEPOS:
+      P_DEST=SNO
+      P_P1=FILE
+      P_P2=REWIND
+      ->PONIT
+!
+STEP(3):
+STEP(6):
+      ->POSFAIL %UNLESS FAIL=4 %OR FAIL=0
+      P_DEST=P_SRCE
+      P_P2=P_P1<<16!1<<8!TAPE POSN
+      ->PONIT
+!
+STEP(4):
+      ->POSFAIL %UNLESS FAIL=0
+FDEVPOSD:
+      ->POSCOMPLETE %UNLESS BM_TODEV=4
+      %IF BM_TODINF1>>24#0 %START
+         P_DEST=CLAIM TAPE
+         P_P2=x'00040002'
+         P_P3=BM_TODINF1; P_P4=BM_TODINF2
+         P_P6=0
+         BM_TVL1=BM_TODINF1; BM_TVL2=BM_TODINF2
+         BM_STEP=4
+         ->PONIT
+!
+STEP(5):
+         %IF P_P2#0 %THEN ->POSFAIL
+         BM_TODINF1=P_P3
+         BM_TODINF2=BM_TODINF2&255
+      %FINISH
+      SNO=BM_TODINF1
+      FILE=BM_TODINF2&255
+      BM_STEP=5
+      ->TAPEPOS
+!
+STEP(7):
+      ->POSFAIL %UNLESS FAIL=0
+POSCOMPLETE:
+READ PG:
+      BM_COUNT=BM_COUNT+1
+      %IF BM_FDEV#5 %START
+         P_DEST=BM_FDINF1
+         P_P3=BM_CORE
+         %IF BM_FDEV=3 %OR BM_FDEV=4 %START
+            P_P2=PAGESIZE<<16!READ PAGE
+         %FINISHELSESTART
+            P_P2=BM_FDINF2-1+BM_COUNT
+         %FINISH
+         BM_STEP=7
+         P_P1=BM_COUNT
+         P_P6=0
+         ->PONIT
+      %FINISHELSE FAIL=0
+!
+STEP(8):
+      ->READ FAIL %UNLESS FAIL=0
+      %IF BM_TODEV#5 %START
+         %CYCLE
+            P_DEST=BM_TODINF1
+            P_SRCE=PRIVSNO!INDEX
+            BM_STEP=8
+            P_P3=BM_CORE
+            %IF BM_TODEV=4 %OR BM_TODEV=5 %THEN P_P2=PAGESIZE<<16!WRITE %ELSE %C
+               P_P2=BM_TODINF2-1+BM_COUNT
+            P_P1=BM_COUNT
+            P_P6=0
+            PON(P)
+            BM_STEP=9
+            BM_WTRANS=BM_WTRANS+1
+            %RETURNIF BM_FDEV#5 %OR BM_WTRANS>=MAX TRANS %OR BM_COUNT>=BM_L
+            BM_COUNT=BM_COUNT+1
+         %REPEAT
+      %FINISHELSE DUMPTABLE(34,BM_CORE,PAGESIZE)
+!
+STEP(9):
+      BM_WTRANS=BM_WTRANS-1 %UNLESS BM_TODEV=5
+      ->WRITEFAIL %UNLESS FAIL=0
+      ->READ PG %IF BM_COUNT<BM_L %AND BM_UFAIL=0
+      %RETURNUNLESS BM_WTRANS=0
+!
+STEP(10):
+      P_DEST=BM_TODINF1
+      P_P1=m'BMTM'
+      P_P2=WRITE TM
+      %IF BM_TODEV=3 %AND BM_TODINF2#0 %START
+         BM_STEP=BM_STEP+2-BM_TODINF2
+         ->PONIT
+      %FINISH
+      ->PONIT %IF BM_TODEV=4
+!
+STEP(11):
+WAYOUT:
+      %RETURNUNLESS BM_WTRANS=0
+      P_DEST=RETURN PAGE
+      P_SRCE=0
+      P_P2=BM_CDEX
+      PON(P)
+      P_DEST=RELEASE TAPE
+      P_SRCE=COMREP
+      %IF BM_FDEV=4 %AND BM_FVL1#0 %START
+         P_P2=x'00040000'!BM_FDINF1&x'ffff'
+         P_P3=BM_FVL1; P_P4=BM_FVL2; P_P5=1
+         PON(P)
+      %FINISH
+      %IF BM_TODEV=4 %AND BM_TVL1#0 %START
+         P_P2=x'00040000'!BM_TODINF1&x'ffff'
+         P_P3=BM_TVL1; P_P4=BM_TVL2; P_P5=1
+         PON(P)
+      %FINISH
+!
+REPLY:
+      P_DEST=BM_SRCE
+      P_SRCE=REQSNO
+      P_P1=BM_UFAIL
+      P_P2=BM_IDENT
+      PON(P)
+      %IF MASK=MAXMASK %THEN UNINHIBIT(REQSNO>>16)
+      MASK=MASK!!1<<INDEX
+      %RETURN
+!
+REQFAIL:
+      BM_UFAIL=-2
+      ->REPLY
+!
+POSFAIL:
+      BM_UFAIL=-3
+      ->WAYOUT
+!
+READFAIL:
+      %IF BM_UFAIL=0 %THEN BM_UFAIL=READPAGE<<24!P_P1!FAIL<<16
+      ->WAYOUT
+!
+WRITEFAIL:
+      %IF BM_UFAIL=0 %THEN BM_UFAIL=WRITE<<24!P_P1!FAIL<<16
+      ->WAYOUT
+!
+%INTEGERFN CHECK(%INTEGERNAME MNEM,PAGE, %INTEGER RTYPE)
+%RECORD (DTFORM) %NAME DDT
+%INTEGER I,L,V1,V2
+      L=6; V1=MNEM; V2=PAGE
+      %FOR I=0,1,COM_NDISCS-1 %CYCLE
+         DDT==RECORD(INTEGER(COM_DITADDR+4*I))
+         %IF (DDT_MNEMONIC=MNEM %OR STRING(ADDR(L)+3)=DDT_LABEL %OR MNEM=DDT_DLVN) %AND %C
+            4<=DDT_STATE<=7 %START
+            MNEM=PDISCSNO!RTYPE
+            PAGE=PAGE&x'ffff'!DDT_DLVN<<24
+            %RESULT=0
+         %FINISH
+      %REPEAT
+      %RESULT=1
+%END
+!
+%END
+!
+!------------------------------------------------------------------------
+%EXTERNALROUTINE ENTER
+      %IF XA=AMDAHL %START;             ! enable 'features'
+      %INTEGER FCR
+      %CONSTINTEGER FCRBITS=x'27000000';  ! 31 bit/BAS/IPTE/4K SSK
+         *la_1,fcr; *PUT_x'8302'; *PUT_x'1000';  ! feature control reg
+         FCR=FCR!FCRBITS;               ! enable
+         *balr_15,0; *using_15
+         *la_1,fcr; *PUT_x'8301'; *PUT_x'1000'
+         *bc_8,<fok>; *drop_15
+         PSW=DISAWAIT!x'00bababa'
+         *lpsw_psw
+FOK:
+      %FINISH
+      CHOP01
+%END
+!
+%EXTERNALINTEGERFN RTV(%INTEGER VAD)
+      %RESULT=VAD
+%END
+!
+!------------------------------------------------------------------------
+!
+!%CONTROL x'1fffffff'
+%ENDOFFILE

@@ -1,0 +1,1674 @@
+{*********************}
+{*     XA  EMAS3     *}
+{*   PUT INTERFACE   *}
+{*   Sept 26  1984   *}
+{*********************}
+
+{ These are those low level code and object generation routines which are common}
+{ to our XA compilers in the EMAS3 environment. }
+
+
+
+{ Tracing control }
+
+%constinteger On= 1, Off = 2
+
+%constinteger Tracing= Off         { Controls conditional compilation }
+
+
+{ Trace all significant calls on interface if: }
+{ comreg(26)&1#0 (Major calls) or }
+{ ComReg(26)&2#0 (Code planting calls) }
+{ as directed by calls on procs. Pmonon/Pmonoff }
+
+{ Seldom required info controlled by bits of comreg(26) as follows: }
+
+{ 128 - Decode each instruction as planted }
+{ 256 - Give a full recode of code area at end of compilation }
+
+
+
+%constinteger EMAS=0
+%constinteger Target=emas
+
+{* External/system declarations *}
+
+%externalroutinespec DESTROY %alias "S#DESTROY"(%stringname FILE, %c
+                                    %integername FLAG)
+%externalroutinespec OUTFILEOLD %alias "S#OUTFILEOLD"(%string (255) name, %integer LENGTH,MAXBYTES,PROTECTION,
+   %integername CONAD,FLAG)
+%externalintegermapspec COMREGMAP %alias "S#COMREGMAP"(%integer I)
+%externalroutinespec FAILUREMESSAGE %alias "S#FAILUREMESSAGE"(%integername NMESS, %stringname FMST)
+%externalroutinespec IPUT %alias "S#IPUT"(%integer Type,P1,P2,P3)
+%externalroutinespec IBMRecode(%integer Start,End,Offset)
+
+{* Constant declarations *}
+
+%constinteger MaxSyms= 100           { Maximum number of identifiers }
+%constinteger SymSize=  31
+
+%constinteger Main= X'80000000'
+%constinteger MainorExt= X'80000001'
+
+%conststring (15) %array Langs(1:16)=
+      "IMP", "FORTE", "IMPS", "NASS", "ALGOL", "OPT CODE", "PASCAL", "SIMULA",
+      "BCPL","FORTRAN77","C","NOTUSED"(3),"PASCAL E","DAP"
+
+{ System dependent constants }
+{ Gla space for descriptors }
+
+%constinteger RefDescSize= 8,
+                 EpDescSize  = 16
+
+{* Area management constants *}
+
+%constinteger code=1,
+              gla=2,
+              {free3}
+              sst=4,
+              Ust=5,
+              diags=6,
+              static=7,
+              iotab=8,
+              zgst=9,
+              Cnst=10
+
+%conststring (6) %array NrArea(1:7)= "Code", "Gla", "Plt", "Sst", "Ust",
+                                     "IniCmn", "IniStk"
+
+%conststring (6) %array Areas(1:10)="Code",
+                                      "Gla",
+                                      "Unused",
+                                      "Sst",
+                                      "Ust",
+                                      "Diags",
+                                      "Static",
+                                      "Iotab",
+                                      "Zgst",
+                                      "Cnst"
+
+%constintegerarray OldArea(Code:Cnst)=   { Old area holding new area }
+               Code,
+               Gla,
+               3,
+               SST,
+               UST,
+               SST,
+               UST,
+               Gla,
+               7,
+               Code
+
+%constintegerarray AreaBase(Code:Cnst)= 0,   { Offset of code buffer in T#CODE }
+                                            1024*256,   { Offset of Gla }
+                                            1024*256,
+                                            1024*320,   { Offset of SST }
+                                            1024*352,   { Offset of UST }
+                                            1024*448,   { Offset of Diags }
+                                            1024*512,   { Offset of Statics }
+                                            1024*512,   { Offset of IOTab }
+                                            1024*512,   { Offset of ZGst }
+                                            1024*576    { Offset of Cnsts }
+
+%constintegerarray AreaSize(Code:Cnst)= 16,
+                                             2,
+                                             0,
+                                             2,
+                                             2,
+                                             2,
+                                             2,
+                                             1,
+                                             2,
+                                             3
+
+{ Internal control variables }
+
+%owninteger mon=0                   { Put call monitoring control }
+%owninteger Faulty { Errors have been detected }
+%ownintegerarray AreaStart(Code:Cnst) { Holds area base addresses }
+%ownintegerarray Ofsts(Code:Cnst) { Holds new area offsets in old }
+%owninteger Ca { Code offset }
+%owninteger LastCa { Last decode ended here }
+%ownintegername CodeOfst, { Offset of code in code }CnstOfst, { Offset of Cnsts in code }IOOfst,
+   { Offset of IOTab in Gla }DiagOfst, { Offset of Diags in SST }StaticOfst { Offset of statics in UST }
+%owninteger CurrentLine { Updated by PLineStart }
+%owninteger CurLexLev { Current nesting of blocks }
+%owninteger NextSym { Next symbol table entry }
+%owninteger NextMarker { Next code marker id }
+
+{* Identifier tables  *}
+
+%constinteger ECRefType= 1,         { Entry is a code ref }
+              EDRefType = 2,         { Entry is a data ref }
+              LabelType = 3,         { Entry is a Label  }
+              ECDefType = 4,         { Entry is a code EP  }
+              JumpType  = 5,         { Entry is a Jump   }
+              UsingType = 6,         { Entry is a PUsing }
+              EDDefType = 8,         { Entry is a data EP  }
+              CNOpType  = 9,         { Entry is a PCNOp }
+              SwDefType =10,         { Entry is a switch def }
+              SwIndType =11          { Entry is a switch index }
+
+%recordformat CommonRecFm(%string (31) Id, %integer Len)
+%ownrecord (CommonRecFm) %array CommonRec(1:20)
+%owninteger NextCommon
+
+{*  IBM XA Opcodes etc.  *}
+
+%include "ercs12:ibmsce_mnemonics"
+%include "ercs12:ibmsce_props"
+%include "ercs12:ibmsce_names"
+
+{*  Service routines  *}
+
+%conststring (1) %array hex(0:15)=
+"0","1","2","3","4","5","6","7","8","9","A","B","C","D","E","F"
+
+%string (255) %fn Itos(%integer N)
+   %string (255) S
+   %integer Sign
+   S = ""
+   %if N<0 %thenstart
+      N = -N
+      Sign = 1
+   %finishelse Sign = 0
+   %cycle
+      S = Tostring((N-(N//10*10))+'0').S
+      N = N//10
+   %repeatuntil N=0
+   %if Sign=1 %then S = "-".S
+   %result = S
+%end { of Itos }
+
+%string (8) %fn Htos(%integer I,Size)
+   %integer j
+   %string (8) s
+   s = ""
+   %cycle j = (size*4)-4,-4,0
+      s = s.hex((i>>j)&15)
+   %repeat
+   %result = s
+%end {   of Htos   }
+
+%routine PHexByte(%integer I)
+   { Print the Hex value of a single byte }
+   Printstring(Hex((I>>8)&15).Hex(I&15))
+%end { of PHexByte }
+
+%string (5) %fn ENames(%integer OP)
+   %integer Op1,Op2
+   Op1 = Op>>8
+   Op2 = Op&255
+   %if Op=X'80' %or Op=X'82' %or Op=X'93' %thenresult = Names(Op1)
+   %if Op1=X'E5' %thenstart
+      %if Op2=1 %thenresult = "LASP"
+      %if Op2=2 %thenresult = "TPROT"
+   %finish
+   %if Op1=X'B2' %and Op2<=60 %thenresult = ExNames(Op2)
+   %if Op1=X'9C' %thenstart
+      %if Op2=0 %thenresult = "SIO"
+      %if Op2=1 %thenresult = "SIOF"
+      %if Op2=2 %thenresult = "RIO"
+   %finish
+   %if Op1=X'9E' %thenstart
+      %if Op2=0 %thenresult = "HIO"
+      %if Op2=1 %thenresult = "HDV"
+   %finish
+   %if Op1=X'9D' %and Op2=1 %thenresult = "CLRIO"
+   %if Op1=X'9F' %and Op2=1 %thenresult = "CLRCH"
+   %result = "?????"
+%end { of ENames }
+
+%integerfn EProps(%integer Op)
+   { Checks the format for an extended opcode }
+   %integer Op1,Op2
+   Op1 = Op>>8
+   Op2 = Op&255
+   %if Op2=X'80' %or Op2=X'82' %or Op2=X'93' %thenresult = SPROP
+   %if Op1=X'E5' %thenstart
+      %if 0<=Op2<=1 %thenresult = SSE
+      %result = 0
+   %finish
+   %if X'9C'<=Op1<=X'9F' %and Op2=1 %thenresult = SPROP
+   %if X'9C00'<=Op<=X'9C02' %or X'9D00'<=Op<=X'9E00' %thenresult = SPROP
+   %if Op1=X'B2' %thenstart
+      %if Op2>60 %thenresult = 0
+      %result = EXProps(Op2)
+   %finish
+   %result = 0
+%end { of EProps }
+
+%routine PError(%string (255) s)
+   Printstring("
+
+* Put Interface Error/ ".s."
+")
+   %if Tracing=On %thenstart
+      %returnif Mon=0 {try to keep going to allow report of multiple faults }
+      %monitor
+   %finish
+%end { of PError }
+
+{* Local service routines *}
+
+%externalroutinespec Move %alias "S#MOVE"(%integer Length,From,To)
+
+%externalroutinespec FILL %alias "S#FILL"(%integer LENGTH,FROM,FILLER)
+
+
+
+{* Standard code planting routines *}
+
+{* Output to code area *}
+
+%owninteger BuffStart
+
+%routine IPUT312(%integer Val)
+   { Equivalent to IPUT(31,2,Ca,Val)}
+   Byteinteger(BuffStart+Ca) = Val>>8
+   Byteinteger(BuffStart+Ca+1) = Val&255
+   %if ComRegMap(26)&128#0 %then IBMRecode(Ca+BuffStart,Ca+BuffStart+2,Ca)
+   Ca = Ca+2
+%end { of IPUT312 }
+
+%routine IPUT314(%integer Val)
+   { Equivalent to IPUT(31,4,Ca,Val) }
+   %integer I
+   %for I = 0,1,3 %cycle
+      Byteinteger(BuffStart+Ca+I) = (Val>>(24-8*I))&255
+   %repeat
+   %if ComRegMap(26)&128#0 %then IBMRecode(Ca+BuffStart,Ca+BuffStart+4,Ca)
+   Ca = Ca+4
+%end { of IPUT314 }
+
+%routine IPUT316(%integer AdVal)
+   { Equivalent to IPUT(31,6,Ca,AdVal) }
+   Move(6,AdVal,BuffStart+Ca)
+   %if ComRegMap(26)&128#0 %then IBMRecode(Ca+BuffStart,Ca+BuffStart+6,Ca)
+   Ca = Ca+6
+%end { of IPUT316 }
+
+{* IBM XA Code Planting Routines *}
+
+{* The following routines have been provided initially, corresponding to the *}
+{* formats given in the "Principles of Operation".                           *}
+
+%externalroutine PIX RR(%integer Op,R1,R2)
+   %if Tracing=On %thenstart
+      %if Mon>1 %thenstart
+         Printstring("PIXRR ".Names(Op)." ".Regs(R1)." ".Regs(R2)."
+")
+      %finish
+   %finish
+   PError("Inappropiate opcode") %if Props(Op)&15#RR
+   IPUT312(((Op&255)<<8)!((R1&15)<<4)!(R2&15))
+%end { of PIX RR }
+
+%externalroutine PIXRRE(%integer Op,R1,R2)
+   %if Tracing=On %thenstart
+      %if Mon>1 %thenstart
+         Printstring("PIXRRE ".ENames(Op)." ".Regs(R1)." ".Regs(R2)."
+")
+      %finish
+   %finish
+   PError("Inappropriate opcode") %if EProps(Op)#RRE
+   IPUT314((Op<<16)!((R1&15)<<4)!(R2&15))
+%end { of PIX RRE }
+
+%externalroutine PIX RX(%integer Op,R1,X2,B2,D2)
+   %if Tracing=On %thenstart
+      %if Mon>1 %thenstart
+         Printstring("PIXRX ".Names(Op)." ".Regs(R1)." ".Regs(X2)." ")
+         Printstring(Regs(B2)." ".Htos(D2,8)."
+")
+         %if Props(Op)&15=RS %then Printstring("*** RS used in RX ***
+")
+      %finish
+   %finish
+   PError("Inappropriate opcode") %if Props(Op)&15#RX %and Props(Op)&15#RS
+   IPUT314((Op<<24)!((R1&15)<<20)!((X2&15)<<16)!((B2&15)<<12)!(D2&X'FFF'))
+%end { of PIX RX }
+
+%externalroutine PIX RS(%integer Op,R1,R3,B2,D2)
+   %if Tracing=On %thenstart
+      %if Mon>1 %thenstart
+         Printstring("PIXRS ".Names(Op)." ".Regs(R1)." ".Regs(R3))
+         Printstring(" ".Regs(B2)." X'".Htos(D2,8)."'
+")
+         %if Props(Op)&15=RX %then Printstring("*** RX used for RS ***
+")
+      %finish
+   %finish
+   PError("Inappropriate opcode") %if Props(Op)&15#RS %and Props(Op)&15#RX
+   IPUT314((Op<<24)!((R1&15)<<20)!((R3&15)<<16)!((B2&15)<<12)!(D2&X'FFF'))
+%end { of PIX RS }
+
+%externalroutine PIX SI(%integer Op,I2,B1,D1)
+   %if Tracing=On %thenstart
+      %if Mon>1 %thenstart
+         Printstring("PIX ".Names(Op)." X'".Htos(I2,8)."' ".Regs(B1)." X'")
+         Printstring(Htos(D1,8)."'
+")
+      %finish
+   %finish
+   PError("Inappropriate opcode") %if Props(Op)&15#SI
+   IPUT314((Op<<24)!((I2&255)<<16)!((B1&15)<<12)!(D1&X'FFF'))
+%end { of PIX SI }
+
+%externalroutine PIX S(%integer Op,B2,D2)
+   %if Tracing=On %thenstart
+      %if Mon>1 %thenstart
+         Printstring("PIXS ".ENames(Op)." ".Regs(B2)." X'".Htos(D2,8)."'
+")
+      %finish
+   %finish
+   PError("Inappropriate opcode") %if EProps(Op)#SPROP
+   %if Op<=255 %then Op = Op<<8
+   IPUT314((Op<<16)!((B2&15)<<12)!(D2&X'FFF'))
+%end { of PIX S }
+
+%externalroutine PIX SS(%integer Op,L1,L2,B1,D1,B2,D2)
+   %integer Val1,Val2
+   %if Tracing=On %thenstart
+      %if Mon>1 %thenstart
+         Printstring("PIXSS ".Names(Op)." ".Itos(L1)." ".Itos(L2)." ")
+         Printstring(Regs(B1)." X'".Htos(D1,8)."' ".Regs(B2)." X'".Htos(D2,8)."'
+")
+      %finish
+   %finish
+   PError("Inappropriate opcode") %if Props(Op)#SS
+   %if L1#0 %then L1 = L1-1
+   %if L2#0 %then L2 = L2-1
+   Val1 = (Op<<24)!((L1&15)<<20)!((L2&255)<<16)!((B1&15)<<12)!(D1&X'FFF')
+   Val2 = ((B2&15)<<28)!((D2&X'FFF')<<16)
+   IPUT316(Addr(Val1))
+%end { of PIX SS }
+
+%externalroutine PIX SSE(%integer Op,B1,D1,B2,D2)
+   %integer Val1,Val2
+   %if Tracing=On %thenstart
+      %if Mon>1 %thenstart
+         Printstring("PIXSSE ".ENames(Op)." ".Regs(B1)." X'".Htos(D1,8)."' ")
+         Printstring(Regs(B2)." X'".Htos(D2,8)."'")
+      %finish
+   %finish
+   PError("Inappropriate opcode") %if EProps(Op)#SSE
+   Val1 = (Op<<16)!((B1&15)<<12)!(D1&X'FFF')
+   Val2 = ((B2&15)<<28)!((D2&X'FFF')<<16)
+   IPUT316(Addr(Val1))
+%end
+
+{* Area initialisation *}
+
+
+{*  Fixup Manipulation *}
+
+%constinteger TopDict= 320*1024-32         { Size of dictionary }
+%owninteger ADict { Start of dictionary }
+%owninteger NDict { Current start of free space }
+%owninteger CFixups, { Head of Code fixup list }GFixups, { Head of Gla  fixup list }LFixups, { Head of label fixup list }MFixups,
+   { Head of marker fixup list }XProcList, { Head of ext proc EP list }XRefList, { Head of ext code refs }FFixups,
+   { Head of relocation requests }XDEPList, { Head of ext data EPs }XDList, { Head of ext data refs }SwList,
+   { Head of switch list }ThruList, { List ordered by Ca for optimisation }ThruLink, { Tail of ThruList }JList,
+   { List of Jumps ordered by Ca }JLink, { Tail of JList }LastUsed { Address of last active Using record }
+
+%recordformat LabFmt(%shortinteger Type,Dum, %integer ThruLink,Link,Label,Ca)
+%recordformat JumpFmt(%shortinteger Type,Line, %integer ThruLink,JLink,Reg,Label,Ca,Used)
+%recordformat ECRefFmt(%integer Link,Id,GlaAd, %string (31) Name)
+%recordformat ECDefFmt(%shortinteger Type,Dum, %integer ThruLink,Link,W0,W1,Ca,ParamW, %string (31) Name)
+%recordformat FixUpFmt(%integer Link,Tgt,Host)
+%recordformat EDRefFmt(%integer Link,Disp,Props, %string (31) Name)
+%recordformat EDDefFmt(%integer Link,Props,Disp, %string (31) Name)
+%recordformat UsingFmt(%shortinteger Type,Dum, %integer ThruLink,Link,Reg,Ca)
+%recordformat CNOpFmt(%shortinteger Type,B, %integer ThruLink,Link,W,Ca)
+%recordformat MarkerFmt(%integer Link,Marker,Ca)
+%recordformat SwFmt(%shortinteger Type,Size, %integer ThruLink,Link,SAd,Lower,Upper,Def,Lbs)
+%recordformat SwElFmt(%shortinteger Type,Dum, %integer ThruLink,RLink,LLink,Index,Ca)
+
+%integerfnspec LocateSw(%integer SAd, %integername At)
+
+%routine NoteM(%integer Marker)
+   { Associate the Marker with Ca }
+   %record (MarkerFmt) %name Rec
+   %integer Here
+   %if NDict+Sizeof(Rec)>TopDict %then PError("Table overflow") %andstop
+   Here = ADict+NDict
+   Rec == Record(Here)
+   Rec_Link = MFixups
+   MFixups = Here
+   Rec_Ca = Ca
+   Rec_Marker = Marker
+   NDict = NDict+Sizeof(Rec)
+%end { of NoteM }
+
+%routine NoteL(%integer Label,Ca)
+   { Associate the Label with Ca }
+   %integer I
+   %record (LabFmt) %name Rec,Rec1
+   %if NDict+Sizeof(Rec)>TopDict %then PError("Table overflow") %andstop
+   I = ADict+NDict
+   Rec == Record(I)
+   Rec_Type = LabelType
+   Rec_Link = LFixups
+   LFixups = I
+   Rec_Label = Label
+   Rec_Ca = Ca
+   NDict = NDict+Sizeof(Rec)
+   %if CA#-1 %thenstart { Avoid adding forward ref to Ca ordered list }
+      %if ThruList=0 %then ThruList = I { First on the Ca ordered list }
+      %if ThruLink#0 %thenstart
+         Rec1 == Record(ThruLink)
+         Rec1_ThruLink = I
+      %finish
+      ThruLink = I
+      Rec_ThruLink = 0
+   %finish
+%end { of NoteL }
+
+%routine NoteJ(%integer Reg, %record (LabFmt) %name Lab)
+   { Add a jump ref to the list attached to label record at Ad }
+   %integer This
+   %record (JumpFmt) %name Rec,Rec1
+   %if NDict+Sizeof(Rec)>TopDict %then PError("Table overflow") %andstop
+   This = ADict+NDict
+   Rec == Record(This)
+   Rec_Ca = Ca
+   Rec_Line = CurrentLine
+   %if ThruList=0 %then ThruList = This { First on the Ca ordered list }
+   %if ThruLink#0 %thenstart
+      Rec1 == Record(ThruLink)
+      Rec1_ThruLink = This
+   %finish
+   Rec_ThruLink = 0
+   ThruLink = This
+   %if JList=0 %then JList = This { First on the Jump list }
+   %if JLink#0 %thenstart
+      Rec1 == Record(JLink)
+      Rec1_JLink = This
+   %finish
+   Rec_JLink = 0
+   JLink = This
+   Rec_Used = LastUsed
+   Rec_Type = JumpType
+   Rec_Reg = Reg
+   Rec_Label = Addr(Lab)
+   NDict = NDict+Sizeof(Rec)
+%end { of Note J }
+
+%routine NoteXProc(%integer Props,ParamW, %string (31) %name Name)
+   { Note an external entry point at Ca corresponding to Name }
+   %integer I
+   %record (ECDefFmt) %name Rec,Rec1
+   %if NDict+Sizeof(Rec)>TopDict %then PError("Table overflow") %andstop
+   I = ADict+NDict
+   Rec == Record(I)
+   Rec_Link = XProcList
+   Rec_W0 = 0
+   Rec_W1 = 0
+   Rec_Ca = Ca!((Props>>31)<<31)
+   Rec_ParamW = ParamW
+   Rec_Type = ECDefType
+   Rec_Name <- Name
+   NDict = NDict+Sizeof(Rec)
+   XProcList = I
+   %if ThruLink#0 %thenstart
+      Rec1 == Record(ThruLink)
+      Rec1_ThruLink = I
+   %finish
+   Rec_ThruLink = 0
+   ThruLink = I
+   %if ThruList=0 %then ThruList = I { First on Ca ordered list }
+%end { of Note X Proc }
+
+%routine NoteXRef(%integer Sym,GlaAd, %string (31) %name Name)
+   { Note that a code reference is to be planted at GlaAd }
+   %integer I
+   %record (ECRefFmt) %name Rec
+   I = ADict+NDict
+   Rec == Record(I)
+   Rec_Link = XRefList
+   Rec_Id = Sym
+   Rec_GlaAd = GlaAd
+   Rec_Name <- Name
+   XRefList = I
+   NDict = NDict+Sizeof(Rec)
+   %if NDict>TopDict %then PError("Table overflow")
+%end { of NoteXRef }
+
+%routine NoteFix(%integer Area,Disp,HostArea,HostDisp)
+   { Note that Disp in HostArea is to be relocated by base of Area }
+   %integer Here
+   %record (FixupFmt) %name Rec
+   Here = ADict+NDict
+   Rec == Record(Here)
+   Rec_Link = FFixups
+   FFixups = Here
+   Rec_Tgt = (Area<<28)!Disp
+   Rec_Host = (HostArea<<28)!HostDisp
+   NDict = NDict+Sizeof(Rec)
+   %if NDict>TopDict %then PError("Table overflow")
+%end { of NoteFix }
+
+%routine NoteXD(%integer Props,Area,Disp, %string (31) %name Name)
+   { Note that Disp in Area is to be relocated by data xref Name }
+   %integer I
+   %record (EDRefFmt) %name Rec
+   I = ADict+NDict
+   Rec == Record(I)
+   Rec_Link = XDList
+   Rec_Disp = Disp
+   Rec_Props = (OldArea(Area)<<24)!Props
+   Rec_Name = Name
+   XDList = I
+   NDict = NDict+Sizeof(Rec)
+   %if NDict>TopDict %then PError("Table Overflow")
+%end { of NoteXD }
+
+%routine NoteXDEp(%integer Area,MaxLen,Disp, %string (31) %name Name)
+   { Note an ext data EP at Disp in Area }
+   %integer I
+   %record (EDDefFmt) %name Rec
+   I = ADict+NDict
+   Rec == Record(I)
+   Rec_Link = XDEPList
+   Rec_Props = (OldArea(Area)<<24)!MaxLen
+   Rec_Disp = Disp
+   Rec_Name = Name
+   XDEPList = I
+   NDict = NDict+Sizeof(Rec)
+   %if NDict>TopDict %then Perror("Table overflow")
+%end { of Note X D EP }
+
+%routine NoteSw(%integer SAd,L,U,S)
+   { Note a switch table at SAd in SST }
+   %integer I
+   %record (SwFmt) %name Rec,Rec1
+   I = ADict+NDict
+   Rec == Record(I)
+   Rec = 0
+   Rec_Link = SWList
+   Rec_SAd = SAd
+   Rec_Lower = L
+   Rec_Upper = U
+   Rec_Size = S
+   Rec_Lbs = 0
+   Rec_Def = 0
+   Rec_Type = SwDefType
+   SwList = I
+   %if ThruList=0 %then ThruList = I { First on Ca ordered list }
+   %if ThruLink#0 %thenstart
+      Rec1 == Record(ThruLink)
+      Rec1_ThruLink = I
+   %finish
+   Rec_ThruLink = 0
+   ThruLink = I
+   NDict = NDict+Sizeof(Rec)
+   %if NDict>TopDict %then PError("TableOverflow")
+%end { of Note Sw }
+
+%routine NoteSwEl(%integer SAd,Index)
+   { Note the location of element(Index) of switch at SAd in SST }
+
+   %integer Here,J,SwAd
+   %record (SwElFmt) %name Rec,Rec1
+
+   %routine AddTo(%integername Link)
+      { Add the element to a tree sorted list }
+      %record (SwElFmt) %name Node
+      %if Link=0 %then Link = Here %andreturn
+      Node == Record(Link)
+      %if Node_Index=Index %thenstart
+         Rec_LLink = Node_LLink
+         Rec_RLink = Node_RLink
+         Link = Here
+         %return
+      %finish
+      %if Node_Index>Index %then AddTo(Node_RLink) %else AddTo(Node_LLink)
+   %end { of Add To }
+
+   %record (SwFmt) %name Sw
+   Here = ADict+NDict
+   Rec == Record(Here)
+   Rec = 0
+   J = LocateSw(SAd,SwAd)
+   %if J#0 %then PError("Switch ".ITos(SAd)." missing")
+   Sw == Record(SwAd)
+   Rec_Ca = Ca
+   Rec_Index = Index
+   Rec_Type = SwIndType
+   AddTo(Sw_Lbs)
+   %if ThruList=0 %then ThruList = Here { First on Ca ordered list }
+   %if ThruLink#0 %thenstart
+      Rec1 == Record(ThruLink)
+      Rec1_ThruLink = Here
+   %finish
+   Rec_ThruLink = 0
+   ThruLink = Here
+   NDict = NDict+Sizeof(Rec)
+   %if NDict>TopDict %then PError("Table overflow")
+%end { of NoteSwEl }
+
+%integerfn LocateL(%integer N, %integername La)
+   { Returns the addr of the label record associated with label N }
+   %record (LabFmt) %name Rec
+   La = LFixups
+   %while La#0 %cycle
+      Rec == Record(La)
+      %if Rec_Label=N %thenresult = 0
+      La = Rec_Link
+   %repeat
+   La = ADict+NDict
+   %result = 1
+%end { of LocateL }
+
+%integerfn LocateM(%integer M, %integername At)
+   %record (MarkerFmt) %name Rec
+   At = MFixups
+   %while AT#0 %cycle
+      Rec == Record(At)
+      %if Rec_Marker=M %thenresult = 0
+      At = Rec_Link
+   %repeat
+   %result = 1
+%end { of LocateM }
+
+%integerfn LocateSw(%integer SAd, %integername At)
+   { Find the location of the entry for a switch at Sad in SST }
+   %record (SwFmt) %name Rec
+   At = SwList
+   %while At#0 %cycle
+      Rec == Record(At)
+      %if Rec_SAd=SAd %thenresult = 0
+      At = Rec_Link
+   %repeat
+   %result = 1
+%end { of Locate Sw }
+
+%externalintegerfn PMarker(%integer HalfWords)
+   %if Tracing=0 %thenstart
+      %if Mon#0 %thenstart
+         Printstring("P Marker ".itos(NextMarker+1)." at ".htos(Ca,8)." len ")
+         Printstring(itos(HalfWords)."
+")
+      %finish
+   %finish
+   NextMarker = NextMarker+1
+   NoteM(NextMarker)
+   Ca = Ca+2*HalfWords
+   %result = NextMarker
+%end { of PMarker }
+
+%routine DoFixups
+   { Process outstanding lists of requests }
+   %record (ECRefFmt) %name ECR
+   %record (ECDefFmt) %name ECD
+   %record (EDRefFmt) %name EDR
+   %record (EDDefFmt) %name EDD
+   %record (FixupFmt) %name Fix
+   %integer HostArea,HostOfst
+   %if XProcList#0 %thenstart { Process external code EPs }
+      ECD == Record(XProcList)
+      IPUT(11,2,Addr(ECD_W0),Addr(ECD_Name))
+      %while ECD_Link#0 %cycle
+         ECD == Record(ECD_Link)
+         IPUT(11,2,Addr(ECD_W0),Addr(ECD_Name))
+      %repeat
+   %finish
+   %if XRefList#0 %thenstart { Process external code refs }
+      ECR == Record(XRefList)
+      %if ECR_GlaAd>0 %then IPUT(12,2,ECR_GlaAd,Addr(ECR_Name)) %else IPUT(13,2,(ECR_GlaAd<<1)>>1,Addr(ECR_Name))
+      %while ECR_Link#0 %cycle
+         ECR == Record(ECR_Link)
+         %if ECR_GlaAd>0 %then IPUT(12,2,ECR_GlaAd,Addr(ECR_Name)) %else IPUT(13,2,(ECR_GlaAd<<1)>>1,Addr(ECR_Name))
+      %repeat
+   %finish
+   %if FFixups#0 %thenstart { Process word relocations }
+      Fix == Record(FFixups)
+      HostArea = Fix_Host>>28
+      HostOfst = (Fix_Host<<4)>>4+Ofsts(HostArea)
+      IPUT(19,OldArea(HostArea),HostOfst,OldArea(Fix_Tgt>>28))
+      %while Fix_Link#0 %cycle
+         Fix == Record(Fix_Link)
+         HostArea = Fix_Host>>28
+         HostOfst = (Fix_Host<<4)>>4+Ofsts(HostArea)
+         IPUT(19,OldArea(HostArea),HostOfst,OldArea(Fix_Tgt>>28))
+      %repeat
+   %finish
+   %if XDEPList#0 %thenstart { Process external data EPs }
+      EDD == Record(XDEPList)
+      IPUT(14,EDD_Props,EDD_Disp+Ofsts(EDD_Props>>24),Addr(EDD_Name))
+      %while EDD_Link#0 %cycle
+         EDD == Record(EDD_Link)
+         IPUT(14,EDD_Props,EDD_Disp+Ofsts(EDD_Props>>24),Addr(EDD_Name))
+      %repeat
+   %finish
+   %if XDList#0 %thenstart { Process external data refs }
+      EDR == Record(XDList)
+      IPUT(15,EDR_Props,EDR_Disp+Ofsts(EDR_Props>>24),Addr(EDR_Name))
+      %while EDR_Link#0 %cycle
+         EDR == Record(EDR_Link)
+         IPUT(15,EDR_Props,EDR_Disp+Ofsts(EDR_Props>>24),Addr(EDR_Name))
+      %repeat
+   %finish
+%end { of Do Fixups }
+
+{* Relocation primitives *}
+
+%externalroutine PSetOpD(%integer MarkValue,Offset,HalfWord)
+   %integer At,I
+   %record (MarkerFmt) %name Rec
+   %if Tracing=On %thenstart
+      %if Mon#0 %thenstart
+         Printstring("PSetOpd, mark ".Itos(MarkValue)." offset ".itos(Offset))
+         Printstring(" value ".itos(HalfWord)."
+")
+      %finish
+   %finish
+   I = LocateM(MarkValue,At)
+   %if I#0 %then PError("Unmatched marker")
+   Rec == Record(At)
+   At = Rec_Ca
+   Byteinteger(At+BuffStart+2*Offset) = HalfWord>>8
+   Byteinteger(At+BuffStart+2*Offset+1) = Halfword&255
+%end { of PSetOpD }
+
+%externalroutine PLabel(%integer LabelId)
+   { Note a label at CA, LabelId being assigned by the code generator }
+   %integer Flag,Val,I
+   %record (LabFmt) %name Lab,Last
+   %if Tracing=On %thenstart
+      %if Mon#0 %thenstart
+         Printstring("Plabel called for ".Itos(LabelId)."
+")
+      %finish
+   %finish
+   %if LocateL(LabelId,I)=0 %thenstart { Forward jump }
+      Lab == Record(I)
+      Lab_Ca = Ca
+      Last == Record(ThruLink)
+      Last_ThruLink = I { Add record to Ca ordered list, which }
+      ThruLink = I { was not done by NoteL for a forward ref }
+      %if Tracing=On %thenstart
+         %if Mon#0 %thenstart
+            Printstring("Forward label at:".Htos(Ca,8)."
+")
+         %finish
+      %finish
+   %finishelsestart
+      NoteL(LabelId,Ca)
+   %finish
+%end { of PLabel }
+
+%externalroutine PUsing(%integer Reg)
+   %integer I
+   %record (UsingFmt) %name Rec,Rec1,Next
+   %if Tracing=On %thenstart
+      %if Mon#0 %then Printstring("PUsing, reg ".regs(Reg)."
+")
+   %finish
+   %if LastUsed#0 %thenstart
+      Rec == Record(LastUsed)
+      %if Rec_Reg=Reg %thenstart
+         LastUsed = Rec_Link
+      %finishelsestart
+         %while Rec_Link#0 %cycle
+            Next == Record(Rec_Link)
+            %if Next_Reg=Reg %thenstart
+               Rec_Link = Next_Link
+            %finish
+            Rec == Next
+         %repeat
+      %finish
+   %finish
+   I = ADict+NDict
+   Rec == Record(I)
+   Rec_Ca = Ca
+   Rec_Reg = Reg
+   Rec_Type = UsingType
+   %if ThruList=0 %then ThruList = I
+   %if ThruLink#0 %thenstart
+      Rec1 == Record(ThruLink)
+      Rec1_Thrulink = I
+   %finish
+   Rec_ThruLink = 0
+   ThruLink = I
+   Rec_Link = LastUsed
+   Lastused = I
+   NDict = NDict+Sizeof(Rec)
+   %if NDict>TopDict %then PError("Table overflow")
+%end { of P Using }
+
+%externalroutine PDrop(%integer Reg)
+   %integer I,Found
+   %record (UsingFmt) %name Used,NRec
+   Found = 0
+   %if Tracing=On %thenstart
+      %if Mon#0 %thenstart
+         Printstring("P Drop ".Regs(Reg)."
+")
+         %if LastUsed=0 %then Printstring("*** Using list empty ***
+")
+      %finish
+   %finish
+   %if LastUsed#0 %thenstart
+      Used == Record(LastUsed)
+      %if Used_Reg=Reg %thenstart
+         LastUsed = Used_Link
+         Found = 1
+      %finishelsestart
+         %while Used_Link#0 %cycle
+            NRec == Record(Used_Link)
+            %if NRec_Reg=Reg %thenstart
+               Used_Link = NRec_Link
+               Found = 1
+            %finish
+            Used == NRec
+         %repeat
+      %finish
+   %finish
+   %if Tracing=On %thenstart
+      %if Mon#0 %and Found=0 %then Printstring("*** Unmatched drop ***
+")
+   %finish
+%end { of PDrop }
+
+%externalroutine PJump(%integer Op,LabelId,Mask,Reg)
+   { Plant jump instruction, filling in address for backward jumps }
+   %record (LabFmt) %name Lab
+   %record (UsingFmt) %name Used
+   %integer I,Tem
+   %if Tracing=On %thenstart
+      %if Mon#0 %thenstart
+         Printstring("P Jump:".Names(Op)." ".Itos(LabelId)." Mask:")
+         Printstring(Itos(Mask)." ".Regs(Reg)."
+")
+      %finish
+   %finish
+   %if LocateL(LabelId,I)=0 %thenstart { Backward jump }
+      Lab == Record(I)
+      I = LastUsed
+      %if Lab_Ca>=0 %thenstart { Not a forward ref to label }
+         %if Lab_Ca<4096 %then Reg = 0
+         %if I#0 %thenstart
+            %cycle
+               Used == Record(I)
+               %if 0<=Lab_Ca-Used_Ca<4096 %then Reg = -Used_Reg %and ->Out
+               I = Used_Link
+            %repeatuntil I=0
+         %finish
+      %finish
+Out:
+      Tem = LastUsed
+      LastUsed = I
+      NoteJ(Reg,Lab)
+      LastUsed = Tem
+   %finishelsestart
+      NoteL(LabelId,-1)
+      Lab == Record(I)
+      NoteJ(Reg,Lab)
+   %finish
+   %if Reg>0 %then PIX RX(L,Reg&15,12,0,0)
+   %if Reg<0 %then PIXRX(Op,Mask,0,-Reg,0) %else PIXRX(Op,Mask,12,Reg&15,0)
+%end { of PJump }
+
+%externalroutine PJIndex(%integer Op,Label,Reg1,Reg2)
+   { Plant a Branch on Index form of jump to Label }
+   %integer Reg,I
+   %record (LabFmt) %name Lab
+   %record (UsingFmt) %name Used
+   %if Tracing=On %thenstart
+      %if Mon#0 %thenstart
+         Printstring("P Jump on Index:".Names(Op)." ".Itos(Label))
+         Printstring(" Regs ".Regs(Reg1)." ".Regs(Reg2)."
+")
+      %finish
+   %finish
+   Reg = 0
+   %if LocateL(Label,I)=0 %thenstart { Backward jump }
+      Lab == Record(I)
+      %if LastUsed#0 %thenstart
+         Used == Record(LastUsed)
+         %if 0<=Lab_Ca-Used_Ca<4096 %then Reg = -Used_Reg
+      %finishelsestart
+         %if Lab_Ca>=4096 %then PError("No Using for Jump on Index") %else Reg = -12
+      %finish
+   %finishelsestart
+      NoteL(Label,-1)
+      Lab == Record(I)
+   %finish
+   NoteJ(Reg,Lab)
+   PIXRS(Op,Reg1,Reg2,0,0)
+%end { of PJIndex }
+
+{* Switch support *}
+
+%externalroutine PSwitch(%integer SSTAd,Lower,Upper,Size)
+   { Note that a switch with bounds Lower and Upper is at SSTAd }
+   { in the SST. Size is the entry size - 2 or 4 bytes. }
+   %if Tracing=On %thenstart
+      %if Mon#0 %thenstart
+         Printstring("P Switch at ".Htos(SSTAd,6)." in SST, Size=".Itos(Size)."
+   Bounds = ".Itos(Lower).":".Itos(Upper)."
+")
+      %finish
+   %finish
+   NoteSw(SSTAd,Lower,Upper,Size)
+%end { of PSwitch }
+
+%externalroutine PSLabel(%integer SSTAd,Index)
+   { Fill in an element of the switch at SSTAd with Ca }
+   %integer At,Lower,Upper,Size
+   %if Tracing=On %thenstart
+      %if Mon#0 %thenstart
+         Printstring("P Switch Label ".Itos(Index)." ".Htos(SSTAd,6)."
+")
+      %finish
+   %finish
+   NoteSwEl(SSTAd,Index)
+%end { of P S Label }
+
+%externalroutine PSDefault(%integer SSTAd,Label)
+   { Fill any unfilled elements of the switch with Label's Ca }
+   %integer Lower,Upper,Size,At,Ad,I,DefLab,At2
+   %record (LabFmt) %name Rec2
+   %record (SwFmt) %name Rec
+   %if Tracing=On %thenstart
+      %if Mon#0 %thenstart
+         Printstring("P Switch Deft. for ".Htos(SSTAd,6)." label=".Itos(Label)."
+")
+      %finish
+   %finish
+   %if LocateSw(SSTAd,At)#0 %then PError("Switch ".Htos(SSTAd,6)." missing")
+   Rec == Record(At)
+   %if Label=0 %then Ad = Ca { Label =0, default is at Ca }
+   %if Label<0 %then Ad = Label { Label < 0, default is value of Label }
+   %if Label>0 %thenstart
+      %if Rec_Def=0 %thenstart
+         %if LocateL(Label,At2)#0 %then NoteL(Label,-1)
+      %finishelsestart
+         I = LocateL(DefLab,At2)
+         Rec2 == record(At2)
+         Rec2_Label = Label
+      %finish
+   %finish
+   Rec_Def = Label
+%end { of P S Default }
+
+%externalroutine PSJump(%integer SSTAd,Reg)
+   { Plant a jump to the switch at SSTAd, with the index in Reg }
+   %if Tracing=On %thenstart
+      %if Mon#0 %thenstart
+         Printstring("P Switch Jump ".Htos(SSTAd,6)." with ".Regs(Reg)."
+")
+      %finish
+   %finish
+%end { of P S Jump }
+
+{* Put Interface Passing of Data   * *}
+
+%externalroutine PCodeHalf(%integer Val)
+   { Write two bytes to the Code area unchecked at Ca }
+   %if Tracing=On %thenstart
+      %if Mon#0 %thenstart
+         Printstring("P Code Half ".Htos(Val,4)."
+")
+      %finish
+   %finish
+   %if Val>>16#0 %then PError("Val too big in PCodeHalf")
+   Byteinteger(BuffStart+CA) = Val>>8
+   Byteinteger(BuffStart+Ca+1) = Val&255
+   Ca = Ca+2
+%end { of PCode Half }
+
+%externalroutine PCodeWord(%integer Val)
+   { Write four bytes to the Code area at current position }
+   %integer I
+   %if Tracing=On %thenstart
+      %if Mon#0 %thenstart
+         Printstring("P Code Word: ".Htos(Val,8)."
+")
+      %finish
+   %finish
+   %for I = 3,-1,0 %cycle
+      Byteinteger(BuffStart+Ca+I) = Val&255
+      Val = Val>>8
+   %repeat
+   Ca = Ca+4
+%end { of PCodeWord }
+
+%externalroutine PDBytes(%integer Area,Disp,Len,Ad)
+   %integer I
+   %if Tracing=On %thenstart
+      %if mon#0 %start
+         printstring("
+  PD ( ".itos(Area)." len  = ".itos(len)." Disp=")
+         write(disp,5)
+         space
+         PHexByte(Byteinteger(I)) %for I = Ad,1,Ad+Len-1
+      %finish
+   %finish
+   Move(Len,Ad,AreaStart(Area)+Disp)
+%end { of PDBytes }
+
+%externalroutine PD4(%integer Area,Disp,Value)
+   ! Plant a 4 byte value at Disp in Area, using unbuffered areas
+   Move(4,Addr(Value),AreaStart(Area)+Disp)
+%end {  of PD4 }
+
+%externalroutine PDPattern(%integer Area,Disp,NCopies,Len,Ad)
+   %integer I,SaveMon
+   %if Tracing=On %thenstart
+      %if Mon#0 %thenstart
+         Printstring("  PDPattern( area = "); Write(area,1)
+         Printstring(", disp = "); Write(disp,1)
+         Printstring(", ncopies = "); Write(ncopies,1)
+         Printstring(" filler = ")
+         PHexByte(byteinteger(i*(target+1))) %for i = ad,1,ad+len-1
+         Newline
+      %finish
+   %finish
+   %for I = 1,1,NCopies %cycle
+      Move(Len,Ad,AreaStart(Area)+Disp)
+   %repeat
+%end { of PDPattern }
+
+{* Put Interface RELOCATION and REFERENCES    *}
+
+%externalintegerfn PXname(%integer Type, %string (255) %name S, %integer GlaAd)
+   { Create an external code reference }
+   { Xrefs are used many times so establish mapping to integer ID early}
+   { and save on holding/passing of strings }
+   %string (32) Name,Rest
+
+   Name <- S
+   NextSym = NextSym+1
+   %if Type=1 %then GlaAd = GlaAd!X'80000000'
+   NoteXRef(NextSym,GlaAd,S)
+   %if Tracing=On %thenstart
+      %if mon#0 %then printstring("Xname: ".s." symID = ".itos(nextsym)."
+")
+   %finish
+   %result = NextSym
+%end {   of PXName   }
+
+%externalroutine Pfix(%integer Hostarea,Disp,TgtArea,TgtDisp)
+   { A relocation request: set word in area, displacement = 'disp' bytes, }
+   { the address of area 'targetareaid', displacement = targetdisp.}
+   %if Tracing=On %thenstart
+      %if Mon#0 %thenstart
+         Printstring("PFix(".Itos(HostArea)."/".Htos(Disp,6)."->")
+         Printstring(Itos(TgtArea)."/".Htos(TgtDisp,6)."
+")
+      %finish
+   %finish
+   NoteFix(TgtArea,TgtDisp&X'FFFFFFF',HostArea,Disp)
+%end { of PFix }
+
+%externalroutine PfixI(%integer Op,TgtArea,TgtDisp)
+   { Plant a relocated instruction, where the operand is PC relative?}
+   PError("PFIXI not used on XA")
+%end { of PFixI }
+
+%externalroutine PDXRef(%integer Type,Area,Disp, %string (31) %name ENm)
+   { Define an external data reference }
+   { Relocate word at Disp in Area by external data ref ENm }
+   { Type holds min size in lowest byte }
+   %string (31) Name
+   NoteXD(Type,Area,Disp,ENm)
+   %if Tracing=On %thenstart
+      %if mon#0 %thenstart
+         Printstring("PDXRef(".Areas(Area)."/".HtoS(Disp,8)."->".ENm."
+")
+      %finish
+   %finish
+%end { of PDXRef }
+
+
+%externalroutine PDataEntry(%string (255) %name Name, %integer Area,Maxlen,Disp)
+   %string (31) S
+   S <- Name
+   %if Tracing=On %thenstart
+      %if Mon#0 %thenstart
+         Printstring("P Data Entry ".S.Areas(Area)."+".Htos(Disp,8)."
+")
+      %finish
+   %finish
+   NoteXDEP(Area,Maxlen,Disp,Name)
+%end { of PDataEntry }
+
+!    The next five routines deal with PROCEDURES
+
+%externalintegerfn PNextSymbol(%integer GlaAd) { reserve a space in the symbol table }
+   NextSym = NextSym+1
+   %if NextSym>=MaxSyms %thenstart
+      PError("Too many external names")
+   %finish
+   %if Tracing=On %thenstart
+      %if mon#0 %then printstring("
+Symbol reserved: ".itos(nextsym)."
+")
+   %finish
+   %result = NextSym
+%end { of P Next Symbol }
+
+%externalroutine Pproc(%string (31) %name Name, %integer Props,ParamW, %integername Id)
+   { Start a new procedure }
+   { PROPS&1   = external   }
+   { PROPS>>31 = Main entry }
+   %integer Type,Save,Disp
+   %string (255) rest,S
+
+   %if Tracing=On %thenstart
+      %if mon#0 %then printstring("  proc: ".name."  CA: ".Htos(CA,8)."
+")
+   %finish
+
+   CurLexLev = CurLexLev+1
+   %if Id=-1 %thenstart { No previous spec, so claim an Id }
+      NextSym = NextSym+1
+      Id = NextSym
+   %finish
+
+   %if Props#0 %then NoteXProc(Props,ParamW,Name)
+
+%end { of PProc }
+
+%externalroutine PProcEnd
+   { End of routine }
+   %integer At,size
+   %integer flag
+   %if Tracing=On %thenstart
+      %if mon#0 %then printstring("
+Proc END:
+")
+   %finish
+   Perror("PProcEnd - too many proc ends ") %if curlexlev=0
+
+   CurLexLev = CurLexLev-1
+%end { of PProcEnd }
+
+%externalroutine PCall(%integer Id,Reg)
+   { Plant a call to the routine previously specified to PNextSymbol, }
+   { or PProc. Reg is a work register. }
+%end { of PCall }
+
+{* Put Interface - Miscellaneous  *}
+
+%externalintegerfn Pcommon(%string (255) %name Name)
+   NextCommon = NextCommon+1
+   CommonRec(NextCommon)_Id = Name
+   %result = NextCommon
+%end {   of PCommon   }
+
+%externalroutine PEndCommon(%integer Id,Length)
+   CommonRec(Id)_Len = Length
+   IPUT(14,(Id<<24)!Length,0,Addr(CommonRec(Id)_Id))
+%end {   of PEndCommon   }
+
+%externalroutine Pfaulty
+   { Code generator has encountered a user error. Code requests should no }
+   { longer be checked and minimum work done in PUT }
+   Faulty = 1
+%end {   of PFaulty   }
+
+%externalroutine PLineStart(%integer Line)
+   { Updates latest line number }
+   CurrentLine = Line
+   %if Tracing=On %thenstart
+      %if Line>=ComRegMap(1)#0 %then Mon = 0 %elseif Line>=ComRegMap(60)#0 %then Mon = 3
+      %if Mon#0 %then Printstring("Line no ".Itos(CurrentLine)."
+")
+   %finish
+   LastCa = Ca
+%end { of PLineStart }
+
+
+%externalroutine PLineDecode
+   { Decodes from last PLineStart or Decode }
+   IBMRecode(AreaStart(Code)+LastCa,AreaStart(Code)+Ca,LastCa)
+   LastCa = Ca
+%end { of PLineDecode }
+
+%externalroutine PInitialise(%integer Language,Release,Version)
+   { Start code generation }
+   %integer I
+   %string (255) Mess
+   OutFileOld("T#CODE",X'100000',0,0,BuffStart,I)
+   %if I#0 %thenstart
+      FailureMessage(I,Mess)
+      Printstring("Code generation fails - ".Mess."
+")
+
+      %monitor
+      %stop
+   %finish
+   BuffStart = BuffStart+32
+   Faulty = 1
+   Ca = 0
+   LastCa = 0
+   %for I = Code,1,Cnst %cycle
+      AreaStart(I) = BuffStart+AreaBase(I)
+   %repeat
+   NextSym = 0
+   NextCommon = 11
+   NextMarker = 0
+   ADict = BuffStart+704*1024
+   CFixups = 0
+   GFixups = 0
+   MFixups = 0
+   LFixups = 0
+   XProcList = 0
+   XRefList = 0
+   FFixups = 0
+   XDEPList = 0
+   XDList = 0
+   SwList = 0
+   ThruList = 0
+   ThruLink = 0
+   JList = 0
+   JLink = 0
+   LastUsed = 0
+   Fill(16,ADict,0)
+   NDict = 16
+   %if Tracing=On %thenstart
+      Mon = ComRegMap(26)&3
+      %if Mon#0 %then Printstring(" PInitialise
+ Vsn = ".Itos(Version).", Release = ".Itos(Release)." of ".Langs(Language)."
+")
+   %finish
+   CurrentLine = 0
+   IPUT(0,Language,Release,Version)
+%end {   of PInitialise   }
+
+{ Multiples of 4096 for head of Code }
+
+%constintegerarray Multiples(0:64)=  0,
+             1*4096, 2*4096, 3*4096, 4*4096, 5*4096, 6*4096, 7*4096, 8*4096,
+             9*4096,10*4096,11*4096,12*4096,13*4096,14*4096,15*4096,16*6096,
+            17*4096,18*4096,19*4096,20*4096,21*4096,22*4096,23*4096,24*4096,
+            25*4096,26*4096,27*4096,28*4096,29*4096,30*4096,31*4096,32*4096,
+            33*4096,34*4096,35*4096,36*4096,37*4096,38*4096,39*4096,40*4096,
+            41*4096,42*4093,43*4096,44*4096,45*4096,46*4096,47*4096,48*4096,
+            49*4096,50*4096,51*4096,52*4096,53*4096,54*4096,55*4096,56*4096,
+            57*4096,58*4096,59*4096,60*4096,61*4096,62*4096,63*4096,64*4096
+
+{ The adjustment needed to compact the 3 * halfwords of NOP planted for }
+{ every PCNOP with W = 8. Ca&7 is the adjusted offset from a double word }
+{ boundary after compaction of preceding code. B is the byte offset given }
+{ to the PCNOP call. }
+
+%constintegerarray Adj(0:15)=
+            { Ca&7 = 0 }      -6, -4, -2,  0,
+            { Ca&7 = 2 }       0, -6, -4, -2,
+            { Ca&7 = 4 }      -2,  0, -6, -4,
+            { Ca&7 = 6 }      -4, -2,  0, -6
+
+{ B =  0   2   4   6 }
+
+%externalroutine PTerminate(%integer AdAreaSizes,MSize)
+   { Code generator closes with this call }
+   { Set Code size etc. }
+
+   %integer SAd,DefAd
+   %string (255) Mess
+   %record (SwFmt) %name Sw
+
+   %routine Follow(%integer Link, %integername Highest)
+      { Follow the index tree for a switch and fill in its table }
+      %integer I
+      %record (SwElFmt) %name El
+      El == Record(Link)
+      %if El_LLink#0 %then Follow(El_LLink,Highest)
+      %if Sw_Size=4 %then Integer(SAd+4*(El_Index-Sw_Lower)) = El_Ca %elsestart
+         Byteinteger(SAd+2*(El_Index-Sw_Lower)) = El_Ca>>8
+         Byteinteger(SAd+2*(El_Index-Sw_Lower)+1) = El_Ca&255
+      %finish
+      Highest = El_Index+1
+      %if El_RLink#0 %then Follow(El_RLink,Highest)
+   %end { of Follow }
+
+   %record (JumpFmt) %name JRec
+   %record (LabFmt) %name LRec
+   %record (FixupFmt) %name Fix
+   %record (UsingFmt) %name Used
+   %integerarrayformat NewAreaSizeFm(1:11)
+   %integerarrayname AreaSizes
+   %integer I,J,Reg,BStart,BOfst,OldEnd,Adjustment,TabStart
+   %integer JAd,Ofst
+   %integerarray OldAreaSizes(Code:Cnst)
+   %if Tracing=On %thenstart
+      %if Mon#0 %then Printstring("P Terminate called
+")
+   %finish
+   BStart = AreaStart(Code)
+   BOfst = 0
+   OldEnd = AreaStart(Code)
+   Adjustment = 0
+   Ofsts(I) = 0 %for I = Code,1,Cnst
+   CodeOfst == Ofsts(Code)
+   CnstOfst == Ofsts(Cnst)
+   IOOfst == Ofsts(IOTab)
+   DiagOfst == Ofsts(Diags)
+   StaticOfst == Ofsts(Static)
+   %for I = 8,-1,1 %cycle
+      OldAreaSizes(I) = 0
+   %repeat
+   AreaSizes == Array(AdAreaSizes,NewAreaSizeFm)
+   { Do the jump preprocessing }
+   I = ThruList
+   %while I#0 %cycle
+      %begin
+         %record (ECDefFmt) %name ECD
+         %record (UsingFmt) %name Used
+         %record (CNOpFmt) %name CRec
+         %record (SwElFmt) %name SwEl
+         %switch ThruType(LabelType:SWIndType)
+
+         ->ThruType(Integer(I)>>16)
+
+ThruType(JumpType): { Process Jump entry }
+         JRec == Record(I)
+         %if JRec_Reg=0 %thenstart
+            LRec == Record(JRec_Label)
+            %if JRec_Used#0 %thenstart { Try to use  offset from a PUsing }
+               Used == Record(JRec_Used)
+               %if 0<=LRec_Ca-Used_Ca<4096 %thenstart
+                  JRec_Reg = -Used_Reg
+                  J = AreaStart(Code)+JRec_Ca+1 { @ of R2 operand }
+                  { Avoid zeroing in PJIndex }
+                  %if Byteinteger(J)&15=12 %then Byteinteger(J) = Byteinteger(J)&X'F0'
+               %finishelsestart
+                  %if LRec_Ca>4095 %thenstart
+                     IbmRecode(JRec_Ca+BuffStart-48,JRec_Ca+BuffStart+48,JRec_Ca-48)
+                     Printstring("Jump at ".Htos(JRec_Ca,8)." line ")
+                     Printstring(Itos(JRec_Line)."
+Label at ".HTos(LRec_Ca,8)." label no ".Itos(LRec_Label)."
+")
+                     PError("Using too far, label ".Itos(LRec_Label))
+                  %finish
+               %finish
+            %finishelsestart
+               %if LRec_Ca>4095 %thenstart
+                  IBMRecode(JRec_Ca+BuffStart-48,JRec_Ca+BuffStart+48,JRec_Ca-48)
+                  Printstring("Jump at ".Htos(JRec_Ca,8)." line ")
+                  Printstring(Itos(JRec_Line)."
+Label at ".Htos(LRec_Ca,8)."
+")
+                  PError("No Using:label ".Itos(LRec_Label))
+               %finish
+            %finish
+            JRec_Ca = JRec_Ca+Adjustment
+         %finishelsestart
+            %if JRec_Reg>0 %thenstart { 8 byte form was planted }
+               LRec == Record(JRec_Label)
+               %if JRec_Used#0 %thenstart
+                  Used == Record(JRec_Used)
+                  %if 0<=LRec_Ca-Used_Ca<4096 %thenstart { Shorten with last PUsing }
+                     Byteinteger(AreaStart(Code)+JRec_Ca+5) = Byteinteger(AreaStart(Code)+JRec_Ca+5)&X'F0'
+                     JRec_Reg = -Used_Reg
+                  %finish
+               %finishelsestart
+                  %if LRec_Ca<4096 %thenstart { Shorten with offset from start of code }
+                     JRec_Reg = 0
+                  %finish
+               %finish
+               %if JRec_Reg<=0 %thenstart { Shortened to 4 bytes }
+                  %if BStart#OldEnd %then Move(JRec_Ca-BOfst,BStart,OldEnd)
+                  BStart = AreaStart(Code)+JRec_Ca+4
+                  OldEnd = OldEnd+JRec_Ca-BOfst
+                  BOfst = JRec_Ca+4
+                  JRec_Ca = JRec_Ca+Adjustment
+                  Adjustment = Adjustment-4
+               %finishelse JRec_Ca = JRec_Ca+Adjustment
+            %finishelse JRec_Ca = JRec_Ca+Adjustment
+         %finish
+         I = JRec_ThruLink
+         ->Finished
+
+ThruType(CNOpType): { Process CNoOp entry }
+         CRec == Record(I)
+         J = CRec_Ca+Adjustment
+         %if CRec_W=4 %thenstart
+            %if J&3#CRec_B %thenstart
+               %if BStart#OldEnd %then Move(Crec_Ca-BOfst,BStart,OldEnd)
+               Adjustment = Adjustment-2
+               OldEnd = OldEnd+CRec_Ca-BOfst
+               BOfst = CRec_Ca+2
+               BStart = AreaStart(Code)+BOfst
+            %finish
+         %finishelsestart
+            %if J&7#CRec_B %thenstart
+               %if BStart#OldEnd %then Move(CRec_Ca-BOfst,BStart,OldEnd)
+               Adjustment = Adjustment+Adj(CRec_B>>1+(J&7)<<1)
+               OldEnd = OldEnd+CRec_Ca-BOfst
+               BOfst = CRec_Ca-Adj(CRec_B>>1+(J&7)<<1)
+               BStart = AreaStart(Code)+BOfst
+            %finish
+         %finish
+         CRec_Ca = CRec_Ca+Adjustment
+         I = CRec_ThruLink
+         ->Finished
+
+ThruType(LabelType): { Process Label entry }
+         LRec == Record(I)
+         LRec_Ca = LRec_Ca+Adjustment
+         I = LRec_ThruLink
+         ->Finished
+
+ThruType(ECDefType): { Process external code EP entry }
+         ECD == Record(I)
+         ECD_Ca = ECD_Ca+Adjustment
+         I = ECD_ThruLink
+         ->Finished
+
+ThruType(UsingType): { Process Using entry }
+         Used == Record(I)
+         Used_Ca = Used_Ca+Adjustment
+         I = Used_ThruLink
+         ->Finished
+
+ThruType(SwDeftype): { Process switch definition entry }
+         Sw == Record(I)
+         I = Sw_ThruLink
+         ->Finished
+
+ThruType(SwIndType): { Process switch index entry }
+         SwEl == Record(I)
+         SwEl_Ca = SwEl_Ca+Adjustment
+         I = SwEl_ThruLink
+         ->Finished
+
+ThruType(*): { Should not be on list }
+         PError("Wrong type on ThruList, no ".Itos(Integer(I)))
+
+Finished:
+      %end
+   %repeat
+
+   %if Tracing=On %thenstart
+      %if Mon#0 %thenstart
+         Printstring("
+   *** Adjustment = ".Itos(Adjustment)." ( ")
+         Print(Adjustment/Ca*100,2,2)
+         Printstring("% )
+")
+      %finish
+   %finish
+   %if Ca#BOfst %then Move(Ca-BOfst,BStart,OldEnd)
+   Ca = Ca+Adjustment
+   AreaSizes(Code) = Ca
+   %if MSize=0 %then CodeOfst = Ca//1024+4 { Length of multiples table }
+   CnstOfst = (CodeOfst+Ca+7)&(\7) { Double word align }
+   OldAreaSizes(Code) = CnstOfst+AreaSizes(Cnst)
+   IOOfst = AreaSizes(Gla)
+   OldAreaSizes(Gla) = IOOfst+AreaSizes(IOTab)
+   DiagOfst = AreaSizes(SST)
+   OldAreaSizes(SST) = DiagOfst+AreaSizes(Diags)
+   StaticOfst = AreaSizes(UST)
+   OldAreaSizes(UST) = StaticOfst+AreaSizes(Static)
+   { Fill in the switch tables }
+   I = SwList
+   %while I#0 %cycle
+      Sw == Record(I)
+      SAd = Sw_SAd+AreaStart(SST)
+      I = LocateL(Sw_Def,J)
+      LRec == Record(J)
+      DefAd = LRec_Ca
+      %for J = 0,1,Sw_Upper-Sw_Lower %cycle
+         %if Sw_Size=4 %then Integer(SAd+J<<2) = DefAd %elsestart
+            Byteinteger(SAd+J<<1) = DefAd>>8
+            Byteinteger(SAd+J<<1+1) = DefAd&255
+         %finish
+      %repeat
+      J = Sw_Lower
+      %if Sw_Lbs#0 %then Follow(Sw_Lbs,J)
+      I = Sw_Link
+   %repeat
+
+   { Now plug the missing fields at the jumps }
+   I = JList
+   %while I#0 %cycle
+      JRec == Record(I)
+      LRec == Record(JRec_Label)
+      JAd = JRec_Ca+AreaStart(Code)+CodeOfst
+      Reg = JRec_Reg
+      %if Reg=0 %thenstart
+         %if Byteinteger(JAd+1)&15=12 %then Byteinteger(JAd+1) = Byteinteger(JAd+1)&X'F0'
+         Byteinteger(JAd+2) = X'C0'!(LRec_Ca>>8)
+         Byteinteger(JAd+3) = LRec_Ca&255
+      %finishelsestart
+         %if Reg<0 %thenstart
+            Reg = -Reg
+            %if Reg=12 %then Ofst = LRec_Ca %elsestart
+               Used == Record(JRec_Used)
+               Ofst = LRec_Ca-Used_Ca
+            %finish
+            %if Ofst>>12#0 %thenstart
+               IBMRecode(JAd-48,JAd+48,JRec_Ca)
+               Printstring("Line ".Itos(JRec_Line)." Ca ".Htos(JRec_Ca,8)."
+Label ".Itos(LRec_Label)." Plugging ".Htos(Ofst,8))
+               PError("Offset too large for Using")
+            %finish
+            Byteinteger(JAd+2) = (Reg<<4)!(Ofst>>8)
+            Byteinteger(JAd+3) = Ofst&255
+         %finishelsestart
+            Byteinteger(JAd+3) = (LRec_Ca>>12)<<2
+            Byteinteger(JAd+6) = Byteinteger(JAd+6)!((LRec_Ca>>8)&15)
+            Byteinteger(JAd+7) = LRec_Ca&255
+         %finish
+      %finish
+      I = JRec_JLink
+   %repeat
+
+   %if ComRegMap(26)&256#0 %then IBMRecode(Buffstart,Buffstart+Ca,0)
+
+   { Now plug the offsets in the words to be fixed up }
+   %if FFixups#0 %thenstart
+      Fix == Record(FFixups)
+      I = (Fix_Tgt<<4)>>4
+      %if I>>27#0 %then I = I!X'FF000000'
+      I = I+Ofsts(Fix_Tgt>>28)
+      Integer(AreaStart(Fix_Host>>28)+(Fix_Host<<4)>>4) = I
+      %while Fix_Link#0 %cycle
+         Fix == Record(Fix_link)
+         I = (Fix_Tgt<<4)>>4
+         %if I>>27#0 %then I = I!X'FF000000'
+         I = I+Ofsts(Fix_Tgt>>28)
+         Integer(AreaStart(Fix_Host>>28)+(Fix_Host<<4)>>4) = I
+      %repeat
+   %finish
+
+   { Now layout the new areas within the old, using IPUT for the moment }
+   %if MSize=0 %then IPUT(31,0,CnstOfst,Addr(Multiples(0))) { First add the multiples table }
+   %for I = Code,1,Cnst %cycle
+      %if AreaSizes(I)>0 %thenstart
+         IPUT(30+OldArea(I),AreaSizes(I),Ofsts(I),AreaStart(I))
+         %if Tracing=On %thenstart
+            %if Mon#0 %thenstart
+               Printstring("New area ".Areas(I)." Len=".Itos(AreaSizes(I)))
+               Printstring(" offset ".Itos(Ofsts(I))." old area ")
+               Printstring(NRArea(OldArea(I))."
+")
+            %finish
+         %finish
+      %finish
+   %repeat
+   DoFixups { Process request chains }
+   %for I = 7,-1,1 %cycle
+      OldAreaSizes(8) = OldAreaSizes(8)+OldAreaSizes(I)
+      %if Tracing=On %thenstart
+         %if Mon#0 %thenstart
+            Printstring(NrArea(I)." ".Itos(OldAreaSizes(I))."
+")
+         %finish
+      %finish
+   %repeat
+   Mess = "T#CODE"
+   Destroy(Mess,I)
+   %if I#0 %thenstart
+      FailureMessage(I,Mess)
+      Printstring("Destroy T#CODE fails ".Mess."
+")
+   %finish
+   IPUT(7,32,0,Addr(OldAreaSizes(1)))
+   %if Tracing=On %thenstart
+      %if Mon#0 %then Printstring("Total = ".Itos(OldAreaSizes(8))."
+")
+   %finish
+%end {   of PTerminate   }
+
+!     PGENERATE - FINAL PHASE OF COMPILATION IS CREATE OBJECT FILE
+
+%externalroutine PGenerateObject(%string (255) %name objfilename)
+   { Not really needed on EMAS ?? }
+%end {   of PGenerateObject   }
+
+%externalroutine PMonOn
+   Mon = 1
+%end { of PMonOn }
+
+%externalroutine PMonOff
+   Mon = 0
+%end { of PMonOff }
+
+%externalroutine PTraceOn
+!   Put on Heap(Line,CA,Recodestart)
+%end { of PTraceOn }
+
+%externalroutine PTraceOff
+!  Put on Heap(-1,CA,Recodestart)
+%end { of PTraceOff }
+
+{*   Pseudo - Operations    *}
+
+%externalroutine PCNOP(%integer B,W)
+   { Matches CNOP in assembler manual }
+   %integer I
+   %record (CNOpFmt) %name Rec,Rec1
+   %if Tracing=On %thenstart
+      %if Mon#0 %thenstart
+         Printstring("PCNOP (".Itos(B).",".Itos(W).")
+")
+      %finish
+   %finish
+   I = NDict+ADict
+   Rec == Record(I)
+   Rec_Ca = Ca
+   Rec_W = W
+   Rec_B = B
+   %if ThruList=0 %then ThruList = I
+   %if ThruLink#0 %thenstart
+      Rec1 == Record(ThruLink)
+      Rec1_ThruLink = I
+   %finish
+   Rec_ThruLink = 0
+   ThruLink = I
+   Rec_Type = CNOpType
+   NDict = NDict+Sizeof(Rec)
+   %if NDict>TopDict %then PError("Table overflow")
+   %for I = 1,1,W>>1-1 %cycle
+      PIXRR(BCR,0,0)
+   %repeat
+%end { of PCNOP }
+
+%endoffile

@@ -1,0 +1,13 @@
+!
+! orbf is format for an operation request block
+! irbf is format for interrupt response block
+! schibf is the format for a subchannel inf block used by MSCH
+!
+%recordformat orbf(%integer ip,keytags,cpaddr)
+%recordformat irbf(%integer keycntr,csw1,csw2,xstatusw,%integerarray ecws(0:11))
+%recordformat  schibf(%integer ip,%short flags,devno,%byte lpm,pnom,lpum,pim,
+    %short mbi,%byte pom,pam,chipd0,chipd1,chipd2,chipd3,chipd4,chipd5,
+    chipd6,chipd7,%integer zword,keycntrl,csw1,csw2,md0,md1,md2)
+!
+! end of file xaioform
+!

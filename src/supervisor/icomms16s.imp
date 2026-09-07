@@ -1,0 +1,2958 @@
+!%include "ercc07:ctoptv7l"
+!%include "ercc07:ctoptnass"
+%include "ercc07:ctoptnassmp"
+%include "ercc07:ibmsup_comf370"
+%record %format pe(%integer dserv, sserv, p1, p2, p3, p4, p5, p6)
+%record %format parmf(%integer dserv, sserv, p1, p2, p3, p4, p5, p6, link)
+%include "ercc07:ibmsup_dtform2s"
+
+!***********************************************************************
+!*  service numbers and activity numbers                               *
+!***********************************************************************
+
+!*  global constants
+
+%const %integer not allocated= x'F0F0F0F0'
+%const %integer empty= x'F0F0'
+%const %integer ebc lf= 37
+%const %integer ebc ff= 12
+%const %integer ebc cr= 13
+%const %integer ebc sp= 64
+%const %integer ebc bell= x'2f';         !used by printer to represent null char
+%const %string (1) snl= "
+"
+
+
+!* comms controller activities
+
+%const %integer init= 0
+%const %integer connect= 1
+%const %integer connect reply= 13
+%const %integer enable= 2
+%const %integer claim amt index reply= 14
+%const %integer enable reply= 15
+%const %integer disable= 4
+%const %integer disable reply= 16
+%const %integer disconnect= 5
+%const %integer disconnect reply= 17
+%const %integer control msg6= 6
+%const %integer control msg6 reply= 18
+%const %integer control msg7= 7
+%const %integer control msg7 reply= 19
+%const %integer transfer requested= 10
+%const %integer page here= 11
+%const %integer transfer completed= 12
+%const %integer process departed= 20
+%const %integer masquerade=21
+
+!* comms controller requests and reply service numbers
+
+%const %integer comms command= x'00370000'
+%const %integer claim block= x'00080001'
+%const %integer block claimed= comms command!claim amt index reply
+%const %integer free block= x'00080002'
+%const %integer claim page= x'00040001'
+%const %integer page claimed= comms command!page here
+%const %integer free page= x'00040002'
+%const %integer request transfer= comms command!transfer requested
+%const %integer transfer complete= comms command!transfer completed
+%const %integer masquerade as process=comms command!masquerade
+
+!* adaptor activities
+
+%const %integer deallocated= x'00000001'
+%const %integer allocated= x'00000002'
+%const %integer execute fails= x'00000003'
+%const %integer initialise= x'00000004'
+%const %integer interrupt= x'00000005'
+%const %integer go ahead= x'00000006'
+%const %integer send control= x'00000007'
+%const %integer clock tick= x'00000008'
+%const %integer allocate request= x'00000009'
+%const %integer oper com reply= x'0000000a'
+%const %integer deallocate request= x'0000000b'
+
+!* adaptor service numbers
+
+%const %integer op service= x'32'
+%const %integer lp service= x'33'
+%if cr fitted=yes %start
+   %const %integer cr service= x'34'
+%finish
+%if cp fitted=yes %start
+   %const %integer cp service= x'35'
+%finish
+%const %integer mk1 fe service= x'39'
+%const %integer op command= op service<<16
+%const %integer lp command= lp service<<16
+%if cr fitted=yes %start
+   %const %integer cr command= cr service<<16
+%else
+   %const %integer cr command= not allocated
+%finish
+%if cp fitted=yes %start
+   %const %integer cp command= cp service<<16
+%else
+   %const %integer cp command= not allocated
+%finish
+%const %integer mk1 fe command= mk1 fe service<<16
+
+!* adaptor requests and replies service numbers
+
+%const %integer slowdevs command= x'00300000'
+%const %integer allocate device= slowdevs command!x'0000000B'
+%const %integer lp allocated= lp command!allocated
+%if cr fitted=yes %start
+   %const %integer cr allocated= cr command!allocated
+%finish
+%if cp fitted=yes %start
+   %const %integer cp allocated= cp command!allocated
+%finish
+%const %integer mk1 fe allocated= mk1 fe command!allocated
+%const %integer deallocate device= slowdevs command!x'00000005'
+%const %integer lp deallocated= lp command!deallocated
+%if cr fitted=yes %start
+   %const %integer cr deallocated= cr command!deallocated
+%finish
+%if cp fitted=yes %start
+   %const %integer cp deallocated= cp command!deallocated
+%finish
+%const %integer mk1 fe deallocated= mk1 fe command!deallocated
+%const %integer execute chain= slowdevs command!x'0000000C'
+%const %integer lp executed= lp command!execute fails
+%if cr fitted=yes %start
+   %const %integer cr executed= cr command!execute fails
+%finish
+%if cp fitted=yes %start
+   %const %integer cp executed= cp command!execute fails
+%finish
+%const %integer mk1 fe executed= mk1 fe command!execute fails
+%const %integer lp interrupt= lp command!interrupt
+%if cr fitted=yes %start
+   %const %integer cr interrupt= cr command!interrupt
+%finish
+%if cp fitted=yes %start
+   %const %integer cp interrupt= cp command!interrupt
+%finish
+%const %integer mk1 fe interrupt= mk1 fe command!interrupt
+%const %integer elapsed int command= x'000A0001'; !TICK EVERY N SECS
+%const %integer mk1 fe clock tick=mk1 fe command!clock tick
+%const %integer mk1 fe oper com reply= mk1 fe command!oper com reply
+%const %integer oper command req= x'0032000E'
+%const %integer secs per tick= 15
+
+%if mon level&2#0 %start
+   %extrinsic %long %integer kmon;       !bit 2**sno is set when service sno is to be monitored
+%finish
+
+%external %routine %spec devio(%record (pe) %name mess)
+%external %routine %spec dump table(%integer table, address, length)
+%external %routine %spec dpon(%record (pe) %name mess, %integer secs)
+%external %routine %spec elapsed int(%record (pe) %name p)
+%external %string %fn %spec htos(%integer value, places)
+%external %routine %spec pon(%record (pe) %name mess)
+%external %routine %spec pkmon rec(%string (23) text, %record (pe) %name mess)
+%external %routine %spec op mess(%string (63) s)
+%external %routine %spec monitor(%string (63) s)
+%external %routine %spec move(%integer length, from, to)
+%external %routine %spec i to e(%integer address, length)
+%external %integer %fn %spec realise(%integer virtual address)
+%external %integer %fn %spec rtv(%integer real address)
+%external %integer %fn %spec new pp cell
+%external %string %fn %spec strint(%integer i)
+
+
+%if multi ocp=no %start
+   %routine %spec comms control(%record (pe) %name mess)
+   %routine %spec mk1 fe adaptor(%record (pe) %name mess)
+%else
+   %external %routine %spec reserve log
+   %external %routine %spec release log
+%finish
+%external %routine %spec return pp cell(%integer cell)
+
+
+%if mon level&256#0 %start;              !include harvesting?
+   %routine %spec harvest(%integer event, process, len, a, b, c, d, e)
+   %external %integer trace= no;         !initially no trace
+   %external %integer trace events= 0;   !initially no events to trace
+   %external %integer trace process= 0;  !initially no process to trace
+%finish
+
+
+!***********************************************************************
+!*                                                                     *
+!*  Stream types:                                                      *
+!*                                                                     *
+!*     even streams: input streams                                     *
+!*     odd  streams: output streams                                    *
+!*                                                                     *
+!*  Stream states:                                                     *
+!*                                                                     *
+!*  From state      title         to state                             *
+!*         1->   0: unused        ->2                                  *
+!*         3->   1: disconnecting ->0                                  *
+!*         0->   2: connecting    ->3                                  *
+!*     2,4,5->   3: connected     ->1,6                                *
+!*      8-11->   4: suspending    ->3                                  *
+!*      8-11->   5: aborting      ->3                                  *
+!*         3->   6: claiming      -> 7                                  *
+!*         6->   7: enabling      ->8                                  *
+!*         7->   8: enabled       ->4,5,9-11                           *
+!*         8->   9: queued        ->4,5,10                             *
+!*       8,9->  10: paging in     ->4,5,11                             *
+!*      8,10->  11: active        ->4,5,8,10                           *
+!*                                                                     *
+!*                                                                     *
+!*  Stream buffer modes:                                               *
+!*                                                                     *
+!*    bits 000000xx                                                    *
+!*               0: sequential   2: sequential continuation            *
+!*               1: circular                                           *
+!*                                                                     *
+!*    bits xxxx0000                                                    *
+!*               0: iso          2: binary                             *
+!*               1: ebcdic       3: control                            *
+!*                               8: !=held                             *
+!*                                                                     *
+!*  Adaptor types:                                                     *
+!*                                                                     *
+!*  device type        device mnemonic     adaptor name                *
+!*        1                  pt            not available               *
+!*        2                  pr            not available               *
+!*        3                  cp            cp adaptor                  *
+!*        4                  cr            cr adaptor                  *
+!*        5                  m0            not available               *
+!*        6                  lp            lp adaptor                  *
+!*        7                                                            *
+!*        8                  op            oper adaptor                *
+!*        9                  mp            mp adaptor == lp            *
+!*       10                  dr            not available               *
+!*       11                  na            not available               *
+!*       12                  ct            not available               *
+!*       13                  su            not available               *
+!*       14                  fe            mk1 fe adaptor              *
+!*       15                  lk            not available               *
+!*                                                                     *
+!*  Device no:                                                         *
+!*                                                                     *
+!*    Can currently be in the range 0 - 9.                             *
+!*    When combined with an adaptor type a device mnemonic is produced *
+!*    i.e. lp0 to lp9  or  fe0 to fe9.                                 *
+!*                                                                     *
+!***********************************************************************
+
+
+%record %format sr(%short %integer stream no, external stream no, %byte %integer state, mode, adaptor no, device no,
+   %integer length, owner, caller, amt index, start, cursor, link)
+%record %format br(%integer stream no, external stream no, amt index, offset, length, real address, p5, p6, link)
+%record %format comms inff(%integer index addr, next free buffer, queued stream head, queued stream tail)
+
+%if ccw format=0 %start;                 !non-xa type
+   %record %format ccw f((%byte %integer cmnd, ad1, ad2, ad3 %or %integer data ad), %byte %integer flags, spare,
+      %short %integer len)
+   %const %integer data ad mask=x'00ffffff'
+%else;                                   !xa type
+   %record %format ccwf(%byte %integer cmnd, flags, %short %integer len, %integer data  ad)
+   %const %integer data ad mask= x'7fffffff'
+%finish
+
+%const %integer max stream= maxprocs*3-1
+%own %integer %array stream index(0:max stream)= empty(max stream+1)
+%own %record (sr) %array %format sarf(0:4095); !mapped onto parm table
+%own %record (sr) %array %name stream tab; !stream table array
+%own %record (br) %array %format barf(0:4095); !mapped onto the parm table
+%own %record (br) %array %name buffer tab; !buffer table array
+%own %record (parmf) %array %format parf(0:4095); !mapped onto parm table
+%own %record (parmf) %array %name parm tab; !parm table array
+%own %record (comms inff) comms
+
+%const %integer recapture= 1
+%const %integer no recapture=0
+
+%const %integer byte mask= x'FF'
+%const %integer short mask= x'FFFF'
+%const %integer top short mask= x'FFFF0000'
+%const %integer pagesize mask=pagesize-1
+%const %integer top bit mask=x'80000000'
+%const %integer cc activity mask=31
+%const %integer queued flag=x'40'
+
+!*  stream states
+
+%const %integer disconnecting= 1;        !waiting on adaptor action
+%const %integer connecting= 2;           !waiting on adaptor action
+%const %integer connected= 3;            !waiting on user action
+%const %integer suspending= 4;           !waiting on adaptor action
+%const %integer aborting= 5;             !waiting on adaptor action
+%const %integer claiming= 6;             !waiting on global controller action
+%const %integer enabling= 7;             !waiting on adaptor action
+%const %integer enabled= 8;              !waiting on user action
+%const %integer queued= 9;               !waiting on a free epage (buffer)
+%const %integer paging in= 10;           !waiting on global controller action
+%const %integer active= 11;              !waiting on adaptor action
+
+!*  stream buffer modes
+
+%const %integer sequential= 0;           !first enable on a stream possible special adaptor action
+%const %integer circular= 1
+%const %integer sequential continuation= 2; !a subsequent sequential enable no special action
+
+%const %integer iso= 0;                  ! >>4
+%const %integer ebcdic= 1;               ! >>4
+%const %integer binary= 2;               ! >>4
+%const %integer control= x'30'
+%const %integer held= x'80'
+
+!*  adaptor types
+
+%const %integer cp= 3
+%const %integer cr= 4
+%const %integer lp= 6
+%const %integer op= 8
+%const %integer mp= 9
+%const %integer fe= 14
+
+!***********************************************************************
+!*  the next array is a mapping from adaptor types to service numbers  *
+!***********************************************************************
+
+%const %integer %array adapt(0:15)= %c
+   not allocated(3),cp command,cr command,not allocated,lp command,
+   not allocated, op command, lp command {mp},
+   not allocated(4), mk1 fe command, not allocated
+
+!***********************************************************************
+!*  the next array is a mapping from states to reply activities        *
+!***********************************************************************
+
+%const %integer %array sub ident(0:active)= %c
+-1,disconnect reply<<16,connect reply<<16,-1,disable reply<<16(2),
+-1,enable reply<<16,-1(4)
+
+!*    map of valid low level control activities from adaptor
+
+%const %integer low level stream con= 1<<connect reply ! 1<<enable reply ! 1<<transfer requested %c
+                                     ! 1<<disable reply ! 1<<disconnect reply
+
+
+!*  channel status word:  unit status byte  ff000000
+
+%const %integer unit attention=x'80'
+%const %integer status modifier=x'40'
+%const %integer control unit end=x'20'
+%const %integer busy=x'10'
+%const %integer channel end=x'08'
+%const %integer device end=x'04'
+%const %integer unit check=x'02'
+%const %integer unit exception=x'01'
+%const %integer normal termination=device end!channel end
+
+!*  channel status word:  channel status byte  00ff0000
+
+%const %integer incorrect length= x'40'
+
+!*  channel command word flags
+
+%const %integer dchain= x'80';           !data chain flag
+%const %integer cchain= x'40';           !command chain flag
+%const %integer sli=x'20';               !suppress length indication flag
+
+!* channel command codes
+
+%const %integer ccw write=x'01'
+%const %integer ccw read=x'02'
+%const %integer ccw control=x'03'
+%const %integer ccw sense=x'04'
+%const %integer ccw sense id=x'e4'
+%const %integer ccw sense close=x'14'
+
+
+
+%external %routine comms control(%record (pe) %name mess)
+
+!***********************************************************************
+!*                                                                     *
+!*    After initialization, all free buffer records are held on a      *
+!*  linked list, the first element of which is pointed at by "next     *
+!*  free buffer". The maximum buffer (e page) allocation is            *
+!*  given by the global controller at initialisation. the comms        *
+!*  controller can then own up to this allocation of epages.           *
+!*    If there are no free buffers, streams requiring a buffer are     *
+!*  held on a linked list, the first element of which is pointed at    *
+!*  by "queued stream head" and the last element of which is pointed   *
+!*  at by "queued stream tail".                                        *
+!*    If the list is empty, both the head and tail pointers will       *
+!*  be set to "empty" (x'f0f0').                                       *
+!*    Space for stream descriptors and buffer descriptors is allocated *
+!*  dynamically by claiming param cells from the dynamically extendable*
+!*  param table via a call on "new pp cell". Stream descriptors are    *
+!*  accessed indirectly through the array "stream index" but buffer    *
+!*  descriptors are accessed directly. When descriptors are no longer  *
+!*  required the space is returned to the param table via a call on    *
+!*  "return pp cell".                                                  *
+!*    Note: all page sharing and page recapture is handled by the      *
+!*  global controller. The comms controller only requests "page ins"   *
+!*  and "page outs". It is up to the global controller to supply the   *
+!*  latest copy of the page and to update the relevant copies.         *
+!*                                                                     *
+!***********************************************************************
+
+
+
+   %integer status, cell, proc no
+   %integer call proc
+   %const %integer successful= 0, unsuccessful = 1
+
+   %record (sr) %name stream; %integer stream no
+   %record (br) %name buffer; %integer buffer no
+
+   %integer temp, dserv, dact, old state, link
+
+   %if monlevel&8#0 %start
+      %own %integer %array pool size(-19:comms epages)
+      %own %integer queued store, queued disc, not queued store, not queued disc, free buffers
+      %integer i, l, t, b
+
+   %finish
+
+   %switch act(init:masquerade)
+
+
+   %routine %spec release page(%integer recapture flag)
+   %routine %spec release buffer(%integer recapture flag)
+   %integer %fn %spec unlink stream(%integer stream no)
+   %routine %spec get page(%integer stream no)
+   %routine %spec release block
+   %routine %spec print stream header
+   %routine %spec print buffer header
+   %routine %spec print cell(%integer index)
+
+
+   %const %integer check ftp streams=yes
+
+   %if check ftp streams=yes %start
+      %integer device no, ext stream
+   %finish
+
+
+!***********************************************************************
+!*                        main program                                 *
+!***********************************************************************
+
+!** monitor
+
+   %if mon level&2#0 %and (kmon>>(comms command>>16))&1#0 %then pkmon rec("Comms Control: ", mess)
+
+
+   dserv = mess_dserv
+   dact = dserv&cc activity mask
+   ->act(dact) %unless connect<dact<process departed; !i.e. for init, connect, proc dep or masq
+   stream no = mess_p1;                  !pull out stream number first always in p1
+   %if 0<stream no<=max stream %start;   !within range?
+      temp = stream index(stream no)
+      %if temp#empty %start;             !allocated?
+         stream == stream tab(temp)
+         proc no = ((stream_owner>>16)-64)&(max procs-1)
+         %if dact<transfer requested %start
+            call proc = ((mess_sserv>>16)-64)&(max procs-1)
+            %if call proc#proc no %start
+               %unless proc no<=2 %or (proc no<=6 %and mess_sserv>>16=x'32') %or stream_owner=0 %start
+                  !This is primarily (the <=5...  bit) to allow OPER ADAPTOR to
+                  !muck about with comms streams owned by executives.
+                  op mess("Comms: illegal use of stream ".strint(stream no))
+                  op mess("Comms: caller ".strint(call proc).", owner ".strint(proc no))
+                  printstring("Comms control: offending POFF -".snl)
+                  pkmon rec("Comms control: ", mess)
+                  %return
+               %finish
+            %finish
+            stream_caller = mess_sserv
+         %finish %else status = mess_p2
+         ->act(dact)
+      %finish
+   %finish
+no stream:
+
+   print string("Comms Control: Stream not allocated ".snl)
+   pkmon rec("Comms Control: ", mess)
+   %return %unless dact<transfer requested
+   mess_dserv = mess_sserv;              !reply to caller
+   mess_sserv = dserv
+   mess_p2 = unsuccessful
+   pon(mess)
+   %return
+
+
+
+!***********************************************************************
+!*                                                                     *
+!*  this section handles:                                              *
+!*  1). communications controller initialisation                       *
+!*  2). comms monitoring   (PON x37 32 0 0 )                           *
+!*  3). monitoring of a process' streams  (PON x37 32 <procno/-1> 0 )  *
+!*                                                                     *
+!***********************************************************************
+
+
+act(init):                               !** command: initialise (or print monitoring)
+   %if dserv&32=0 %and mess_p2>0 %start
+      stream tab == array(mess_p3, sarf); !address supplied by global controller
+      buffer tab == array(mess_p3, barf); !address of parm array supplied by global controller
+      parm tab == array(mess_p3, parf);  !parm table array
+      comms_index addr = addr(stream index(0))
+      comms_queued stream head = empty
+      comms_queued stream tail = empty
+      com_commsreca = addr(comms)
+      link = new pp cell;                !get a buffer entry from param table
+      comms_next free buffer = link;     !head of list
+      %for temp = 1, 1, mess_p2 %cycle;  !get other buffers
+         buffer == buffer tab(link);     !map buffer
+         buffer = 0
+         buffer_stream no = empty
+         %if temp=mess_p2 %then link = empty %else link = new pp cell; !last buffer?
+         buffer_link = link;             !link buffers together
+      %repeat
+      %if monlevel&8#0 %then free buffers = comms epages
+
+   %else;                                !print monitoring
+
+      %if mess_p1=0 %start
+         %if monlevel&8#0 %start
+            l = 0
+            l = l+pool size(i) %for i = 1, 1, comms epages
+            t = l
+            t = t+pool size(i) %for i = -19, 1, 0
+            %if multiocp=yes %then reserve log
+            newlines(2)
+            printstring("Buffer use   (on transfer request)  -  100% =")
+            write(t, 1); newline
+            %if t>0 %start
+               printstring("buffer pool:  availability =")
+               write(l*100//t, 1); printstring("%"); newline
+               write(i, 4) %for i = 1, 1, comms epages
+               newline; space
+               %for i = 1, 1, comms epages %cycle
+                  b = pool size(i)*100//t
+                  %if poolsize(i)>0=b %then printstring("  >0") %else write(b, 3)
+                  printstring("%")
+               %repeat
+               newline
+               printstring("buffer queue:  requests queued =")
+               write(100-(l*100//t), 1); printstring("%"); newline
+               write(i, 4) %for i = 1, 1, 20
+               printstring("+"); newline; space
+               %for i = 0, -1, -19 %cycle
+                  b = pool size(i)*100//t
+                  %if pool size(i)>0=b %then printstring("  >0") %else write(b, 3)
+                  printstring("%")
+               %repeat
+               newline
+               l = queued store+queued disc
+               %if l#0 %then l = queued store*100//l
+               printstring("Pagein for queued buffers:    ")
+               write(l, 1); printstring("% store, ")
+               write(100-l, 1); printstring("% disc")
+               newline
+               l = not queued store*100//(not queued store+not queued disc)
+               printstring("Pagein for available buffers: ")
+               write(l, 1); printstring("% store, ")
+               write(100-l, 1); printstring("% disc")
+               newlines(2)
+            %finish
+            %if multiocp=yes %then release log
+            pool size(i) = 0 %for i = -19, 1, comms epages
+            queued store = 0; queued disc = 0
+            not queued store = 0; not queued disc = 0
+         %finish
+      %else
+         %if-1<=mess_p1<=maxprocs %start
+            proc no = mess_p1
+            temp = 0
+            %if multiocp=yes %then reserve log
+            %for stream no = 0, 1, max stream %cycle
+               %if stream index(stream no)=empty %then %continue
+               stream == stream tab(stream index(stream no))
+               %if proc no<1 %or proc no=((stream_owner>>16)-64)&(maxprocs-1) %start
+                  %if temp=0 %then print stream header %and temp = 1
+                  write(stream no, 4); space
+                  print cell(stream index(stream no))
+                  %if stream_link=empty %then %continue
+                  print buffer header
+                  spaces(6)
+                  print cell(stream_link)
+                  temp = 0
+               %finish
+            %repeat
+            %if multiocp=yes %then release log
+         %finish
+      %finish
+   %finish
+   %return
+
+
+
+act(process departed):                   !** command: clear any hung streams
+
+   proc no = mess_p1
+   %for stream no = 0, 1, max stream %cycle
+      cell = stream index(stream no)
+      %if cell=empty %then %continue
+      %if ((stream tab(cell)_owner>>16)-64)&(max procs-1)=proc no %start
+         stream == stream tab(cell)
+         %if stream_adaptor no=op %start; !newstart process?
+            pkmonrec("CC oper:", stream)
+            stream_caller = 0;           !so that any disable replies arejunked
+         %else
+            pkmonrec("CC masq:", stream)
+            stream_owner = 0;            !junk high level control messages
+            stream_caller = masquerade as process; !catch pending low level  control msgs
+            %if suspending<=stream_state<=enabling %then %continue
+            mess_dserv = masquerade as process
+            mess_sserv = dserv
+            mess_p1 = stream no
+            pon(mess)
+         %finish
+      %finish
+   %repeat
+   %return
+
+
+
+act(masquerade):                         !command: act on behalf of a  departed process
+
+   stream no = mess_p1
+   %if stream index(stream no)=empty %then %return
+   stream == stream tab(stream index(stream no))
+   %if stream_state=connected %start
+      mess_dserv = comms command!disconnect
+   %finish %else %if stream_state>=enabled %start
+      mess_dserv = comms command!disable
+      mess_p2 = aborting
+   %finish %else %return;                !all other cases
+   mess_sserv = dserv
+   pon(mess)
+   %return
+
+
+
+!***********************************************************************
+!*                                                                     *
+!*  this section handles:                                              *
+!*  1). commands from communications users.                            *
+!*  2). replies from the global controller in response                 *
+!*         to calls generated by commands.                             *
+!*  3). replies from an adaptor in response                            *
+!*         to calls generated by a command.                            *
+!*                                                                     *
+!***********************************************************************
+
+
+act(connect):                            !** command: connect stream to communications user
+
+   %if check ftp streams=yes %start
+      ext stream = mess_p3&short mask
+      %if (mess_p3>>24)&15=fe %and 8<ext stream<350 %start
+         stream no = mess_p1&1
+         %if stream no#ext stream&1 %start
+            op mess("Comms: I/O mismatch in connect".tostring(17))
+            ->no stream
+         %finish
+         device no = (mess_p3>>16)&byte mask
+         %for stream no = stream no+2, 2, max stream-(1-stream no) %cycle
+            %if stream index(stream no)=empty %then %continue
+            %if stream tab(stream index(stream no))_external stream no=ext stream %and %c
+               stream tab(stream index(stream no))_device no=device no %and %c
+               stream tab(stream index(stream no))_adaptor no=fe %start
+               op mess("Comms: duplicate FEP stream x".htos(ext stream, 4).tostring(17))
+               %if stream tab(stream index(stream no))_owner#mess_p2 %start
+                  pk monrec("CC poffs: ", mess)
+                  pk monrec("CC stream:", stream tab(stream index(stream no)))
+                  ->no stream
+               %finish
+               op mess("Comms: old str ".htos(stream no, 4)." discarded")
+               return pp cell(stream index(stream no))
+               stream index(stream no) = empty
+               %exit
+            %finish
+         %repeat
+      %finish
+   %finish
+
+   stream no = mess_p1&1;                !make even or odd i.e. input or output
+   %for stream no = stream no+2, 2, max stream-(1-stream no) %cycle
+      %if stream index(stream no)=empty %start; !found a free stream
+         stream index(stream no) = new pp cell; !get a stream table entry
+         stream == stream tab(stream index(stream no))
+         stream = 0
+         stream_stream no = stream no
+         stream_caller = mess_sserv
+         stream_owner = mess_p2;         !high level control messages sent on this service
+         %if mon level&256#0 %start;     !include harvesting?
+            proc no = ((stream_owner>>16)-64)&(max procs-1)
+            harvest(14, proc no, 8, stream no, mess_p3, 0, 0, 0) %if %c
+               trace=yes %and trace events&(1<<14)#0 %and (trace process=-1 %or trace process=proc no)
+         %finish
+         stream_length = stream no;      !set for replies from front end
+         stream_cursor = mess_p5;        !set for reply to connect only
+         stream_mode = mess_p6;          !set to pass unit size into the adaptor
+         stream_adaptor no = (mess_p3>>24)&15
+         %if adapt(stream_adaptor no)=not allocated %start
+            status = unsuccessful
+            ->return cell
+         %finish
+         stream_device no = (mess_p3>>16)&byte mask
+         stream_external stream no = mess_p3&short mask
+         stream_amt index = not allocated
+         stream_link = empty
+         stream_state = connecting
+         ->update adaptor
+      %finish
+   %repeat
+   ->no stream
+
+
+act(connect reply):                      !** adaptor reply: stream connected
+   %if mon level&256#0 %start;           !include harvesting?
+      harvest(15, proc no, 4, stream no, 0, 0, 0, 0) %if %c
+         trace=yes %and trace events&(1<<15)#0 %and (trace process=-1 %or trace process=proc no)
+   %finish
+   %if status=successful %start
+      stream_state = connected
+      ->reply to caller;                 !note, p3 = nsi or x25 indication from fep
+   %finish %else ->return cell
+
+
+act(enable):                             !** command: enable stream
+
+!                p1         p2            p3         p4            p5           p6
+!Old format:   stream       da           lim        mode    cursor<<16!start  length
+!Newformat:    stream    1<<31!da    lim<<16!mode  cursor        start        length
+
+! Formats are distinguished by top bit in da.  This change is for multi-console
+! printer.  Uses a (nominally) circular buffer (as required by fep), hence length
+! is limited to '7fff'.  So to access last 32k of a 128k block, halfwords start
+! and length are insufficient.
+   %if stream_state=connected %and mess_p6>0 %start
+      stream_state = claiming
+      stream_length = mess_p6-1
+      %if mess_p2&top bit mask#0 %start; !new format
+         mess_p2 = mess_p2&(\(top bit mask))
+         stream_mode = mess_p3&bytemask
+         mess_p3 = mess_p3>>16
+         stream_start = mess_p5
+         %if stream_mode&15=circular %then stream_cursor = mess_p4 %else stream_cursor = 0
+      %else
+         stream_mode = mess_p4&bytemask
+         %if stream_mode&15=circular %start
+            stream_start = mess_p5&short mask
+            stream_cursor = mess_p5>>16
+         %else
+            stream_start = mess_p5
+            stream_cursor = 0
+         %finish
+      %finish
+      %if mess_p3>=maxblock %then status = unsuccessful %and ->reply to caller
+      %if mon level&256#0 %start;        !include harvesting?
+         harvest(16, proc no, 12, stream no, stream_mode, mess_p6, 0, 0) %if %c
+            trace=yes %and trace events&(1<<16)#0 %and (trace process=-1 %or trace process=proc no)
+      %finish
+      stream_amt index = mess_p2 {save p2 in case retry required}
+!** claim block from the global controller
+      mess_dserv = claim block
+      mess_sserv = block claimed
+!** p1=stream no, p2=disc address, p3=flags/epages. user supplied cannot check
+      pon(mess)
+      %return
+   %finish %else status = unsuccessful
+   ->reply to caller
+
+
+act(claim amt index reply):              !** global controller reply: block claimed
+   %if mon level&256#0 %start;           !include harvesting?
+      harvest(17, proc no, 8, stream no, status, 0, 0, 0) %if %c
+         trace=yes %and trace events&(1<<17)#0 %and (trace process=-1 %or trace process=proc no)
+   %finish
+   %if status<=0 %start;                 !block unsuccessful
+!*  0 change block size in situ
+!* -1 no amt cells
+!* -2 not enough garbage
+!* -3 change block size while still in use
+!* -4 outs not yet completed - retry
+      %if status=-4 %start
+         i = (dserv>>8)&15
+         %if i<15 %start
+            mess_dserv = claim block
+            mess_sserv = block claimed!((i+1)<<8)
+            mess_p2 = stream_amt index {disc address saved earlier, p1 and p3 intact}
+            dpon(mess, 2)
+            op mess("CC: claim retry ".strint(i)); !temp
+            %return
+         %finish
+      %finish
+      stream_state = connected
+      status = status-1;                 !zero normally successful
+      ->reply to caller
+   %finish
+   stream_amt index = status<<16
+   stream_state = enabling
+   ->update adaptor
+
+
+act(enable reply):                       !** adaptor reply: stream enabled
+   %if mon level&256#0 %start;           !include harvesting?
+      harvest(18, proc no, 4, stream no, 0, 0, 0, 0) %if %c
+         trace=yes %and trace events&(1<<18)#0 %and (trace process=-1 %or trace process=proc no)
+   %finish
+   %if status=successful %start
+      stream_state = enabled
+      %return %if stream_mode&15#circular %and stream_owner#masquerade as  process
+   %else
+      stream_state = connected
+      release block
+   %finish
+   ->reply to caller
+
+
+act(disable):                            !** command: disable stream (suspend or abort)
+   %if mon level&256#0 %start;           !include harvesting?
+      harvest(19, proc no, 12, stream no, mess_p2, stream_state, 0, 0) %if %c
+         trace=yes %and trace events&(1<<19)#0 %and (trace process=-1 %or trace process=proc no)
+   %finish
+   %if stream_state>=enabled %and suspending<=mess_p2<=aborting %start
+      old state = stream_state;          !remember state
+      stream_state = mess_p2;            !set to suspending or aborting
+      %return %if old state>=paging in;  !wait for completion of page in or transfer
+      stream no = unlink stream(stream no) %if old state=queued
+      release block
+      ->update adaptor
+   %finish %else status = unsuccessful
+   ->reply to caller
+
+
+act(disable reply):                      !** adaptor reply: disabled
+   %if mon level&256#0 %start;           !include harvesting?
+      harvest(20, proc no, 4, stream no, 0, 0, 0, 0) %if %c
+         trace=yes %and trace events&(1<<20)#0 %and (trace process=-1 %or trace process=proc no)
+   %finish
+   stream_state = connected
+   %unless status=aborting %then status = successful; !always successful for disable-suspend
+   ->reply to caller;                    !note, p3 = accounting info from adaptor
+
+
+act(disconnect):                         !** command: disconnect stream
+   %if mon level&256#0 %start;           !include harvesting?
+      harvest(21, proc no, 4, stream no, 0, 0, 0, 0) %if %c
+         trace=yes %and trace events&(1<<21)#0 %and (trace process=-1 %or trace process=proc no)
+   %finish
+   %if stream_state=connected %start
+      stream_state = disconnecting
+      ->update adaptor
+   %finish %else status = unsuccessful
+   ->reply to caller
+
+
+act(disconnect reply):                   !** adaptor reply: stream disconnected
+   %if mon level&256#0 %start;           !include harvesting?
+      harvest(22, proc no, 4, stream no, 0, 0, 0, 0) %if %c
+         trace=yes %and trace events&(1<<22)#0 %and (trace process=-1 %or trace process=proc no)
+   %finish
+   status = successful;                  !always successful
+   ->return cell;                        !note, p3 = disconnect reason from fep
+
+
+act(control msg6):                       !** command: send high level control message which generates no reply
+   %if mon level&256#0 %start;           !include harvesting?
+      harvest(23, proc no, 20, stream no, dact, stream_state, mess_p2, mess_p3) %if %c
+         trace=yes %and trace events&(1<<23)#0 %and (trace process=-1 %or trace process=proc no)
+   %finish
+   %if stream_mode&held#0 %start;          !can now allow transfers to proceed
+      stream_mode = stream_mode!!held
+      { Should verify that mess_p3=stream_cursor??}
+      ->act(transfer requested)
+   %finish
+   mess_sserv = comms command!control msg6 reply
+   ->pon adaptor
+
+
+act(control msg7):                       !** command: send high level control message which generates a reply
+   %if mon level&256#0 %start;           !include harvesting?
+      harvest(23, proc no, 20, stream no, dact, stream_state, mess_p2, mess_p3) %if %c
+         trace=yes %and trace events&(1<<23)#0 %and (trace process=-1 %or trace process=proc no)
+   %finish
+   status = mess_sserv&x'80000000';      !called or ponned?
+   mess_dserv = send control!adapt(stream_adaptor no)
+   mess_sserv = comms command!control msg7 reply
+   %if multiocp=no %and stream_adaptor no=fe %then mk1 fe adaptor(mess) %else pon(mess)
+   %if status=0 %and procno>5 %then op mess("CC: pons reply to cm7") %and ->reply to caller; !ponned, so pon a reply
+   mess_p2 = 0;                          !status
+   mess_p5 = stream_cursor
+   %return;                              !back to caller
+
+
+
+
+
+!***********************************************************************
+!*                                                                     *
+!*  this section handles:                                              *
+!*  1). transfer requests from an adaptor.                             *
+!*  2). replies from the global controller in response                 *
+!*         to calls generated by transfer requests.                    *
+!*  3). transfer complete replies from an adaptor.                     *
+!*                                                                     *
+!***********************************************************************
+
+
+act(transfer requested):                 !** adaptor request: transfer request
+   %if stream_state=enabled %and stream_mode&held=0 %start; !ignore if suspending or aborting or held
+      %if comms_next free buffer=empty %start; !no buffer available
+         %if mon level&256#0 %start;     !include harvesting?
+            harvest(27, proc no, 4, stream no, 0, 0, 0, 0) %if %c
+               trace=yes %and trace events&(1<<27)#0 %and (trace process=-1 %or trace process=proc no)
+         %finish
+         stream_state = queued;          !so wait.
+         stream_link = empty
+         %if comms_queued stream head=empty %then comms_queued stream head = stream no %else %c
+            stream tab(stream index(comms_queued stream tail))_link = stream no
+         comms_queued stream tail = stream no
+      %else;                             !buffer available
+         buffer no = comms_next free buffer
+         buffer == buffer tab(buffer no)
+         comms_next free buffer = buffer_link
+         buffer = 0
+         buffer_link = empty
+         stream_link = buffer no
+         get page(stream no)
+      %finish
+      %if monlevel&8#0 %start
+         %if free buffers<-19 %then pool size(-19) = pool size(-19)+1 %else %c
+            pool size(free buffers) = pool size(free buffers)+1
+         free buffers = free buffers-1
+      %finish
+   %finish
+   %return
+
+
+act(page here):                          !** global controller reply: current owner's page here
+   %if stream_state=paging in %start;    !check buffer not disabled (suspend or abort)
+      %if mon level&256#0 %start;        !include harvesting?
+         harvest(30, proc no, 8, stream no, (mess_sserv&255)<<24!(mess_p5&255)<<16!(mess_p6&short mask), 0, 0, 0) %if %c
+            trace=yes %and trace events&(1<<30)#0 %and (trace process=-1 %or trace process=proc no)
+      %finish
+      op mess("Comms page in fails") %if mess_p3#0
+!* should deal with transfer failures here?
+!* p_p3 = 0 ok
+!* p_p3 = 1 parity error
+!* p_p3 > 1 zero page
+      %if status=-1 %start
+         op mess("Comms: deadlock page recovery")
+         mess = 0
+         mess_dserv = claim page
+         mess_sserv = page claimed
+         mess_p1 = buffer tab(stream_link)_amt index
+         mess_p2 = stream no
+         dpon(mess, 2);                  !2 secs delay
+         %return
+      %finish
+      %if monlevel&8#0 %start
+         t = mess_sserv&255
+         %if dserv&queued flag#0 %start
+            %if t=1 %then queued store = queued store+1 %else queued disc = queued disc+1
+         %else
+            %if t=1 %then not queued store = not queued store+1 %else not queued disc = not queued disc+1
+         %finish
+      %finish
+      buffer tab(stream_link)_real address = status; !real page address
+      stream_state = active
+      mess_sserv = transfer complete
+      mess_dserv = go ahead!adapt(stream_adaptor no)
+      mess_p2 = stream_link
+      mess_p5 = stream_device no;        ! for use by OPER
+      %if multi ocp=no %and stream_adaptor no=fe %then mk1 fe adaptor(mess) %else pon(mess)
+      %return
+   %else;                                !buffer disabled
+      buffer no = stream_link
+      buffer == buffer tab(buffer no)
+      release buffer(no recapture)
+      release block
+      ->update adaptor
+   %finish
+
+
+act(transfer completed):                 !** adaptor reply: transfer complete
+   %if mon level&256#0 %start;           !include harvesting?
+      harvest(31, proc no, 12, stream no, mess_p2, mess_p3, 0, 0) %if %c
+         trace=yes %and trace events&(1<<31)#0 %and (trace process=-1 %or trace process=proc no)
+   %finish
+
+!* p2 has bits set with significance 2**0 next page required
+!*                                   2**1 page not eligible for recapture
+!*                                   2**2 update users cursor
+!* p3 has number of bytes transferred
+
+   buffer no = stream_link
+   buffer == buffer tab(buffer no)
+   stream_cursor = stream_cursor+mess_p3; !add in length transfered
+   %if mess_p3>=buffer_length %or stream_state#active %start
+      !end of buffer or buffer disabled
+      %if stream_cursor>=(stream_length+1) %start; !end of section (wrap round or suspend)
+         %if stream_mode&15=circular %start
+            stream_cursor = mess_p3-buffer_length {only OPERs can wrap round}
+            %if stream_mode&control=control %and stream no&1=0 %then %c
+               stream_mode = stream_mode!held %and status = status!4
+         %finish %else stream_state = suspending
+      %finish
+      %if stream_state=active %start;    !check not disabled (suspend or abort)
+         %if status&1#0 %and stream_mode&held=0 %start;          !get the next page (unless held)
+            release page(no recapture);  !release page to get another
+            get page(stream no)
+            %return
+         %finish
+      %else;                             !disabled (suspend or abort)
+         release buffer(no recapture)
+         release block
+         ->update adaptor
+      %finish
+   %finish
+   %if status&2=0 %then temp = recapture %else temp = no recapture
+   release buffer(temp)
+   stream_state = enabled
+   %if status&4#0 %start;                !update users cursor
+      mess_dserv = stream_owner
+      mess_sserv = dserv
+      mess_p2 = stream_cursor
+      mess_p3 = 0;                       !must be zero otherwise signifies an abort
+      pon(mess)
+   %finish
+   %return
+
+
+update adaptor:
+
+   !send low level control info to the adaptor to inform of stream state change
+   mess = 0
+   mess_p1 = sub ident(stream_state)!stream no
+   mess_p2 = stream_state<<24!stream_mode<<16!(stream_length&x'FFFF')
+   mess_p3 = stream_cursor
+   mess_p4 = stream index(stream no);    ! when connecting, set to cell
+   mess_p5 = stream_device no;           ! for OPER
+   mess_p6 = stream_length
+   mess_sserv = dserv
+pon adaptor:
+
+   mess_dserv = send control!adapt(stream_adaptor no)
+   %if multi ocp=no %and stream_adaptor no=fe %then mk1 fe adaptor(mess) %else pon(mess)
+   %return
+
+
+act(control msg6 reply):                 !** adaptor reply: control message 6 reply
+   %if mon level&256#0 %start;           !include harvesting?
+      harvest(24, proc no, 12, stream no, dact-12, stream_state, 0, 0) %if %c
+         trace=yes %and trace events&(1<<24)#0 %and (trace process=-1 %or trace process=proc no)
+   %finish
+   %if status=successful %then %return %else ->reply to caller; !??????
+
+
+act(control msg7 reply):                 !** adaptor reply: control message 7 reply
+   %if mon level&256#0 %start;           !include harvesting?
+      harvest(24, proc no, 12, stream no, dact-12, stream_state, 0, 0) %if %c
+         trace=yes %and trace events&(1<<24)#0 %and (trace process=-1 %or trace process=proc no)
+   %finish
+   %return
+
+
+
+reply to caller:
+
+   stream no = -1
+return cell:
+
+   mess_sserv = dserv
+   mess_dserv = stream_caller
+   mess_p2 = status
+   mess_p6 = mess_p3;                    !see connect reply, disable reply, disconnect reply
+   mess_p3 = stream_owner
+   mess_p4 = stream_state
+   mess_p5 = stream_cursor
+   pon(mess)
+   %unless stream no<0 %start
+      return pp cell(stream index(stream no))
+      stream index(stream no) = empty
+   %finish
+   %return
+
+
+
+   %routine release page(%integer recapture flag)
+!***********************************************************************
+!*                                                                     *
+!*  send a page out request to the global controller. specifying       *
+!*  whether the page has been                                          *
+!*  written to and whether the page is eligible for recapture.         *
+!*  no reply is given by the global controller                         *
+!*  bit significance:                                                  *
+!*       2**0 - recapturable                                           *
+!*       2**1 - make new                                               *
+!*       2**2 - not used                                               *
+!*       2**3 - written to                                             *
+!*                                                                     *
+!***********************************************************************
+      %record (pe) mess
+      mess = 0
+      mess_dserv = free page
+      mess_sserv = dserv
+      mess_p1 = buffer_amt index;        !index<<16!epage
+      mess_p2 = (1-(stream no&1))<<3!recapture flag; !mark output streams not written to
+      %if mon level&256#0 %start;        !include harvesting?
+         harvest(25, proc no, 12, stream no, mess_p1, mess_p2, 0, 0) %if %c
+            trace=yes %and trace events&(1<<25)#0 %and (trace process=-1 %or trace process=proc no)
+      %finish
+      pon(mess)
+   %end;                                 !of routine release page
+
+
+
+   %routine release buffer(%integer recapture flag)
+!***********************************************************************
+!*                                                                     *
+!*  release a comms page from its allocation. if a transfer request is *
+!*  queued request another page.                                       *
+!*                                                                     *
+!***********************************************************************
+      %integer tempst no
+      release page(recapture flag)
+      buffer_stream no = empty
+      stream_link = empty
+      %if comms_queued stream head#empty %start; !page frame required
+         tempst no = unlink stream(comms_queued stream head)
+         stream tab(stream index(tempst no))_link = buffer no
+         %if monlevel&8#0 %then tempst no = tempst no!queued flag<<24
+         get page(tempst no)
+      %else;                             !return buffer to free list
+         buffer_link = comms_next free buffer
+         comms_next free buffer = buffer no
+         %if monlevel&8#0 %then free buffers = free buffers+1
+      %finish
+   %end;                                 !of routine release buffer
+
+
+
+   %integer %fn unlink stream(%integer tempst no)
+!***********************************************************************
+!*                                                                     *
+!*  remove a queued transfer from the linked list                      *
+!*                                                                     *
+!***********************************************************************
+      %integer stream id, stream link, link
+      %record (sr) %name tempst
+      %if mon level&256#0 %start;        !include harvesting?
+         harvest(28, proc no, 4, tempst no, 0, 0, 0, 0) %if %c
+            trace=yes %and trace events&(1<<28)#0 %and (trace process=-1 %or trace process=proc no)
+      %finish
+      %if monlevel&8#0 %then free buffers = free buffers+1
+      link = stream tab(stream index(tempst no))_link
+      stream tab(stream index(tempst no))_link = empty
+      %if comms_queued stream head=tempst no %start
+         comms_queued stream head = link
+         comms_queued stream tail = empty %if comms_queued stream head=empty
+      %else
+         stream link = comms_queued stream head
+         %until stream link=tempst no %cycle
+            stream id = stream link
+            tempst == stream tab(stream index(stream id))
+            stream link = tempst_link
+         %repeat
+         tempst_link = link
+         comms_queued stream tail = stream id %if comms_queued stream tail=tempst no
+      %finish
+      %result = tempst no
+   %end;                                 !of integerfn unlink stream
+
+
+
+   %routine get page(%integer tempst no)
+!***********************************************************************
+!*                                                                     *
+!*  calculate the next page required and request it from the global    *
+!*  controller.                                                        *
+!*                                                                     *
+!***********************************************************************
+      %record (pe) mess
+      %record (sr) %name tempst
+      %integer epage, length, offset
+      %if monlevel&8#0 %start
+         %integer queued flag
+      %finish
+      %if monlevel&8#0 %then queued flag = tempst no>>24 %and tempst no = tempst no&short mask
+      tempst == stream tab(stream index(tempst no))
+      tempst_state = paging in
+      offset = tempst_cursor+tempst_start; !offset in the file section
+      epage = offset//pagesize;          !calculate in which page
+      offset = offset-epage*pagesize;    !offset in page
+      length = (tempst_length+1)-tempst_cursor; !calculate length
+      length = pagesize-offset %if offset+length>pagesize
+      !length within page
+      buffer_stream no = tempst no
+      buffer_external stream no = tempst_external stream no
+      buffer_amt index = tempst_amt index!epage
+      buffer_offset = offset
+      buffer_length = length
+      mess = 0
+      mess_dserv = claim page
+      %if monlevel&8#0 %then mess_sserv = page claimed!queued flag %else mess_sserv = page claimed
+      mess_p1 = buffer_amt index
+      mess_p2 = tempst no
+      mess_p3 = x'f0';                   !key f(user) with no read check protection
+      %if mon level&256#0 %start;        !include harvesting?
+         harvest(29, proc no, 12, stream no, mess_p1, buffer_length, 0, 0) %if %c
+            trace=yes %and trace events&(1<<29)#0 %and (trace process=-1 %or trace process=proc no)
+      %finish
+      pon(mess)
+   %end;                                 !of routine get page
+
+
+
+   %routine release block
+!***********************************************************************
+!*                                                                     *
+!*  release the page and buffer if the stream has one and then release *
+!*  the file section from the active memory table                      *
+!*                                                                     *
+!***********************************************************************
+      %record (pe) mess
+      mess = 0
+      mess_dserv = free block
+      mess_sserv = dserv
+      mess_p1 = stream no
+      mess_p2 = stream_amt index>>16
+      %if mon level&256#0 %start;        !include harvesting?
+         harvest(26, proc no, 8, stream no, mess_p2, 0, 0, 0) %if %c
+            trace=yes %and trace events&(1<<26)#0 %and (trace process=-1 %or trace process=proc no)
+      %finish
+      pon(mess)
+      stream_amt index = not allocated
+   %end;                                 !of routine release block
+
+
+   %routine print stream header
+      printstring("stream parmcell     sno xsno  s m a d  length    owner   caller ")
+      printstring(" amtindex   start   cursor      link".snl)
+   %end
+
+   %routine print buffer header
+      printstring("buffer parmcell      strmno  extstrno   amtx    offset   length ")
+      printstring("  r addr   spare0   spare1      link".snl)
+   %end
+
+   %routine print cell(%integer index)
+      %integer from, i
+      from = addr(stream tab(index))
+      write(index, 7); spaces(6)
+      %for i = from, 4, from+32 %cycle
+         printstring(htos(integer(i), 8)." ")
+      %repeat
+      newline
+   %end;                                 !of print cell
+
+%end;                                    !of routine comms control
+
+
+
+
+
+
+
+
+
+%external %routine mk1 fe adaptor(%record (pe) %name mess)
+!***********************************************************************
+!*    service 57 (x39)                                                 *
+!*    drives the mk1 front end to comms controller spec                *
+!*    can manage up to 10 front ends (fe0-fe9) using a 768 byte area   *
+!*    for each which is provided on allocation                         *
+!***********************************************************************
+   %record %format daf(%record (ccwf) ccw1, ccw2, %integer stream, name, cob start, cob index, head, tail, ident,
+      co head, co tail, max qd transfers, max qd control msgs, total qd transfers, total qd control msgs,
+      bytes of control input, bytes of control output, bytes of data input, bytes of data output,
+      control input transfers, control output transfers, data input transfers, data output transfers, output updates,
+      update overwrites, control input xbit set, control output xbit set, data input xbit set, data output xbit set,
+      %byte %integer attn set, spare, device no, failures, %byte %integer %array cib, cob(0:167),
+      %integer %array buffqsize(0:20), %short %integer cib seq)
+   %record %format cr(%integer message ident, p2, p3, p4, p5, p6)
+!  %record %format oper command f(%integer dest, srce, %string (23) txt)
+   %own %integer %array device to da ad(0:9)= %c
+      not allocated(10)
+   %own %integer timer started
+   %const %integer cib length= 168;      !7 control messages
+   %const %integer cob length= 168
+   %const %integer max failures= 5
+   %const %byte %integer %array retry delay(0:max failures)= %c
+      1,1,1,1,1,1 {0,1,0,2,0,3}
+   %const %integer control msg length= 24
+   %const %integer idle= x'F0F0F0F0'
+   %const %integer control in=-2
+   %const %integer control out=-1
+   %const %integer sense id stream=-3;   !used as the stream no during sense id
+   %const %integer sense close stream=-4; !used as the stream no during sense close
+   %const %integer data stream= 0
+   %const %integer incorrect length0 mask= incorrect length<<16; !with 0 residual count
+   %const %integer long block mask= incorrect length<<16!x'ffff'
+   %const %integer x mask= unit attention
+   %const %integer y mask= unit exception
+   %integer stream no, buffer no, device no
+   %integer temp, length, message ident, s ident, search index, cib index, dact
+   %integer control addr, l, f, t, x, xbit set, unit status
+   %record (pe) slowdevs req
+   %record (pe) cmes
+   %record (dtform) %name slowdevs entry
+   %record (daf) %name device area
+   %record (sr) %name stream
+   %record (br) %name buffer
+   %record (cr) %name control
+   %record (parmf) %name parm cell
+!  %record (oper command f) oper command
+!  %record (pe) %name oc
+   %switch act(0:deallocate request)
+
+   %const %integer fe testing=yes
+   %if fe testing=yes %start
+      %own %integer hist pt= 0
+      %own %record (pe) %array hist(0:15)
+      %long %integer clock
+      %const %integer max dist=13;       !for 1ms - 2s + >2s
+      %own %integer %array distribution(1:max dist)
+      %integer total, sum
+      %real rval
+   %finish
+
+
+
+   %routine start device(%integer stream no, ext stream no, real address, length)
+      %const %byte %integer %array ccw cmnd(0:1)= ccw read, ccw write
+
+      device area_ccw2_data ad = real address
+      device area_ccw2_cmnd = ccw cmnd(stream no&1)
+      device area_ccw2_len = length
+      device area_ccw2_flags = 0
+      device area_stream = stream no
+      device area_name = ext stream no<<16!length
+      slowdevs req = 0
+      slowdevs req_dserv = execute chain
+      slowdevs req_sserv = mk1 fe executed
+      slowdevs req_p1 = addr(device area_ccw1)
+      slowdevs req_p2 = device area_ident
+      slowdevs req_p3 = 0;               !??
+      %if fe testing=yes %start
+         *stck_clock
+         slowdevs req_p4 = (clock>>12)&x'7fffffff'; !current time in microsecs
+      %finish
+      %if multi ocp=yes %then pon(slowdevs req) %else devio(slowdevs req)
+   %end;                                 !of routine start device
+
+
+
+   %routine queue
+!* queue a high or low level control message for output as the cob is full
+      %integer temp
+      temp = new pp cell
+      parm cell == parm tab(temp)
+      control addr = addr(parm cell_p1)
+      %if device area_co head=empty %then device area_co head = temp %else parm tab(device area_co tail)_link = temp
+      parm cell_link = empty
+      device area_co tail = temp
+      %if mon level&4#0 %start
+         device area_total qd control msgs = device area_total qd control msgs+1
+         l = device area_co head
+         f = 1
+         %while l#device area_co tail %cycle
+            f = f+1
+            l = parm tab(l)_link
+         %repeat
+         %if f>device area_max qd control msgs %then device area_max qd control msgs = f
+      %finish
+   %end;                                 !of routine queue
+
+
+   %routine log event(%string (63) text, %record (pe) p)
+      %integer i
+      op mess("FE".tostring(device no+'0').": ".text)
+      pkmon rec("Mk1 FE Adaptor:", p)
+      %if fe testing=yes %start
+         %for i = 0, 1, 15 %cycle
+            pkmon rec("FE hist: ", hist(hist pt))
+            hist pt = (hist pt+1)&15
+         %repeat
+      %finish
+      dumptable(80, mess_p3, 768)
+   %end;                                 !of routine log event
+
+
+   %routine sense device(%integer sense stream no)
+!   Executed on device allocation (sense id) and fepdown (sense + modifier),
+!   to resynchronize adaptor and FEP.
+      %const %byte %integer %array ccw sense cmnd(-4:-3) = ccw sense close, ccw sense id
+
+      device area_ccw1_data ad = realise(addr(device area_name))
+      device area_ccw1_cmnd = ccw sense cmnd(sense stream no)
+      device area_ccw1_flags = 0
+      device area_ccw1_len = 4
+      start device(sense stream no, 0, 0, 0)
+   %end;                                 !of sense device
+
+
+
+
+
+!***********************************************************************
+!*                            main program                             *
+!***********************************************************************
+   %if mon level&2#0 %and (kmon>>mk1 fe service)&1#0 %then pkmon rec("Mk1 FE Adaptor: ", mess)
+   dact = mess_dserv&short mask
+
+   %if dact=interrupt %start;            !from slowdevs mess_p3=slowdevs area adrress
+      unit status = mess_p2>>24;         !from csw2
+      slowdevs entry == record(mess_p3); !map device area
+      device area == record(slowdevs entry_ua ad); !map private device area
+      device no = device area_device no
+      stream no = device area_stream
+   %else
+      %if go ahead<=dact<=send control %start; !from comms mess_p1=strm&short mask
+         stream no = mess_p1&short mask
+         temp = stream index(stream no)
+         %if temp=empty %then %return;   !can happen on fepdown
+         stream == stream tab(temp)
+         device no = stream_device no
+         %if device to da ad(device no)=not allocated %start; !send failure replies
+            cmes = 0
+            %if mess_p1&top short mask#0 %then cmes_dserv = comms command!mess_p1>>16 %else cmes_dserv = mess_sserv
+            cmes_sserv = mess_dserv
+            cmes_p1 = stream no
+            cmes_p2 = 1
+            pon(cmes)
+            %return
+         %finish %else device area == record(device to da ad(device no))
+      %finish
+   %finish
+   ->act(dact)
+
+
+act(0):                                  !** print monitoring if collected
+   %if mon level&4#0 %start
+      %for device no = 0, 1, 9 %cycle
+         %if mess_p1>>device no&1=1 %start
+            %if multi ocp=yes %then reserve log
+            %if fe testing=yes %and device no=0 %start
+               total = 0; sum = 0
+               total = total+distribution(x) %for x = 1, 1, max dist
+               %if total#0 %start
+                  printstring("Front-end responses          total events=".strint(total))
+                  newlines(2)
+                  printstring("           class            count     percent")
+                  newlines(2)
+                  %for x = 1, 1, max dist %cycle
+                     printstring("   responses ")
+                     %if x=max dist %then printstring(">  prev") %else printstring("< ") %and write(1<<(x-1), 4)
+                     printstring(" ms")
+                     sum = sum+distribution(x)
+                     write(sum, 9)
+                     rval = sum
+                     rval = rval*100/total
+                     f = intpt(rval)
+                     write(f, 8)
+                     printsymbol('.')
+                     f = intpt(10*(rval-f))
+                     write(f, 0)
+                     newline
+                  %repeat
+                  newlines(2)
+                  distribution(x) = 0 %for x = 1, 1, max dist
+               %finish
+            %finish
+
+            %if device to da ad(device no)#not allocated %start
+               device area == record(device to da ad(device no))
+               newlines(2)
+               print string("FE".to string(device no+'0'). %c
+                  " Log              Bytes  Transfers   XBIT Set   Bytes/Transfer")
+               newline
+               print string("Data Input     ")
+               f = device area_bytes of data input
+               write(device area_bytes of data input, 10)
+               t = device area_data input transfers
+               write(device area_data input transfers, 10)
+               x = device area_data input xbit set
+               write(device area_data input xbit set, 10)
+               write(device area_bytes of data input//device area_data input transfers, 10) %if %c
+                  device area_data input transfers#0
+               newline
+               print string("Data Output    ")
+               f = f+device area_bytes of data output
+               write(device area_bytes of data output, 10)
+               t = t+device area_data output transfers
+               write(device area_data output transfers, 10)
+               x = x+device area_data output xbit set
+               write(device area_data output xbit set, 10)
+               write(device area_bytes of data output//device area_data output transfers, 10) %if %c
+                  device area_data output transfers#0
+               newline
+               print string("Control Input  ")
+               f = f+device area_bytes of control input
+               write(device area_bytes of control input, 10)
+               t = t+device area_control input transfers
+               write(device area_control input transfers, 10)
+               x = x+device area_control input xbit set
+               write(device area_control input xbit set, 10)
+               write(device area_bytes of control input//device area_control input transfers, 10) %if %c
+                  device area_control input transfers#0
+               newline
+               print string("Control Output ")
+               f = f+device area_bytes of control output
+               write(device area_bytes of control output, 10)
+               t = t+device area_control output transfers
+               write(device area_control output transfers, 10)
+               x = x+device area_control output xbit set
+               write(device area_control output xbit set, 10)
+               write(device area_bytes of control output//device area_control output transfers, 10) %if %c
+                  device area_control output transfers#0
+               newline
+               print string("Totals         ")
+               write(f, 10)
+               write(t, 10)
+               write(x, 10)
+               write(f//t, 10) %if t#0
+               newline
+               print string("Output Updates ")
+               write(device area_output updates, 10)
+               newline
+               print string("Update Overwrites")
+               write(device area_update overwrites, 8)
+               newline
+               print string("Overwrite Ratio")
+               %if device area_update overwrites>0 %then %c
+                  write(device area_output updates//device area_update overwrites, 10) %else write(0, 10)
+               print string(":1")
+               newline
+               print string("Queued Transfers")
+               write(device area_total qd transfers, 9)
+               newline
+               print string("Queued Control ")
+               write(device area_total qd control msgs, 10)
+               newline
+               print string("Max Queued Trans")
+               write(device area_max qd transfers, 9)
+               newline
+               print string("Max Queued Control")
+               write(device area_max qd control msgs, 7)
+               newlines(2)
+               t = 0
+               t = t+device area_buffqsize(l) %for l = 0, 1, 20
+               printstring("Transfer queue sizes      (idle =")
+               %if t=0 %then printstring(" 100%)") %else %start
+                  write(device area_buffqsize(0)*100//t, 1)
+                  printstring("%)")
+                  newline
+                  write(f, 4) %for f = 1, 1, 20
+                  printstring("+")
+                  newline; space
+                  %for f = 1, 1, 20 %cycle
+                     x = device area_buffqsize(f)*100//t
+                     %if device area_buffqsize(f)>0=x %then printstring("  >0") %else write(x, 3)
+                     printstring("%")
+                  %repeat
+               %finish
+               newlines(2)
+
+               device area_buffqsize(f) = 0 %for f = 0, 1, 20
+               device area_max qd transfers = 0
+               device area_max qd control msgs = 0
+               device area_total qd transfers = 0
+               device area_total qd control msgs = 0
+               device area_bytes of control input = 0
+               device area_bytes of control output = 0
+               device area_bytes of data input = 0
+               device area_bytes of data output = 0
+               device area_control input transfers = 0
+               device area_control output transfers = 0
+               device area_data input transfers = 0
+               device area_data output transfers = 0
+               device area_output updates = 0
+               device area_update overwrites = 0
+               device area_control input xbit set = 0
+               device area_control output xbit set = 0
+               device area_data input xbit set = 0
+               device area_data output xbit set = 0
+            %finish
+            %if multi ocp=yes %then release log
+            mess_p1 = mess_p1!!(1<<device no)
+            %if mess_p1&x'3ff'#0 %then dpon(mess, 1)
+            %exit
+         %finish
+      %repeat
+   %finish
+   %return
+
+
+act(interrupt):                          !** device interrupt (normal, abnormal or attention)
+   %if fe testing=yes %start
+      hist(hist pt) = mess
+      hist(hist pt)_p6 = stream no
+      hist pt = (hist pt+1)&15
+   %finish
+   ->atten %if unit status=unit attention
+   ->abnormal termination %unless unit status&(normal termination!unit check)=normal termination
+   %if mess_p1&short mask#2 %start;      !executed both ccws?
+      %if stream no=sense id stream %then ->sense id complete
+      %if stream no=sense close stream %then ->down
+      ->abnormal termination
+   %finish
+   %if fe testing=yes %start
+      *stck_clock
+      clock = (clock>>12)&x'7fffffff'-mess_p6; !subtract request time
+      %if clock>0 %start;                !in case clock overflow
+         t = clock//1000;                !to millisecs
+         temp = max dist
+         %for x = 1, 1, max dist-1 %cycle
+            %if t=0 %then temp = x %and %exit
+            t = t>>1
+         %repeat
+         distribution(temp) = distribution(temp)+1
+      %finish
+   %finish
+!** normal termination interrupt
+   %if device area_failures#0 %start
+      %if device area_failures=255 %then sense device(sense close stream) %and %return; !now do operator's FEPDOWN
+      op mess("FE".to string(device no+'0')." Transfer Recovered")
+      device area_failures = 0
+   %finish
+
+
+   length = device area_ccw2_len-mess_p2&short mask; !no of bytes transferred
+   %if length<0 %then log event("-ve length transfer", mess) %and ->abnormal termination
+! The Auscom fep can only perform even byte transfers.  Status modifier is indicated
+! when an odd byte transfer has been padded with an extra byte, i.e. the last
+! byte sent was not received, or the last byte input is invalid.  It is also set
+! when an odd byte transfer exactly fills an odd byte buffer - the apparent
+! long block condition is in fact false.  See this:
+!
+! status mod   incorrect len  residual count  interpretation
+
+!    1              0                0        decrement length (end of buffer)
+!    1              1               >0        decrement length (middle of buffer)
+!    1              1                0        cancel long block
+!    0              1                0        long block
+   %if unit status&status modifier#0 %start; !one byte too many or cancel l.b.
+      %if mess_p2&long block mask=incorrect length0 mask %then mess_p2 = mess_p2!!incorrect length0 mask %else %start
+         length = length-1 %if length>0
+      %finish
+   %finish
+   xbit set = unit status&x mask;        !requesting a control input transfer
+
+
+   %if stream no=control out %start;     !control output termination
+      %if length#(length//control msg length)*control msg length %start
+         log event("partial control msg output", mess)
+         length = (length//control msg length)*control msg length
+      %finish
+      %if mon level&4#0 %start
+         device area_bytes of control output = device area_bytes of control output+length
+         device area_control output transfers = device area_control output transfers+1
+         device area_control output xbit set = device area_control output xbit set+1 %if xbit set#0
+      %finish
+      device area_cob index = device area_cob index-length
+      move(device area_cob index, addr(device area_cob(length)), addr(device area_cob(0))) %if device area_cob index>0
+      !shuffle down?
+      device area_cob start = 0
+      %while device area_co head#empty %and device area_cob index<cob length %cycle
+         parm cell == parm tab(device area_co head)
+         move(control msg length, addr(parm cell_p1), addr(device area_cob(device area_cob index)))
+         device area_cob index = device area_cob index+control msg length
+         temp = parm cell_link
+         return pp cell(device area_co head)
+         device area_co head = temp
+         device area_co tail = empty %if temp=empty
+      %repeat
+      ->make idle
+   %finish
+
+
+   %if stream no=control in %start;      !control input termination
+      %if fe testing=yes %start
+         %if length=0 %then log event("zero byte cin msg", mess) %else %start
+!           %if device area_cib(23)#device area_cib seq#256 %then %c
+!              log event("bad cib seq ".strint(device area_cib seq), mess)
+!            device area_cib seq = (device area_cib(23)+length//control msg length)&255
+         %finish
+      %finish
+      %if length#(length//control msg length)*control msg length %start
+         log event("partial control msg input", mess)
+         length = (length//control msg length)*control msg length
+      %finish
+      %if mon level&4#0 %start
+         device area_bytes of control input = device area_bytes of control input+length
+         device area_control input transfers = device area_control input transfers+1
+         device area_control input xbit set = device area_control input xbit set+1 %if xbit set#0
+      %finish
+      cib index = 0
+      cmes_sserv = mess_dserv
+      %while cib index<length %cycle
+         control == record(addr(device area_cib(cib index)))
+         temp = control_message ident
+         s ident = temp&short mask
+         stream no = temp>>16
+         %if 0<=stream no<=max stream %and stream index(stream no)#empty %start; !valid stream?
+            cmes_p1 = stream no
+            move(control msg length-4, addr(control_p2), addr(cmes_p2))
+            %if s ident=0 %then cmes_dserv = stream tab(stream index(stream no))_owner %else %c
+               cmes_dserv = comms command!s ident
+            %if fe testing=yes %start
+               stream == stream tab(stream index(stream no))
+               %if stream_adaptor no#fe %or stream_device no#device no %or (0#s ident#transfer requested %and %c
+                  sub ident(stream_state)#s ident<<16) %start
+                  pkmonrec("Comms: stream ", record(addr(stream)))
+                  log event("bad low level con", cmes)
+               %finish %else pon(cmes)
+            %finish %else pon(cmes)
+         %else
+            log event("bad stream number ".strint(stream no), mess)
+         %finish
+         cib index = cib index+control msg length
+      %repeat
+      ->make idle
+   %finish
+
+
+   %if mon level&4#0 %start
+      %if stream no&1=1 %start;          !output
+         %if unit status&unit exception#0 %then log event("exception on data output", mess)
+         device area_bytes of data output = device area_bytes of data output+length
+         device area_data output transfers = device area_data output transfers+1
+         device area_data output xbit set = device area_data output xbit set+1 %if xbit set#0
+      %else
+         device area_bytes of data input = device area_bytes of data input+length
+         device area_data input transfers = device area_data input transfers+1
+         device area_data input xbit set = device area_data input xbit set+1 %if xbit set#0
+      %finish
+   %finish
+   cmes = 0
+   cmes_sserv = mess_dserv
+   cmes_dserv = transfer complete
+   cmes_p1 = stream no
+   {if long block set, indicate next page required and dont recapture}
+   cmes_p2 = 3 %if mess_p2&long block mask=incorrect length0 mask
+   cmes_p3 = length
+   temp = unit status&y mask;            !send high level control message to signal end of message
+   cmes_p2 = cmes_p2!4 %if temp#0
+   pon(cmes)
+   ->make idle
+
+
+abnormal termination:                    !** abnormal termination interrupt
+   %if unit status&x mask#0 %then device area_attn set = 1
+   %if unit status&normal termination#normal termination %start
+      log event("incomplete termination", mess)
+      %return;                           !still waiting for device end+channel end
+   %finish
+   mess_p6 = integer(slowdevs entry_sensedatad)
+   pkmon rec("Mk1 FE Adaptor: ", mess)
+   %if stream no=sense id stream %then ->sense id complete
+   %if stream no=sense close stream %then ->down
+   %if unit status&unit check#0 %and mess_p4=0 {sense successful} %and mess_p6&x'01000000'#0 %start
+      !indicates resynch req from fep
+      op mess("FE".strint(device no)." requests resynch")
+   %else
+      print string("Mk1 FE Adaptor: Abterm FE".to string(device no+'0')." ".strint(device area_failures).snl)
+      %if device area_failures<=max failures %start
+         !try again?
+         slowdevs req = 0
+         slowdevs req_dserv = execute chain
+         slowdevs req_sserv = mk1 fe executed
+         slowdevs req_p1 = addr(device area_ccw1)
+         slowdevs req_p2 = device area_ident
+         slowdevs req_p3 = 0;            !??
+         %if fe testing=yes %start
+            *stck_clock
+            slowdevs req_p4 = (clock>>12)&x'7fffffff'
+         %finish
+         dpon(slowdevs req, retry delay(device area_failures))
+         !try again in ? seconds
+         device area_failures = device area_failures+1
+         %return
+      %finish
+   %finish
+
+down:
+
+   op mess("FE".to string('0'+device no)." DOWN")
+   !flash
+   %if stream no>=data stream %start;    !fail transfer in progress
+      cmes = 0
+      cmes_dserv = transfer complete
+      cmes_sserv = mess_dserv
+      cmes_p1 = stream no
+      cmes_p2 = 2;                       !dont recapture
+      pon(cmes)
+   %finish
+   %while device area_head#empty %cycle; !fail all queued transfers
+      buffer == buffer tab(device area_head)
+      device area_head = buffer_link
+      device area_tail = empty %if device area_head=empty
+      cmes = 0
+      cmes_dserv = transfer complete
+      cmes_sserv = mess_dserv
+      cmes_p1 = buffer_stream no
+      cmes_p2 = 2;                       !dont recapture
+      pon(cmes)
+   %repeat
+   %for stream no = 0, 1, max stream %cycle
+      %if stream index(stream no)#empty %start
+         stream == stream tab(stream index(stream no))
+         %if stream_adaptor no=fe %and stream_device no=device no %start; !connected thru this front end
+            cmes = 0
+            cmes_sserv = mess_dserv
+            cmes_p1 = stream no
+            %if stream no&1=0 %and sub ident(stream_state)=-1 %start; !input stream not waiting on a reply
+               cmes_dserv = stream_owner; !then send a high level control msg
+               cmes_p2 = stream_cursor
+               cmes_p3 = x'01590000';    !control (e o t) y
+               pon(cmes)
+            %else;                       !waiting on a reply
+               %if sub ident(stream_state)#-1 %start
+                  cmes_dserv = comms command!sub ident(stream_state)>>16; !simulate one
+                  cmes_p2 = 1;           !failure
+                  pon(cmes)
+               %finish
+            %finish
+         %finish
+      %finish
+   %repeat
+   device area_stream = idle
+   device area_cob start = 0
+   device area_cob index = 0
+   device area_failures = 0
+   slowdevs req = 0
+   slowdevs req_dserv = deallocate device
+   slowdevs req_sserv = mk1 fe deallocated
+   slowdevs req_p1 = m'FE0'!device no
+   pon(slowdevs req)
+   device to da ad(device no) = not allocated
+!      %if com area_ipldev<0 %start
+!         oper command_dest = oper command req
+!         oper command_srce = mk1 fe oper com reply
+!         oper command_txt = "FEPUP 0"
+!         oc == oper command
+!         oc_p2 = oc_p2!device no
+!         dpon(oper command, 600); !after 10 mins
+!      %finish
+   %return
+
+
+atten:                                   !** attention interrupt
+   %if stream no=idle %start
+      %if device to da ad(device no)=not allocated %start
+!            mess_dserv = x'32000b'
+         !flash off
+!            pon(mess)
+         op mess("FE".to string(device no+'0')." UP")
+         device to da ad(device no) = addr(device area)
+      %finish
+make idle:
+      device area_stream = idle
+      %if unit status=unit attention %or xbit set#0 %or device area_attn set#0 %start
+         !control input pending
+         device area_attn set = 0
+         start device(control in, control in, realise(addr(device area_cib(0))), cib length)
+         %return
+      %finish
+
+
+      %if device area_cob index>0 %start; !control output pending.
+         start device(control out, control out, realise(addr(device area_cob(0))), device area_cob index)
+         device area_cob start = device area_cob index
+         %return
+      %finish
+
+
+      %if device area_head#empty %start; !data transfer queued
+         buffer == buffer tab(device area_head)
+         device area_head = buffer_link
+         device area_tail = empty %if device area_head=empty
+         start device(buffer_stream no, buffer_external stream no, buffer_real address+buffer_offset, buffer_length)
+         %return
+      %finish
+   %else
+      device area_attn set = 1 %if stream no#control in
+   %finish
+   %return
+
+
+act(deallocate request):                 !** operator can now invoke reallocation following
+   !   a disconnect/reconnect sequence by slowdevs
+   device no = mess_p1
+   %if 0<=device no<=9 %and device to da ad(device no)#not allocated %start
+      device area == record(device to da ad(device no))
+      stream no = device area_stream
+      %if stream no=idle %then sense device(sense close stream); !can do it straight away
+      device area_failures = 255;        !await termination of transfer or  sense
+      %return
+   %finish
+   opmess("FE".tostring(device no+'0')." not allocated")
+   %return
+
+
+act(deallocated):                        !** reply from slowdevs
+   %if mess_p1#0 %then opmess("FE: Dealloc fails ".strint(mess_p1&short mask))
+   %return
+
+
+act(allocate request):                   !** operator request to recover fe
+   device no = mess_p1
+   %if device to da ad(device no)=not allocated %start
+      slowdevs req = 0
+      slowdevs req_dserv = allocate device
+      slowdevs req_sserv = mk1 fe allocated
+      slowdevs req_p1 = m'FE0'!device no
+      slowdevs req_p2 = mk1 fe interrupt
+      pon(slowdevs req)
+   %finish %else opmess("FE".tostring(device no+'0')." Already allocated")
+   %return
+
+
+act(allocated):                          !** device allocated by slowdevs
+   %if mess_p1=0 %start;                 !allocated
+      slowdevs entry == record(mess_p3)
+      device area == record(slowdevs entry_ua ad)
+      device no = slowdevs entry_mnemonic&byte mask-'0'
+      device to da ad(device no) = slowdevs entry_ua ad
+      device area_ident = mess_p2
+      device area_device no = device no
+      %if mon level&4#0 %start
+         device area_max qd transfers = 0
+         device area_max qd control msgs = 0
+         device area_total qd transfers = 0
+         device area_total qd control msgs = 0
+         device area_bytes of control input = 0
+         device area_bytes of control output = 0
+         device area_bytes of data input = 0
+         device area_bytes of data output = 0
+         device area_control input transfers = 0
+         device area_control output transfers = 0
+         device area_data input transfers = 0
+         device area_data output transfers = 0
+         device area_output updates = 0
+         device area_update overwrites = 0
+         device area_control input xbit set = 0
+         device area_control output xbit set = 0
+         device area_data input xbit set = 0
+         device area_data output xbit set = 0
+      %finish
+      device area_cob start = 0
+      device area_cob index = 0
+      device area_head = empty
+      device area_tail = empty
+      device area_co head = empty
+      device area_co tail = empty
+      device area_attn set = 0
+      device area_failures = 0
+!     %if fe testing=yes %then device area_cib seq = 256; !initialised by fep
+      sense device(sense id stream)
+
+      %if timer started=no %start
+         mess = 0
+         mess_dserv = elapsed int command; !tick every n secs
+         mess_sserv = mk1 fe clock tick
+         mess_p1 = mk1 fe clock tick
+         mess_p2 = secs per tick
+         %if multi ocp=no %then elapsed int(mess) %else pon(mess)
+         timer started = yes
+      %finish
+   %finish
+   %return
+
+
+sense id complete:                       !now initialise rest of device area
+
+   mess_p6 = device area_name
+   pkmon rec("Mk1 FE Adapt: sense id", mess)
+   temp = (device area_name>>16)&x'ff';  !fep no
+   %if 0#temp#device no %then op mess("FE".strint(device no)." reports device no ".strint(temp)) %and mess_p6 = 0
+   %if mess_p6=0 %then ->down;           !deallocate
+   device area_ccw1_data ad = realise(addr(device area_name)); !holds ext str + len
+   device area_ccw1_cmnd = ccw write;    !write control (ext stream no)<<16!length
+   device area_ccw1_flags = cchain;      !chain to next read or write command
+   device area_ccw1_len = 4;             !length of ext stream no and length field
+   device area_name = 0;                 !control information sent written here
+   device area_stream = idle
+   %return
+
+
+act(execute fails):                      !** execute chain fails
+   slowdevs entry == record(mess_p3)
+   device area == record(slowdevs entry_ua ad)
+   device no = device area_device no
+   stream no = device area_stream
+   log event("execute chain fails", mess)
+   ->abnormal termination;               ! treat as abterm for better diagnostics
+
+
+!* above entries are called by slowdevs
+
+!* below entries are called by comms control
+
+
+act(go ahead):                           !** transfer go ahead
+   buffer no = mess_p2
+   buffer == buffer tab(buffer no)
+   %if device area_stream#idle %start;   !queue a transfer
+      buffer_link = empty
+      %if device area_head=empty %then device area_head = buffer no %else buffer tab(device area_tail)_link = buffer no
+      device area_tail = buffer no
+      %if mon level&4#0 %start
+         device area_total qd transfers = device area_total qd transfers+1
+         l = device area_head
+         f = 1
+         %while l#device area_tail %cycle
+            f = f+1
+            l = buffer tab(l)_link
+         %repeat
+         %if f>device area_max qd transfers %then device area_max qd transfers = f
+         f = 20 %if f>20
+      %finish
+   %else
+      start device(stream no, buffer_external stream no, buffer_real address+buffer_offset, buffer_length)
+      %if monlevel&4#0 %then f = 0
+   %finish
+   %if monlevel&4#0 %then device area_buffqsize(f) = device area_buffqsize(f)+1
+   %return
+
+
+act(send control):                       !** control message
+   message ident = stream_external stream no<<16!mess_p1>>16; !x stream + reply (if a state change)
+   mess_p1 = message ident
+   %if message ident&short mask=0 %and mess_sserv&short mask=control msg7 reply %start; !high level and update message
+      device area_output updates = device area_output updates+1 %if mon level&4#0
+      search index = device area_cob start
+      %cycle
+         control addr = addr(device area_cob(0))+search index
+         %if search index>=device area_cob index %start; !end of whats in buffer?
+            %if device area_cob index>=cob length %start; !cob buffer full
+               temp = device area_co head
+               %while temp#empty %cycle; !scan down existing queue
+                  parm cell == parm tab(temp)
+                  %if message ident=parm cell_p1 %start; !update?
+                     device area_update overwrites = device area_update overwrites+1 %if mon level&4#0
+                     control addr = addr(parm cell_p1)
+                     ->out
+                  %finish %else temp = parm cell_link
+               %repeat
+               queue
+out:
+            %finish %else device area_cob index = device area_cob index+control msg length
+            %exit
+         %finish
+         %if integer(control addr)=message ident %start
+            device area_update overwrites = device area_update overwrites+1 %if mon level&4#0
+            %exit
+         %finish
+         search index = search index+control msg length
+      %repeat
+!         cmes = 0
+!         cmes_dserv = mess_sserv
+!         cmes_sserv = mess_dserv
+!         cmes_p1 = stream no
+!         %if multi ocp = no %then comms control(cmes) %else pon(cmes)
+      !reply message updated
+   %else
+      %if device area_cob index<cob length %start
+         !cob buffer full?
+         control addr = addr(device area_cob(device area_cob index))
+         device area_cob index = device area_cob index+control msg length
+      %finish %else queue
+   %finish
+   move(control msg length, addr(mess_p1), control addr)
+   start device(control out, control out, realise(addr(device area_cob(0))), device area_cob index) %and %c
+      device area_cob start = device area_cob index %if device area_stream=idle
+   %return
+
+
+act(clock tick):                         !send control msg every n secs to confirm feps are up
+   %for device no = 0, 1, 9 %cycle
+      %unless device to da ad(device no)=not allocated %start
+         device area == record(device to da ad(device no))
+         %if device area_cob index=0 %and device area_stream=idle %start
+            mess = 0
+            mess_p1 = -1;                !dummy stream no for fe to ignore
+            control addr = addr(device area_cob(0))
+            device area_cob index = control msg length
+            move(control msg length, addr(mess_p1), control addr)
+            start device(control out, control out, realise(addr(device area_cob(0))), control msg length)
+            device area_cob start = control msg length
+         %finish
+      %finish
+   %repeat
+   %return
+
+
+act(oper com reply):                     !ignore reply to fepup message
+!!
+%end;                                    !of mk1 fe adaptor
+
+
+
+
+
+
+%external %routine lp adaptor(%record (pe) %name mess)
+!***********************************************************************
+!*    Service 51 (x33)                                                 *
+!*    Drives the line printer to comms controller spec.                *
+!*    Accepts the data as iso, ebcdic or binary. Iso is translated to  *
+!*    ebcdic using the master translate tables. Ebcdic data is         *
+!*    translated to a subset of ebcdic depending on the rep in the     *
+!*    printer to avoid non printing characters fouling things up.      *
+!*    Binary data is left alone.                                       *
+!*    Can manage up to 10 printers (lp0-lp9) using a 2048 byte area for*
+!*    each which is provided on allocation.                            *
+!*    The adaptor also drives matrix plotters.  It strictly chops      *
+!*    output into 132 byte lines.  At page end, copies the last part   *
+!*    line so that a full 132 bytes are printed when next page comes.  *
+!***********************************************************************
+   %const %byte %integer %array e to band(16:319) = %c
+      x'ff',x'9f',x'9f',x'9f', x'9f',x'25',x'9f',x'9f',
+      x'9f',x'9f',x'9f',x'9f', x'9f',x'9f',x'9f',x'9f',
+      x'9f',x'9f',x'9f',x'9f', x'9f',x'25',x'9f',x'9f',
+      x'9f',x'9f',x'9f',x'9f', x'9f',x'9f',x'9f',x'9f',
+      x'9f',x'9f',x'9f',x'9f', x'9f',x'9f',x'9f',x'9f',
+      x'9f',x'9f',x'9f',x'9f', x'9f',x'9f',x'9f',x'9f',
+      x'40',x'9f',x'9f',x'9f', x'9f',x'9f',x'9f',x'9f',
+      x'9f',x'9f',x'9f',x'4B', x'4C',x'4D',x'4E',x'4F',
+      x'50',x'9f',x'9f',x'9f', x'9f',x'9f',x'9f',x'9f',
+      x'9f',x'9f',x'5A',x'5B', x'5C',x'5D',x'5E',x'a1',
+      x'60',x'61',x'9f',x'9f', x'9f',x'9f',x'9f',x'9f',
+      x'9f',x'9f',x'9f',x'6B', x'6C',x'6D',x'6E',x'6F',
+      x'9f',x'5f',x'9f',x'9f', x'9f',x'9f',x'9f',x'9f',
+      x'9f',x'79',x'7A',x'7B', x'7C',x'7D',x'7E',x'7F',
+      x'9f',x'81',x'82',x'83', x'84',x'85',x'86',x'87',
+      x'88',x'89',x'9f',x'9f', x'9f',x'9f',x'9f',x'9f',
+      x'9f',x'91',x'92',x'93', x'94',x'95',x'96',x'97',
+      x'98',x'99',x'9f',x'9f', x'9f',x'9f',x'9f',x'9f',
+      x'9f',x'a1',x'A2',x'A3', x'A4',x'A5',x'A6',x'A7',
+      x'A8',x'A9',x'9f',x'9f', x'9f',x'AD',x'9f',x'9f',
+      x'9f',x'9f',x'9f',x'9f', x'9f',x'9f',x'9f',x'9f',
+      x'9f',x'9f',x'9f',x'9f', x'9f',x'BD',x'9f',x'9f',
+      x'8b',x'C1',x'C2',x'C3', x'C4',x'C5',x'C6',x'C7',
+      x'C8',x'C9',x'9f',x'9f', x'9f',x'9f',x'9f',x'9f',
+      x'9b',x'D1',x'D2',x'D3', x'D4',x'D5',x'D6',x'D7',
+      x'D8',x'D9',x'9f',x'9f', x'9f',x'9f',x'9f',x'9f',
+      x'e0',x'9f',x'E2',x'E3', x'E4',x'E5',x'E6',x'E7',
+      x'E8',x'E9',x'9f',x'9f', x'9f',x'9f',x'9f',x'9f',
+      x'F0',x'F1',x'F2',x'F3', x'F4',x'F5',x'F6',x'F7',
+      x'F8',x'F9',x'9f',x'9f', x'9f',x'9f',x'9f',x'9f',
+ x'40',x'30',x'30',x'30',x'30',x'30',x'30',x'30',  {DUCT}
+ x'30',x'30',x'00',x'60',x'40',x'40',x'40',x'40',
+ x'40',x'30',x'30',x'30',x'30',x'30',x'30',x'30',
+ x'30',x'30',x'40',x'60',x'40',x'40',x'40',x'60',
+ x'50',x'60',x'30',x'30',x'30',x'B0',x'30',x'30',
+ x'30',x'30',x'00',x'40',x'40',x'60',x'40',x'40',
+ x'10',x'10',x'10',x'10',x'10',x'10',x'10',x'10',
+ x'10',x'50',x'40',x'40',x'40',x'60',x'40',x'40'
+
+   %const %integer max ccws=(2048-10*4-132-132-8)//8
+   %record %format line f(%byte %integer %array chars(1:132))
+   %record %format daf(%integer stream no, buffer no, trt ad, ident, real begin, real end, sense ad,
+      (%integer cc reply %or %byte %integer mode, active line, last cno, current cno), %short %integer pagecount,
+      %byte %integer linecount, linesperpage, %byte %integer active, last line len, partial buffer, last unit status,
+      %record (linef) %array line(0:1),  {NOTE! double word aligned here} %record (ccw f) %array ccw(1:max ccws))
+   %routine %spec reply to comms control(%integer act, stream no, flag, count)
+   %routine %spec get next buffer
+   %routine %spec e to e(%integer address, length)
+   %const %byte %integer write and nl0= x'01'
+   %const %byte %integer write and nl1= x'09'
+   %const %byte %integer write and skipto1= x'89'
+   %const %byte %integer nowrite and nl0=x'03'; !no-op
+   %const %byte %integer no op= nowrite and nl0
+   %const %byte %integer nowrite and nl1=x'0b'
+   %const %byte %integer nowrite and skipto1=x'8b'
+   %const %byte %integer load ucs cmnd=x'fb'
+   %const %byte %integer carr control only= x'02'; !bit is set for carriage control with no data
+   %const %byte %integer %array first cmnd(lp:mp) = nowrite and skipto1 {ff}, 0, 0, nowrite and nl0 {no-op}
+   %const %integer %array adaptor mnemonic(lp:mp) = m'LP0', 0, 0,  m'MP0'
+   %const %byte %integer %array feff trt(0:255)= 0(12), write and skipto1 {ff}, write and nl0 {cr},
+      0(23), write and nl1 {lf}, 0(218)
+   %own %integer %array device to da ad(0:9)= not allocated(10)
+   %record (pe) req
+   %record (pe) rep
+   %record (dtform) %name slowdevs entry
+   %record (daf) %name device area
+   %record (sr) %name stream
+   %record (br) %name buffer
+   %record (ccw f) %array %name ccw
+   %integer stream no, buffer no, state, linecount, perpage
+   %integer buffer end, sent, device no, act, unit status
+   %integer i, line begin, line end, trt ad, real address
+   %integer len, cno, psw key, adaptor type, line no, chars to dchain
+   %byte %integer cmnd
+   %switch dact(0:deallocate request)
+   %switch states(0:active)
+
+   %const %integer lp testing=yes
+   %if lp testing=yes %start
+      %own %integer hist pt= 0
+      %own %record (pe) %array hist(0:15)
+   %finish
+
+   %routine log event(%string (63) text, %record (pe) p)
+      %integer i
+      op mess("LP".tostring(device no+'0').": ".text)
+      pkmon rec("LP Adaptor:", p)
+      %if lp testing=yes %start
+         %for i = 0, 1, 15 %cycle
+            pkmon rec("LP hist: ", hist(hist pt))
+            hist pt = (hist pt+1)&15
+         %repeat
+      %finish
+      dumptable(81, mess_p3, 2048)
+   %end;                                 !of routine log event
+
+
+   %routine fire request(%integer cno)
+      req = 0
+      req_dserv = execute chain
+      req_sserv = lp executed
+      req_p1 = addr(device area_ccw(cno))
+      req_p2 = device area_ident
+      req_p3 = 0;                        !??
+      pon(req)
+   %end;                                 !of fire request
+
+
+
+   %if mon level&2#0 %and (kmon>>lp service)&1#0 %then pkmon rec("LP Adaptor: ", mess)
+   act = mess_dserv&short mask
+   %if act=interrupt %start
+      slowdevs entry == record(mess_p3)
+      device area == record(slowdevs entry_ua ad)
+      device no = slowdevs entry_mnemonic&bytemask-'0'
+      stream no = device area_stream no
+   %else
+      %if go ahead<=act<=send control %start
+         stream no = mess_p1&short mask
+         stream == stream tab(stream index(stream no))
+         device no = stream_device no
+         adaptor type = stream_adaptor no
+      %finish
+   %finish
+   ->dact(act)
+
+
+dact(interrupt):                         !** device interrupt (normal, abnormal, auto/manual)
+   %if lp testing=yes %start
+      hist(hist pt) = mess
+      hist(hist pt)_p6 = stream no
+      hist pt = (hist pt+1)&15
+   %finish
+
+   unit status = mess_p2>>24
+   %if device area_ccw(1)_cmnd=load ucs cmnd %start {initialising}
+      %if unit status&unit check#0 %then %return {in manual}
+      ->initialised
+   %finish
+
+   %if mess_p2&x'00ff0000'#0 %then log event("channel status ", mess)
+   adaptor type = stream tab(stream index(stream no))_adaptor no
+   ccw == device area_ccw
+   cno = mess_p1&short mask;             !last ccw executed
+
+   %if adaptor type=mp %start;           !we execute commands one at a time
+      %if unit status&(~(device end!channel end))#0 %then log event("unit status", mess)
+      %if unit status&device end=0 %then %return {await device end}
+      %if unit status&unit check#0 {gone off-line} %then cno=0 %else %start
+         cno = cno+device area_current cno
+         device area_current cno = cno
+         %if cno<device area_last cno %then fire request(cno) %and %return
+      %finish
+   %finish;                              !have executed the lot (excluding the sense)
+
+   {Check that this indicates a transfer termination, not just auto/manual signals}
+   %if unit status&(device end!unit check)#0 %and device area_last unit status&unit check=0 %and %c
+      device area_active=yes %start
+      %unless mess_p2=-1 %start;         !not a time-out
+         %if cno>1 %start;               !nothing sent if we failed on 1
+            %if unit status=normal termination %or ccw(cno)_cmnd=ccw sense %start
+!           Telling cc that we have printed right to the end of the page.
+!           In fact, if <132, the last-line-len bytes were not printed.  Set up ccw1 below to print
+!           them next time.   If len=132 then the line was printed, but  feff action is outstanding
+               sent = device area_real end-device area_real begin
+               len = device area_last line len
+               %if len<132 %then sent = sent+len; !dont count twice
+            %else
+               sent = ccw(cno)_data ad&data ad mask-device area_real begin
+               len = 0;                  !completed a whole line
+            %finish
+!           Set up ccw1 for unprinted line (only if complete chain has terminated)
+            ccw(1)_len = len
+            %if len#0 %start
+               line no = 1-device area_active line; !flip line buffers 0 and 1
+               device area_active line = line no
+               ccw(1)_data ad = realise(addr(device area_line(line no)))
+            %finish
+            perpage = device area_linesperpage
+            %if perpage>0 %start;        !accounting selected?
+               linecount = device area_linecount
+               %for i = 1, 1, cno-1 %cycle; !examine each one executed
+                  %if ccw(i)_cmnd&x'89'=x'09' {LF} %start
+                     linecount = linecount+1
+                     %if linecount=perpage %then device area_pagecount = device area_pagecount+1 %and linecount = 0
+                  %else
+                     %if ccw(i)_cmnd&x'89'=x'89' {FF} %then %c
+                        device area_pagecount = device area_pagecount+1 %and linecount = 0
+                  %finish
+               %repeat
+               device area_linecount = linecount
+            %finish
+         %finish %else sent = 0
+      %finish %else sent = 0
+      {send reply to comms control}
+      req = 0
+      req_sserv = mess_dserv
+      req_dserv = transfer complete
+      req_p1 = stream no
+      req_p2 = 3;                        !get next page and dont recapture
+      %if unit status#normal termination %start
+         req_p2 = req_p2!4;              !inform user
+         req_p5 = slowdevs entry_sense1
+         req_p6 = slowdevs entry_sense2
+      %finish
+      req_p3 = sent
+      pon(req)
+      get next buffer %if device area_partial buffer=1 %and unit status=normal termination
+      device area_active = no
+   %else;                                !** auto/manual sequence
+      { Note: When device goes into manual we get the following interrupts -}
+      {           unit check (+ channel end perhaps)  *going manual*}
+      {           device end (may be included in previous interrupt)  *gone manual*}
+      {           control unit end (may not occur)}
+      {       When it goes auto we get device end (+channel end perhaps)  *gone auto*}
+      {Check if this is the second device end after unit check = gone to auto}
+      %if device area_last unit status&(device end!unit check)=device end!unit check %and %c
+         unit status&device end=device end %start
+         %if stream index(stream no)#empty %start
+            stream == stream tab(stream index(stream no))
+            device no = stream_device no
+         %finish
+         get next buffer
+      %finish
+   %finish
+   device area_last unit status = device area_last unit status!unit status
+   %return
+
+
+dact(execute fails):                     !** execute chain fails
+   slowdevs entry == record(mess_p3)
+   dump table(81, mess_p3, 2048);        !** should be a slowdevs entry_ent size
+   %return
+
+
+dact(allocated):                         !** device allocated by slowdevs
+   %if mess_p1#0 {not allocated} %then reply to comms control(mess_p4, mess_p5&x'ffff', mess_p1, 0) %and %return
+   slowdevs entry == record(mess_p3)
+   device area == record(slowdevs entry_ua ad)
+   device no = slowdevs entry_mnemonic&byte mask-'0'
+   device to da ad(device no) = slowdevs entry_ua ad
+   device area_ident = mess_p2;          !save slowdevs identifier
+   device area_linesperpage = (mess_p5>>16)&x'ff'
+   device area_buffer no = 0
+   device area_trt ad = slowdevs entry_trtab ad
+   device area_last unit status = 0;     !for auto/manual sequence
+   device area_sense ad = realise(addr(slowdevs entry_sense1))
+   device area_linecount = 0
+   device area_pagecount = 0
+   device area_cc reply = mess_p4
+   device area_stream no = mess_p5&x'ffff'
+   %if stream tab(stream index(device area_stream no))_adaptor no=lp %start
+      ccw == device area_ccw
+      ccw(1)_cmnd = load ucs cmnd
+      ccw(1)_flags = cchain
+      ccw(1)_len = 304
+      ccw(1)_data ad = realise(addr(e to band(16)))
+      ccw(2)_cmnd = ccw sense
+      ccw(2)_flags = sli
+      ccw(2)_len = 16
+      ccw(2)_data ad = device area_sense ad
+      fire request(1)
+      %return
+   %finish
+
+initialised:                             !load rep completed
+   device area_ccw(1) = 0
+   device area_ccw(1)_data ad = realise(addr(device area_line(0)))
+   reply to comms control(device area_cc reply, device area_stream no, 0, 0)
+   device area_cc reply = 0;             !zero 4 byteintegers
+   %return
+
+
+dact(deallocate request):                !** operator request to force deallocation
+   device no = mess_p1
+   %if 0<=device no<=9 %and device to da ad(device no)#not allocated %start
+      device area == record(device to da ad(device no))
+      stream no = device area_stream no
+      stream == stream tab(stream index(stream no))
+      %if stream_state>=enabled %start
+         mess_dserv = stream_caller
+         reply to comms control(disable, stream no, aborting, 0)
+      %finish
+      %if stream_state=connected %start
+         mess_dserv = stream_caller
+         mess_p1 = stream no
+         mess_p2 = 1;                    !fail the connect request
+         pon(mess)
+         reply to comms control(disconnect, stream no, 0, 0)
+      %finish
+      mess_dserv = lp command!deallocate request
+      dpon(mess, 4)
+   %finish %else op mess("LP Adapt: device free")
+   %return
+
+
+dact(deallocated):                       !** device deallocated by slowdevs
+   device no = mess_p6
+   device to da ad(device no) = not allocated
+   reply to comms control(mess_p4, mess_p5, mess_p1, 0)
+   %return
+
+
+dact(go ahead):                          !** transfer go ahead
+   buffer no = mess_p2
+   buffer == buffer tab(buffer no)
+   device area == record(device to da ad(device no))
+   device area_buffer no = buffer no
+   device area_partial buffer = 0;       !set if not enough ccws for buffer
+   device area_last line len = 0;        !set if line crosses page boundary
+   device area_last unit status = 0
+   device area_active = yes
+   real address = buffer_real address
+   line begin = rtv(real address)+buffer_offset
+   buffer end = line begin+buffer_length-1
+   *ipk_0; *st_2, pswkey; *spka_0(0);    !save psw-key, and reset to allow write to page
+   i to e(line begin, buffer_length) %if device area_mode=iso
+   e to e(line begin, buffer_length) %if device area_mode#binary; !to the ebcdic chars in the current rep
+   *l_2, pswkey; *spka_0(2);             !restore psw-key
+   ccw == device area_ccw
+   chars to dchain = ccw(1)_len;         !length of unprinted line from last time
+   cno = 2;                              !start at ccw 2
+   device area_real begin = real address!line begin&pagesize mask
+   trt ad = addr(feff trt(0))
+   %if adaptor type=lp %start
+      %for line begin = line begin, 1, buffer end %cycle; !skip leading nulls
+         %if byteinteger(line begin)#ebc bell %then %exit
+      %repeat
+   %finish
+   %if chars to dchain<132 %then len = 133-chars to dchain %else len = 133; !range of 1st scan for feffs
+
+   %until line begin>buffer end %cycle
+      ccw(cno)_data ad = real address!line begin&pagesize mask
+      i = buffer end-line begin+1
+      %if i<len %then len = i %and i = i-1 %else len = len-1 %and i = len
+      %if adaptor type=mp %then ->no feff; !no feffs for plotters
+      *basr_15, 0
+      *using_15
+      *l_1, i;                           !bytes to be scanned minus 1 (<256)
+      *l_2, linebegin;                   !start address
+      *l_3, trtad;                       !addr of format effector translate table
+      *ex_1, <trt>;                      !do trt with 'len' bytes
+      *bc_8, <nofeff>;                   !none found
+      *stc_2, cmnd;                      !found, store its table value
+      *st_1, lineend;                    !location of feff
+      *bc_15, <fefffound>
+trt:  *trt_0(0, 2), 0(3)
+      *drop_15
+no feff:                                 !no format effector
+      %if line begin+len>buffer end {buffer end?} %and %c
+         buffer end&x'fff'=x'fff' {stream_cursor+buffer_length<(stream_length+1)} %start {not section end}
+         %if len<132 %start;             !save it for next time
+            device area_last line len = len
+            line no = 1-device area_active line; !select the inactive line buffer
+            move(len, line begin, addr(device area_line(line no)))
+            %exit
+         %finish;                        !full line, but feff action not yet known
+         %if adaptor type=lp %start
+            device area_last line len = 132; !get feff action from next page
+            cmnd = write and nl0;           ! for LP, feff action pending
+         %finish %else cmnd = write and nl1;! for MP, end of story
+      %finish %else cmnd = write and nl1; !long line within the buffer
+      ccw(cno)_len = len;                !send all
+      line begin = line begin+len
+      ->set
+feff found:                              !found either nl, cr or ff
+      %if line begin=line end %then cmnd = cmnd+carr control only %and line begin = line begin-1; !zero length line
+      ccw(cno)_len = line end-line begin; !must be non-zero
+      line begin = line end+1
+
+set:
+      ccw(cno)_cmnd = cmnd
+      %if adaptor type=mp %then i = sli %else i = cchain!sli
+      ccw(cno)_flags = i;                !always get incorrect len unless 132 char line
+      cno = cno+1
+      %if cno=max ccws %start;           !run out of ccw space
+         %if line begin<=buffer end %then device area_partial buffer = 1
+         %exit
+      %finish
+      len = 133;                         !range of subsequent scans
+   %repeat
+
+   i = rtv(-1);                          !to remove access to current file page
+   device area_real end = real address+((line begin-1)&pagesize mask)+1; !1 beyond end
+   ccw(cno)_data ad = device area_sense ad
+   ccw(cno)_cmnd = ccw sense
+   ccw(cno)_flags = sli
+   ccw(cno)_len = 16
+   device area_last cno = cno
+   device area_current cno = 1
+
+   {  Now fixup ccw1.  For the first page of the file may require form feed      }
+   {  Otherwise, depends on the no of chars in the line buffer (unprinted from   }
+   {  the previous page) and on whether the first char of this page is a feff.   }
+
+   ccw(1)_flags = cchain!sli;            !usually
+   %if chars to dchain=255 %start;       !requires form feed (unless MP)
+      cmnd = first cmnd(adaptor type)
+   %finish %else %if chars to dchain#0 %start
+      %if ccw(2)_cmnd&carr control only=2 %start; !first byte is a feff
+         %if chars to dchain<132 %then cmnd = write and nl0 {print it} %else cmnd = no op {already printed}
+      %else
+         %if chars to dchain=132 %then cmnd = nowrite and nl1 {long line at page end} %else %start
+            cmnd = ccw(2)_cmnd;          !2's got the feff required
+            ccw(1)_flags = dchain!sli;   !data chain the transfers
+         %finish
+      %finish
+   %finish %else cmnd = no op {zero chars from previous page}
+   ccw(1)_cmnd = cmnd
+   %if cmnd=no op %start
+      ccw(1)_len = 1;  !must be non-zero
+      %if adaptor type=mp %start
+         device area_current cno = 2;  !skip the no op
+         fire request(2)
+         %return
+      %finish
+   %finish
+
+   fire request(1);                      !initiate the  transfer
+   %return
+
+
+dact(send control):                      !** control message
+   state = mess_p2>>24
+   ->states(state)
+
+
+states(connecting):                      !** allocate device
+   req = 0
+   req_dserv = allocate device
+   req_sserv = lp allocated
+   req_p1 = adaptor mnemonic(adaptor type)!device no
+   req_p2 = lp interrupt
+   req_p4 = mess_p1>>16
+   req_p5 = (mess_p2&x'00ff0000')!stream no; !lines per page from caller
+   pon(req)
+   %return
+
+
+states(enabling):                        !** request first page
+   reply to comms control(mess_p1>>16, stream no, 0, 0)
+   device area == record(device to da ad(device no))
+   device area_mode = mess_p2>>20&3;     !iso ebcdic or binary
+   %if mess_p2>>16&3=sequential %start;  !if sequential continuation continue  as usual
+      device area_ccw(1)_len = 255;      !to indicate that this is the first page
+   %finish
+   get next buffer
+   %return
+
+
+states(disconnecting):                   !** deallocate device
+   req = 0
+   req_dserv = deallocate device
+   req_sserv = lp deallocated
+   req_p1 = adaptor mnemonic(adaptor type)!device no
+   req_p4 = mess_p1>>16
+   req_p5 = stream no
+   req_p6 = device no
+   %if adaptor type=mp %then dpon(req, 30) %else pon(req)
+   %return
+
+
+states(aborting):
+
+
+states(suspending):
+   device area == record(device to da ad(device no))
+   %if device area_pagecount<=1 %then linecount = device area_linecount %else %c
+      linecount = (device area_pagecount-1)<<16!device area_linecount
+   reply to comms control(mess_p1>>16, stream no, 0, linecount); !always reply
+   %return
+
+
+!   Service routines
+
+
+   %routine reply to comms control(%integer act, stream no, flag, count)
+      rep = 0
+      rep_dserv = comms command!act
+      rep_sserv = mess_dserv
+      rep_p1 = stream no
+      rep_p2 = flag
+      rep_p3 = count
+      pon(rep)
+   %end;                                 !of routine reply to comms control
+
+
+
+   %routine get next buffer
+      req = 0
+      req_dserv = request transfer
+      req_sserv = lp command
+      req_p1 = stream no
+      pon(req)
+   %end;                                 !of routine get next buffer
+
+
+   %routine e to e(%integer address, length)
+      %integer trt ad
+      trt ad = device area_trt ad
+      %if trt ad=0 %then %return
+      *l_1, length; *l_2, address; *l_3, trtad
+      *la_0, 256
+      *basr_15, 0
+      *using_15
+      *clr_1, 0; *bc_4, <lt256>
+      *tr_0(256, 2), 0(3)
+      *alr_2, 0; *slr_1, 0
+      *bcr_15, 15
+lt256: *ltr_1, 1; *bc_8, <end>
+      *bctr_1, 0; *ex_1, <tr>
+end:  %return
+tr:   *tr_0(0, 2), 0(3)
+      *drop_15
+   %end;                                 !of e to e
+
+
+%end;                                    !of routine lp adaptor
+
+
+
+%if crfitted=yes %start
+   %external %routine cr adaptor(%record (pe) %name mess)
+   %end;                                 !of routine cr adaptor
+%finish
+
+
+
+%if cpfitted=yes %start
+   %external %routine cp adaptor(%record (pe) %name mess)
+   %end;                                 !of routine cp adaptor
+%finish
+
+
+!!         Comms event monitoring
+
+
+%if monlevel&256#0 %start;               !include monitoring?
+
+   %if multi ocp=yes %start
+      %external %routine %spec semaloop(%integer %name sema, %integer parm)
+      %own %integer trace sema= -1
+   %finish
+   %external %integer %fn %spec s to i(%string (255) %name s)
+
+   %const %integer start page= x'500';   !first available page on fsys to trace to
+   %const %integer nbuffs= 2;            !maybe more for fast machines & multi ocps
+   %const %integer combine sno= x'380000'
+   %const %integer page out reply= 1;    !activity numbers in combine
+   %const %integer start harvest= 2
+   %const %integer page got= 3
+   %const %integer stop harvest= 4
+
+   %own %integer trace fsys= -1;         !trace output to this fsys initially not set
+   %own %integer end page= 0;            !last available e page on fsys to trace to
+   %own %integer current page= 0;        !initially not set
+   %own %integer events lost= 0;         !count of events lost when no buffer available
+   %own %integer buffer pointer= 0;      !next free hole in current buffer
+   %own %integer current buffer= 0;      !current buffer if # 0
+   %own %integer next buffer= 0;         !next buffer if # 0
+   %own %integer count= 0;               !count of pages claimed
+   %record %format bufferf(%integer real address, store index, link)
+   %own %record (bufferf) %array buffers(1:nbuffs)
+
+
+   %external %routine tracer(%string (63) s)
+
+!*  This routine handles text commands from the operator to set up
+!*   and control the trace procedure. The commands handled are
+!*
+!*       TRACE TO vollabel    !Nominates disc volume trace to be logged to
+!*       TRACE event process  !specifies which event is to be traced (-1 all)
+!*                             and which process is to be traced (-1 all).
+!*                            !Events can be added to but not processes.
+!*       TRACE ON             !initiates tracing (above commands must have
+!*                             previously been given)
+!*       TRACE OFF            !terminates tracing. Not final trace may be
+!*                             added to by setting trace on again.
+
+
+      %record (pe) p
+      %record (dtform) %name disc
+      %string (63) label, temp
+      %integer i, j
+
+
+      ->set fsys %if s->temp.("TO ").label %and temp=""
+      ->set on %if s="ON"
+      ->set off %if s="OFF"
+
+      %if trace fsys#-1 %and trace=no %start; !trace fsys must first be set
+         !and trace not started
+         i = s to i(s);                  !get events to trace from string
+         %if-1<=i<=31 %start;            !within range
+            j = s to i(s);               !get process to trace from string
+            %if-1<=j<=max procs %and j#0 %start
+               !within range
+               %if i<=0 %then trace events = i %else trace events = trace events!1<<i
+               trace process = j
+               %return
+            %finish
+         %finish
+      %finish
+err:
+
+      op mess("TRACE ".s." ?")
+      %return
+
+
+set on:                                  !start tracing check trace fsys set and events set first
+      ->err %if trace fsys=-1 %or trace events=0 %or trace=yes
+      %if current page<end page %start
+         p = 0
+         p_dserv = combine sno!start harvest
+         pon(p);                         !request combine to get buffers and start tracing
+      %finish %else op mess("TRACE AREA FULL")
+      %return
+
+
+set off:                                 !stop tracing check tracing was on
+      ->err %if trace#yes
+      p = 0
+      p_dserv = combine sno!stop harvest
+      pon(p)
+      %return
+
+
+set fsys:                                !set the trace fsys checking it is there
+
+!*  CHECKS
+!*         WHETHER THE LABEL IS A VALID LENGTH
+!*         TRACING IS NOT ALREADY IN PROGRESS
+!*         WHETHER SPECIFIED DISC IS ON-LINE
+!*         THAT ITS CONSISTENCY CHECK HAS BEEN DONE
+!*         THAT IT IS NOT THE IPL DISC
+!*         THAT THE TRACE AREA DOES NOT OVERLAP THE FILE SYSTEM
+!*  SETS (if above checks succeed)
+!*         TRACE FSYS
+!*         END PAGE OF TRACE AREA
+!*         START PAGE OF TRACE AREA
+
+      %if length(label)=6 %and trace=no %and com_ndiscs>0 %start
+         %for i = 0, 1, com_ndiscs-1 %cycle
+            disc == record(integer(com_ditaddr+4*i))
+            %if disc_label=label %and disc_dlvn>=0 %and disc_dlvn#com_suplvn %and disc_base>start page %start
+               trace fsys = disc_dlvn;   !set fsys no
+               end page = disc_base-1;   !page before start of file system
+               current page = start page; !set to start of trace area
+               op mess("TRACE AREA ".label." X".h to s(start page, 3)." TO X".h to s(end page, 3))
+               %exit
+            %finish
+         %repeat
+         %return %if trace fsys#-1
+      %finish
+      ->err
+   %end;                                 !of routine trace
+
+
+   %routine fill(%integer length, from, filler)
+!***********************************************************************
+!*                                                                     *
+!*  FILL "LENGTH" BYTES "FROM" WITH CHARACTER "FILLER"                 *
+!*                                                                     *
+!***********************************************************************
+      *l_0, from
+      *lr_2, 0
+      *l_1, length
+      *l_3, filler
+      *sll_3, 24
+      *mvcl_0, 2
+   %end;                                 !of routine fill
+
+
+   %routine page out
+      %record (pe) p
+      p = 0
+      p_dserv = x'210002';               !write out to disc
+      p_sserv = combine sno!page out reply; !reply to combine
+      p_p1 = current buffer
+      p_p2 = trace fsys<<24!current page
+      p_p3 = buffers(current buffer)_real address
+      pon(p)
+
+      current page = current page+1
+      %if trace=yes %start;              !ignore if trace over
+         %if current page>=end page %start; !end of trace area
+            p = 0
+            p_dserv = combine sno!stop harvest
+            pon(p);                      !notify combine to stop
+            op mess("TRACE AREA FULL")
+         %finish
+         current buffer = next buffer;   !get next buffer
+         %if current buffer#0 %start;    !there was one
+            next buffer = buffers(current buffer)_link
+            !relink chain
+            buffer pointer = 0;          !set to start of buffer
+         %finish
+      %finish
+   %end;                                 !of routine page out
+
+
+   %routine return buffer(%integer buff no)
+      %record (pe) p
+      p = 0
+      p_dserv = x'60000';                !return page
+      p_p1 = buff no
+      p_p2 = buffers(buff no)_store index
+      pon(p)
+   %end;                                 !of routine return buffer
+
+
+   %external %routine harvest(%integer event, proc, len, a, b, c, d, e)
+      %integer bytes, address, i, v address
+      %record %format dataf(%byte %integer event, proc, ocp, len, %long %integer clock, %integer %array a(0:4))
+      %long %integer clock, ocp
+      %record (dataf) %name data
+      bytes = len+12
+      *stck_clock
+      clock = clock>>12;                 !to microsecs
+      %if multi ocp=yes %start
+         *stipd_ocp; ocp = (ocp>>32)&x'ff'
+         *balr_1, 0; *using_1; *sr_0, 0
+         *lr_2, 0; *bctr_2, 0
+         *cs_2, 0, tracesema
+         *bc_8, <tgot1>
+         *drop_1
+         semaloop(trace sema, 0)
+tgot1:
+      %finish %else ocp = 0
+
+      %if current buffer#0 %start;       !buffer available?
+         v address = rtv(buffers(current buffer)_real address); !get a virt address
+         address = v address+buffer pointer
+         data == record(address)
+         data_event = event;             !log data in buffer
+         data_proc = proc
+         data_ocp = ocp
+         data_len = len
+         data_clock = clock
+         move(len, addr(a), address+12) %if len>0
+!         %if len>0 %start
+!            address = address+12
+!            i = addr(a)
+!mc code
+!         %finish
+         buffer pointer = buffer pointer+bytes
+         %if buffer pointer+32>=page size %or trace=no %start
+            fill(page size-buffer pointer, v address+buffer pointer, 0)
+            page out
+         %finish
+         i = rtv(-1)
+         !buffer nearly full or trace stops
+         op mess("END OF TRACE X".h to s(current page-1, 3)) %if trace=no
+      %finish %else events lost = events lost+1
+      trace sema = -1 %if multi ocp=yes
+   %end;                                 !of routine harvest
+
+
+   %external %routine combine(%record (pe) %name p)
+      %switch act(page out reply:stop harvest)
+      %integer buff no
+      buff no = p_p1;                    !normally in p1
+      %if multi ocp=yes %start
+         *balr_1, 0; *using_1; *sr_0, 0
+         *lr_2, 0; *bctr_2, 0
+         *cs_2, 0, tracesema
+         *bc_8, <tgot2>
+         *drop_1
+         semaloop(trace sema, 0)
+tgot2:
+      %finish
+      ->act(p_dserv&x'FFFF')
+
+act(page out reply):
+      op mess("TRACE PAGE OUT FAILS") %if p_p2#0
+      %if trace=yes %start;              !still tracing
+         %if current buffer=0 %start;    !buffer urgently required
+            current buffer = buff no
+            buffer pointer = 0
+         %else;                          !link to free list
+            buffers(buff no)_link = next buffer
+            next buffer = buff no
+         %finish
+      %finish %else return buffer(buff no); !tracing has stopped
+      trace sema = -1 %if multi ocp=yes
+      %return
+
+
+act(start harvest):
+      p = 0
+      p_dserv = x'50000';                !get page
+      p_sserv = combine sno!page got;    !reply here
+      p_p2 = 1;                          !do not zero
+      p_p3 = x'18';                      !set my psw for the page
+      %for buff no = 1, 1, n buffs %cycle
+         p_p1 = buff no
+         pon(p)
+      %repeat
+      next buffer = 0;                   !head of free list
+      count = 0;                         !of buffers which have arrived
+      trace sema = -1 %if multi ocp=yes
+      %return
+
+
+act(page got):
+      buffers(buff no)_real address = p_p4
+      buffers(buff no)_store index = p_p2
+      buffers(buff no)_link = next buffer; !link in to free list
+      next buffer = buff no
+      count = count+1;                   !count arrivals
+      %if count=nbuffs %start;           !all have arrived start harvest
+         current buffer = next buffer;   !get first buffer from free list
+         next buffer = buffers(current buffer)_link
+         buffer pointer = 32;            !leave room for a file header
+         events lost = 0
+         op mess("START OF TRACE X".h to s(current page, 3))
+         trace = yes
+         trace sema = -1 %if multi ocp=yes
+         harvest(64, 0, 12, nbuffs, trace events, trace process, 0, 0)
+         !trace starts
+         %return
+      %finish
+      trace sema = -1 %if multi ocp=yes
+      %return
+
+
+act(stop harvest):
+      %while next buffer#0 %cycle;       !release queued buffers
+         return buffer(next buffer)
+         next buffer = buffers(next buffer)_link
+      %repeat
+      trace = no
+      trace sema = -1 %if multi ocp=yes
+      harvest(65, 0, 4, events lost, 0, 0, 0, 0); !trace ends
+      %return
+   %end;                                 !of routine combine
+%finish
+%end %of %file

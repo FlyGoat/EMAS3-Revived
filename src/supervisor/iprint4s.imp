@@ -1,0 +1,811 @@
+%INCLUDE "ercc07:ibmsup_comf370"
+%RECORD %FORMAT parmf(%INTEGER dest,srce,(%INTEGER p1,p2,p3,p4,p5,p6 %OR %STRING (23) text))
+!
+%EXTERNAL %ROUTINE %SPEC devio(%RECORD (parmf) %NAME p)
+%EXTERNAL %ROUTINE %SPEC monitor(%STRING (63) s)
+%EXTERNAL %ROUTINE %SPEC move(%INTEGER l,f,t)
+%EXTERNAL %ROUTINE %SPEC pon(%RECORD (parmf) %NAME p)
+%EXTERNAL %ROUTINE %SPEC opmess(%STRING (63) s)
+%STRING %FN %SPEC strint(%INTEGER n)
+%STRING %FN %SPEC strhex(%INTEGER n)
+%EXTERNAL %ROUTINE %SPEC itoe(%INTEGER ad,l)
+%STRING %FN %SPEC htos(%INTEGER n,p)
+%if multiocp=yes %then %Start
+      %externalroutinespec semaloop(%integer %name sema)
+      %externalintegerfnspec getmyport
+      %routinespec reservelog
+      %routinespec releaselog
+      %routinespec await log route
+      %OWN %INTEGER logsema=-1;          ! semaphore for iocp and printer
+      %OWN %INTEGER logroute=0;          ! bottom half has count
+                                         ! if count>0 tophalf has ocp port
+%finish
+!
+%EXTERNAL %LONG %INTEGER %SPEC kmon
+%CONST %LONG %INTEGER disawait=psw0!x'2000000000000'
+%OWN %LONG %INTEGER psw
+!------------------------------------------------------------------------
+!
+!
+%CONST %BYTE %INTEGER %ARRAY hexds(0:15)='0','1','2','3','4','5','6','7',
+                                   '8','9','A','B','C','D','E','F'
+!
+%EXTERNAL %INTEGER %FN realise(%INTEGER vad)
+      %IF va mode=yes %START
+         *basr_15,0; *using_15
+         *l_1,vad; *lra_0,0(1); *bc_8,<ok>
+         monitor("REALISE bad address!")
+ok:      *st_0,vad
+         *drop_15
+      %FINISH
+      %RESULT=vad
+%END
+!
+%EXTERNAL %ROUTINE write %ALIAS "S#WRITE"(%INTEGER i,pl)
+%STRING (31) s
+%STRING (1) sign
+%INTEGER j,value
+      sign=" "
+      %IF i<0 %START
+         sign="-"
+         %IF i=x'80000000' %THEN i=x'7fffffff' %ELSE i=-i
+      %FINISH
+      s=strint(i)
+      j=pl-length(s)
+      spaces(j) %IF j>0
+      printstring(sign.s)
+%END
+!
+%ROUTINE ptrec(%RECORD (parmf) %NAME p)
+%INTEGER i,j,sptr,val
+%STRING (120) s
+      length(s)=120;                     ! sidestep charno check
+      sptr=1
+      %FOR i=addr(p),4,addr(p)+28 %CYCLE
+         val=integer(i)
+         %FOR j=28,-4,0 %CYCLE
+            charno(s,sptr)=hexds((val>>j)&15)
+            sptr=sptr+1
+         %REPEAT
+         charno(s,sptr)=' '
+         sptr=sptr+1
+      %REPEAT
+      %FOR i=addr(p)+8,1,addr(p)+31 %CYCLE
+         j=byteinteger(i)
+         %IF j<32 %OR j>95 %THEN j='_'
+         charno(s,sptr)=j
+         sptr=sptr+1
+      %REPEAT
+      charno(s,sptr)=nl
+      length(s)=sptr
+      printstring(s)
+%END
+!
+!------------------------------------------------------------------------
+!
+%EXTERNAL %ROUTINE pkmonrec(%STRING (23) text, %RECORD (parmf) %NAME p)
+%longinteger time
+      *stck_time
+      time=time>>22;               ! millesecs
+      write(time&X'FFFF',5); space
+      printstring(text)
+      space
+      ptrec(p)
+%END
+!
+!------------------------------------------------------------------------
+!
+%EXTERNAL %ROUTINE dumptable(%INTEGER table,add,length)
+%OWN %INTEGER next
+%INTEGER i,j,k,ad,end,sptr,val
+%STRING (132) s
+      ad=addr(s)
+      add=add&(-4)
+      %IF multiocp=yes %THEN reserve log
+      newline
+      %IF table>0 %THEN %START
+         next=next+1
+         printstring("DT: ".string(addr(com_date0)+3)." ".string(addr(com_time0)+3)."
+****    Supervisor  dump    table: ".strint(table)."    addr ".strhex(add)."    length: ".strint(length). %C
+            "    Dump no: ".strint(next)."****
+")
+      %FINISH
+      end=add+length; i=1
+      s=" "
+      %UNTIL add>=end %CYCLE
+         j=add+31
+         *basr_15,0; *using_15
+         *l_1,j; *lra_0,0(1); *bc_7,<invl>; *drop_15
+         %IF i=0 %AND add+32<end %THEN %START
+            %CYCLE k=add,4,add+28
+               ->on %IF integer(k)#integer(k-32)
+            %REPEAT
+            s="O"; ->up
+         %FINISH
+on:
+         byteinteger(ad+2)='('; sptr=3
+         %CYCLE i=28,-4,0
+            byteinteger(ad+sptr)=hexds((add>>i)&15)
+            sptr=sptr+1
+         %REPEAT
+         byteinteger(ad+sptr)=')'
+         byteinteger(ad+sptr+1)=' '
+         sptr=sptr+2
+         %CYCLE k=add,4,add+28
+            val=integer(k)
+            %CYCLE i=28,-4,0
+               byteinteger(ad+sptr)=hexds((val>>i)&15)
+               sptr=sptr+1
+            %REPEAT
+            byteinteger(ad+sptr)=' '
+            sptr=sptr+1
+         %REPEAT
+         %IF table>=0 %THEN %START
+            byteinteger(ad+sptr)=' '
+            sptr=sptr+1
+            %CYCLE k=add,1,add+31
+               i=byteinteger(k)&x'7f'
+               %UNLESS 32<=i<127 %THEN i=' '
+               byteinteger(ad+sptr)=i
+               sptr=sptr+1
+            %REPEAT
+         %FINISH
+         byteinteger(ad+sptr)=nl
+         byteinteger(addr(s))=sptr
+         printstring(s)
+         s=" "
+up:      add=add+32
+         i=0
+      %REPEAT
+      ->wayout
+invl:
+      printstring("address validation fails
+")
+wayout:                                  ! exit freeing path
+      %IF multiocp=yes %THEN release log
+%END;                                    !routine dump
+!
+!  OWN variables for joint use by 'IOCP' and 'PRINTER'
+!
+%CONST %INTEGER psno=x'360000'
+%CONST %INTEGER buffbase=pbseg<<sshift,mask=buffbase!x'3fff',pagemask=buffbase!x'3000'
+%OWN %INTEGER busy=0, dintpend=0, intpend=0, testpend=0, init=0
+%OWN %INTEGER mode=-1
+%CONST %INTEGER spooling=1, printing=0
+      %IF multiocp=yes %THEN %START
+      %EXTERNAL %ROUTINE reserve log
+!***********************************************************************
+!*    claims the log for calling routine. waits if needed. this routine*
+!*    is used in duals to prevent tables being mixed up                *
+!*    nested claims and release by same ocp are permitted              *
+!***********************************************************************
+      %INTEGER myport
+         myport=getmyport
+         semaloop(logsema)
+         %IF logroute&x'ffff'=0 %THEN ->wayout
+         %IF logroute>>16=myport %THEN ->wayout
+         logsema=-1
+         await log route
+wayout:
+         logroute=(logroute&x'ffff'+1)!myport<<16
+         logsema=-1
+      %END
+      %EXTERNAL %ROUTINE release log
+!***********************************************************************
+!*    release the log path                                             *
+!***********************************************************************
+      %INTEGER myport
+         myport=getmyport
+         semaloop(logsema)
+         %IF logroute&x'ffff'=0 %OR logroute>>16#myport %THEN opmess("LOGROUTE paths ? ".strhex(logroute)) %ELSE %C
+            logroute=logroute-1
+         logsema=-1
+      %END
+      %ROUTINE await log route
+!***********************************************************************
+!*    awaits logroute coming free and returns with logsema held        *
+!*    times out after about 5 secs on 2970                             *
+!***********************************************************************
+      %INTEGER myport,i,j
+         %IF monlevel&4#0 %START
+         %EXTERNAL %LONGINTEGER %SPEC sematime
+         %longinteger cpt1,cpt2
+      *STPT_cpt1
+         %FINISH
+         myport=getmyport
+         %CYCLE j=1,1,2000
+            %CYCLE i=1,1,com_inspersec;  ! wait about 1 millesec
+            %REPEAT;                     ! dont use rtc in case other
+                                         ! ocp has clock&has died
+            semaloop(logsema)
+            %IF logroute&x'ffff'=0 %THEN ->wayout
+            logsema=-1
+         %REPEAT
+         opmess("LOGROUTE timeout")
+         logroute=0;                     ! have timed out
+wayout:
+         %IF monlevel&4#0 %START;        ! record wasted time
+            *stpt_cpt2
+            sematime=sematime+(cpt1-cpt2)>>12
+         %FINISH
+      %END
+      %FINISH
+%EXTERNAL %ROUTINE iocp %ALIAS "S#IOCP"(%INTEGER ep,n)
+!***********************************************************************
+!*       This routine receives all the output from main via imp stmts  *
+!*       such as printstring, and sends it to the main print file.     *
+!*       segment p30 is used as the buffer. if output arrives faster   *
+!*       than the printer can cope it is discarded.                    *
+!***********************************************************************
+%RECORD (parmf) q
+%INTEGER i,j,adr,l,oldinptr,sym,nlseen,myport,mymask
+%STRING (63) s
+      %RETURN %UNLESS x'280a8'&1<<ep\=0; !check for valid entry
+      nlseen=0
+      %IF ep=17 %THEN %START;            ! repeated symbols
+         l=n>>8&63
+         adr=addr(s)+1
+         j=l
+         length(s)=63;                   ! avoid charno checks
+         %WHILE j>0 %CYCLE
+            charno(s,j)=n&127
+            j=j-1
+         %REPEAT
+!
+      %FINISH %ELSE %START
+         %IF ep>=7 %THEN %START;         ! print string
+            l=byte integer(n); adr=n+1
+         %FINISH %ELSE %START;           ! print symbol & print ch
+            l=1; adr=addr(n)+3
+         %FINISH
+      %FINISH
+!
+! now put message into buffer if there is room
+!
+      i=1
+      %IF multiocp=yes %THEN %START
+         semaloop(logsema)
+      %FINISH
+!
+! check and await the logroute in duals except for system errors
+! the other ocp is halted here, so no point in waiting
+! also system error in singles can break into device error
+! so journal system has to be able to cope with this.
+!
+      %IF multiocp=yes %AND logroute&x'ffff'>0 %START
+         myport=getmyport
+         %IF myport#logroute>>16 %AND mymask&1=0 %START
+            logsema=-1
+            await log route
+         %FINISH
+      %FINISH
+      oldinptr=com_inptr
+      %WHILE i<=l %CYCLE
+         ->end %IF busy=1;               ! buffers busy discard output
+         j=(com_inptr+1)&mask
+         %IF j&x'fff'<=63 %THEN com_inptr=j!63 %AND j=com_inptr+1
+         %IF j#com_outptr %THEN %START;  ! room for current char
+            sym=byte integer(adr)
+            byte integer(j)=sym
+            %IF sym=133 %THEN sym=nl
+            %IF sym=nl %THEN nlseen=1
+            adr=adr+1; i=i+1
+            com_inptr=j
+         %FINISH %ELSE busy=1 %AND ->end
+      %REPEAT
+!
+! pon a kick to printer if a line (or page in disc mode) has been completed
+! and printer is idle. however if reporting a recovered error (ie syserr
+! int is masked out) refrain from ponning. recovered error might be
+! a single bit or retry from pon or poff
+!
+      %IF (oldinptr=com_outptr %AND nlseen#0) %OR (mode=spooling %AND com_inptr&pagemask#oldinptr&pagemask) %THEN %C
+         q_dest=psno %AND pon(q)
+end:
+      %IF multiocp=yes %THEN logsema=-1
+%END;                                    ! of routine iocp
+!!
+%EXTERNAL %ROUTINE printer(%RECORD (parmf) %NAME p)
+!***********************************************************************
+!*    This (over elaborate) version of printer supports both a real    *
+!*    printer and a virtual (disc) printer allowing switching between  *
+!*    the two at any time. This was useful in development but in a     *
+!*    service situation a disc only version would be samller and easier*
+!*    to maintain.                                                     *
+!***********************************************************************
+%ROUTINE %SPEC initialise file
+%ROUTINE %SPEC change file
+%ROUTINE %SPEC discwrite(%INTEGER ad)
+%ROUTINE %SPEC preport(%INTEGER value)
+%ROUTINE %SPEC deallocate main printer(%INTEGER reply act)
+%ROUTINE %SPEC allocate main printer(%INTEGER reply act)
+%INTEGER i,j,act,dmon,page,prevmode
+%OWN %BYTE %INTEGER %ARRAY buffer(0:133)=0(*)
+%OWN %INTEGER bufferad=-1
+%INCLUDE "ercc07:ibmsup_dtform1s"
+      %IF CCW Format=0 %START
+      %RECORD %FORMAT ccwf(%INTEGER cmdadr, %BYTE %INTEGER flags,sp, %SHORT %INTEGER len)
+      %ELSE
+      %RECORD %FORMAT ccwf(%BYTE cmd,flags, %SHORT len, %INTEGER adr)
+      %FINISH
+%OWN %RECORD (ccwf) %NAME ccw
+%RECORD (dtform) %NAME d
+%OWN %INTEGER pagestate=0;               ! bitmask of pages with trnsfers
+%CONST %INTEGER ponsrc=psno
+%CONST %INTEGER gpcsno=x'300000'
+%OWN %INTEGER mnem=m'LP', actsize=0
+%OWN %INTEGER dpage=0;                   ! disc address
+%OWN %INTEGER cfile=0, sectsize=0
+%OWN %INTEGER %ARRAY dpages(0:1) =  -1(2)
+%OWN %INTEGER discdest,transtabad=0
+                                         ! file header block
+%RECORD %FORMAT hdrf(%INTEGER hdr1,hdr2,hdr3,hdr4,hdr5,hdr6,hdr7,hdr8)
+%OWN %STRING (8) olddate, oldtime
+%OWN %INTEGER oldpdt
+%OWN %INTEGER source8
+%CONST %INTEGER maxact=10
+%SWITCH dact(0:maxact)
+!!
+!!
+!!
+      %IF init=0 %THEN %START;           ! first time in - initialise
+         allocate main printer(10)
+         init=-1
+      %FINISH
+!!
+!!
+!!
+      act=p_dest&255
+      %IF act>maxact %THEN act=0;        ! dont report for fear of starting loop
+      %IF monlevel&2#0 %THEN dmon=kmon>>54&1
+      %IF monlevel&2#0 %AND dmon#0 %AND act#0 %AND (act#2 %OR p_p2>>24#x'0c') %THEN pkmonrec("PRINT( in):",p)
+                                         ! dont monitor clock or normal terms
+      ->dact(act)
+!!
+!****************************************
+!!
+nextline:
+      %IF mode=printing %THEN byteinteger(bufferad)=0 %and CCW_LEN=0
+!!
+!!------------------------------------------------
+dact(0):                                 ! alarm clock tick or equivalent
+      %IF multiocp=yes %THEN %START
+         semaloop(logsema)
+      %FINISH
+      %IF mode=spooling %START
+         i=com_outptr
+         %CYCLE j=1,1,4
+            %IF (i-1)<=com_inptr<(i+4096)&x'ffffffc0' %AND busy=0 %THEN %START
+               %IF multiocp=yes %THEN logsema=-1
+               %RETURN
+            %FINISH
+            page=(i-buffbase)//pagesize
+            %IF pagestate&(1<<page)=0 %THEN discwrite(i)
+            i=(i+4096)&mask
+         %REPEAT
+      %FINISH
+      %IF mode!intpend!testpend!dintpend#0 %START
+         %IF multiocp=yes %THEN logsema=-1
+         %RETURN;                        ! unless printing & no ints pending
+      %FINISH
+      %IF com_inptr=com_outptr %THEN ->unbusy; ! nothing to print
+                                         ! check we were not inhibited
+      i=byteinteger(bufferad)
+      %CYCLE
+         j=byte integer(com_outptr)
+         byte integer(com_outptr)=0
+         %IF j=10 %OR j=12 %OR i=132 %START
+            j=32 %IF j=10
+            %IF i=132 %THEN byteinteger(com_outptr)=j %ELSE %START
+               com_outptr=(com_outptr+1)&mask
+               %IF com_outptr&x'fff'<=63 %THEN com_outptr=com_outptr+64
+            %FINISH
+            i=i+1; byteinteger(bufferad+i)=j
+            byteinteger(bufferad)=i
+            ccw_len=i
+            itoe(bufferad+1,i)
+            %UNLESS transtabad=0 %START
+               *l_1,bufferad; *l_2,transtabad
+               *tr_1(132,1),0(2)
+            %FINISH
+            %EXIT
+         %FINISH
+         com_outptr=(com_outptr+1)&mask
+         %IF com_outptr&x'fff'<=63 %THEN com_outptr=com_outptr+64
+         %IF j#13 %THEN i=i+1 %AND byteinteger(bufferad+i)=j
+         %IF com_inptr=com_outptr %THEN byteinteger(bufferad)=i %AND ->unbusy
+                                         ! incomplete line
+      %REPEAT
+      %IF multi ocp=yes %THEN logsema=-1
+print:                                   ! print line in array buffer(again)
+      p=0
+      p_dest=gpcsno!12
+      p_srce=ponsrc!5
+      p_p1=addr(ccw)
+      p_p2=init
+      pon(p)
+      intpend=1
+      %RETURN
+!!
+!!-----------------------------------------------
+                                         ! execute request rejected
+dact(5):
+!!
+      preport(p_p1)
+      %RETURN
+!!
+!!-----------------------------------------------
+dact(1):                                 ! new log file
+                                         ! P_P1=no of epages (16)
+                                         ! P_P2=disc addr
+      %IF monlevel&2#0 %AND dmon=1 %THEN opmess("New log file ".htos(p_p2,8))
+      sectsize=p_p1<<12
+      %IF dpages(0)>0 %AND dpages(1)>0 %START
+         printstring("Spurious log file")
+         %RETURN
+      %FINISH
+      %IF dpages(cfile)=0 %THEN dpages(cfile)=p_p2 %ELSE dpages((cfile+1)&1)=p_p2
+      %IF dpage=0 %THEN initialise file
+      ->nextline
+!!
+!!------------------------------------------------
+!!      Printer interrupts terms&attns, come here
+dact(2):
+      j=p_p2>>24
+      %IF j=x'0c' %START;                ! normal term
+         intpend=0
+         %IF mode=spooling %THEN ->dmp
+         ->nextline
+      %FINISH
+      %IF J&4=4 %AND intpend=4 %THEN intpend=0 %AND testpend=1 %AND ->end
+      %IF J=4 %AND intpend=0 %START;     ! unexpected den end =attention
+         %IF testpend#0 %THEN testpend=0
+         ->print %if ccw_len#0; ! something in buffer in EBCDIC
+         ->end
+      %FINISH
+                                         ! abterm
+      %IF mode=spooling %START
+         intpend=0
+dmp:     deallocate main printer(9)
+         ->end
+      %FINISH
+      opmess("Attend main lp") %if J&3#0;         ! unit check & unit exception
+      %IF j&2#0 %start
+          %if J&4=0 %THEN intpend=4 %ELSE intpend=0 %AND testpend=1
+      %finish
+      ->end
+!!
+!!------------------------------------------------
+!!     Reset to printer - after D/MAINLP (obeying allocation rules)
+!!
+dact(8):
+      source8=p_srce
+      %IF mode#printing %START
+         allocate main printer(3)
+         %RETURN
+      %FINISH
+      p_p1=81;                           ! DIR error "already main lp"
+dact(3):                                 ! reply from above allocat
+      p_dest=source8
+      p_srce=ponsrc!8
+      %IF 0#p_p1#81 %THEN p_p1=95;       ! DIR err "main lp fails"
+      pon(p)
+      %RETURN %IF p_p1\=0;               ! no allocate done
+dact(10):                                ! reply from initial allocate
+exit6:
+      %IF p_p1#0 %THEN preport(p_p1) %AND %RETURN
+      d==record(p_p3)
+      transtabad=d_trtabad
+      init=p_p2
+      mnem=p_p6
+      mode=printing
+      bufferad=addr(buffer(0))
+                                         ! use private areas where possible
+                                         ! 'lest LP in use when 'grabbed' by PON X36 6
+      ccw==record(d_ua ad)
+      %IF CCW Format=0 %START
+         ccw_cmdadr=x'09'<<24!realise(addr(buffer(1)))
+         integer(addr(ccw)+8)=x'04000000'!realise(addr(d_sense1))
+         integer(addr(ccw)+12)=x'20000004'
+      %ELSE
+         ccw_cmd=x'09'
+         ccw_adr=realise(addr(buffer(1)))
+         integer(addr(ccw)+8)=x'04200004'
+         integer(addr(ccw)+12)=realise(addr(D_sense1))
+      %FINISH
+      ccw_flags=x'60'
+      %IF multiocp=yes %THEN %START
+         semaloop(logsema)
+      %FINISH
+      change file %IF dpage>0
+      %IF multiocp=yes %THEN logsema=-1
+      intpend=0
+      ->nextline
+!!
+!!----------------------------------
+!!
+dact(6):                                 ! emergency reset by hairy PON
+                                         ! no reply. Use emergency allocate
+      p_dest=gpcsno!8;                   ! emergency allocate
+      p_p1=m'LP';                        ! any LP will do
+      p_p2=ponsrc!2
+      devio(p);                          ! direct call for emergency allocate
+      ->exit6;
+!!----------------------------------------------------
+dact(7):                                 ! close current output
+      %IF monlevel&2#0 %AND dmon=1 %THEN opmess("NLF ".htos(com_inptr,8)." ".htos(com_outptr,8))
+      prevmode=mode
+      discdest=p_srce
+      %IF multiocp=yes %THEN %START
+         semaloop(logsema)
+      %FINISH
+      %IF mode=spooling %START
+         byteinteger((com_inptr+1)&mask)=4; ! EOM character
+         discwrite(com_outptr)
+!   Subtract unused space
+         actsize=actsize-(x'1000'-((com_inptr&x'fff')+1))
+         com_inptr=((com_inptr+4096)&pagemask)!63; ! move onto next page
+         change file
+      %FINISH %ELSE %START;              ! zero front of first page
+         %IF com_inptr<com_outptr %AND com_inptr>>12=com_outptr>>12 %START
+            busy=1
+            i=(com_inptr&pagemask)!64
+            %WHILE i<=com_outptr %CYCLE
+               byteinteger(i)=0
+               i=i+1
+            %REPEAT
+         %FINISH
+         mode=spooling
+         %IF dpages(0)=-1=dpages(1) %THEN change file %ELSE initialise file
+! ACT to acquire new files if neccesary
+      %FINISH
+      %IF multiocp=yes %THEN logsema=-1
+      %IF prevmode=printing %THEN deallocate main printer(9)
+      ->nextline
+!!
+!!------------------------------------------------
+dact(4):                                 ! disc termination
+      %IF dintpend=0 %START
+         printstring("
+ Spurious log disc int ")
+         %RETURN
+      %FINISH
+      dintpend=dintpend-1
+      pagestate=pagestate&(x'ffffffff'!!(1<<p_p1)); ! clear transfer bit
+      j=buffbase+(p_p1<<12)
+!
+! Zero block - null character
+!
+      *l_0,j; *l_1,pagesize
+      *lr_2,0; *la_3,7; *sll_3,24; *mvcl_0,2
+      %IF multiocp=yes %THEN %START
+         semaloop(logsema)
+      %FINISH
+      %IF p_p2#0 %START;                 ! abnormal termination
+         opmess(" Log file abterm ".htos(p_p2,2))
+         dintpend=0;                     ! forget other transfers outstanding on faulty file
+         pagestate=0
+         change file
+      %FINISH
+      %CYCLE
+         page=(com_outptr-buffbase)//pagesize
+         %EXIT %IF pagestate&(1<<page)#0
+         com_outptr=((com_outptr+4096)&pagemask)!64
+         ->unbusy %IF com_outptr-1<=com_inptr<(com_outptr+4096)
+      %REPEAT
+      %IF multiocp=yes %THEN logsema=-1
+      %RETURN
+!!------------------------------
+!!
+dact(9):                                 ! reply from dellocate
+                                         ! after switch to spooling
+      %IF p_p1#0 %THEN preport(p_p1)
+      testpend=0
+      bufferad=-1
+      %RETURN
+!!
+!!-------------------------------------------------
+!!
+unbusy:                                  ! restart if buffer oflow occurred
+                                         ! LOGSEMA is claimed
+      %IF busy=1 %THEN %START
+         %IF mode=spooling %THEN com_inptr=com_outptr
+         %IF monlevel&2#0 %AND dmon=1 %THEN opmess("Unbusy")
+         busy=0
+         i=-1
+      %FINISH %ELSE i=0
+      %IF multiocp=yes %THEN logsema=-1
+      %IF i=-1 %THEN printstring("
+*** output lost ***
+")
+      %RETURN
+%ROUTINE initialise file
+!***********************************************************************
+!*    SEMA must be claimed before calling this                         *
+!***********************************************************************
+%INTEGER w0,w1,w2
+      %RETURN %UNLESS mode=spooling
+      actsize=0
+      com_outptr=(com_outptr&pagemask)!64
+      %IF busy=1 %THEN com_inptr=com_outptr-1
+                                         ! pack date and time
+      *la_2,w1; *srl_2,3; *sll_2,3
+      *stck_0(2); *l_0,0(2)
+      *st_0,oldpdt
+      oldtime=string(addr(com_time0)+3)
+      olddate=string(addr(com_date0)+3)
+      dpage=dpages(cfile)
+%END
+%ROUTINE changefile
+!***********************************************************************
+!*    SEMA must be held before calling this. Can not let other OCP in  *
+!*    while changing files                                             *
+!*    close current spool file and request another one                 *
+!*    if both files closed , requests have already been sent, so return*
+!***********************************************************************
+      %RETURN %IF dpages(0)=0 %AND dpages(1)=0
+      %RETURN %IF actsize=0 %AND dpage#0; ! no empty files
+agn:
+      %IF monlevel&2#0 %AND dmon=1 %THEN opmess("Change file ".htos(dpage,8)." ".htos(actsize,6))
+      p=0
+      p_dest=discdest
+      p_srce=ponsrc!1
+      p_p1=dpage
+      p_p2=actsize
+      pon(p)
+      actsize=0
+      dpages(cfile)=0;                   ! mark file closed
+      cfile=(cfile+1)&1;                 ! change to alternate file
+      dpage=dpages(cfile)
+      %IF dpage>0 %THEN initialise file %ELSE %START
+         %IF dpage=-1 %THEN dpage=0 %AND ->agn
+      %FINISH
+%END
+%ROUTINE discwrite(%INTEGER ad)
+!***********************************************************************
+!*    SEMA must be held for call of change file                        *
+!***********************************************************************
+%RECORD (hdrf) %NAME hdr
+%STRING (32) shead
+%INTEGER i
+      ad=ad&pagemask
+      p=0
+      p_p1=(ad>>12)&3;                   ! block 0:3
+!  Return unless no file available or page already sent
+      %RETURN %IF dpage<=0 %OR pagestate&(1<<p_p1)#0
+      %IF monlevel&2#0 %AND dmon=1 %THEN opmess("DISCW ".htos(ad,8)." ".htos(dpage,8))
+      %IF dpage&15=0 %START;             ! header page
+         hdr==record(ad)
+         hdr_hdr1=sectsize
+         hdr_hdr2=32
+         hdr_hdr3=hdr_hdr1
+         hdr_hdr4=3
+         hdr_hdr5=0
+         hdr_hdr6=oldpdt
+         hdr_hdr7=-256
+         hdr_hdr8=0
+         %IF com_ocptype>>12&255=0 %THEN i=3 %ELSE i=4
+         shead="DT: ".olddate." ".oldtime." CPU  ".htos(com_ocptype,i)."
+"
+         move(32,addr(shead)+1,ad+32)
+      %FINISH
+      p_dest=x'210002'
+      p_srce=ponsrc!4
+      p_p2=dpage
+      p_p3=realise(ad)
+      pon(p)
+      dintpend=dintpend+1;               ! remember disc term. pending
+      pagestate=pagestate!(1<<p_p1);     ! lock page until disc write complete
+      actsize=actsize+4096
+      %IF actsize>=sectsize %THEN change file %ELSE dpage=dpage+1
+%END
+%ROUTINE preport(%INTEGER value)
+      opmess("MLP activity ".strint(act)." fails ".strint(value))
+%END
+%ROUTINE deallocate main printer(%INTEGER reply act)
+%RECORD (parmf) q
+      %IF intpend#0 %THEN %RETURN
+      q=0; q_dest=gpcsno!5
+      q_srce=ponsrc!replyact
+      q_p1=mnem
+      pon(q)
+%END
+%ROUTINE allocate main printer(%INTEGER replyact)
+%RECORD (parmf) q
+      q=0
+      q_dest=gpcsno!11
+      q_p2=ponsrc!2
+      q_srce=ponsrc!replyact
+      q_p1=mnem
+      pon(q)
+%END
+end:
+%END;                                    ! of routine printer
+!
+!------------------------------------------------------------------------
+!
+%EXTERNAL %ROUTINE prhex(%INTEGER n)
+      printstring(strhex(n))
+%END
+%EXTERNAL %STRING %FN strhex(%INTEGER value)
+      %RESULT=htos(value,8)
+%END
+!
+%EXTERNAL %STRING %FN htos(%INTEGER value,places)
+%CONST %STRING (1) %ARRAY hex(0:15)="0","1","2","3","4","5","6","7","8","9",
+                                        "A","B","C","D","E","F"
+%STRING (8) s
+%INTEGER i
+      s=""
+      i=0
+      %WHILE i<places %CYCLE
+         s<-hex(value&15).s
+         value=value>>4
+         i=i+1
+      %REPEAT
+      %RESULT=s
+%END
+!
+!------------------------------------------------------------------------
+!
+%EXTERNAL %STRING %FN strint(%INTEGER value)
+%STRING (16) s
+%STRING (1) sign
+%INTEGER j
+      sign=""
+      s=""
+      %IF value<0 %START
+         sign="-"
+         %IF value=x'80000000' %THEN value=x'7fffffff' %ELSE value=-value
+      %FINISH
+      %CYCLE
+         j=value
+         value=value//10
+         j=j-value*10+'0'
+         s=tostring(j).s
+         %EXIT %IF value<=0
+      %REPEAT
+      %RESULT=sign.s
+%END
+!
+!------------------------------------------------------------------------
+%EXTERNAL %INTEGER %FN stoi(%STRING %NAME s)
+%STRING (50) p
+%INTEGER sign,ad,i,j,hex
+!%LONGINTEGER total
+%INTEGER total
+      hex=0; total=0; sign=1
+      ad=addr(p)
+l1:   ->nulls %IF s=""
+      i=charno(s,1);                     ! 1st char
+      %IF i=' ' %THEN s->(" ").s %AND ->l1; ! lose leading spaces
+      %IF i='-' %THEN s->("-").s %AND sign=-1 %AND ->l1
+      %IF i='X' %THEN s->("X").s %AND hex=1 %AND ->l1
+      p=s
+      %UNLESS s->p.(" ").s %THEN s=""
+      i=1
+      %WHILE i<=byteinteger(ad) %CYCLE
+         j=byteinteger(ad+i)
+         ->fault %UNLESS '0'<=j<='9' %OR (hex#0 %AND 'A'<=j<='F')
+         %IF hex=0 %THEN total=10*total %ELSE total=total<<4+9*j>>6
+         total=total+j&15; i=i+1
+      %REPEAT
+      %IF hex#0 %AND i>9 %THEN ->fault
+      j<-total
+      %IF i>1 %THEN %RESULT=sign*j
+fault:
+      s=p." ".s
+nulls:
+      %RESULT=x'80808080'
+%END
+!
+!------------------------------------------------------------------------
+%EXTERNAL %STRING (255) %FN strsp(%INTEGER n)
+%STRING (255) s
+      %UNLESS 0<n<=255 %THEN %RESULT=""
+      s=""
+      s=s." " %AND n=n-1 %UNTIL n=0
+      %RESULT=s
+%END;                                    ! of strsp
+!
+%END %OF %FILE

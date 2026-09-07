@@ -1,0 +1,6 @@
+parm opt
+imp d.b01conn,director.conny,connl
+imp d.b02direct,director.directy,directl
+imp d.c04xop,director.xopy,xopl
+imp d.c05diag,director.diagy,diagl
+imp d.b07ss,director.ssy,ssl

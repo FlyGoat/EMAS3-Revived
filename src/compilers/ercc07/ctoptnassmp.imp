@@ -1,0 +1,64 @@
+!
+!   Compile time options for EMAS/370
+!
+%constinteger YES=1,NO=0,AMDAHL=2
+%constinteger XA=YES;                    ! yes for 370/XA
+%constinteger VA MODE=YES;               ! yes for Supervisor, no for Chopsupe
+%constinteger MULTI OCP=YES;             ! yes to include semaphoring
+%constinteger CRFITTED=NO;               ! card reader
+%constinteger CPFITTED=NO;               ! card punch
+%constinteger SNOOZING=YES;              ! allow suspend in store
+%constinteger PRODUCTION=NO;             ! yes for continuing after S/W errors
+%constinteger MONLEVEL=x'3F';                ! 0 = no monitoring
+                                         ! 2**0 = video updating
+                                         ! 2**1 = KMONning
+                                         ! 2**2 = sup timing measurements
+                                         ! 2**3 = a-c for cross calls
+                                         ! 2**4 = strobing
+                                         ! 2**5 = cat table transitions
+                                         ! 2**8 = event harvesting
+%constinteger P4PERCENT=19;              ! max % of free store for large jobs
+%constinteger MAXPROCS=256;              ! max concurrent procs (64,128 or 256)
+%constinteger MINS INACTIVE=30;          ! before being chopped (5-60)
+%constinteger CCW FORMAT=1;             ! 0 for frormat0 ccws,=1 for Format1
+%constinteger COMMS EPAGES=4+MAXPROCS//32
+%include "ercc07:ibmsup_seguse2"
+!
+!   Global system constants
+!
+%if XA=YES %Then %Start
+   %constlonginteger PSW0=x'041c0e0080000000'
+   %constlonginteger upsw0=x'07fd0c0080000000'
+%finish %else%if XA=AMDAHL %start
+   %constlonginteger PSW0=x'0c1c0e0000000000';    ! EC PSW word 0
+      %constlonginteger upsw0=x'0ffd0c0000000000'
+%finish %else %start
+   %constlonginteger PSW0=x'041c0e0000000000';    ! EC PSW word 0
+      %constlonginteger upsw0=x'07fd0c0000000000'; ! user PSW
+                                                  ! interruptible, key 15, pmask c
+%finish
+%constlonginteger MAX CPU TIMER=x'000007fffffff000'
+!
+%constinteger MAXBLOCK=32;               ! max epages in CBT block
+%constinteger PAGESIZE=4096
+%constinteger SEGEPSIZE=256;             ! pages/segment
+%constinteger SSHIFT=20;                 ! 31 bit addressing
+%constinteger PTE SIZE=4;                ! 2 or 4 byte PT entries
+%constinteger MIN PT SIZE=64;            ! minimum PT size
+%constinteger PAGE0 VA=PAGE0 SEG<<SSHIFT
+%constinteger SEGTAB VA=SEGTAB SEG<<SSHIFT
+%constinteger PARMPTSIZE=128;             ! 512K max for ppseg
+%constinteger STOREPTSIZE=48;            ! 192K max for store seg (64 meg m/c)
+                                        ! Allows for new 12 byte store table entry
+%constinteger LOCSN0=64
+%constinteger MAXSERV=LOCSN0+4*MAXPROCS
+%constinteger SERVAAD=PPSEG<<SSHIFT+(PTE SIZE*PARMPTSIZE+MIN PT SIZE-1)&(-MIN PT SIZE)
+%constinteger SERVASIZE=8*MAXSERV
+%constinteger PARM0AD=SERVAAD+SERVASIZE
+%constinteger STORE0AD=STORESEG<<SSHIFT+(PTE SIZE*STOREPTSIZE+MIN PT SIZE-1)&(-MIN PT SIZE)
+%if VA MODE=NO %start
+   %constinteger STORE LIMIT=x'400000'; ! max 16 meg.
+%finish
+!
+!   End of CTOPT file
+!

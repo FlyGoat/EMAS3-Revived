@@ -1,0 +1,9 @@
+!
+%include "Ercc07:ibmsup_comformat"
+!
+%if VA MODE=YES %start
+   %constrecord (COMF) %name COM=COM SEG<<SSHIFT
+%finishelsestart
+   %ownrecord (COMF) %name COM
+%finish
+%endoffile

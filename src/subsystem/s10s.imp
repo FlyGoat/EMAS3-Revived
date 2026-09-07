@@ -1,0 +1,3506 @@
+! S10 - JOB SPACE MAGIC
+%endoflist
+%include "SUBARC:SSOWNF3"
+%list
+!
+
+%constinteger job spacefilesize = 4096
+%constinteger topkey = 23
+%conststring(14)%array keyword(1 : topkey) = %c
+{ 1}   "CYCLE",
+{  }   "REPEAT",
+{ 3}   "EXIT",
+{  }   "CONTINUE",
+{ 5}   "IF",
+{  }   "UNLESS",
+{ 7}   "ELSE",
+{  }   "FINISH",
+{ 9}   "STOP",
+{  }   "RETURN",
+{11}   "SAY",
+{  }   "MONITOR",
+{13}   "FOR",
+       "GLOBAL",
+{15}   "SAYCHS",
+       "IFNSPEC",
+{17}   "RFNSPEC",
+       "SFNSPEC",
+{19}   "SPEC",
+       "",
+{21}   "IFNOT",
+       "FI",
+{23}   "END"
+
+
+%constbytearray callable at command level(0:topkey) = %c
+   1,   0(10),   1,1,0,0,0,1,1,1,1,0,   0,0,0
+
+%constbytearray conditional(0 : topkey) = %c
+   0,   0,1,1,1,0,0,0,0,1,1,  0(10),   0,0,0
+
+%constbytearray single expr(0 : topkey) = %c
+   0,   0(10),  1,0,1,0,1,0,0,0,0,0,  0,0,0
+
+%constinteger uc = X'DF'
+
+
+%constinteger top system variable = 5
+%conststring(13)%array system variable (1 : top system variable) = %c
+   "returncode",
+   "returntext",
+   "result",
+   "jobspacefsys",
+   "jobspaceindex"
+
+%constinteger top function = 25
+%conststring(8)%array function (1 : top function) = %c
+{ 1} "integer",
+     "count",
+{ 3} "string",
+     "date",
+{ 5} "time",
+     "substr",
+{ 7} "uinfi",
+     "uinfs",
+{ 9} "vdus",
+     "pos",
+{11} "newline",
+     "hex",
+{13} "typeof",
+     "next",
+{15} "finfo",
+     "line",
+{17} "dsfi",
+     "length",
+{19} "giveline",
+     "pop",
+{21} "filetype",
+     "intpt",
+{23} "real",
+     "eclfsys",
+{25} "eclindex"
+
+
+%constintegerarray function params (1 : top function) = %c
+
+{      1      2      3      4      5      6      7      8      9      10 }
+
+    x'21',    0,    x'21',  0,     0,   x'23',   1,     1,     1,     2,
+      0,      1,    x'31',  0,  x'22',  x'21',   1,    x'31',  1,     0,
+    x'21',    1,    x'11',  0,     0
+
+
+%constbytearray function type (1 : top function) = %c
+
+{  1  2  3  4  5  6  7  8  9  10     }
+
+   0, 0, 2, 2, 2, 2, 0, 2, 2, 2,
+   2, 2, 0, 2, 0, 2, 0, 0, 2, 2,
+   0, 0, 1, 0, 2
+
+
+%constinteger top externalfn=12
+%conststring(23)%array externalfn(1:topexternalfn) = %c
+{ 1} "sqrt/s#ecl/1/rr",
+     "sin/s#ecl/1/rr",
+{ 3} "cos/s#ecl/1/rr",
+     "tan/s#ecl/1/rr",
+{ 5} "exp/s#ecl/1/rr",
+     "log/s#ecl/1/rr",
+{ 7} "arcsin/s#ecl/1/rr",
+     "arccos/s#ecl/1/rr",
+{ 9} "hypsin/s#ecl/1/rr",
+     "hypcos/s#ecl/1/rr",
+{11} "arctan/s#ecl/1/rrrr",
+     "radius/s#ecl/1/rrrr"
+
+
+
+{  items                }
+{ type   0   (          }
+{        1   + - * /    }
+{        2   ) var num  }
+
+
+{ commands recognised   }
+
+{  %?  lists values of all variables     }
+{  % sp effects parameter substitution   }
+{  %= expr displays the value of expr    }
+{  %var = expr  declares the variable if }
+{               nec. and assigns expr to it }
+{  %keyword...                           }
+
+
+%constinteger top cop = 5
+%constbytearray comp(1 : top cop) = '-', '=', '#', '>', '<'
+%constinteger top op = 5
+%constbytearray op(0 : top op) = '(', ')', '+', '-', '*', '/'
+
+{                                 0    1    2    3    4    5    }
+
+%constinteger top terminator = 5
+%constbytearray terminator (1 : top terminator) = %c
+   '=', '#', '>', '<', ','
+
+
+%constinteger a='a',b='b',c='c',d='d',e='e',f='f',g='g',h='h',i='i',
+   j='j',k='k',l='l',m='m',n='n',o='o',p='p',q='q',r='r',s='s',
+t='t',u='u',v='v',w='w',x='x',y='y',z='z'
+
+%constbytearray emas3(0:255) = %c
+C, H, E, C, K, N, A, M, E, '(', s, b, i, r, i, r, i, w, ')',
+C, L, E, A, R, S, C, R, E, E, N, '(', ')',
+C, O, M, R, E, G, '(', i, r, i, w, ')',
+C, P, U, T, I, M, E, '(', r, w, ')',
+E, X, I, S, T, '(', s, r, i, w, ')',
+G, E, T, L, I, N, E, F, R, O, M, W, I, N, D, O, W, '(', i, r, s, w, i, w, ')',
+H, E, L, P, I, N, F, O, '(', s, r, ')',
+I, N, T, E, G, E, R, '(', s, r, i, w, ')',
+L, O, N, G, R, E, A, L, '(', s, r, r, w, ')',
+M, O, V, E, C, U, R, S, O, R, '(', i, r, s, r, i, w, ')',
+S, T, R, I, N, G, '(', s, r, s, w, ')',
+S, E, T, C, O, M, R, E, G, '(', i, r, i, r, ')',
+S, E, T, S, C, R, E, E, N, V, E, C, T, O, R, '(', s, r, ')',
+W, I, N, D, O, W, '(', i, r, s, r, i, r, i, r, i, r, i, r, i, r, i, w, ')',
+'*', 
+0(*)
+
+
+
+%constinteger vtemp = X'20000000'
+
+%recordformat e4f(%integer code, gla, ep, pword)
+
+%externalroutinespec batchstop %alias "s#batchstop" (%integer reason)
+%externalintegerfnspec close n clear %alias "s#closenclear"(%integer chan)
+%externalroutinespec ssenter %alias "s#ssenter"(%stringname s, %integername i,
+   %stringname template)
+%externalroutinespec ssexit %alias "s#ssexit"(%stringname s, %integername i,
+   %stringname template)
+%externalintegerfnspec uig %alias "s#uig"(%stringname s)
+%external %string %fn %spec ucstring %alias "s#ucstring"(%string (255) s)
+%external %routine %spec define %alias "S#IDEFINE"(%integer channel, %string (255) id, %integer %name afd, flag)
+%external %integer %fn %spec outstream %alias "s#outstream"
+%external %routine %spec emas3claimchannel(%integer %name chan)
+%externalroutinespec remove comments %alias "s#removecomments" (%stringname line)
+%integerfnspec jobspace expression(%stringname line, %record(jobspace varf)%name w)
+%integerfnspec assign(%record(jobspace varf)%name w,
+   %record(jobspacef)%name jobspace)
+%externalintegerfnspec checkparamwords %alias "s#checkparamwords" (%integer ent, ref, %string(31)id)
+%externalstringfnspec substring %alias "s#substring" (%stringname s, %integer first, last)
+%externalintegerfnspec loadep %alias "s#loadep" (%string(31)entry,
+   %integername type, flag, %record(e4f)%name e4, %integer level)
+%externalroutinespec dispose heap %alias "s#disposeheap" (%integer adr)
+%externalroutinespec psysmess %alias "s#psysmess" (%string(255)caller, %integer flag)
+%externalstringfnspec failuremessage %alias "s#failuremessage"(%integer n)
+%externalintegerfnspec dirtoss %alias "s#dirtoss" (%integer n)
+%external %routine %spec console %alias "s#console" (%integer ep,
+   %integername adr, len)
+%external %routine %spec emas3signal(%integername c, sc)
+%external %routine %spec quit %alias "emas#quit"
+%external %integer %fn %spec open %alias "s#open"(%integer afd, mode)
+%external %routine %spec tidyfiles %alias "s#tidyfiles" (%integer selectflag)
+%externalroutinespec adjustloadlevel %alias "s#adjustloadlevel"(%integer p)
+%externalroutinespec shout %alias "s#shout" (%string(255)s)
+%externalroutinespec fill %alias "s#fill" (%integer len, from, ch)
+%externalroutinespec spop %alias "s#pop" (%stringname s, %integername j)
+%externalroutinespec shide %alias "s#hide" (%integername flag)
+%externalroutinespec squeue %alias "s#queue" (%string(255)s, %integername j)
+%externalroutinespec sexec %alias "s#exec"(%string(255)outfile, %integer type, %integername j)
+%externalroutinespec sreveal %alias "s#reveal"
+%externalroutinespec sethelp %alias "s#sethelp" (%string(255)s)
+%externalroutinespec move %alias "s#move" (%integer len, from, to)
+%externalintegerfnspec stoi %alias "s#stoi" (%string(255)s, %integername i)
+%externalroutinespec control line %alias "s#controlline" (%stringname line,
+   %integername flag)
+%externalintegerfnspec dsfi (%stringname index, %integername fsys, type, set,
+   %stringname s, %integerarrayname i)
+%externalroutinespec top n tail %alias "s#topntail" (%stringname s)
+%externalintegerfnspec starts %alias "s#starts" (%stringname a, b)
+%externalroutinespec finfo %alias "s#finfo" (%string(255)file,
+   %integer mode, %record(frf)%name fr, %integername flag)
+%externalroutinespec connect %alias "s#connect" (%string(255)file,
+   %integer mode, hole, prot,
+   %integername conad, type, start, end, flag)
+%externalroutinespec destroy %alias "s#destroy" (%string(255)file,
+   %integername flag)
+%externalroutinespec disconnect %alias "s#disconnect" (%string(255)file,
+   %integername flag)
+%externalroutinespec setreturncode %alias "s#setreturncode" (%integer n)
+%externalroutinespec lctranslate %alias "s#lctranslate" (%integer adr, len)
+%externalroutinespec uctranslate %alias "s#uctranslate" (%integer adr, len)
+%externalintegerfnspec getheap %alias "s#getheap" (%integer n)
+%externalroutinespec printline %alias "s#printline" (%string(255)s)
+%external %routine %spec set io default %alias "S#SETIODEFAULT"(%integer d, i, dummy)
+%externalinteger %fn %spec compare %alias "s#compare" (%string (255) target, a)
+%externalroutinespec idefine %alias "s#idefine" (%integer channel,
+   %string(255)file, %integername af, flag)
+%externalroutinespec sobey %alias "s#obey"
+%externalstringfnspec htos %alias "s#htos" (%integer val, places)
+%externalstringfnspec itos %alias "s#itos" (%integer n)
+%externalroutinespec getstring %alias "s#getstring" (%string(255)vector,
+   %stringname value)
+%externalroutinespec getinteger %alias "s#getinteger" (%string(255)vector,
+   %integername value)
+%externalroutinespec getlongreal %alias "s#getlongreal" (%string(255)vector,
+   %longrealname value)
+%externalroutinespec outfile %alias "s#outfile" (%string(255)file,
+   %integer size, hole, prot, %integername adr, flag)
+%externalintegerfnspec uinfi %alias "s#uinfi" (%integer n)
+%externalstringfnspec uinfs %alias "s#uinfs" (%integer n)
+%externalstringfnspec vdus %alias "s#vdus" (%integer n)
+%externalstringfnspec vduc %alias "s#vduc" (%integer y, x)
+%externalroutinespec printchs %alias "s#printchs" (%string(255)s)
+%external %routine %spec set comreg36 %alias "s#setcomreg36" (%integer val, by)
+
+
+
+
+
+%integerfn uch(%integer ch)
+   %if 'a' <= ch <= 'z' %c
+   %then %result = ch - 32 %c
+   %else %result = ch
+%end
+
+%integerfn inresolve(%stringname line, a, piece, b)
+%integer n, i, p
+%string(255)w
+
+! does a case independent string resolution
+
+   n = length(line) - length(piece)
+   %result = 1 %if n < 0  { non zero result if it DOESNT resolve }
+   %cycle i = 0, 1, n
+      %cycle p = 1, 1, length(piece)
+         %exit %unless uch(charno(piece,p)) = uch(charno(line,i+p))
+         %if p = length(piece) %start  { found }
+            w = substring(line, 1, i)
+            b = substring(line, i+p+1, length(line))
+            a = w
+! printline("line=".line." a=".a." piece=".piece." b=".b)
+            %result = 0
+         %finish
+      %repeat
+   %repeat
+   %result = 1
+%end; ! inresolve
+
+!-----------------------------------------------------------------------
+
+%integerfn process spec (%stringname s, %record(jobspacef)%name jobspace,
+   %integer type)
+
+! type = 0 integerfn, 1 (long)realfn, 2 stringfn, 3 routine
+!        {i,s,r}{r,b,w}
+
+%integer p, t, a
+%string(32)proc
+
+   topntail(s)
+   %result = 14 %if s = ""  { nothing after spec - internal flag }
+   lctranslate(addr(s)+1, length(s))
+   proc = s %and s = "" %unless s -> proc . (" ") . s
+   topntail(s)
+   %unless s = "" %start
+      %result = 15 %if length(s) & 1 > 0  { odd template }
+      p = 1
+      %cycle
+         %exit %if p > length(s)
+         t = charno(s, p)
+         %result = 16 %unless t = 'i' %or t = 's' %or t = 'r'  { 1st char of pair }
+         t = charno(s, p+1)
+         %result = 17 %unless t = 'r' %or t = 'b' %or t = 'w'  { 2nd }
+         p = p + 2
+      %repeat
+   %finish
+   a = getheap(length(proc) + length(s) + 7)
+   integer(a) = jobspace_spec
+   jobspace_spec = a
+   byteinteger(a+4) = type
+   string(a+5) = proc
+   string(a+length(proc)+6) = s
+! printline("Spec for " . proc . " template " . s)
+   %result = 0
+%end; ! process spec
+
+!-----------------------------------------------------------------------
+
+%externalroutine clear jobspace variables %alias "s#clearjobspacevariables" (%record(jobspace f)%name jobspace)
+%integer p, next
+%record(jobspace variable f)%name jsv
+
+   p = jobspace_pointer
+   %cycle
+      %exit %if p = 0
+      jsv == record(p)
+! printstring("Variable ".jsv_name)
+      %if jsv_type = 2 %start
+! printstring(" was a string")
+         dispose heap(integer(p+4))
+      %finish
+      p = jsv_link
+      dispose heap(addr(jsv))
+! newline
+   %repeat
+   jobspace_pointer = 0
+
+   next = jobspace_spec
+   %cycle
+      %exit %if next = 0
+      p = next
+      next = integer(p)
+! printline("Spec to ".string(p+5))
+      dispose heap(p)
+   %repeat
+   jobspace_spec = 0
+
+   p = jobspace_global
+   %cycle
+      %exit %if p = 0
+      jsv == record(integer(p+4))
+      next = integer(p)
+      disposeheap(p)
+      p = next
+! printline("Global ".jsv_name)
+   %repeat
+   jobspace_global = 0
+%end; ! clear jobspace variables
+
+!-----------------------------------------------------------------------
+
+%integerfn type(%string(255)file)
+
+%integer j, type
+
+   connect(file, 0, 0, 2, 0, type, 0, 0, j)
+   type = 0 %and j = 0 %if j = 345
+   type = -j %unless j = 0
+   %result = type
+%end
+
+
+
+%routine printsomehow(%string(255)s)
+%externalroutinespec tojournal %alias "s#tojournal" (%integer a, l)
+%integer p, q, ch
+%string(255)w
+
+   %return %if s = ""
+   p = 0
+   q = 0
+   length(w) = 255
+   %cycle
+      p = p + 1
+      %exit %if p > length(s)
+      ch = charno(s, p)
+      %continue %unless ch = 10 %or ch = 13 %or ' ' <= ch <= '~'
+      q = q + 1
+      charno(w, q) = ch
+   %repeat
+   length(w) = q
+
+   %if ssown_ssreason = batchreason %c
+   %then printstring(w) %c
+   %else printchs(s) %and tojournal(addr(w)+1, q)
+%end
+
+
+%routine error(%integer n, %record(job spacef)%name job space)
+
+%integer line, p, p0
+%record(fdf)%name fd
+%string(255)w
+
+   w = failuremessage(n)
+   length(w) = length(w) - 1
+
+   %unless job space_name = "" %start
+      fd == record(job space_afd)
+      line = 0
+      p = job space_fstart
+      p0 = p - 1
+      %cycle
+         %exit %if p >= job space_fend
+         %exit %if p+2 = fd_cur
+         line = line + 1 %and p0 = p %if byteinteger(p) = nl
+         p = p + 1
+      %repeat
+      w = w . " - at line " . itos(line) . ": "
+      %cycle
+         p0 = p0 + 1
+         %exit %if p0 > p %or length(w) = 255
+         w = w . tostring(byteinteger(p0))
+      %repeat
+   %finish
+   ssown_ssfname = w
+   w = jobspace_name
+   w = "ECL" %if w = ""
+   psysmess(w, 100)
+%end
+
+!-----------------------------------------------------------------------
+
+
+%integerfn job spacebase(%integer level)
+%integer j, conad
+
+   %if level < 0 %then level = 2 %else level = ssown_load level
+   j = ssown_job spacebase(level)
+   %if j = 0 %start
+      outfile("T#MACWK".itos(level), job space file size, 0, 4!vtemp, conad, j)
+                    { the 4 means 'dont disconnect' }
+      set return code(j) %and %result = 0 %unless j = 0
+      j = conad + 32
+      ssown_job spacebase(level) = j
+   %finish
+   %result = j
+%end; ! job spacebase
+
+!-----------------------------------------------------------------------
+
+%externalintegerfn jobspace vtoi %alias "s#jobspacevtoi" (%record(jobspace varf)%name v,
+   %integername i)
+%switch sw(0:2)
+
+   -> sw(v_type)
+sw(0):
+   i = v_i
+   %result = 0
+sw(1):
+   i = intpt(v_r)
+   %result = 0
+sw(2):
+   %result = stoi(v_s, i)
+%end; ! jobspace vtoi
+
+!-----------------------------------------------------------------------
+
+%integerFN ecl LOG (%LONGREAL IN, %longrealname out)
+
+!-----------------------------------------------------------------------
+
+!***********************************************************************
+!*    IMP NATURAL LOGARITHIM. SINCE THE SCALING IS BEST DONE BY        *
+!*    DIRECTLY TAMPERING WITH THE EXPONENT DIFFERENT METHODS ARE       *
+!*    NEEDED FOR IBM &IEEEE REPRESENTATIONS                            *
+!***********************************************************************
+%INTEGER P,Q,SHORTF
+%LONGREAL PRESULT,INARG2
+%CONSTLONGREAL A1=0.594603557501360533
+%CONSTLONGREAL A2=0.840896415253714543
+%CONSTLONGREAL B1=0.75{R'40C0000000000000'}
+%CONSTLONGREAL B2=0.25{R'4040000000000000'}
+%CONSTLONGREAL LOGE2=R'40B17217F7D1CF7A'
+%CONSTLONGREAL R0=-0.184416657749370267@2
+%CONSTLONGREAL R1=-0.234508372303045254@2
+%CONSTLONGREAL R2=-0.244294581969260792
+%CONSTLONGREAL S0=-0.157942837832759265@2
+%CONSTLONGREAL S1=-0.374252034640387355@1
+%CONSTLONGREAL S2=-0.139586882716355509@1
+%CONSTLONGREAL SQRTHALF= 7.0710678118654753@ -1{R'40B504F333F9DE65'}
+
+   %result = 52 %if in <= 0.0
+   P=BYTEINTEGER(ADDR(IN))-64
+   BYTEINTEGER(ADDR(IN))=0
+   SHORTF=INTEGER(ADDR(IN))
+   %IF SHORTF>=X'00400000' %START
+      %IF SHORTF>=X'00800000' %THEN Q=0 %ELSE Q=1
+   %FINISHELSESTART
+      %IF SHORTF>=X'00200000' %THEN Q=2 %ELSE Q=3
+   %FINISH
+   INTEGER(ADDR(IN))=(INTEGER(ADDR(IN))<<Q)!(INTEGER(ADDR(IN)+4)>>(32-Q))
+   INTEGER(ADDR(IN)+4)=INTEGER(ADDR(IN)+4)<<Q
+   BYTEINTEGER(ADDR(IN))=X'40'
+dummylabel:  { for compiler bug @ 4/11/87 }
+   %IF IN>0 %AND IN<SQRTHALF %START
+      IN=(IN-A1)/(IN+A1)
+      PRESULT=((4*P-Q)-B1)*LOGE2
+   %FINISHELSESTART
+      IN=(IN-A2)/(IN+A2)
+      PRESULT=((4*P-Q)-B2)*LOGE2
+   %FINISH
+   INARG2=IN*IN
+   out=R0/(INARG2+S0+(R1/(INARG2+S1+(R2/(INARG2+S2)))))*IN+PRESULT
+!printstring("LOG"); print(out,1,12); newline
+   %result = 0
+%END; ! ecl LOG
+
+!-----------------------------------------------------------------------
+
+%integerFN ecl EXP(%LONGREAL INARG, %longrealname out)
+!************************************************************************
+!*    SEE NOTE FOR LOG                                                 *
+!***********************************************************************
+%CONSTLONGREAL UE=R'C2B437DF00000000'
+%CONSTLONGREAL E=R'42AEAC4D00000000'
+      %LONGREAL Y,w
+      %INTEGER B,YINT,P,NEGQ
+      %CONSTLONGREAL LOG2E=R'41171547652B82FE'
+      %CONSTLONGREAL C0=0.999999999999999993
+      %CONSTLONGREAL C1=-0.693147180559934648
+      %CONSTLONGREAL C2=0.240226506956369776
+      %CONSTLONGREAL C3=-0.0555041084024485261; !@-1
+      %CONSTLONGREAL C4=0.00961811709948153328; !@-2
+      %CONSTLONGREAL C5=-0.00133307347698115810; !@-2
+      %CONSTLONGREAL C6=0.000150737171272758723; !@-3
+      %CONSTLONGREALARRAY EXP2(0:15)=1.0,
+      0.957603280698573647,
+      0.917004043204671232,
+      0.878126080186649742,
+      0.840896415253714543,
+      0.805245165974627154,
+      0.771105412703970412,
+      0.738413072969749656,
+      0.707106781186547524,
+      0.677127773468446364,
+      0.648419777325504833,
+      0.620928906036742024,
+      0.594603557501360533,
+      0.569394317378345827,
+      0.545253866332628830,
+      0.522136891213706920
+         %result = 53 %IF INARG>=E
+         %IF INARG<=UE %THEN out = 0 %and %RESULT=0
+         Y=INARG*LOG2E
+         %IF INARG>0 %START
+            YINT=INTPT(Y)+1
+            Y=YINT-Y
+            %UNLESS Y<1.0 %START
+               YINT=YINT-1
+               Y=0
+            %FINISH
+            %IF YINT&3=0 %THEN P=YINT>>2 %AND NEGQ=0 %ELSE %C
+               P=YINT>>2+1 %AND NEGQ=-(P<<2)+YINT
+         %FINISHELSESTART
+            %IF INARG<0 %THEN YINT=-INTPT(-Y) %ELSE YINT=INTPT(Y)
+            Y=YINT-Y
+            B=-YINT
+            P=-(B>>2)
+            %IF B&3=0 %THEN NEGQ=0 %ELSE NEGQ=(-P<<2)-B
+         %FINISH
+         W=Y
+         %IF W<R'4010000000000000' %THEN B=0 %ELSESTART
+            INTEGER(ADDR(W))=INTEGER(ADDR(W))<<4!INTEGER(ADDR(W)+4)>>28
+            B=INTEGER(ADDR(W))>>24
+            BYTEINTEGER(ADDR(W))=X'3F'
+            INTEGER(ADDR(W)+4)=INTEGER(ADDR(W)+4)<<4!8
+         %FINISH
+         W=((((((C6*W+C5)*W+C4)*W+C3)*W+C2)*W+C1)*W+C0)*EXP2(B)
+         %IF BYTEINTEGER(ADDR(W))=X'41' %START
+            %IF NEGQ#0 %THEN NEGQ=NEGQ+4 %ELSE P=P+1 %AND ->NOSHIFT
+         %FINISH
+         %IF NEGQ>0 %THENSTART;         ! OFTEN(ALWAYS?) NEGATIVE
+            INTEGER(ADDR(W))=INTEGER(ADDR(W))<<NEGQ!INTEGER(ADDR(W)+4)>> %C
+               (32-NEGQ)
+            INTEGER(ADDR(W)+4)=INTEGER(ADDR(W)+4)<<NEGQ
+         %FINISHELSESTART
+            NEGQ=-NEGQ
+            INTEGER(ADDR(W)+4)=INTEGER(ADDR(W)+4)>>NEGQ!INTEGER(ADDR(W))<< %C
+               (32-NEGQ)
+            INTEGER(ADDR(W))=INTEGER(ADDR(W))>>NEGQ
+         %FINISH
+NOSHIFT:
+         BYTEINTEGER(ADDR(W))=P+64
+         out = w
+!printstring("EXP"); print(out,1,12); newline
+         %RESULT=0
+%END; ! ecl EXP
+!
+!-----------------------------------------------------------------------
+!
+%externalstringfn jobspacevtos %alias "s#jobspacevtos" (%record(job space var f)%name v)
+%integer j
+%string(63)s
+%longinteger li
+%longreal lr, lw
+%switch sw(0:2)
+
+%externalstringfnspec sprint %alias "s#sprint" (%longreal x, %integer m,n)
+%externalstringfnspec sprintfl %alias "s#sprintfl" (%longreal x, %integer n)
+
+   -> sw(v_type)
+
+sw(0):  { integer }
+   s = itos(v_i)
+   -> out
+sw(1):  { long real }
+   lr = v_r
+   lr = -lr %if lr < 0
+   %if 1 <= lr <= 10**15 %start
+      li = lintpt(lr)
+      s = sprint(v_r,1,0) %and -> out %if li = lr
+   %finish
+   li = -1
+   j = ecl log(lr,lw) %and li = lintpt(0.434294481903 * lw) %if lr > 0.5
+   s = sprintfl(v_r, 11) %and -> out %unless 0 <= li < 16
+   s = sprint(v_r, li+1, 15-li)
+   j = length(s)
+   j = j - 1 %while charno(s, j) = '0'
+   length(s) = j
+out:
+   s -> (" ") . s %if charno(s, 1) = ' '
+   %result = s
+sw(2):  { string }
+   %result = v_s
+%end
+
+!-----------------------------------------------------------------------
+
+
+%externalintegerfn get jsv %alias "s#getjsv" (%integer level, %record(jobspace varf)%name w)
+%integer j, base
+%integername p, g
+%record(global varf)%name gv
+%record(jobspace variable f)%name jsv
+%record(job spacef)%name job space
+%switch swa (1 : top system variable)
+
+   base = 0
+   base = ssown_job spacebase(level) %if level > 0
+   %if base = 0 %start  { check globals anyway }
+      base = ssown_jobspace base(2)
+      -> sv %if base = 0
+      jobspace == record(base)
+      p == jobspace_pointer
+      %cycle
+         -> sv %if p = 0
+         jsv == record(p)
+         -> pick up value %if compare(w_name, jsv_name) = yes
+         p == jsv_link
+      %repeat
+   %finish
+
+   job space == record(base)
+
+   %if level > 2 %start  { first check if its a global }
+      g == jobspace_global
+      %cycle
+         %exit %if g = 0  { no (more) globals }
+         gv == record(g)
+         p == gv_p
+         jsv == record(p)
+         -> pick up value %if compare(w_name, jsv_name) = yes
+         g == gv_link
+      %repeat
+   %finish
+
+   p == jobspace_pointer
+   %cycle
+      %exit %if p = 0
+      jsv == record(p)
+      -> pick up value %if compare(w_name, jsv_name) = yes
+      p == jsv_link
+   %repeat
+sv:
+   %cycle j = 1, 1, top system variable
+      -> swa(j) %if compare(w_name, system variable(j)) = yes
+   %repeat
+
+
+   %result = 460  { not known }  
+
+pick up value:
+   w_type = jsv_type
+   w_s = string(integer(p+4)) %if w_type = 2
+   w_r = longreal(p) %if w_type = 1
+   w_i = integer(p) %if w_type = 0
+   %result = 0
+
+swa(1):   { return code }
+   w_type = 0
+   w_i = ssown_rcode
+   %result = 0
+swa(2):   { return text }
+   w_type = 2
+   w_s = ssown_ssfname
+   %result = 0
+swa(3):   { result }
+   w = ssown_job space result
+   %result = 0
+swa(4):   { job space fsys }
+   w_type = 0
+   w_i = ssown_job space fsys
+   %result = 0
+swa(5):   { job space index }
+   w_type = 2
+   w_s = ssown_job space index
+   %result = 0
+
+%end; ! get jsv
+
+!-----------------------------------------------------------------------
+
+%externalintegerfn get value of jsv %alias "s#getvalueofjsv" (%record(job space var f)%name w)
+
+   %result = get jsv(ssown_load level, w)
+
+%end; ! get value of jsv
+
+!-----------------------------------------------------------------------
+
+
+
+
+
+%routine monitor
+%integer j, k, level
+%string(255)s
+%integername p
+%record(jobspace variable f)%name jsv
+%record(job spacef)%name job space
+%record(job space var f)w
+
+   level = ssown_load level + 1
+   %cycle
+      level = level - 1
+      %exit %if level = 0
+      j = ssown_job spacebase(level)
+      %continue %if j = 0
+      job space == record(j)
+      printstring("Level ".itos(level))
+      %if job space_name = "" %c
+      %then printline(" ----------------------") %c
+      %else printline(" procedure " . job space_name)
+         %if job space_pointer = 0 %start
+            printline("No User Variables")
+         %else
+            p == jobspace_pointer
+            %cycle
+               jsv == record(p)
+               w_type = jsv_type
+               w_s = string(integer(p+4)) %if w_type = 2
+               w_r = longreal(p) %if w_type = 1
+               w_i = integer(p) %if w_type = 0
+               s = jsv_name
+               s = s . " " %while length(s) < 11
+               printstring(s)
+               printstring(" = ")
+               printline(jobspace vtos(w))
+               p == jsv_link
+               %exit %if p = 0
+            %repeat
+         %finish
+   %repeat
+
+   newline
+   printline("System Variables")
+   %cycle j = 1, 1, top system variable
+      s = system variable(j)
+      w_name <- s
+      k = get value of jsv(w)
+      s = s . " " %while length(s) < 11
+      printline(s . " = " . jobspacevtos(w))
+   %repeat
+%end; ! monitor
+
+!-----------------------------------------------------------------------
+
+%integerfn checktypes(%record(job space var f)%name w1, w2)
+   %result = 0 %if w1_type = w2_type = 0  { both integers }
+
+   %if w1_type = 2 %or w2_type = 2 %start
+      w1_s = jobspacevtos(w1) %and w1_type = 2 %if w1_type< 2
+      w2_s = jobspacevtos(w2) %and w2_type = 2 %if w2_type< 2
+      %result = 2
+   %finish
+
+   w1_r = w1_i %and w1_type = 1 %if w1_type = 0
+   w2_r = w2_i %and w2_type = 1 %if w2_type = 0
+   %result = 1
+%end
+
+!-----------------------------------------------------------------------
+
+%integerfn alphanumeric(%integer ch)
+
+   %result = yes %if 'A' <= ch&uc <= 'Z'
+   %result = yes %if '0' <= ch <= '9'
+   %result = no
+%end; ! alphanumeric
+
+!-----------------------------------------------------------------------
+
+
+%INTEGERFN STRING TO NUMBER(%stringname s, %record(job space var f)%name v)
+
+!-----------------------------------------------------------------------
+
+!
+! result is  0 OK
+!          371 no digits!  
+!          372 bad characters
+!          373 too big
+%INTEGER J, K, SIGN, N, L, CH, ESIGN, EXP, DOT, flag
+%LONGLONGREAL LLR, SCALE
+%BYTEINTEGERARRAYNAME B
+%BYTEINTEGERARRAYFORMAT BF(0:255)
+      B == ARRAY(ADDR(S), BF)
+      L = LENGTH(S)
+      SIGN = 0; ! no sign as yet seen
+      DOT = 0; ! no decimal point etc, treat number as integer
+      N = 0; ! count digits
+      v_I = 0
+      J = 1; ! to index along B
+CHECK SIGN:
+      %IF J <= L %AND B(J) = '+' %START
+         j = 3 %and -> err %UNLESS SIGN = 0
+         SIGN = 1
+         J = J + 1
+         -> CHECK SIGN
+      %FINISH
+!
+      %IF J <= L %AND B(J) = '-' %START
+         j = 3 %and -> err %UNLESS SIGN = 0
+         SIGN = -1
+         J = J + 1
+         -> CHECK SIGN
+      %FINISH
+!
+      j = 2 %and -> err %IF J > L
+!
+      %IF L >= J + 1 %AND B(J)&uc = 'P' %AND B(j+1)&uc = 'I' %andc
+      (L=J+1 %or alphanumeric(b(j+2)) = no) %START
+         j = j + 2
+         v_R = PI
+         v_R = -v_R %IF SIGN < 0
+         flag = 1
+         -> ok
+      %FINISH
+!
+      %IF B(J)&uc = 'X' %START; ! hex?
+         J = J + 1
+         j = 2 %and -> err %IF J > L
+         k = 0
+         %WHILE J <= L %CYCLE
+            CH = B(J)
+            %if '0' <= CH <= '9' %OR 'A' <= CH&uc <= 'F' %start
+               j = j + 1
+               k = k + 1
+               %IF N = 0 %START
+                  N = 1 %UNLESS CH = '0'
+               %FINISH %ELSE %START
+                  N = N + 1
+                  j = 4 %and -> err %IF N > 8
+               %FINISH
+            %else
+               j = 3 %and -> err %if k = 0   { no digits after X }
+               %exit
+            %finish
+            v_I = v_I << 4 + 9 * CH >> 6 + CH & 15
+         %REPEAT
+!
+         %IF SIGN < 0 %START
+            j = 4 %and -> err %IF v_I = X'8000000000000000'
+            v_I = -v_I
+         %FINISH
+!
+         flag = 0; ! a good long integer
+         -> ok
+      %FINISH
+!
+      %IF '0' <= B(J) <= '9' %START
+         LLR = B(J) - '0'
+         J = J + 1
+         N = N + 1
+         %CYCLE
+            -> NO MORE %IF J > L
+            %EXIT %UNLESS '0' <= B(J) <= '9'
+            N = N + 1
+            LLR = LLR * 10.0 + B(J) - '0'
+            J = J + 1
+         %REPEAT
+      %FINISH %ELSE LLR = 0; ! integer part
+!
+      %IF B(J) = '.' %START; ! add in the fractional part
+         DOT = 1; ! decimal point encountered
+         SCALE = 10.0
+         J = J + 1
+         %CYCLE
+            -> NO MORE %IF J > L
+            %EXIT %UNLESS '0' <= B(J) <= '9'
+            N = N + 1
+            LLR = LLR + (B(J) - '0') / SCALE
+            SCALE = SCALE * 10.0
+            J = J + 1
+         %REPEAT
+      %FINISH
+!
+      j = 3 %and -> err %IF N = 0; ! no digits so far
+!
+      %IF B(J) = '@' %START; ! appears to be an exponent
+         ESIGN = 0
+         EXP = 0
+         J = J + 1
+CHECKESIGN:
+         %IF J <= L %AND B(J) = '+' %START
+            j = 3 %and -> err %UNLESS ESIGN = 0
+            ESIGN = 1
+            J = J + 1
+            -> CHECKESIGN
+         %FINISH
+!
+         %IF J <= L %AND B(J) = '-' %START
+            j = 3 %and -> err %UNLESS ESIGN = 0
+            ESIGN = -1
+            J = J + 1
+            -> CHECKESIGN
+         %FINISH
+!
+         j = 2 %and -> err %IF J > L; ! no digits in exponent
+!
+         k = 0
+         %WHILE J <= L %CYCLE
+            CH = B(J)
+            %UNLESS '0' <= CH <= '9' %start
+              j = 3 %and -> err %if k = 0
+              %exit
+           %finish
+           j = j + 1
+           k = k + 1
+            EXP = EXP * 10 + CH - '0'
+         %REPEAT
+         EXP = -EXP %AND DOT = 1 %IF ESIGN < 0
+!
+         %IF EXP = -99 %C
+         %THEN LLR = 0 %C
+         %ELSE LLR = LLR * 10 ** EXP
+      %FINISH
+NO MORE:
+      %IF DOT = 0 %AND LLR < 10**9 %START; ! treat as an integer
+         v_I = INTPT(LLR + 0.1)
+         v_I = -v_I %IF SIGN < 0
+         flag = 0
+         -> ok
+      %FINISH
+!
+      LLR = -LLR %IF SIGN < 0
+!
+      v_R = LLR
+!
+      flag = 1
+ok:
+      v_s = s
+      length(v_s) = j-1
+      s -> (v_s) . s
+      v_type = flag
+      %result = 0
+err:
+      ssown_ssfname = s
+      %result = j + 369
+%list
+%END; ! STRING TO NUMBER
+
+!-----------------------------------------------------------------------
+
+
+
+%routine printjsv (%string(255)s, %record(jobspacevarf)%name w)
+%integer type
+
+   printstring(s)
+   type = w_type
+   printstring("Name=".w_name.", Type=".itos(w_type).", Val=")
+   write(w_i,1) %if type = 0
+   print(w_r,1,6) %if type = 1
+   printstring("'".w_s."'") %if type =2
+   newline
+%end; ! printjsv
+
+!-----------------------------------------------------------------------
+
+%integerfn make numeric(%record(jobspacevarf)%name w)
+%integer j
+%string(255)s
+%record(jobspacevarf) w1
+
+!   printjsv("-> make numeric ", w)
+   j = 0
+   -> out %unless w_type = 2
+   s = w_s
+   j = string to number(s, w1)
+   -> out %unless j = 0
+   ssown_ssfname = w_s %and %result = 372 %unless s = ""  
+   w_type = w1_type
+   %if w_type = 0 %then w_i = w1_i %else w_r = w1_r
+out:
+!   printjsv("<- make numeric ", w)
+   %result = j
+%end; ! make numeric
+
+!-----------------------------------------------------------------------
+
+%integerfn intpt of jsv(%record(jobspacevarf)%name w, %integername i)
+
+%integer j
+
+!printjsv("-> intpt of jsv ", w)
+   j = 0
+   j = make numeric(w) %if w_type = 2
+   -> out %unless j = 0
+   w_i = intpt(w_r) %if w_type = 1
+   i = w_i
+out:
+!printjsv("<- intpt of jsv (".itos(i).") ", w)
+   %result = j
+%end; ! intpt of jsv
+
+!-----------------------------------------------------------------------
+
+%integerfn change type(%record(jobspacevarf)%name w, %integer reqd type)
+%integer j
+%string(255)s
+
+!   printjsv("-> change type to ".itos(reqdtype)." ", w)
+   j = 0
+   %if reqd type = 2 %start
+      s = jobspace vtos(w)
+      w_s = s
+   %finish %else %start
+      j = make numeric(w)
+      -> out %unless j = 0
+      %if reqd type = 1 %start
+         w_r = w_i %if w_type = 0
+      %finish %else %start
+         w_i = intpt(w_r) %if w_type = 1
+      %finish
+   %finish
+   w_type = reqd type
+out:
+!   printjsv("<- change type ", w)
+   %result = j
+%end; ! change type
+
+!-----------------------------------------------------------------------
+
+%externalintegerfn check for jsv name %alias "s#checkforjsvname" (%stringname line, %record(job space var f)%name v)
+%integer j, k, ch
+
+   v_name = ""
+   j = 1
+   k = length(line)
+   %cycle
+      %exit %if j > k
+      ch = charno(line, j)
+      ch = ch & uc %if 'a' <= ch <= 'z'
+      %exit %unless 'A' <= ch <= 'Z' %or (j > 1 %and '0' <= ch <= '9')
+      v_name = v_name . tostring(ch) %if j < 255
+      j = j + 1
+   %repeat
+   %result = 466 %if v_name = ""  
+   %result = 452 %if j > 255
+   v_s = line
+   length(v_s) = j-1
+   line -> (v_s) . line
+   %result = 0
+%end
+
+!-----------------------------------------------------------------------
+
+
+%stringfn next for line(%record(job spaceforf)%name job spacefor)
+%integer k
+%string(255)s
+
+   s = ""
+   %cycle
+      k = byteinteger(job spacefor_start)
+      job spacefor_start = job spacefor_start + 1
+      %exit %if k = nl
+      s = s . tostring(k)
+      %exit %if job spacefor_start >= job spacefor_end
+   %repeat
+   %result = s
+%end
+
+!-----------------------------------------------------------------------
+
+%routine call(%string(255)proc, template, %stringname line,
+   %record(jobspacef)%name jobspace, %record(jobspace varf)%name fnres,
+   %integer result type, %integername flag)
+
+%integer tx, ix, rx, sx, vx, k, type, int, reqd type
+%longreal lreal
+%integerarray i(0:7)
+%string(255)%array s(0:3)
+%longrealarray r(0:3)
+%integerarray stack(0:15)
+%record(jobspace varf) w
+%constinteger top param=7
+%record(jobspace varf)%array var(0:top param)
+%switch sw(0:10)
+%record(e4f)e4
+%constbytearray rt(0:2) = 1, 2, 0
+
+%integerfn f(%integer ch)
+%integer p
+%constbytearray chs(0:8)='r', 'b', 'w', 0, 's', 0, 0, 0, 'i'
+
+   %cycle p = 0, 1, 8
+      %result = p %if ch = chs(p)
+   %repeat
+   %result = -1
+%end
+
+
+   ix = 0; rx = 0; sx = 0; vx = 0; flag = 0; k = -1
+   tx = 1
+
+   k=0 %and -> uct %if template = ""  { no params }
+   %if result type < 3 %start
+      top n tail(line)
+      flag = 467 %and %return %if line = ""  { ##467 ##468 ##469 }
+      flag = 468 %and %return %unless charno(line, 1) = '('
+      line -> ("(") . line
+   %finish
+
+   %cycle
+      k = k + 1
+      %if tx > length(template) %start
+         %exit %if result type = 3
+         flag = 469 %and %return %unless charno(line, 1) = ')'
+         line -> (")") . line
+         %exit
+      %finish
+      line -> (",") . line %if tx > 1
+      top n tail(line)
+      type = f(charno(template, tx)) + f(charno(template, tx+1))
+      tx = tx + 2
+! printline("line=".line.", type=".itos(type))
+   
+
+      reqd type = rt(type>>2)
+      %if type & 3 > 0 %start  { ?b or ?w }
+         var(vx) = 0
+         flag = check for jsv name(line, var(vx))
+         %return %unless flag = 0
+! printline("name=".var(vx)_name)
+         %if type & 1 > 0 %start  { ?b so need current value }
+            flag = get value of jsv(var(vx))
+            %return %unless flag = 0
+%unless reqd type = var(vx)_type %start
+   flag = change type(var(vx), reqd type)
+   %return %unless flag = 0
+%finish
+         %finish
+         vx = vx + 1
+      %else
+         flag = jobspace expression(line, w)
+         %return %unless flag = 0
+%unless reqd type = w_type %start
+   flag = change type(w, reqd type)
+   %return %unless flag = 0
+%finish
+      %finish
+
+      -> sw(type)
+
+sw(0):   { rr }
+      r(rx) = w_r
+      stack(k) = addr(r(rx))
+      rx = rx + 1
+      %continue
+
+sw(1):   { rb }
+      stack(k) = addr(var(vx-1)_r)
+      %continue
+
+sw(2):   { rw }
+      var(vx-1)_type = 1  { long real }
+      stack(k) = addr(var(vx-1)_r)
+      %continue
+sw(4):   { sr }
+      s(sx) = jobspace vtos(w)
+! printline("sr s(".itos(sx).") = ".s(sx))
+      stack(k) = 256
+      stack(k+1) = addr(s(sx))
+      k = k + 1
+      sx = sx + 1
+      %continue
+
+sw(5):   { sb }
+      var(vx-1)_s = jobspace vtos(var(vx-1))
+      var(vx-1)_type = 2
+      stack(k) = 256
+      stack(k+1) = addr(var(vx-1)_s)
+      k = k + 1
+      %continue
+
+sw(6):   { sw }
+      var(vx-1)_type = 2  { string }
+      stack(k) = 256
+      stack(k+1) = addr(var(vx-1)_s)
+      k = k + 1
+      %continue
+
+sw(8):   { ir }
+! printline("ir i(".itos(ix).")=".itos(w_i))
+      i(ix) = w_i
+      stack(k) = addr(i(ix))
+      ix = ix + 1
+      %continue
+
+sw(9):   { ib }
+      ! flag =    %and %return %unless var(vx-1)_type = 0
+      stack(k) = addr(var(vx-1)_i)
+      %continue
+
+sw(10):   { iw }
+      stack(k) = addr(var(vx-1)_i)
+      %continue
+
+   %repeat
+
+uct:
+   uctranslate(addr(proc)+1, length(proc))
+   type = 2  { code reqd }
+   ix = loadep(proc, type, flag, e4, ssown_load level)
+   %return %if ix = 0
+!printline("pword=".htos(e4_pword,8))
+   flag = check param words(e4_pword, (length(template)<<15) ! (k<<2), proc)
+                   { ie no of params<<16 ! length of params }
+   flag = 361 %and %return %if flag = 0  { ##361 }
+   flag = 0
+   *l_1,stack
+   *mvc_64(256,11),0(1)
+   *la_1,e4
+   *lm_12,14,0(1)
+   *basr_15,14
+   *st_1,int
+   *std_0,lreal
+   fnres_i = int %if result type = 0
+   fnres_r = lreal %if result type = 1
+   %if result type = 2 %start
+      move(byteinteger(int)+1, int, addr(fnres_s))
+   %finish
+   fnres_type = result type %if result type < 3
+
+   %while vx > 0 %cycle
+      vx = vx - 1
+      flag = assign(var(vx), jobspace)
+      %exit %unless flag = 0
+   %repeat
+%end; ! call
+
+!-----------------------------------------------------------------------
+
+%routine get line from file(%stringname line, %integername adr, end)
+%integer ch
+
+   line = ""
+   %cycle
+      %return %if adr >= end
+      ch = byteinteger(adr); adr = adr + 1
+      %return %if ch = nl
+      line = line . tostring(ch) %if length(line) < 255
+   %repeat
+%end; ! getline from file
+
+!-----------------------------------------------------------------------
+
+%integerfn get line from window(%integer n, %stringname s)
+%integer j, k
+%record(windowf)%name window
+
+   s = ""
+   %result = 439 %unless 1 <= n <= top window  
+   j = ssown_window(n)
+   %result = 440 %if j = 0  
+   window == record(j)
+   %result = 441 %if window_cursor < 0  { no cursor }  
+   k = window_curpos  { first linre on display }
+   n = window_cursor - window_firstline  { how many lines to discard }
+   %cycle
+      getline from file(s, k, window_end)
+      %exit %if n = 0
+      n = n - 1
+   %repeat
+   top n tail(s)
+   %result = 0
+%end; ! get line from window
+
+!-----------------------------------------------------------------------
+
+%externalintegerfn jobspaceexpression %alias "s#jobspaceexpression" (%stringname line, %record(job space var f)%name w)
+%integer prev, opi, tos, j
+%bytearray ops(1:16)
+%record(job space var f)%array stack(1:15)
+%integer flag, save36, saveby, innerbase
+
+%routinespec exprinner
+%integerfnspec next item
+%integerfnspec get op
+%integerfnspec get a string(%record(job space var f)%name w)
+%integerfnspec do op
+%integerfnspec push(%record(job space var f)%name w)
+%integerfnspec function call(%record(job space var f)%name w)
+%routinespec xx(%string(255)s)
+
+   flag = 474  { ##474 unable to evaluate expression }
+   save36 = ssown_sscomreg(36)
+   saveby = ssown_who set comreg36
+   *st_11,innerbase
+   set comreg36(innerbase, 4)
+   exprinner
+   setcomreg36(save36, -saveby)
+   %result = flag
+
+
+%routine exprinner
+   prev = 0
+   opi = 0
+   tos = 0
+   %cycle
+      top n tail(line)
+      %exit %if line = ""
+      j = 0
+      %exit %if starts(line, "->") = yes
+      %exit %if starts(line, "then") = yes
+      %cycle j = 1, 1, top terminator
+         j = 0 %and %exit %if charno(line,1) = terminator(j)
+      %repeat
+       j = 0 %if j > 0 %and opi = 0 %and charno(line,1) = ')'
+
+      %exit %if j = 0
+xx("before")
+      j = next item
+xx("after".itos(j))
+      %exit %if prev = 3
+      -> out %unless j = 0
+   %repeat
+
+   %while opi > 0 %cycle
+      j= do op
+      %exit %unless j = 0
+   %repeat
+   j = 455 %and -> out %if tos = 0  { ##455 }
+   w = stack(1) %if j = 0
+out:
+   flag = j
+%end; ! exprinner
+
+!-------------------------------
+
+%routine xx(%string(255)s)
+%return %if ssown_job spacetrace&32 = 0
+shout(s." line:".line." opi:".itos(opi)." prev:".itos(prev)." tos:".itos(tos))
+%end
+
+%integerfn next item
+
+! Gets next operator or operand
+
+%integer j, ch, j1
+%record(job space var f)w
+%string(255)save line
+
+   j = get op
+   -> out %unless j < 0
+
+   j = 465 %and -> out %if prev = 2  { ##465 }
+   ch = charno(line, 1)
+
+   %if ch = '''' %or ch = '"' %start
+      j = get a string(w)
+!printline("Get a string gives " . itos(j))
+      -> out %unless j = 0
+      -> pu
+   %finish
+
+   save line = line
+   j1 = check for jsv name(line, w)
+   %if j1 = 0 %start
+      j = get value of jsv(w)
+   -> pu %if j = 0
+      j = function call(w)
+      -> pu %if j = 0
+   %finish
+   line = save line
+   j = string to number(line, w)
+   -> pu %if j = 0
+   j = 460 %if j1 = 0  { ##460 }
+   -> out
+pu:
+   j = push(w)
+   prev = 2
+out:
+!   printline("Next item gives " . itos(j))
+   %result = j
+%end; ! next item
+
+!-----------------------------------------------------------------------
+
+
+
+%routine print stack(%integer tos)
+printstring("Stack: ")
+%while tos > 0 %cycle
+   write(stack(tos)_i,1); tos = tos - 1
+%repeat
+%end
+
+%integerfn get op
+
+! Looks if next character is an operator, result:
+!     -1 no it isn't
+!      0 yes and valid
+!     >0 invalid operator
+
+!      (  )  +  -  *  /  **
+!      0  1  2  3  4  5  6
+
+%integer ch, j, type, res
+%string(1)chs
+%switch sw(0 : top op)
+   ch = charno(line, 1)
+   chs = tostring(ch)
+   %cycle type = 0, 1, top op
+      %if ch = op(type) %start
+         line -> (chs) . line
+        -> sw(type) 
+      %finish
+   %repeat
+   res = -1 %and -> out  { not an op }
+
+sw(0):  { ( }
+   res = 465 %and -> out %unless prev < 2  { ##465 }
+   prev = 0
+   -> stack
+sw(1):  { ) }
+   %cycle
+      res = 455 %and -> out %if prev = 0  { empty expr }  { ##455 }
+      %if opi = 0 %start  { no ( and nothing (more) to do }
+         line = ")" . line  { replace the ) }
+         prev = 3
+         %result = 0
+      %finish
+      opi = opi - 1 %and %exit %if ops(opi) = 0  { ( }
+      j = do op
+      res = j %and -> out %unless j = 0
+   %repeat
+   prev = 2
+   j = 0
+   j = do op %if opi > 0 %and (ops(opi) > 3)  { * or / }
+   res = j %and -> out
+sw(2):  { + }
+sw(3):  { - }
+   type = 128 ! type %if prev = 0  { mark unary }
+   res = 471 %and -> out %if prev = 1  { consec ops }  { ##471 }
+   j = do op %if opi > 0 %and ops(opi) > 1
+   prev = 1
+   -> stack
+sw(4):  { * }
+   %if line # "" %and charno(line,1) = '*' %start
+      line -> ("*") . line
+      type = 6
+   %finish
+sw(5):  { / }
+   res = 471 %and -> out %if prev = 1
+   res = 472 %and -> out %if prev = 0  { this is not a unary operator }  { ##472 }
+   prev = 1
+stack:
+   opi = opi + 1
+   ops(opi) = type
+! printline("Stack ".itos(type)." at ".itos(opi))
+   res = 0
+out:
+   %result = res
+%end; ! get op
+
+!-----------------------------------------------------------------------
+
+
+
+%integerfn do op
+%integer j, op, quotient
+%string(255)s255
+%record(job space var f)%name w1, w2
+%switch sw(2:13)
+
+%integerfn exponentiation
+
+%integer j, m, n, p, neg
+%longreal rm, rp
+%record(jobspace varf)temp
+
+   tos = tos - 1
+   w1 == stack(tos)
+   w2 == stack(tos + 1)
+
+   %if w1_type = 2 %start
+      j = make numeric(w1)
+      %result = j %unless j = 0
+   %finish
+   %if w2_type = 2 %start
+      j = make numeric(w2)
+      %result = j %unless j = 0
+   %finish
+
+   n = w2_i %if w2_type = 0
+
+   %if w1_type = 0 = w2_type %start  { int ** int }
+      w1_i = 1 %and %result = 0 %if n = 0
+      %if n < 0 %then neg = yes %and n = -n %else neg = no
+      m = w1_i
+      p = 1
+      %cycle
+         p = p * m %if n & 1 > 0
+         n = n >> 1
+         %exit %if n = 0
+         m = m * m
+      %repeat
+      %if neg = yes %then w1_r = 1/p %and w1_type = 1 %else w1_i = p
+      %result = 0
+   %finish
+
+   %if w2_type = 0 %start  { real ** int }
+      w1_r = 1.0 %and %result = 0 %if n = 0
+      %if n < 0 %then neg = yes %and n = -n %else neg = no
+      rm = w1_r
+      rp = 1.0
+      %cycle
+         rp = rp * rm %if n & 1 > 0
+         n = n >> 1
+         %exit %if n = 0
+         rm = rm * rm
+      %repeat
+      rp = 1.0/rp %if neg = yes
+      w1_r = rp
+      %result = 0
+   %finish
+
+   j = ecl log(w1_r, rm)
+   j = ecl exp(w2_r*rm, w1_r) %if j = 0
+   %result = j
+%end; ! exponentiation
+
+
+%integerfn check
+
+   tos = tos - 1
+   w1 == stack(tos)
+   w2 == stack(tos+1)
+   %result = checktypes(w1, w2)
+%end; ! check
+
+!-----------------------------------------------------------------------
+
+
+
+!printstack(tos)
+!printline("Do op tos=".itos(tos).", opi=".itos(opi))
+   %result = 455 %if tos = 0  { empty expression }  { ##455 }
+   op = ops(opi)
+   opi = opi - 1
+   -> out %if op = 128 ! 2 { unary + }
+   %if op = 128 ! 3 %start  { unary - }
+      w1 == stack(tos)
+      w1_i = -w1_i %if w1_type = 0
+      w1_r = -w1_r %if w1_type = 1
+      w1_s = " " . w1_s %if w1_type = 2
+      -> out
+   %finish
+
+   %result = exponentiation %if op = 6 { ** }
+   j = check
+   -> sw(4*j+op)
+
+sw(2):  { + }
+   w1_i = w1_i + w2_i; -> out
+sw(3):  { - }
+   w1_i = w1_i - w2_i; -> out
+sw(4):  { * }
+   w1_i = w1_i * w2_i; -> out
+sw(5):  { / }
+   quotient = w1_i // w2_i
+   %if w1_i = quotient * w2_i %c
+   %then w1_i = quotient %c
+   %else w1_r = w1_i / w2_i %and w1_type = 1
+   %result = 0
+sw(6):  { +R }
+   w1_r = w1_r + w2_r; %result = 0
+sw(7): { -R }
+   w1_r = w1_r - w2_r; %result = 0
+sw(8):  { *R }
+   w1_r = w1_r * w2_r; %result = 0
+sw(9):  { /R }
+   w1_r = w1_r / w2_r; %result = 0
+sw(10):  { + strings }
+   s255 = w2_s
+   length(s255) = 255 - length(w1_s) %if length(w1_s) + length(s255) > 255
+   w1_s = w1_s . s255; %result = 0
+sw(11):   { - strings }
+   %result = 0 %if length(w1_s) = 255
+   s255 = w2_s
+   length(s255) = 254 %if length(s255) = 255
+   length(s255) = 254 - length(w1_s) %if length(w1_s) + length(s255) > 254
+   w1_s = w1_s . " " . s255; %result = 0
+sw(12):
+   %result = 458  { ##458 ##459 ##474 }
+sw(13):
+   %result = 459
+sw(*):
+   %result = 474
+out:
+!printstring("After do op "); printstack(tos); newline
+   %result = 0
+%end; ! do op
+
+!-----------------------------------------------------------------------
+
+
+%integerfn push(%record(job space var f)%name w)
+%integer j
+
+   tos = tos + 1
+   stack(tos) = w
+   j = 0
+   j = do op %if opi > 0 %and 4 <= ops(opi) <= 6  { *, / or ** } ; ! %or (ops(opi) = 3 %and prev = 1))
+   %result = j
+%end; ! push
+
+!-----------------------------------------------------------------------
+
+%integerfn get a string(%record(job space var f)%name w)
+%integer ch, j, q
+%string(255)out, s
+
+   q = charno(line, 1)
+   out = ""
+   j = 2
+   %cycle
+      %result = 470 %if j > length(line)  { ##470 }
+      ch = charno(line, j)
+      j = j + 1
+      %exit %if q = ch
+      out = out . tostring(ch)
+   %repeat
+
+   %if j > length(line) %c
+   %then line = "" %c
+   %else %start
+     s = line
+      length(s) = j - 1
+      line -> (s) . line
+   %finish
+
+   w_s = out
+   w_type = 2
+   %result = 0
+
+%end; ! get a string
+
+!-----------------------------------------------------------------------
+
+%integerfn function call(%record(job space var f)%name w)
+%integer j, k, n, width, nops, fps, reqd type, spec, result type, loadlevel
+%string(15)fn, alias, temp
+%string(1)stype
+%byteintegername first
+%string(255)wline
+%record(job space var f)%array parm(1 : 3)
+%record(fdf)%name fd
+%record(job space for f)%name job spacefor
+%record(job spacef)%name job space
+%record(windowf)%name window
+%record(frf)fr
+%integerarray dsfii(0 : 31)
+%constbyteintegerarray dsfitype(0 : 49) = %c
+2, 2, 2, 2, 0, 0, 0, 0, 0, 0,
+0, 0, 0, 0, 0, 0, 0, 0, 2, 2,
+0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+0, 0, 0, 0, 0, 2, 2, 2, 0, 2,
+0, 0, 0, 0, 2, 0, 2, 0, 0, 2
+
+%switch sw(1 : top function)
+
+%constinteger top fsw = 2
+%switch fsw(0 : top fsw)
+
+   loadlevel = ssown_loadlevel
+   jobspace == record(jobspace base(0))
+   spec = jobspace_spec
+   %cycle  { any local (fn) specs? }
+      %exit %if spec = 0
+      result type = byteinteger(spec+4)
+      %if result type < 3 %start  { a fn spec }
+         fn = string(spec+5)
+         temp = string(spec+length(fn)+6)
+         alias = fn %unless fn -> fn . ("/") . alias
+         %if compare(w_name, fn) = yes %start
+            call(alias, temp, line, jobspace, w, result type, j)
+            %result = j
+         %finish
+      %finish
+      spec = integer(spec)
+   %repeat
+
+   %cycle k = 1, 1, top function
+      %if compare(w_name, function(k)) = yes %start
+   fps = function params(k)
+   %if fps > 0 %start
+      first == byteinteger(addr(line)+1)
+      top n tail(line)
+      %result = 467 %if line = ""  { ##467 ##468 ##469 }
+      %result = 468 %unless first = '('
+      line -> ("(") . line
+      nops = fps & 15
+      %cycle n = 1, 1, nops
+         j = jobspaceexpression(line, parm(n))
+         %result = 469 %unless j = 0 %andc
+           ((n < nops %and first = ',' )%orc
+            (n = nops %and first = ')' ))
+         line -> (tostring(first)) . line
+         fps = fps >> 4
+         reqd type = fps & 15
+         %unless reqd type = parm(n)_type %orc
+                       reqd type = 3 %c
+         %start
+            j = change type(parm(n), reqd type)
+            %result = j %unless j = 0
+         %finish
+!printjsv("parm(".itos(n).") ", parm(n))
+      %repeat
+      parm(n)_s = jobspacevtos(parm(n))
+   %finish
+   w_type = function type(k)
+   -> sw(k)
+      %finish
+   %repeat
+
+   %cycle j = 1, 1, top external fn
+      external fn(j) -> fn . ("/") . alias . ("/") . stype . ("/") . temp
+      alias = alias . fn
+      %if compare(w_name, fn) = yes %start
+         call(alias, temp, line, jobspace, w, charno(stype,1)-'0', j)
+         %result = j
+      %finish
+   %repeat
+
+   ssown_ssfname = w_name %and %result = 464  { ##464 not recognised }
+   
+
+
+sw(1):    { integer }
+   selectinput(-90)
+   getinteger(parm(1)_s, j)
+   selectinput(0)
+   w_i = j
+   %result = 0
+
+sw(2):    { count }
+   jobspace for == jobspace_for(jobspace_for depth)
+   %if jobspace for_count < 0 %start  { not yet evaluated }
+      j = jobspace for_static start
+      n = 0
+      %cycle
+         %exit %if j >= jobspace for_end
+         n = n + 1 %if byteinteger(j) = nl
+         j = j + 1
+      %repeat
+      jobspace for_count = n
+   %finish
+   w_i = jobspace for_count
+   %result = 0
+
+sw(3):    { string }
+   selectinput(-90)
+   getstring(parm(1)_s, w_s)
+   selectinput(0)
+   %result = 0
+
+sw(4):   { date }
+   w_s = date
+   %result = 0
+
+sw(5):   { time }
+   w_s = time
+   %result = 0
+
+sw(6):   { substr }
+   w_s = substring(parm(1)_s, parm(2)_i, parm(3)_i)
+   %result = 0
+
+sw(7):   { uinfi }
+   w_i = uinfi(parm(1)_i)
+   %result = 0
+
+sw(8):   { uinfs }
+   w_s = uinfs(parm(1)_i)
+   %result = 0
+
+sw(9):   { vdus }
+   w_s = vdus(parm(1)_i)
+   %result = 0
+
+sw(10):   { pos }
+   w_s = vduc(parm(2)_i, parm(1)_i)
+   %result = 0
+sw(11):   { newline }
+   w_s = {tostring(13) .} tostring(10)
+   %result = 0
+
+sw(12):   { hex }
+   w_s = htos(parm(1)_i,8)
+   %result = 0
+
+sw(13):   {type of }
+   w_i = parm(1)_type
+   %result = 0
+
+sw(14):   { next }
+   w_s = ""
+   job space == record(ssown_job spacebase(ssown_load level))
+
+%if jobspace_fordepth = 0 %start
+   w_s = "next"
+   %result = 0
+%finish
+   job spacefor == job space_for(job space_for depth)
+   %if job spacefor_start >= job spacefor_end %start  { finished }
+      %cycle  { do an exit }
+         %exit %if job space_type & 1 > 0
+         job space_type = job space_type >> 1
+         job space_depth = job space_depth - 1
+      %repeat
+      job space_p = job space_ref(job space_depth)
+      job space_p = job space_desc(job space_p)_p
+      job space_depth = job space_depth - 1
+      job space_type = job space_type >> 1
+      fd == record(job space_afd)
+      fd_cur = job space_desc(job space_p)_adr
+      fd_currec = fd_cur
+      disconnect(job spacefor_name, j)
+      job space_for depth = job space_for depth - 1
+      w_s = "0" %if job spacefor_type = 4  { fsyss }
+      %result = 0
+   %finish
+
+   w_s = next for line(job spacefor)
+   %result = 0
+
+sw(15):  { finfo }
+   finfo(parm(1)_s, 3, fr, j)
+   %result = j %unless j = 0
+   parm(2)_i = 0 %unless 0 < parm(2)_i <= top f sw
+   -> fsw(parm(2)_i)
+fsw(0):  { error }
+   w_s = "???"
+   %result = 0
+fsw(1):  { type }
+   w_i = fr_filetype
+   w_type = 0
+   %result = 0
+fsw(2):  { logical size }
+   w_i = fr_dataend - fr_datastart
+   w_type = 0
+   %result = 0
+
+sw(16):   { line }
+   ssown_prompt text = parm(1)_s . ": "
+   select input(-90)
+   control line(w_s, j)
+   select input(0)
+   %stop %if j > 0
+   %result = 0 %if j = 0
+   %stop
+
+sw(17):   { dsfi }
+   n = parm(1)_i
+   k = 0
+   %if n > 100 %start
+      k = n
+      n = n // 100
+      k = k - 100 * n
+   %finish
+   j = dsfi(ssown_job spaceindex, ssown_job spacefsys, n, 0, wline, dsfii)
+   %result = dirtoss(j) %unless j = 0
+   %if dsfitype(n) = 0 %start
+      w_i = dsfii(k)
+   %else
+      w_s = wline
+   %finish
+   w_type = dsfitype(n)
+   %result = 0
+
+sw(18):   { length }
+   wline = jobspacevtos(parm(1))
+   w_i = length(wline)
+   %result = 0
+
+sw(19):   { give line }
+   j = get line from window(parm(1)_i, w_s)
+   %result = 0
+
+sw(20):   { pop }
+   spop(w_s, j)
+   w_s = "" %unless j = 0
+   %result = 0
+
+sw(21):   { filetype }
+   w_i = type(parm(1)_s)
+   %result = 0
+
+sw(22):   { intpt }
+!   %result = intpt of jsv(parm(1), w_i)
+   w_i = parm(1)_i
+   %result = 0
+
+sw(23):   { real }
+   w_r = parm(1)_r
+   %result = 0
+
+sw(24):   { fsys }
+   w_i = ssown_jobspace fsys
+   %result = 0
+
+sw(25):   { index }
+   w_s = ssown_jobspace index
+   %result = 0
+
+%end; ! function call
+
+!-----------------------------------------------------------------------
+
+%end; ! jobspace expression
+
+!-----------------------------------------------------------------------
+
+%integerfn analyse(%stringname line)
+%integer i, j, k, found, res, lkey
+%string(255)s, key
+
+   k = length(line)
+   %cycle i = 1, 1, topkey
+      key = keyword(i)
+      lkey = length(key)
+      %continue %if lkey = 0 %or lkey > k
+      found = 1
+      %cycle j = 1, 1, lkey
+         found = 0 %and %exit %unless uch(charno(line,j)) = charno(key,j)
+      %repeat
+      %if found = 1 %start
+         %continue %if k > lkey %and ('A' <= uch(charno(line,lkey+1)) <= 'Z' %orc
+            '0' <= charno(line,lkey+1) <= '9')
+         s = line
+         length(s) = lkey
+         line -> (s) . line
+         res = i %and -> out
+      %finish
+   %repeat
+   res = 0
+out:
+   shout("<- Analyse " . itos(res)) %if ssown_job spacetrace & 1 > 0
+
+   %result = res
+%end
+
+!-----------------------------------------------------------------------
+
+%integerfn assign(%record(job space var f)%name w, %record(job spacef)%name job space)
+%integer j, i, erract
+%integername p, g
+%record(global varf)%name gv
+%record(jobspace variable f)%name jsv
+%switch sw (1 : top system variable)
+
+   %cycle j = 1, 1, top system variable
+      -> sw(j) %if compare(w_name, system variable(j)) = yes
+   %repeat
+
+   erract = compare(w_name, "erroraction")
+   g == jobspace_global
+   %cycle
+      %exit %if g = 0  { no (more) globals }
+      gv == record(g)
+      p == gv_p
+      jsv == record(p)
+      -> assign %if compare(w_name, jsv_name) = yes
+      g == gv_link
+   %repeat
+
+   p == jobspace_pointer
+   %cycle
+      %if p = 0 %start  { not found, make a new one }
+         p = getheap(14 + length(w_name))
+         jsv == record(p)
+         jsv_type = 0
+         jsv_link = 0
+         jsv_name = w_name
+         jobspace_error action = 1 %if erract = yes
+         %exit
+      %finish
+      jsv == record(p)
+      %exit %if compare(w_name, jsv_name) = yes
+      p == jsv_link
+   %repeat
+
+assign:
+   %if jsv_type=2 %and (w_type # 2 %or length(w_s) > integer(p)) %start
+      dispose heap(integer(p+4))
+      jsv_type = 0
+   %finish
+
+   %if w_type = 2 %start
+      %unless jsv_type = 2 %start
+         integer(p) = length(w_s)
+         integer(p+4) = getheap(length(w_s)+1)
+      %finish
+      string(integer(p+4)) = w_s
+   %finish %else %start
+      longreal(p) = w_r %if w_type = 1
+      integer(p) = w_i %if w_type = 0
+   %finish
+   jsv_type = w_type
+!   ssown_rcode = 0 %if erract = yes
+   -> out
+
+
+sw(1):   { return code }
+   %if w_type = 0 { integer } %start
+      psysmess(jobspace_name, w_i)
+   %else
+      w_s = jobspacevtos(w) %if w_type = 1
+      ssown_ssfname = w_s
+      psysmess(jobspace_name, 100)
+   %finish
+   -> out
+sw(2):   { return text }
+   w_s = jobspacevtos(w) %if w_type < 2
+   ssown_ssfname = w_s
+   -> out
+sw(3):   { result }
+   ssown_job space result = w
+   -> out
+sw(4):   { job space fsys }
+   j = intpt of jsv(w, i)
+   %result = j %unless j = 0
+   ssown_job space fsys = i
+   -> out
+sw(5):   { job space index }
+   ssown_job space index = w_s
+   -> out
+
+out:
+   shout("<- Assign: ".w_name."=".jobspacevtos(w)) %if ssown_job spacetrace&1>0
+   %result = 0
+%end; ! assign
+
+!-----------------------------------------------------------------------
+
+%externalintegerfn set jsv %alias "s#setjsv" (%integer level,
+   %record(jobspace varf)%name w)
+
+%record(jobspacef)%name jobspace
+
+   jobspace == record(jobspacebase(level))
+   %result = assign(w, jobspace)
+%end; ! set jsv
+
+!-----------------------------------------------------------------------
+
+%routine generate file %alias "s#generatefile"(%string %name file,
+   %integer type, options, ftypes)
+
+   { takes a pattern and returns '@file' }
+
+   %integer chan, afd, j, cost, ch1, ch2, k, ok,flag
+   %string (255) pattern
+   %string (15) w
+   %string (6) mask
+   %string (19) %array names(0:1365)
+   %integer %array a(0:15)
+   %integer n
+   %const %integer top= 6,zset=x'2000000'
+   %switch sw(0:top)
+
+   %record %format hf(%integer end, start, size, type, sum, dt, adir, count)
+   %record %format dirf(%integer start, %string (11) name, %integer a, b, c, d)
+   %record (dirf) %array %format diraf(0:16000)
+   %record (hf) %name h
+   %record (dirf) %array %name dir
+   %integer conad, count
+
+   %external %integer %fn %spec iocp %alias "s#iocp"(%integer a, b)
+   %external %routine %spec files %alias "s#files"(%string (255) pattern, %integer options,qual,days unused, %integer %name flag)
+   %external %integer %fn %spec d av fsys(%integer %name n, %integer %array %name a)
+   %external %integer %fn %spec d get indexes(%integer %name fsys, n, %string (19) %array %name names)
+
+   pattern = file { passed in }
+   file = ""
+   %return %unless 0<=type<=top
+   uctranslate(addr(pattern)+1, length(pattern)) %unless pattern=""
+
+   %if type<4 %start
+      j = uig(pattern)
+      %return %unless j=0
+   %finish
+
+   emas3 claim channel(chan)
+   ssown_seq = ssown_seq + 1  { next temp }
+   w = "T#WILD".htos(ssown_seq, 3)
+   define(chan, w, afd, j)
+   %return %unless j=0
+   cost = outstream
+   select output(chan)
+   ->sw(type)
+
+sw(6):
+   pattern = pattern."_";                ! for member names
+sw(0):
+sw(1):
+sw(2):
+sw(3):
+   files(pattern, options!zset, ftypes, 0, flag)
+   ->out
+
+sw(4):
+   j = d av fsys(n, a)
+   %return %unless j=0
+   %cycle
+      ->out %if j=n
+      printline(itos(a(j)))
+      j = j+1
+   %repeat
+
+sw(5):
+   j = d get indexes(ssown_jobspacefsys, n, names)
+   %return %unless j=0
+   mask = "" %unless pattern->(",").mask
+   mask = ucstring(mask) %unless mask=""
+   %cycle
+      ->out %if j=n
+      j = j+1 %and %continue %if type=5 %and length(names(j))>6
+      ok = yes
+      %unless mask="" %start
+         %cycle k = 1, 1, 6
+            ch1 = charno(mask, k)
+            %continue %if ch1='?'
+            ch2 = charno(names(j), k)
+            %continue %if ch1=ch2
+            %continue %if ch1='#' %and '0'<=ch2<='9'
+            %continue %if ch2='@' %and 'A'<=ch2<='Z'
+            ok = no
+            %exit
+         %repeat
+      %finish
+      printline(names(j)) %if ok=yes
+      j = j+1
+   %repeat
+
+out:
+   select output(cost)
+   j = close n clear(chan)
+   file = "@".w
+%end;                                    ! generate file
+!
+!-----------------------------------------------------------------------
+!
+%integerfn generate (%stringname file, %integername gtype)
+%integer ftypes, j, ch, option
+%string(8)w, types, options
+%string(255)fn
+%conststring(1)%array ftype(0:6) = "O","N","C","D","","P","Y"
+%constinteger topfn = 3
+%conststring(10)%array fns(0:topfn) = %c
+"files",
+"lines",
+"allfsyss",
+"allindexes"
+
+%switch sw(0:topfn)
+
+   gtype = 0
+   %result = 0 %if file = ""
+   fn = file %and file = "" %unless file -> fn . ("(").file.(")")
+   %cycle j = 0, 1, topfn
+      -> sw(j) %if compare(fn, fns(j)) = 1
+   %repeat
+   %result = 125  { ##125 specifier not recognised }
+
+sw(0):  {files}
+   options = "" %unless file -> file . (",") . options
+   options = ucstring(options) %unless options = ""
+   types = "" %unless options -> options . (",") . types
+   option = 0
+   %unless options = "" %start
+      %cycle j = 1, 1, length(options)
+         ch = charno(options,j)
+         option = option ! (1<<(ch-'A')) %if 'A' <= ch <= 'Z'
+      %repeat
+   %finish
+
+   ftypes = 0
+   %if types # "" %start
+      %cycle j = 0, 1, 6
+         ftypes = ftypes ! (1<<j) %if types -> (ftype(j))
+      %repeat
+      ftypes = ftypes << 5
+   %finish
+   -> gen
+sw(2):   {allfsyss}
+   gtype = 4; -> gen
+sw(3):   {allindexes}
+   gtype = 5; -> gen
+gen:
+   generate file(file, gtype, option, ftypes)
+   file -> ("@") . file
+   %result = 0
+sw(1):   {lines}
+   gtype = -1
+   %result = 0
+%end; ! generate
+
+!-----------------------------------------------------------------------
+
+%integerfn locate global jsv(%string(255) name)
+
+%integername p
+%record(jobspacevariablef)%name jsv
+%record(jobspacef)%name basespace
+
+   basespace == record(jobspacebase(-1))  { outer level }
+   p == basespace_pointer
+   %cycle
+      %if p = 0 %start  { doesnt exist, so make a new one }
+         p = getheap(14+length(name))
+         jsv == record(p)
+         jsv_len = 0
+         jsv_addr = 0
+         jsv_link = 0
+         jsv_type = 0
+         jsv_name = name
+         %exit
+      %finish
+      jsv == record(p)
+      %exit %if compare(name, jsv_name) = yes
+      p == jsv_link
+   %repeat
+   %result = p
+%end; ! locate global jsv
+
+!-----------------------------------------------------------------------
+
+%externalroutine job space man %alias "s#jobspaceman"(%stringname line, %integer percents)
+%record(fdf)%name fd
+%record(job spacef)%name job space
+%record(job space var f)w
+%record(job space for f)%name job spacefor
+%string(255)wline, s255
+%string(30)aname
+%integer conad, j, k, b, com, type, start, end, s, p
+%string(255)proc, temp, procw, alias
+%byteintegername first
+%integer save36, saveby, innerbase
+
+%routinespec spacemaninner
+
+   save36 = ssown_sscomreg(36)
+   saveby = ssown_who set comreg36
+   *st_11, innerbase
+   set comreg36(innerbase, 5)
+   spacemaninner
+   set comreg36(save36, -saveby)
+   select input(0)
+   %if j # 0 %and jobspace_afd # 0 %and jobspace_procetc = 1 %start
+!      printline("EOF forced")
+      fd_cur = jobspace_fend { return from procedure }
+   %finish
+   %return
+
+%routine spacemaninner
+%integerfnspec declare global variable
+%integerfnspec resolve(%stringname lhs, line, %integername bool)
+%integerfnspec bexpr(%stringname line, %integername flag)
+%integerfnspec evaluate optional if
+%switch sw(0 : topkey)
+
+!printline("job space: " . line)
+
+   j = job spacebase(0)
+   %return %if j = 0
+   job space == record(j)
+   fd == record(job space_afd) %unless jobspace_afd = 0
+
+!   ssown_ssfname = ""
+have another go:
+   top n tail(line)
+
+   com = analyse(line)
+
+   j = 0
+   %if ssown_obeylevel = 0 %and ssown_ssreason # batchreason %start
+         { at ordinary comand level }
+      %if callable at command level(com) = no %c
+      %then line = keyword(com) . line %and %return
+   %finish
+
+   %if conditional(com) = 1 %start
+      %unless line = "" %start
+         top n tail(line)
+         j = evaluate optional if
+         com = 3 %and j = -1 %if com = 2 %and j = 0  { a failed repeat }
+                           { becomes an exit }
+         -> out %unless j < 0
+      %finish
+   %finish
+
+   %if single expr(com) = 1 %start
+      j = jobspaceexpression(line, w)
+      -> out %unless j = 0
+      s255 = jobspacevtos(w)
+   %finish
+
+   top n tail(line)
+   first == byteinteger(addr(line) + 1)
+   j = 0  { anticipate success }
+   -> sw(com)
+
+
+sw(0):  { assignment }
+   wline = line
+   j = check for jsv name(wline, w)
+   -> subs %unless j = 0
+   aname = w_name
+   top n tail(wline)
+   -> subs %unless starts(wline, "=") = yes %or starts(wline, "->") = yes
+   %if charno(wline, 1) = '=' %start
+      wline -> ("=") . wline
+      -> subs %if wline = ""
+      j = jobspaceexpression(wline, w)
+      {-> out}-> subs %unless j = 0
+      {j = 474 %and -> out} -> subs %unless wline = ""
+      w_name = aname
+      j = assign(w, job space)
+      -> out
+   %finish
+
+   wline -> ("->") . wline
+   j = get value of jsv(w)
+   -> subs %unless j = 0
+   s255 = jobspacevtos(w)
+   j = resolve(s255, wline, b)
+   j = 463 %if j = 0 = b  { ##463 }
+   -> out
+
+subs:
+   wline = line
+   lctranslate(addr(wline)+1, length(wline))
+!   ssown_rcode = 0  { WHY was this in ??? }
+   proc = wline %and wline = "" %unless wline -> proc . (" ") . wline
+   s = jobspace_spec
+   %cycle
+      %exit %if s = 0  { no more local specs }
+      %if byteinteger(s+4) = 3 {routine} %start
+         procw = string(s+5)
+         temp = string(s+length(procw)+6)
+         alias = procw %unless procw -> procw . ("/") . alias
+         %if proc = procw %start
+            proc = alias
+printline("Found ".proc." in local specs temp ".temp) %if ssown_jobspace trace & 4 > 0
+            -> call
+         %finish
+      %finish
+
+      s = integer(s)
+   %repeat
+
+   j = 0
+   %return %unless length(proc) > 5 %and proc -> temp . ("emas3") %and temp = ""
+
+   %cycle
+      %return %if emas3(s) = '*'  { no more built-in specs }
+      p = 6  { first ch after 'emas3' }
+      %cycle
+         %if emas3(s) = '(' %start
+            %exit %unless p = length(proc)+1
+            temp = ""
+            %cycle
+               s = s + 1
+               %if emas3(s) = ')' %start
+printline("Built in spec to ".proc." found") %if ssown_jobspace trace & 4 > 0
+                  select input(-90)
+                  -> call
+               %finish
+               temp = temp . tostring(emas3(s))
+            %repeat
+         %finish %else %start
+            %exit %if p > length(proc)
+            %exit %if emas3(s) # charno(proc, p)
+            p = p + 1; s = s + 1
+         %finish
+      %repeat
+      s = s + 1 %while emas3(s) # ')'
+      s = s + 1
+   %repeat
+call:
+   %if wline = "" %c
+   %then line = "" %c
+   %else line = substring(line, length(line)-length(wline)+1, length(line))
+
+   call(proc, temp, line, jobspace, w, 3 {routine}, j)
+   -> out
+
+sw(1):  { cycle }
+sw(13): { for }
+   job space_depth = job space_depth + 1
+   job space_type = (job space_type<<1) ! 1
+   job space_p = job space_p + 1
+   job space_ref(job space_depth) = job space_p
+   -> out %if com = 1 { cycle }
+
+   j = generate(s255, k)
+   -> out %unless j = 0
+   job space_for depth = job space_for depth + 1
+   job spacefor == job space_for(job space_for depth)
+   connect(s255, 0,0, 0, conad, type, start, end, j)
+   job spacefor_name <- s255
+   job spacefor_type = k
+   job spacefor_start = conad + start
+   job spacefor_end = conad + end
+   job spacefor_static start = conad + start
+   job spacefor_count = -1  { no of items - not evaluated }
+special:
+   -> out %unless 4 <= job spacefor_type <= 5
+   %if job spacefor_start >= job spacefor_end %start
+      com = 3  { exit }
+      -> sw(3)
+   %finish
+   s255 = next for line(job spacefor)
+   %if job spacefor_type = 4 %start  { fsyss }
+      j = stoi(s255, ssown_job spacefsys)
+   %else
+      ssown_job spaceindex = s255
+   %finish
+   -> out
+
+
+
+sw(2):  { repeat }
+   job space_p = job space_ref(job space_depth)
+   fd_cur = job space_desc(job space_p)_adr
+      fd_currec = fd_cur
+   %if job space_desc(job space_p)_type = 13 %start  { after a %for }
+      job spacefor == job space_for(job space_for depth)
+      -> special
+   %finish
+   -> out
+
+sw(3):  { exit }
+sw(4):  { continue }
+   %cycle
+      %exit %if job space_type & 1 > 0
+      job space_type = job space_type >> 1
+      job space_depth = job space_depth - 1
+   %repeat
+   -> sw(2) %if com = 4 {continue}
+   job space_p = job space_ref(job space_depth)
+   %if job space_desc(job space_p)_type = 13 %start
+      disconnect(job space_for(job space_for depth)_name, 0 {dont wish to know})
+      %if job space_for(job space_for depth)_type >= 0 %start
+         destroy(job space_for(job space_for depth)_name, 0)
+      %finish
+      job space_for depth = job space_for depth - 1
+   %finish
+   job space_p = job space_desc(job space_p)_p
+   fd_cur = job space_desc(job space_p)_adr
+      fd_currec = fd_cur
+   job space_depth = job space_depth - 1
+   job space_type = job space_type >> 1
+   -> out
+
+sw(5):  { if }
+sw(6):  { unless }
+sw(21):   { ifnot = unless }
+   j = bexpr(line, b)
+!printline("aaa j=".itos(j)." line='".line."'")
+   -> out %unless j = 0
+%unless line = "" %start
+      { either unused boolean stuff or then... }
+   j = inresolve(line, s255, "then", line)
+   %if j = 0 %and line # "" %start  { a 'then' present }
+      -> out %unless (com=5 %and b=1) %or (com#5 %and b=0)
+      -> have another go  { ie do whatever is after the then }
+   %finish
+   j = 0
+%finish
+
+   job space_p = job space_p + 1
+   %if (com=5 %and b=1) %or (com#5 %and b=0) %start
+      job space_depth = job space_depth + 1  { want to continue with %IF... }
+      job space_type = job space_type << 1
+      job space_ref(job space_depth) = job space_p
+      -> out
+   %finish
+   { want to skip to else or finish }
+   fd_cur = job space_desc(job space_p)_adr
+      fd_currec = fd_cur
+   job space_p = job space_desc(job space_p)_p
+   -> out %if jobspace_p > 0  { simple if....fi }
+   job space_depth = job space_depth + 1
+   job space_type = job space_type << 1
+   jobspace_p = -jobspace_p
+   job space_ref(job space_depth) = job space_p
+   -> out
+
+sw(7):  { else }
+sw(8):  { finish }
+sw(22):   { fi = finish }
+   job space_depth = job space_depth - 1
+   job space_type = job space_type >> 1
+   -> out %unless com = 7 { else }
+   job space_p = job space_p + 1
+   fd_cur = job space_desc(job space_p)_adr
+      fd_currec = fd_cur
+   job space_p = job space_desc(job space_p)_p
+   -> out
+
+sw(9):   { stop }
+   quit %if ssown_obeylevel = 0
+   batchstop(4) %if ssown_ssreason = batchreason
+   console(9, -1, -1)
+   emas3signal(65, 65)
+   %stop
+
+sw(10):   { return }
+sw(23):   { end }
+   fd_cur = job space_fend
+   -> out
+
+sw(11):   { say }
+   printstring{chssomehow}(s255)
+   -> out
+
+sw(12):   { monitor }
+   monitor
+   -> out
+
+sw(14):   { global }
+   j = declare global variable
+   -> out
+
+sw(15):   { saychs }
+   printsomehow(s255)
+   -> out
+
+sw(16):   { specs }
+sw(17):                 { done during initial scan }
+sw(18):
+sw(19):
+!   j = process spec(line, jobspace, com-16)
+   -> out
+
+out:
+   %if ssown_jobspace trace & 16 > 0 %start
+      com = 20 %unless 1 <= com <= topkey
+      shout("Com=".keyword(com). %c
+                " Depth=".itos(jobspace_depth). %c
+                " Type=".itos(jobspace_type). %c
+                " P=".itos(jobspace_p). %c
+                " Cur=".htos(fd_cur,8))
+   %finish
+   line = ""
+
+   %if ssown_usage & 4 = 0 %start  { record fact that ECL has been used }
+      ssown_usage = ssown_usage ! 4
+      connect("SUBSYS:Y.PRIVATEECL", 0, 0, 2, 0, 0, 0, 0, 0)
+   %finish
+
+   error(j, job space) %unless j = 0
+   %return
+
+
+
+%integerfn declare global variable
+%integer j, p
+%integername g
+%record(globalvarf)%name gv
+%record(jobspace variablef)%name jsv
+
+   %result = 0 %if ssown_load level = 2  { no-op }
+   %cycle
+      topntail(line)
+      j = check for jsv name(line, w)
+      %result = j %unless j = 0
+      topntail(line)
+      %result = 466 %unless line = "" %or charno(line, 1) = ','  { ##466 }
+      p = locate global jsv(w_name)
+         { p is now addr of global record }
+      g == jobspace_global
+      %cycle
+         %if g = 0 %start
+            g = getheap(8)
+            gv == record(g)
+            gv_p = p
+            gv_link = 0
+            %exit
+         %finish
+         gv == record(g)
+         jsv == record(gv_p)
+         %exit %if compare(w_name, jsv_name) = yes  { duplicate decl, ignore }
+         g == gv_link
+      %repeat
+      %result = 0 %if line = ""
+      line -> (",") . line
+   %repeat
+%end; ! declare global variable
+
+!-----------------------------------------------------------------------
+
+%integerfn evaluate optional if
+%integer j, k, b, res
+%string(255)w
+%conststring(7)%array piece(0:2)="if ","unless ","ifnot "
+
+   %cycle j = 0, 1, 2
+      %exit %if inresolve(line,s255,piece(j),w)=0
+      %result = -1 %if j = 2
+   %repeat
+   line = piece(j) . w
+   res = 466  { invalid statement }
+   j = analyse(line)
+   -> out %unless j = 5 %or j = 6 %or j = 21
+   k = bexpr(line, b)
+   -> out %unless k = 0
+   res = 0
+   -> out %if (j = 5 %and b = 0) %or (j # 5 %and b = 1)  { false }
+   line = s255
+   res = -1
+out:
+   %result = res
+%end; ! evaluate optional if
+
+!-----------------------------------------------------------------------
+
+%integerfn bexpr(%stringname line, %integername bool)
+%integerfnspec do cop (%record(job space var f)%name w1, w2, %integer op)
+%integer j, state, ch, c
+%string(255)s255
+%record(job space var f)w1, w2
+
+   j = jobspaceexpression(line, w1)
+!printline("bbb j=".itos(j)." line='".line."'")
+   %result = j %unless j = 0
+   state = 1  { just one expr }
+   %cycle
+      %exit %if line = ""
+      %result = 461 %if length(line) < 2  { ##461 ##462 ##453 }
+      ch = charno(line, 1)
+%exit %if starts(line, "then") = yes  { case independent }
+      j = 0
+      %cycle c = 1, 1, top cop  { - = # > < }
+         j = c %and %exit %if ch = comp(c)
+      %repeat
+      %result = 462 %if j = 0
+      line -> (tostring(ch)).line
+      ch = charno(line, 1)
+      %result = 462 %if j = 1 %and ch # '>'
+      j = j + 2 %if 4 <= j <= 5 %and ch = '='
+      line -> (tostring(ch)) . line %if j = 1 %or j > 5
+      ch = j
+      %if ch > 1 %start
+         j = jobspaceexpression(line, w2)
+         %result = j %unless j = 0
+         j = do cop(w1, w2, ch)
+         state = 2
+         %exit %if j = 0  { false }
+         w1 = w2
+         state = 3
+      %else
+         %result = 453 %unless state = 1
+         s255 = jobspacevtos(w1)
+         j = resolve(s255, line, bool)
+         %result = j
+      %finish
+   %repeat
+   %if state = 1 %start
+      state = 0 %if w1_type = 0 %and w1_i = 0
+      state = 0 %if w1_type = 1 %and w1_r = 0
+      state = 0 %if w1_type = 2 %and w1_s = ""
+   %finish
+   bool = state & 1  { 0 = false, 1 = true }
+   %result = 0
+
+%integerfn do cop(%record(job space var f)%name w1, w2, %integer op)
+%integer j
+%switch sw(1 : 18)
+
+   j = checktypes(w1, w2)
+   -> sw(j * 6 + op - 1)
+
+sw(1):  { = integers }
+   %if w1_i = w2_i %then %result = 1 %else %result = 0
+sw(2):  { # integers }
+   %if w1_i # w2_i %then %result = 1 %else %result = 0
+sw(3):  { > }
+   %if w1_i > w2_i %then %result = 1 %else %result = 0
+sw(4):  { < }
+   %if w1_i < w2_i %then %result = 1 %else %result = 0
+sw(5):   { >= }
+   %if w1_i >= w2_i %then %result = 1 %else %result = 0
+sw(6):   { <= }
+   %if w1_i <= w2_i %then %result = 1 %else %result = 0
+
+
+sw(7):  { = reals }
+   %if w1_r = w2_r %then %result = 1 %else %result = 0
+sw(8):   { # reals }
+   %if w1_r # w2_r %then %result = 1 %else %result = 0
+sw(9):   { > reals }
+   %if w1_r > w2_r %then %result = 1 %else %result = 0
+sw(10):   { < reals }
+   %if w1_r < w2_r %then %result = 1 %else %result = 0
+sw(11):   { >= reals }
+   %if w1_r >= w2_r %then %result = 1 %else %result = 0
+sw(12):   { <= reals }
+   %if w1_r <= w2_r %then %result = 1 %else %result = 0
+
+
+sw(13):   { = strings }
+   %result = compare(w1_s, w2_s)
+sw(14):   { # strings }
+   %result = 1 - compare(w1_s, w2_s)
+sw(*):
+   %result = 0
+%end; ! do cop
+
+!-----------------------------------------------------------------------
+
+%end; ! bexpr
+
+!-----------------------------------------------------------------------
+
+%integerfn resolve (%stringname lhs, line, %integername bool)
+%integer j, res
+%string(255)aname, w1
+%record(job spacevarf) w
+%byteintegername first
+
+   res = 457  { ##457 }
+   bool = 0  { assume false }
+   top n tail(line)
+   -> out %if line = ""
+   first == byteinteger(addr(line)+1)
+   aname = ""
+   -> left b %if first = '('
+
+   j = check for jsv name(line, w)
+   -> out %unless j = 0
+   top n tail(line)
+   -> out %if line = ""
+LOOP:
+   aname = w_name
+   top n tail(line)
+   -> out %if line = ""
+LEFT B:
+   -> out %unless first = '('
+   line -> ("(") . line
+   j = jobspaceexpression(line, w)
+   -> out %unless j = 0
+   top n tail(line)
+   -> out %if line = ""
+   -> out %unless first = ')'
+   line -> (")") . line
+   res = 0 %and -> out %unless inresolve(lhs, w1, jobspacevtos(w), lhs) = 0
+
+   %unless aname = "" %start
+      w = 0
+      w_name = aname
+      w_type = 2
+      w_s = w1
+      j = assign(w, job space)
+      -> out %unless j = 0
+   %finish
+
+   top n tail(line)
+   bool = 1 %and res = 0 %and -> out %if line = ""
+   top n tail(line)
+   j = check for jsv name(line, w)
+   -> out %unless j = 0
+   top n tail(line)
+   %if line = "" %or starts(line, "then ")=yes %start
+      w_type = 2
+      w_s = lhs
+      j = assign(w, job space)
+      -> out %unless j = 0
+      bool = 1
+      res = 0 %and -> out
+   %finish
+   -> LOOP
+out:
+!   printline("Resolve: line='".line."' bool=".itos(bool)." res=".itos(res))
+   %result = res
+%end; ! resolve
+
+!-----------------------------------------------------------------------
+
+%end; ! spaceman inner
+%end; ! spaceman
+
+!-----------------------------------------------------------------------
+
+%externalintegerfn clear jsv %alias "s#clearjsv" (%string(255)name)
+%integer flag, level, base
+%integername p
+%record(jobspacef)%name jobspace
+%record(jobspacevariablef)%name jsv
+
+   flag = 460  { ##460 }
+   -> out %if name = ""
+!   %if charno(name, 1) = special %then level = 2 %else level = ssown_load level
+   base = ssown_jobspacebase(level)
+   -> out %if base = 0
+   jobspace == record(base)
+   p == jobspace_pointer
+   %cycle
+      %exit %if p = 0
+      jsv == record(p)
+      %if compare(name, jsv_name) = yes %start
+         %if jsv_type = 2 %start
+            dispose heap(integer(p+4))
+         %finish
+         p = jsv_link
+         dispose heap(addr(jsv))
+         flag = 0
+         %exit
+      %finish
+   %repeat
+out:
+   %result = flag
+%end; ! clear jsv
+
+!-----------------------------------------------------------------------
+
+%routine next line(%string %name res, %integername fstart, fend, line)
+
+! fstart and fend give the next byte to be examined and the eof respec.
+! line is the current line no, init to 0
+!
+! the routine gets the next line, which may be null, increments fstart
+! and line and removes leading and trailing spaces
+
+%integer i, j, ch
+
+%cycle
+   length(res) = 255
+   i = 0
+   j = 0
+   %cycle
+      %exit %if fstart >= fend
+      ch = byteinteger(fstart); fstart = fstart + 1
+      %exit %if ch = nl
+      %unless i = 0 %and ch = ' ' %start  { 'top' }
+         i = i+1
+         charno(res, i) = ch
+         j = i %unless ch = ' '  { 'tail' }
+      %finish
+   %repeat
+   length(res) = j
+   line = line + 1
+   remove comments(res)
+   %return %if res # "" %or fstart >= fend
+%repeat
+!printline("Next line gives: ".res) %unless ssown_ssnote=0
+%end;                                 ! of NEXT LINE
+!
+!-----------------------------------------------------------------------
+!
+%external %routine scanfile %alias "s#scanfile" (%integername fstart,
+   fend, wkad, line, level, type)
+
+! creates a workfile and returns conad+32 in wkad
+! then scans the file whose limits are in fstart and fend and builds a
+! record of if-----fi, cycle-----repeat etc
+! type = 0 normal
+!        1 do not scan the file
+
+%conststring(31)%array error(1 : 17) = %c
+{ 1} "cycle too deep",
+{ 2} "no cycle for repeat",
+{ 3} "repeat instead of fi",
+{ 4} "no cycle for exit",
+{ 5} "no cycle for continue",
+{ 6} "if too deep",
+{ 7} "ifnot too deep",
+{ 8} "no if for else",
+{ 9} "else instead of repeat",
+{10} "too many else's",
+{11} "no if for fi",
+{12} "fi instead of repeat",
+{13} "repeat or fi omitted",
+{14} "empty spec",
+{15} "length of template not even",
+{16} "first ch of pair not i, s or r",
+{17} "second ch of pair not r, b or w"
+
+%record(job spacef)%name job space
+%string (255) s1, s2
+%integer conad, j, t, p, d, data, k
+%switch sw(0 : topkey)
+%integerarray ref(1 : 31)
+
+   outfile("T#MACWK".itos(level), job space file size, 4, vtemp, conad, j)
+   type = j %and %return %unless j = 0
+   wkad = conad+32
+   job space == record(wkad)
+   job space_fstart = fstart
+   job space_fend = fend
+   job space_pamad = ssown_currentpamad
+   ssown_job spacebase(level) = wkad
+
+   type = 0 %and %return %if type = 1
+   data = 0  { not inside data brackets }
+   t = 0  { bit mask of current type }
+   d = 0  { depth }
+   p = 0  { index along ref array }
+   %cycle
+      %exit %if fstart >= fend
+      next line(s1, fstart, fend, line)
+! printline("scanline: ".s1)
+      %continue %if s1 = ""
+      %if data = 0 %start
+         data = 1 %and %continue %if s1 = "----"
+      %finish %else %start
+         data = 0 %if s1 = "++++" %or s1 = "...."
+         %continue
+      %finish
+
+      j = analyse(s1)
+      -> sw(j)
+
+sw(1):  { cycle }
+sw(13):  { for }
+   j = 1 %and -> err %if d = 30
+   d = d + 1
+   t = (t << 1) ! 1
+   p = p + 1
+   ref(d) = p
+   job space_desc(p)_adr = fstart
+   job space_desc(p)_type = j
+   %continue
+sw(2):  { repeat }
+   j = 2 %and -> err %if d = 0
+   j = 3 %and -> err %if t & 1 = 0
+   p = p + 1
+   job space_desc(p)_p = ref(d)
+   job space_desc(p)_adr = fstart
+   job space_desc(p)_type = 2
+   job space_desc(ref(d))_p = p
+   d = d - 1
+   t = t >> 1
+   %continue
+sw(3):  { exit }
+   j = 4 %and -> err %if t = 0
+sw(4):  { continue }
+   j = 5 %and -> err %if t = 0
+   %continue
+sw(5):  { if }
+   j = 6 %and -> err %if d = 30
+sw(6):  { unless }
+sw(21):   { ifnot }
+   j = 7 %and -> err %if d = 30
+   k = inresolve(s1, s1, " then", s2)
+   %continue %if k = 0 %and s2 # ""
+   d = d + 1
+   t = t << 1
+   p = p + 1
+   ref(d) = p
+   j = 6 %if j = 21
+   job space_desc(p)_type = j
+   %continue
+sw(7):  { else }
+   j = 8 %and -> err %if d = 0
+   j = 9 %and -> err %if t & 1 > 0
+   j = 10 %and -> err %if job space_desc(ref(d))_type = 7
+   p = p + 1
+   job space_desc(ref(d))_adr = fstart
+   job space_desc(ref(d))_p = -p
+   ref(d) = p
+   job space_desc(p)_type = 7
+   %continue
+sw(8):  { finish }
+sw(22):   { fi }
+   j = 11 %and -> err %if d = 0
+   j = 12 %and -> err %if t & 1 > 0
+   job space_desc(ref(d))_adr = fstart
+   k = p
+!   k = -k %if jobspace_desc(ref(d))_type = 7  { else }
+   job space_desc(ref(d))_p = k
+   d = d - 1
+   t = t >> 1
+   %continue
+sw(23):   { end }
+   %exit
+sw(16):   { specs }
+sw(17):
+sw(18):
+sw(19):
+   j = process spec (s1, jobspace, j-16)
+   -> err %unless j = 0
+   %continue
+
+sw(*):
+   %repeat
+
+   j = 13 %and -> err %if d > 0
+%if ssown_job spacetrace & 16 > 0 %start
+   %cycle j = 1, 1, p
+   shout(itos(j)."  ".itos(job space_desc(j)_type).",".itos(job space_desc(j)_p).",".htos(job space_desc(j)_adr,8))
+   %repeat
+%finish
+
+   type = 0
+   %return
+
+err:
+      ssown_ssfname = error(j) . " at line " . itos(line)
+   type = 100  { failure indicator }
+%end; ! scanfile
+
+!-----------------------------------------------------------------------
+
+%externalroutine job space macro %alias "s#jobspacemacro" (%string (255)file, %integer fstart, fend)
+%externalintegerfnspec setmode %alias "s#setmode" (%string(255)s)
+%integer fstart0, j, wkad, line, stream, fstart1, type
+%string(255)s1, s2
+%record(job spacef)%name job space
+%record(fdf)%name fd
+%integername filenameptr
+
+   fstart0 = fstart
+   line = 0
+   next line(s1, fstart, fend, line) %until s1 # ""  { ie first line of file }
+   uctranslate(addr(s1)+1, length(s1))
+   -> bad header %unless s1 -> ("MACRO") . s1 %or s1 -> ("PROCEDURE") . s1
+   s1 -> (" ") . s1 %while s1 # "" %and charno(s1, 1) = ' '
+   -> bad header %if s1 = ""
+   s2 = s1 %unless s1 -> s2 . (" ")
+   fstart1 = fstart  { after first line }
+   type = 0
+   scanfile(fstart, fend, wkad, line, ssown_loadlevel+2, type)
+   set return code(type) %and %stop %unless type = 0
+   job space == record(wkad)
+   job space_fstart = fstart0  { used only in routine error }
+   job space_name <- s2
+   job space_procetc = 1  { this is a procedure }
+
+   adjustloadlevel(+1)
+   stream = ssown_obeystream + 1
+   idefine(stream, file, job space_afd, j)
+   set return code(j) %and %stop %unless j = 0
+   set io default(0, stream, 0)
+   ssown_obeystream = stream
+   ssown_obeylevel = ssown_obeylevel + 1
+   ssown_echostate(ssown_obeylevel) = ssown_dataecho
+   filenameptr == ssown_obeyfile(ssown_obeylevel)
+   filenameptr = getheap(length(file) + 1)
+   string(filenameptr) = file
+   select input(0)
+   fd == record(job space_afd)
+   fd_cur = fstart1
+   fd_cur rec = fstart1
+      fd_end = fend
+!   ssown_load level = ssown_load level + 1
+   adjustloadlevel(+1)
+   j = setmode("TRANS") %unless ssown_ssreason = batchreason
+   ssown_dataecho = 0  { no echo }
+   sobey
+   %return
+bad header:
+   printline("File " . file . " has a bad header")
+   %stop
+
+%end;                                    ! of job space MACRO
+!
+!-----------------------------------------------------------------------
+!
+%integer %fn filebeingobeyed(%string (255) file)
+
+!*     Result is   1   if FILE is a file which is being obeyed, or to which
+!                      OBEY output is being written
+!*                 0   if it is not being obeyed
+
+
+      %integer i, filename2ptr
+      %for i = 1, 1, ssown_obeylevel %cycle
+         filename2ptr = ssown_obeyfile(i+maxobeys)
+         %if compare(string(ssown_obeyfile(i)), file)=yes %or (filename2ptr#0 %and %c
+            compare(string(filename2ptr), file)=yes) %then %result = 1
+      %repeat
+      %result = 0
+%end;                                 ! of FILEBEINGOBEYED
+
+!-----------------------------------------------------------------------
+
+%routine disaster(%integer number)
+      %integer i
+      %const %string (41) %array disa(1:6)= %c
+"Nested OBEY depth exceeded",
+ "output file is already being obeyed!",
+ "Define (IN) fails",
+ "Define (OUT) fails",
+ "Recursive use of obeyfiles",
+ "Obeyfile and outputfile the same!!!"
+      ssown_obeylevel = 0
+      ssown_obeystream = nullobeystream
+      adjustloadlevel(0)
+      tidyfiles(0)
+      printline(disa(number)) %if 1 <= number <= 6
+      i = ssown_savecom36
+      *l_1,i
+      *lm_4,15,16(1)
+      *bcr_15,15
+%end;                                 ! of DISASTER
+
+!-----------------------------------------------------------------------
+
+%external %routine innerobey %alias "s#innerobey"(%string (255) param,
+   obeyoutfile, %integer echo, type, %integer %name flag)
+
+%integer afd, fail, nextstream
+%integer %name filenameptr
+%string (255) s1
+%record (fdf) %name fd
+%integer wkad, line, fstart, fend, ftype, conad
+%record(job spacef)%name job space
+
+   fail = 0
+   %if ssown_obeylevel>=max obeys %then disaster(1)
+
+!*    ssown_loadlevel = ssown_loadlevel+1
+   adjustloadlevel(+1);                         !increment load level
+   ! Two reasons for incrementing loadlevel here.  One is that if you Int:A
+   ! out of an OBEYFILE control does not return via the OBEYfile eof, and
+   ! the OBEYfile gets left connected at level 2 (at least for a first-level
+   ! OBEY).  Second, RESETLOADER is being disallowed except from real command
+   ! level (as opposed to OBEY-command-level), and unless we increment here
+   ! we cannot distinguish, in the test in RESETLOADER.
+
+   disaster(5) %if filebeingobeyed(param)#0 { recursive }
+   %if compare(obeyoutfile, ".OUT")=no %start { not going to .OUT }
+      {%if param="" %or charno(param, 1)='.' %or}
+      disaster(6) %if compare(param, obeyoutfile)=yes
+      disaster(2) %if filebeingobeyed(obeyoutfile)#0
+
+   %finish {%else %if filebeingobeyed(param)#0 %then disaster(2) }
+
+   connect(param, 0, 0, 0, conad, ftype, fstart, fend, flag)
+   %if flag#0 %start
+      adjustloadlevel(-1)
+      %return
+   %finish
+
+   line = 0
+   fstart = conad + fstart
+   fend = conad + fend
+   scanfile(fstart, fend, wkad, line, ssown_load level+1, type)
+   %unless type = 0 %start
+      adjustloadlevel(-1)
+      set return code(type)
+      %return
+   %finish
+   job space == record(wkad)
+   job space_name <- param
+
+   nextstream = ssown_obeystream+1
+   idefine(nextstream, param, afd, flag)
+   flag = open(afd, 1) %if flag=0
+   %if flag#0 %then disaster(3)
+   set io default(0, nextstream, 0)
+   job space_afd = afd
+   fd == record(afd)
+   fd_cur = job space_fstart
+   fd_cur rec = job space_fstart
+
+   %if obeyoutfile#"" %and obeyoutfile#".OUT" %start
+      idefine(nextstream+maxobeys, obeyoutfile, afd, flag)
+      %if flag=0 %start
+         fd == record(afd)
+         fd_mode of use = 1
+         flag = open(afd, 2)
+      %finish
+      %if flag#0 %then disaster(4)
+      set io default(1, nextstream+maxobeys, 0)
+      filenameptr == ssown_obeyfile(ssown_obeylevel+maxobeys+1)
+      filenameptr = getheap(length(obeyoutfile)+1)
+      string(filenameptr) = obeyoutfile
+   %finish
+
+   ssown_obeystream = nextstream
+   s1 = param
+   %unless s1->(":") %then s1 = ssown_ssowner.":".s1
+   ssown_obeylevel = ssown_obeylevel+1
+   ssown_echostate(ssown_obeylevel) = ssown_dataecho
+!
+   filenameptr == ssown_obeyfile(ssown_obeylevel)
+   filenameptr = getheap(length(s1)+1)
+   string(filenameptr) = s1
+
+   select input(0)
+   select output(0)
+   ! (We need to do these selects here in order to open the channels before
+   ! incrementing LOADLEVEL, so that the channel(s) and file(s)(if any) are
+   ! protected in TIDYFILES.
+!*    ssown_loadlevel = ssown_loadlevel+1
+   adjustloadlevel(+1)
+   ssown_dataecho = echo
+   sobey
+   ! And return to C#OBEY, thence to COMMAND LOOP
+
+
+%end;                                    ! INNEROBEY
+!-----------------------------------------------------------------------
+
+
+%external %routine obey %alias "emas#OBEY"
+   %integer flag
+   %string (255) file1, file2
+   getstring("Obeyfile;fileormem,exist,char;?;call pamhelp", file1)
+   getstring("Output;fileordev,write,char;.out;call pamhelp", file2)
+
+   %if ssown_usage & 1 = 0 %start
+      ssown_usage = ssown_usage ! 1
+      connect("SUBSYS:Y.OBEYUSED", 0, 0, 2, 0, 0, 0, 0, 0)
+   %finish
+
+   innerobey(file1, file2, ssown_dataechooption, 0, flag)
+   setreturncode(flag)
+%end;                                    ! of OBEY
+
+!-----------------------------------------------------------------------
+
+%externalroutine exec %alias "emas#exec"
+%string(255)s
+%integer j
+   get string("Output;fileordev,write,char;.out", s)
+   sexec(s, 0, j)
+   setreturncode(j)
+%end; ! exec
+
+!-----------------------------------------------------------------------
+
+%routine display windows
+
+%integer n, adr, width, c, d, window, s
+%string(255)line
+%record(windowf)%name w
+%byteintegerarray screen(0:1919)
+
+%routine vertical(%integer c)
+%integer j, s
+
+   s = 80*(w_firstline-1) + c
+   screen(s) = '+' %if w_firstline > 0
+   %cycle j = w_firstline, 1, w_lastline
+      s = s + 80
+      screen(s) = '|'
+   %repeat
+   screen(s+80) = '+' %if w_lastline < 23
+%end; ! vertical
+
+%routine horizontal(%integer l)
+%integer j
+%string(80)wstring
+
+   wstring = ""
+   %cycle j = w_firstcol, 1, w_lastcol
+      wstring = wstring . "-"
+   %repeat
+   j = w_firstcol
+   j = j - 1 %and wstring = "+" . wstring %if w_firstcol > 0
+   wstring = wstring . "+" %if w_lastcol < 79
+   move(length(wstring), addr(wstring)+1, addr(screen(80*l+j)))
+%end; ! horizontal
+
+   fill(24*80, addr(screen(0)), ' ')  { clear local copy }
+   %cycle window = 1, 1, top window
+      n = window
+      %unless ssown_screen vector = "" %start
+         %exit %if length(ssown_screen vector) < window
+         n = charno(ssown_screen vector, window) - '0'
+      %finish
+      %exit %unless 1 <= n <= top window
+      %continue %if ssown_window(n) = 0
+      w == record(ssown_window(n))
+      horizontal(w_firstline-1) %if w_firstline > 0
+      horizontal(w_lastline+1) %if w_lastline < 23
+      vertical(w_firstcol-1) %if w_firstcol > 0
+      vertical(w_lastcol+1) %if w_lastcol < 79
+      width = w_last col - w_first col + 1
+      adr = w_curpos
+      %cycle n = w_first line, 1, w_last line
+         get line from file(line, adr, w_end)
+         length(line) = 80 %if length(line) > 80
+         %unless w_cursor < 0 %start
+            %if w_cursor = n %then line = ">" . line %else line = " " . line
+         %finish
+         line = line . " " %while length(line) < width  { length now >= width }
+         s = n*80 + w_first col  { where to put first ch on line }
+         move(width, addr(line)+1, addr(screen(s)))
+      %repeat
+   %repeat
+
+   %cycle n = 0, 1, 23  { compare lines }
+      s = 80 * n
+      c = 0
+      c = c + 1 %while c < 80 %and screen(s+c) = ssown_screen(s+c)
+      %continue %if c = 80  { same }
+      d = 79
+      d = d - 1 %while d > c %and screen(s+d) = ssown_screen(s+d)
+      width = d - c + 1
+      move(width, addr(screen(s+c)), addr(ssown_screen(s+c)))
+      length(line) = width
+      move(width, addr(screen(s+c)), addr(line)+1)
+      printsomehow(vduc(c,n) . line)
+   %repeat
+%end; ! display windows
+
+!-----------------------------------------------------------------------
+
+%externalroutine emas3move cursor(%integername xwindow, %stringname xact, %integername xflag)
+%integer a, cursor0, window, flag, n
+%string(7)act
+%string(255)line
+%record(windowf)%name w
+%switch sw('B':'U')
+
+   ssenter(act, window, "irsriw")
+   flag = 439  { ##439 }
+   -> out %unless 1 <= window <= top window
+   n = ssown_window(window)
+   -> out %if n = 0
+   w == record(n)
+   cursor0 = w_cursor
+   -> out %unless length(act) = 1
+   a = charno(act, 1)
+   a = a - 32 %if 'a' <= a <= 'z'
+   -> out %unless 'B' <= a <= 'U'
+   flag = 0
+   n = w_lastline - w_firstline + 1
+   -> sw(a)
+
+sw('U'):  { move cursor }
+   n = 1 %if cursor0 < 0
+   -> sw('B') %if cursor0 <= w_firstline  { no cursor or cursor already at top }
+   w_cursor = cursor0 - 1
+   -> update cursor
+
+sw('D'):
+   n = 1 %if cursor0 < 0
+   -> sw('F') %if cursor0 < 0 %or cursor0 >= w_lastline
+   w_cursor = cursor0 + 1
+   -> update cursor
+
+sw('F'):
+   a = w_curpos
+   %cycle
+      get line from file(line, a, w_end)
+      n = n - 1
+      %exit %if n = 0
+   %repeat
+   -> out %if a >= w_end  { cant go any further }
+   w_curpos = a
+   w_cursor = w_firstline %unless w_cursor < 0
+   -> display
+
+sw('B'):
+   a = w_curpos
+   -> out %if a = w_start  { already at start }
+   a = a - 1
+   %cycle
+      %exit %if a <= w_start
+      a = a - 1
+      n = n - 1 %if byteinteger(a) = nl
+      a = a + 1 %and %exit %if n = 0
+   %repeat
+   w_curpos = a
+   w_cursor = w_lastline %unless w_cursor < 0
+
+sw(*):
+display:
+   display windows
+   -> out
+
+update cursor:
+   -> display %unless cursor0 = w_cursor
+out:
+   ssexit(act, window, "irsriw")
+%end; ! emas3 move cursor
+
+!-----------------------------------------------------------------------
+
+%externalroutine emas3 window(%integername xwindow, %stringname xfile,
+   %integername xfirstl, xlastl, xfirstc, xlastc, xcursor, xflag)
+
+%integername q
+%integer type, conad, start, end
+%integer window, firstl, lastl, firstc, lastc, cursor, flag
+%string(255)file
+%record(windowf)%name w
+
+   ssenter(file, window, "irsririririririw")
+   flag = 439  { ##439 }
+   -> out %unless 1 <= window <= top window %andc
+      0 <= firstl %and firstl < lastl < 24 %andc
+      0 <= firstc %and firstc < lastc < 80
+   q == ssown_window(window)
+   q = getheap(40) %if q = 0
+   w == record(q)
+   flag = generate(file, type)
+   %return %unless flag = 0
+   connect(file, 0, 0, 2, conad, type, start, end, flag)
+   -> out %unless flag = 0
+   w_start = conad + start
+   w_curpos = w_start
+   w_end = conad + end
+   w_firstline = firstl
+   w_lastline = lastl
+   w_firstcol = firstc
+   w_lastcol = lastc
+   cursor = firstl %unless cursor < 0
+   w_cursor = cursor
+   display windows
+out:
+   ssexit(file, window, "irsririririririw")
+%end; ! emas3 window
+
+!-----------------------------------------------------------------------
+
+%externalroutine emas3 clear screen
+%integer j
+   print{stringchs}somehow(vdus(1))
+   fill(24*80, addr(ssown_screen(0)), ' ')
+   ssown_screen vector = ""
+   %cycle j = 1, 1, top window
+      ssown_window(j) = 0
+   %repeat
+%end; ! emas3 clear screen
+
+!-----------------------------------------------------------------------
+
+%externalroutine emas3 set screen vector(%stringname nv)
+%string(255)vector
+
+   ssenter(vector, 0, "sr")
+   length(vector) = top window %if length(vector) > top window
+   ssown_screen vector = vector
+   display windows
+   ssexit(vector, 0, "sr")
+%end; ! emas3 set screen vector
+
+!-----------------------------------------------------------------------
+
+%externalroutine emas3 get line from window(%integername xn,
+   %stringname xline, %integername xflag)
+%integer n, flag
+%string(255)line
+
+   ssenter(line, n, "irswiw")
+   flag = get line from window(n, line)
+   ssexit(line, n, "irswiw")
+%end; ! emas3 get line from window
+
+!-----------------------------------------------------------------------
+
+%endoffile

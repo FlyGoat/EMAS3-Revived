@@ -1,0 +1,44 @@
+! SPDX-License-Identifier: MIT
+! Copyright (c) 2026 Jiaxun Yang <jiaxun.yang@flygoat.com>
+
+%externalintegerfn host source alias(%string(255) name,path)
+%record(statef)%name s
+  %result=unix error("EINVAL") %if valid name(path)=0
+  s==state;%result=set item(s_aliases,name,path)
+%end
+%externalroutine host clear source aliases
+%record(statef)%name s
+  s==state;clear items(s_aliases)
+%end
+%externalroutine host consource(%string(255) name,%byteintegername address)
+%record(statef)%name s
+%record(itemf)%name alias
+%record(sourcef)%name source
+%string(255) path
+%longinteger p,data,size
+%integer fd,count,error
+  %signal 9,3 %if valid name(name)=0 %or addr(address)=0
+  put address(address,0);s==state;path=name;p=find item(s_aliases,name)
+  %if p#0 %then alias==record(p) %and path=alias_value
+  fd=unix open(path,0);%signal 9,4 %if fd<0
+  size=unix length(fd)
+  %if size<0 %or size>X'7FFFFFFF'-33 %then error=unix close(fd) %and %signal 9,2
+  p=addr(unix allocate(sizeof(source size)+size+1))
+  %if p=0 %then error=unix close(fd) %and %signal 2,1
+  source==record(p);data=addr(source_header(0))+32
+  count=unix read at(fd,byteinteger(data),int(size),0);error=unix close(fd)
+  %if count#size %or error#0 %then unix free(byteinteger(p)) %and %signal 9,2
+  %if count=0 %or byteinteger(data+count-1)#10 %then byteinteger(data+count)=10 %and count=count+1
+  source_header(0)=count+32;source_header(1)=32;source_header(2)=count+32;source_header(3)=3
+  source_next=s_sources;s_sources=p;put address(address,addr(source_header(0)))
+%end
+%externalroutine host freesourceareas
+%record(statef)%name s
+%record(sourcef)%name source
+%longinteger next
+  s==state
+  %while s_sources#0 %cycle
+    source==record(s_sources);next=source_next
+    unix free(byteinteger(s_sources));s_sources=next
+  %repeat
+%end

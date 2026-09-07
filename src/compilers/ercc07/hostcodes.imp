@@ -1,0 +1,46 @@
+
+%CONSTINTEGER YES=1,NO=0
+            
+!
+! THESE CODE ARE ARBITARY BUT THE TOP DECIMAL DIGIT GIVES THE NO OF BYTES
+! IN THE UNIT OF ADDRESSABILITY. BYTE ADDRESSED HOSTS BEING 1N ( also 0N) AND
+! 16 BIT WORD ADDRESSED HOSTS BEING 2N ETC
+%CONSTINTEGER PENTIUM=4;                ! PENTIUM chip Unix stack and completely swopped
+%constinteger MIPS=05;                  ! Imp on MIPS (all variants)
+%CONSTINTEGER RS6=06;                   ! imp on IBM rs6000
+%CONSTINTEGER M88K=07;                  ! Imp on all forms of 88k
+                                        ! also serves for Sparc sinc there is a common b-e
+%CONSTINTEGER VAX=08;                   ! Imp on Vax using F & G formats
+%CONSTINTEGER UNISYS=09;                ! Imp on UnisSys. Unix stack unswopped Vax reals
+%CONSTINTEGER EMAS=10;                  ! emas on 2900 (unsigned shorts)
+%CONSTINTEGER IBM=11;                   ! emas on 24 bit ibm hardware
+%CONSTINTEGER IBMXA=12;                 ! emas of XA 31 bit hardware
+%CONSTINTEGER WWC=13;                   ! WWc (Natsemi chip) completely swopped
+%CONSTINTEGER AMDAHL=14;                ! Emas on Amdahls guess at Xa Minor differences fron IBM)
+%CONSTINTEGER PERQ3=15;                 ! ICL packaged 68k chip Unix stack but not swopped
+%CONSTINTEGER GOULD=16;                 ! Gould unswopped forward stack. Needs 4&8 byte alined
+%CONSTINTEGER VNS=17;                   ! Unix on 2900 unsigned shorts params as
+                                        ! 2900. Long int available but not in Ecode
+%CONSTINTEGER EAMD=18;                  ! Amdahl via the Emachine
+%CONSTINTEGER DRS=19;                   ! Intel chip Unix stack and mostly swopped
+%CONSTINTEGER PERQ=20;                  ! Pos perq now obselete. Fully swopped forward stack
+%CONSTINTEGER PNX=21;                   ! ICL's perq2 Unix stack byte swopped (unsigned shorts)
+%CONSTINTEGER ACCENT=22;                ! Perq 1 under accent. obsolete now
+                                        ! ACCENT DIFFERS FROM PERQ ONLY IN
+                                        ! ASSEMBLES SEQUENCES&SYNTAX
+                                        ! AND GENERATOR
+%constinteger ORN=23
+%CONSTINTEGER UNSIGNEDSHORTS=1<<emas!1<<pnx!1<<vns
+%CONSTINTEGER LINTAVAIL=1<<IBM!1<<IBMXA!1<<amdahl!1<<EMAS!1<<GOULD!1<<MIPS
+%CONSTINTEGER LLREALAVAIL=1<<IBM!1<<IBMXA!1<<amdahl!1<<EMAS!1<<MIPS
+%CONSTINTEGER EMACHINE=1<<DRS!1<<PENTIUM!1<<WWC!1<<Vax!1<<GOULD!1<<PERQ3!1<<VNS!1<<EAMD!1<<ORN!1<<UniSys!1<<m88k!1<<rs6!1<<MIPS
+%CONSTINTEGER IBMFPFORMAT=1<<ibm!1<<ibmxa!1<<amdahl!1<<emas!1<<gould!1<<vns!1<<EAMD
+%constinteger VAXFPFORMAT=1<<Vax!1<<UniSys
+%constinteger IEEEFPFORMAT=1<<WWC!1<<PERQ3!1<<DRS!1<<PENTIUM!1<<PERQ!1<<accent!1<<m88k!1<<rs6!1<<MIPS
+%CONSTINTEGER BYTESWOPPED=1<<PERQ!1<<ACCENT!1<<WWC!1<<Vax!1<<PNX!1<<ORN
+%CONSTINTEGER HALFSWOPPED=1<<PERQ!1<<ACCENT!1<<WWC!1<<Vax!1<<DRS!1<<PENTIUM!1<<ORN
+%CONSTINTEGER WORDSWOPPED=1<<PERQ!1<<ACCENT!1<<WWC!1<<Vax!1<<DRS!1<<PENTIUM!1<<ORN
+%CONSTINTEGER RISKMC=1<<M88K!1<<rs6!1<<MIPS
+!
+! end of file hostcodes
+!

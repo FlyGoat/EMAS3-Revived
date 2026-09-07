@@ -1,0 +1,19 @@
+PARM MAP
+LINK
+DIRECTOR.DIAGY
+DIRECTOR.CONNY
+DIRECTOR.DIRECTY
+.END
+thasha
+LINK
+DIRECTOR.XOPY
+DIRECTOR.SSY
+.END
+thashb
+LINK
+thasha
+thashb
+.END
+thashc
+DIRFIX thashc,director.OBJ,DIRECTOR.DIA,EMAS39,X380
+ destroy thasha,thashb,thashc

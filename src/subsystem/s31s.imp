@@ -1,0 +1,1100 @@
+! S31 Commands
+%end %oflist
+%include "subarc:SSOWNF3"
+%list
+!
+!***********************************************************************
+!*                                                                     *
+!*                              Constants                              *
+!*                                                                     *
+!***********************************************************************
+!
+%const %integer ebcdicbit=x'20'
+%const %integer promptrequested=1<<1;    !user entered "?" (pam code)
+!***********************************************************************
+!*                                                                     *
+!*                     %system Routine/fn/map spec                     *
+!*                                                                     *
+!***********************************************************************
+!
+
+%external %routine %spec adjust load level %alias "s#adjustloadlevel"(%integer p)
+%externalroutinespec tell %alias "s#tell" (%string(6)user,
+   %string(255)text, %integername flag)
+%external %integer %fn %spec DMODE(%integer %name SET, ADR, CMD)
+%external %integer %fn %spec getheap %alias "s#getheap"(%integer len)
+%external %routine %spec disposeheap %alias "s#disposeheap"(%integer adr)
+%external %routine %spec printline %alias "s#printline"(%string (255) s)
+%external %routine %spec wrsn %alias "s#wrsn"(%string (255) s, %integer n)
+%external %routine %spec get string %alias "s#getstring"(%string (255) vector, %string %name value)
+%external %routine %spec get integer %alias "s#getinteger"(%string (255) vector, %integer %name value)
+%external %routine %spec getrestofline %alias "s#getrestofline"(%string %name s)
+%external %integer %fn %spec dirtoss %alias "S#DIRTOSS"(%integer flag)
+%external %integer %fn %spec stoi %alias "s#stoi"(%string (255) s, %integer %name i)
+%external %integer %fn %spec pstoi %alias "S#PSTOI"(%string (255) s)
+%external %routine %spec connect %alias "S#CONNECT"(%string (255) file, %integer mode, hole, prot,
+   %integer %name fconad, ffiletype, fdatastart, fdataend, flag)
+%external %routine %spec idefine %alias "S#IDEFINE"(%integer chan, %string (255) iden, %integer %name afd, flag)
+%external %routine %spec modpdfile %alias "S#MODPDFILE"(%integer ep, %string (255) pdfile, %string (11) member,
+   %string (255) infile, %integer %name flag)
+%external %routine %spec move %alias "S#MOVE"(%integer length, from, to)
+%external %routine %spec sethelp %alias "s#sethelp"(%string (255) helpfile)
+%external %routine %spec setline %alias "s#setline"(%string (255) text)
+%external %integer %fn %spec ssetmode %alias "s#setmode"(%string (255) s)
+%external %routine %spec setreturncode %alias "s#setreturncode"(%integer i)
+%external %string %fn %spec itos %alias "s#itos"(%integer n)
+%external %string %fn %spec printparms %alias "S#PRINTPARMS"(%long %integer p)
+%external %string %fn %spec substring %alias "S#SUBSTRING"(%string %name s, %integer i, j)
+%external %integer %fn %spec starts %alias "s#starts"(%string %name line, first)
+%external %string %fn %spec ucstring %alias "s#ucstring"(%string (255) s)
+%external %integer %fn %spec outstream %alias "s#outstream"
+!
+!
+!***********************************************************************
+!*                                                                     *
+!*               External/internal routine/fn/map specs                *
+!*                                                                     *
+!***********************************************************************
+!
+!
+%external %integer %fn %spec dsfi(%string %name fileindex, %integer %name fsys, type, set, %string %name s,
+   %integer %array %name i)
+%external %integer %fn %spec uinfi %alias "s#uinfi"(%integer n)
+%external %string %fn %spec uinfs %alias "s#uinfs"(%integer n)
+!
+!
+
+!***********************************************************************
+!*                                                                     *
+!*                     %system Routine/fn/map spec                     *
+!*                                                                     *
+!***********************************************************************
+!
+!
+!
+%const %string (11) key= "SS#OPTIONS"
+%const %integer vsn= 2
+%external %string %fn %spec htos %alias "s#htos"(%integer n, pl)
+%external %routine %spec writeprofile %alias "s#writeprofile"(%string (11) key, %name info, %integer %name vsn, flag)
+
+%external %routine %spec get options %alias "s#getoptions"(%record (optionf) %name r)
+%external %routine %spec use options inner %alias "s#useoptionsinner"(%record (optionf) %name r)
+%external %integer %fn %spec match %alias "s#match"(%string %name a, b)
+
+
+%const %integer top option= 19
+%const %string (19) %array t(0:top option)= %c
+"Arraydiag",
+ "Blanklines",
+ "Bstartfile",
+ "Echo",
+ "Fstartfile",
+ "Initworksize", {5}
+ "Itinsize",
+ "Itoutsize",
+ "Recall",
+ "Preloadfile",
+ "Ustacksize", {10}
+ "Controlcharints",
+ "Definesizedefault",
+ "Parities",
+ "Terminaltypedefault",
+ "Autosearch", {15}
+ "Journalsize",
+ "Basedirsearch",
+ "Verbosity",
+ "Recorddiag"
+
+! Actions for NATIVE, GRAPH, TRANSPARENT, MESSAGE:
+!
+!                 NATIVE      GRAPH       TRANS        MSG
+! 4(timeout)         1          0           0           0
+!10(folding)         0          0           0       linewidth
+!15(editing)         0          1           1           1
+!Subsystem/FEP    binary     binary      normal      normal
+
+!---------------------------- MODESTR ------------------------------------------
+
+%external %string (255) %fn modestr %alias "s#modestr"
+   %string (255) ans
+   %byte %integer %array area(0:31)
+   %byte %integer %array %format areaf(0:31)
+   %string (255) pr
+   %integer i, p, j, np
+   %byte %integer %array %name resp
+
+   %string (3) %fn tos(%integer n)
+      %string (3) s
+      s = ""
+      %if n>=100 %start
+         s = tostring('0'+n//100)
+         n = n-100*(n//100)
+      %finish
+      %if n>=10 %start
+         s = s.tostring('0'+n//10)
+         n = n-10*(n//10)
+      %finish
+      %result = s.tostring(n+'0')
+   %end;                                 ! tos
+
+
+   resp == array(addr(uinf_tmodes), areaf)
+   ans = ""
+   p = 1
+   %while p<=18 %cycle
+      np = 19-p
+      %if np>14 %then np = 14
+      area(0) = 2*(np+1)
+      area(1) = 255
+      area(2) = 4 {read}
+      %for j = 1, 1, np %cycle
+         area(2*j+1) = p
+         area(2*j+2) = 0
+         p = p+1
+      %repeat
+      %result = "" %if ssown_erte process#0 {because ERTE does not respond}
+      i = dmode(2, addr(area(0)), 0)
+      %result = "" %unless i=0
+      np = 2 * np
+      %for j = 2, 2, np %cycle
+         %if resp(j)&x'80'=0 %start
+            ssown_setmodep(resp(j)) = resp(j+1)
+            pr = "P".tos(resp(j))."=".tos(resp(j+1)).","
+            %if length(pr)+length(ans)<=255 %then ans = ans.pr
+         %finish
+      %repeat
+   %repeat
+   ans = ans."NO" %if ssown_fepmode=2
+   ans = ans."CONTROLCHARINTS".","
+   ans = ans."NO" %if ssown_nocrtrans#0
+   ans = ans."CRTRANSLATE"
+   %result = ans
+%end;                                    ! of modestr
+
+!------------------------------ SETMODE ----------------------------------------
+
+%integer %fn setmodei(%string %name line)
+   %string (255) s, rest, t, t1, s1
+   %integer flag, i, warn
+   %record (pamf) %name pam
+   %const %integer max defunct= 10;      !2900 modes which no longer apply
+   %const %string (9) %array defunct(1:max defunct)= %c
+"UPPER", "LOWER", "HEIGHT", "RETURN", "INT", "STOPINPUT", "TABS", "PADS", "VIDEO", "APPEND"
+   %const %integer max numkeys=7
+   %const %string (7) %array numkeys(1:max numkeys)= %c
+"WIDTH", "FORWARD", "TIMEOUT", "CRPAD", "LFPAD", "DELETE", "CANCEL"
+
+   %routine tostream0(%string (255) text)
+      %integer savestream
+      savestream = outstream
+      selectoutput(0)
+      printstring(text)
+      selectoutput(savestream)
+   %end;                                 !of tostream0
+
+   %routine get(%string (31) function, limit)
+      getinteger(function.";0:".limit.",null=-1;;", i)
+      %if i#-1 %then line = line.ucstring(function)."=".itos(i).","
+   %end
+
+   flag = 0
+   getrestofline(s)
+   %if s="=" %then %start
+      line = "="
+   %finish %else %start
+      pam == record(ssown_currentpamad)
+      sethelp("call pamhelp(helper:one.one2)")
+      %if s="" %and pam_control&promptrequested=0 %start; !null input
+         %if ssown_term valid=0 %then i = 80 %else i = ssown_term_columns
+         line = "MESSAGE,ECHO,FORWARD=126,P7=1,P9=0,P10=".itos(i).",P13=4,P16=127,"
+      %else
+
+!         Take the parameters apart and reformat so that pam can get at them
+
+         %if s#"" %start
+            s1 = ""
+            line = ""
+            %while s#"" %cycle
+               %unless s->t.(",").s %then t = s %and s = ""
+               %unless t->t.("=").rest %start
+                  %if t="" %then %continue
+                  rest = ""
+                  %if charno(t, 1)='-' %start; !for -E == "ECHO=OFF" etc
+                     t -> ("-").t;       !remove it
+                     rest = "OFF"
+                  %finish
+                  %if t->("NO").t1 %and length(t1)=length(t)-2 %then t = t1 %and rest = "OFF"
+                  %if rest="" %start
+                     %if starts("ECHO", t)=1 %or starts("CONTROLCHARINTS", t)=1 %or starts("CRTRANSLATE", t)=1 %then %c
+                        rest = "ON"
+                  %finish
+               %finish
+               %if t="" %then %continue
+               %if starts("TRANSPARENT", t)=1 %or starts("NATIVE", t)=1 %or starts("GRAPH", t)=1 %or %c
+                  starts("MESSAGE", t)=1 %start
+                  %if rest#"" %and starts("OFF", rest)=1 %then s1 = "MESSAGE," %else s1 = t.","
+                  %continue;             !the 1st param is a WORD, the rest are all KEY=VALUE
+               %else
+                  %if starts("MSG", t)=1 %then s1 = "MESSAGE," %and %continue
+               %finish
+               %if rest="" %start
+                  %for i = 1, 1, max numkeys %cycle
+                     %if numkeys(i)->t1.(t) %and t1="" %start
+                        rest = "??";     !user omitted a value
+                        %exit
+                     %finish
+                  %repeat
+                  %if rest="" %then rest = "ON"
+               %finish
+               line = line.t."=".rest.","
+            %repeat
+            line = s1.line
+            length(line) = length(line)-1 %while line#"" %and charno(line, length(line))=','
+            setline(line);               !put it back
+         %finish
+
+!      Now GET all valid setmode parameters
+
+         getstring("Message/native/transparent/graph;word,,message,transparent,native,graph;;;mode", line)
+         %if line#"" %then line = line.","
+         getinteger("Echo on/off;word,,on,off;;", i)
+         %if i#0 %start
+            %if i=1 %then s = "ECHO" %else s = "NOECHO"
+            line = line.s.","
+         %finish
+         getinteger("Controlcharints;word,,on,off;;", i)
+         %if i#0 %start
+            %if i=1 %then s = "" %else s = "NO"
+            line = line.s."CONTROLCHARINTS,"
+         %finish
+         getinteger("Crtranslate;word,,on,off;;", i)
+         %if i#0 %then %start
+            %if i#1 %then line = line."NO"
+            line = line."CRTRANSLATE,"
+         %finish
+         get("Width", "255")
+         get("Forward", "127")
+         get("Timeout", "255")
+         get("Crpad", "7")
+         get("Lfpad", "7")
+         %if pam_control&promptrequested=0 %start; !dont do these when prompting
+            warn = 0
+            getinteger("Delete;0:255,null=-1;;", i)
+            %if i#-1 %then line = line."P16=".itos(i)."," %and warn = 1
+            getinteger("Cancel;0:255,null=-1;;", i)
+            %if i#-1 %then line = line."P17=".itos(i)."," %and warn = warn ! 2
+            getinteger("Flow;word,,off,on;;", i)
+            %if i#0 %then line = line."P12=".itos(i-1)."," %and warn = warn ! 4
+            %if warn > 0 %start
+               s = "Setmodes Delete/Cancel/Flow"
+               tostream0(snl."Warning - ".s." are OBSOLETE".snl)
+               tell("ERCC04", s."(".itos(warn).")", warn)
+            %finish
+         %finish
+
+!      Now see if any junk is left over
+
+         getrestofline(s)
+         %if s#"" %start;                !could be Pn=m params or defunct 2900 params
+            t = "";                      !to hold the junk
+            %while s#"" %cycle
+               %unless s->s1.(",").s %then s1 = s %and s = ""
+               %unless s1->t1.("P").rest %and t1="" %and rest->t1.("=").rest %start
+                  %if s1->s1.("=") %start; %finish
+                  %for i = 1, 1, maxdefunct %cycle
+                     %if defunct(i)->t1.(s1) %and t1="" %start
+                        !found a 2900 setmode
+                        tostream0(snl."Warning - setmode ".defunct(i)." no longer available".snl)
+                        s1 = ""
+                        %exit
+                     %finish
+                  %repeat
+                  %if s1#"" %then t = t.s1.","
+                  %continue
+               %finish
+               flag = stoi(t1, i)
+%if flag = 0 %and i = 12 %start
+!   tell("ERCC04", "Setmode P12", warn)
+%finish
+               %if flag#0 %or i<1 %or i>18 %then t = t.s1."," %and %continue
+               line = line.s1.","
+            %repeat
+            %if t#"" %start
+               length(t) = length(t)-1
+               ssown_ssfname = "param ".t." not recognised"
+               flag = 100
+            %finish
+         %finish
+
+      %finish
+      %if line#"" %then length(line) = length(line)-1
+   %finish
+   %result = flag
+%end;                                    !of setmodei
+
+!-----------------------------------------------------------------------
+
+%external %routine setmode %alias "EMAS#setmode"
+   %integer flag, j
+   %string (255) line
+
+   flag = setmodei(line)  { get params sorted out }
+   ->out %unless flag=0 %and line#""
+
+   %if line="=" %start
+      printline(modestr)
+      ->out
+   %finish
+
+   flag = ssetmode(line)
+   ->out %unless flag=0 {%and ssown_caller of command=1} { not EMAS3... }
+
+   adjust load level(2); ! puts this new mode in at all levels
+out:
+   setreturncode(flag)
+%end;                                    ! set mode
+
+!---------------------------------------- OPTION -----------------------
+
+%external %routine option %alias "EMAS#option"
+
+   %const %byte %array sequence(0:top option)= %c
+  0, 15, 17, 1, 2, 11, 12, 3, 4, 5, 6, 7, 16, 13, 9, 8, 19, 14, 10, 18
+
+   %string (63) %array v(0:top option)
+   %integer j, k, b1, b2, b3, b4, b5, b6, b18
+   %string (255) text, text1, text2, s
+   %record (optionf) r
+   %record (pamf) %name pam
+   %const %integer promptrequested=2;    !user entered "?"
+   %routine %spec print options
+
+   get options(r)
+
+   v(0) = itos(r_arraydiag) { set up text forms }
+
+   %if r_blanklines=0 %then v(1) = "ON" %else v(1) = "OFF"
+
+   v(2) = r_bstartfile
+
+   %if r_echo=0 %then v(3) = "NO" %else %if r_echo=1 %then v(3) = "PART" %else v(3) = "FULL"
+
+   v(4) = r_fstartfile
+   v(5) = itos(r_initworksize)
+   v(6) = itos(r_itinsize)
+   v(7) = itos(r_itoutsize)
+
+   %if r_recall=0 %then v(8) = "NONE" %else %if r_recall=1 %then v(8) = "TEMP" %else v(8) = "PERM"
+
+   v(9) = r_preloadfile
+   v(10) = itos(r_ustacksize)
+   %if r_c char ints=0 %then v(11) = "ON" %else v(11) = "OFF"
+   v(12) = itos(r_define size)
+   %if r_parity mask=0 %then v(13) = "ON" %else v(13) = "OFF"
+   v(14) = itos(r_defaultttype)
+   %if r_autosearch=0 %then v(15) = "ON" %else %if r_autosearch=1 %then v(15) = "OFF" %else v(15) = "REPORT"
+   v(16) = itos(r_journal pages<<2)
+   %if r_basedirsearch=0 %then v(17) = "FIRST" %else v(17) = "LAST"
+   %if r_verbosity=0 %then v(18)="NO" %else %if r_verbosity=1 %then v(18)="PART" %else v(18)="FULL"
+   v(19) = itos(r_record diag)
+
+   getrestofline(text) { get supplied params }
+
+   sethelp("call pamhelp(helper:one.one3)")
+   pam == record(ssown_currentpamad)
+   %if text="=" %or (text="" %and pam_control&promptrequested=0) %start {report}
+      print options
+      setreturncode(0)
+      %return
+   %finish
+
+   ! Make every param conform to key=value form to avoid funny error msgs
+   %if text#"" %start
+      text1 = ""
+      %while text#"" %cycle
+         %unless text->s.(",").text %then s = text %and text = ""
+         %if s->("=").text2 %start
+            %if text2="" %then s = s."?"; !so that some action is taken
+         %finish %else s = s."=?";       !insisting on key=value
+         text1 = text1.s.","
+      %repeat
+      length(text1) = length(text1)-1;   !last comma
+      setline(text1)
+   %finish
+   getinteger(t(0).";0:;".v(0).";call pamhelp", r_arraydiag)
+   getinteger(t(15).";word,on,off,report;".v(15), b4)
+   getinteger(t(17).";word,first,last;".v(17), b6)
+   getinteger(t(1).";word,on,off;".v(1), r_blanklines)
+   getstring(t(2).";fileormem,ornull;".v(2).";", r_bstartfile)
+   getinteger(t(11).";word,on,off;".v(11), b1)
+   getinteger(t(12).";64:".itos(ssown_ssmaxfsize>>10).";".v(12), r_definesize)
+   getinteger(t(3).";word,no,part,full;".v(3), r_echo)
+   getstring(t(4).";fileormem,ornull;".v(4).";", r_fstartfile)
+   getinteger(t(5).";256:;".v(5), r_initworksize)
+   getinteger(t(6).";1:28;".v(6), r_itinsize)
+   getinteger(t(7).";3:16;".v(7), r_itoutsize)
+   getinteger(t(16).";64:1020;".v(16), b5)
+   getinteger(t(13).";word,on,off;".v(13), b3)
+   getstring(t(9).";fileormem,ornull;".v(9).";", r_preloadfile)
+   getinteger(t(8).";word,none,temp,perm;".v(8), r_recall)
+   getinteger(t(19).";16:1048576;".v(19), r_record diag);
+   getinteger(t(14).";0:".itos(max terminals).";".v(14), b2)
+   getinteger(t(10).";256:".itos(ssown_ssmaxfsize>>10).";".v(10), r_ustacksize)
+   getinteger(t(18).";word,no,part,full;".v(18), b18)
+   !  The following deals with use of old "default" names
+
+   %if pam_control&promptrequested=0 %start; !dont do these when prompting
+      getinteger("Defaultdefinesize;64:;".itos(r_define size), r_definesize)
+      getinteger("Defaultterminaltype;0:".itos(max terminals).";".itos(b2), b2)
+   %finish
+   r_c char ints = b1
+   r_defaultttype = b2
+   r_parity mask = b3
+   r_autosearch = b4
+   r_journal pages = b5>>2
+   r_basedirsearch = b6
+   r_verbosity = b18
+
+   getrestofline(text)
+   %if text#"" %start
+      s = ""
+      %while text->text.("=").text1 %cycle
+         %if text1->(",").text1 %start;  !discard up to next comma
+            text1 = ",".text1;           !put the comma back
+            s = "s";                     !for plural
+         %finish %else text1 = ""
+         text = text.text1
+      %repeat
+      printline("Warning - unrecognised parameter".s.": ".text)
+   %finish
+   use options inner(r)
+   writeprofile(key, r, vsn, j)
+   setreturncode(j)
+   %return
+
+   %routine print options
+      %const %integer col2=25
+      %integer k, len, ptr2, n1, n2, row
+
+      newline
+      %for k = 0, 1, topoption %cycle
+         %if v(k)="" %then v(k) = "<none>"
+         v(k) <- t(k)." = ".v(k)
+      %repeat
+
+      k = 0; n2 = (topoption+1)//2; n1 = topoption+1-n2
+      %cycle
+         %unless n2=n1 %or n2=n1-1 %then %monitor %and %stop
+         %if k>=n1 %then %exit
+         len = length(v(sequence(k)))
+         %if len>col2 %start
+            ! Have an extra row in col2
+            n2 = n2+1
+            %if n2>n1 %then n1 = n1+1 %and n2 = n2-1
+         %finish
+         k = k+1
+      %repeat
+
+      k = 0
+      row = 0
+      ptr2 = n1
+      %cycle
+         row = row+1
+         printstring(v(sequence(k)))
+         len = length(v(sequence(k)))
+         k = k+1
+         %if len>col2 %then newline %and %continue
+         spaces(col2-len+1)
+         printstring(v(sequence(ptr2))) %if ptr2<=topoption
+         newline
+         ptr2 = ptr2+1
+      %repeat %until row>=n1
+   %end;                                 ! of print options
+%end;                                    ! of option
+!
+!-----------------------------------------------------------------------
+!
+%external %integer %function %spec dsetit(%integer %name i)
+%external %routine cpulimit %alias "EMAS#CPULIMIT"
+   %integer m, s, f, ms
+   %string (255) p, default secs
+
+   getrestofline(p)
+   f = 0
+   %unless p="=" %start
+      getinteger("Mins;0:120,null=-1;;call pamhelp(helper:one.one7);MINUTES", m)
+      getinteger("Secs;0:60,null=-1;;;SECONDS", s)
+      %if m=-1 %start
+         s = 7200 %if s=-1
+      %finish %else %start
+         s = 0 %if s=-1
+         s = 60*m+s
+      %finish
+      s = 7200 %if s>7200
+      ms = s*1000
+      f = dsetit(ms)
+      %if f=0 %then ssown_currms = ms %else f = dirtoss(f)
+   %finish
+   printline("Current cpulimit: ".itos(ssown_currms//1000)." Seconds") %if f=0
+   setreturncode(f)
+%end;                                    ! cpulimit
+!
+!-----------------------------------------------------------------------
+!
+%external %routine initparm %alias "EMAS#initparm"
+   %integer i, j, p
+   %record (optionf) r
+
+   i = 0
+   j = 0
+   get options(r)
+   %cycle
+      getinteger("Parm;parm;;call pamhelp(helper:three.three0)", p)
+      %if p=-2 %start { =, report }
+         printstring("Init parm setting: ")
+         printline(printparms(r_initparm))
+         set return code(0)
+         %return
+      %finish
+      %exit %if p<0
+      %if p<32 %then j = j!(1<<p) %else i = i!(1<<(p-32))
+   %repeat
+
+   r_initparm = longinteger(addr(i))
+   write profile(key, r, vsn, j)
+   ssown_sscomreg(27) = i
+   ssown_sscomreg(28) = j
+   set return code(j)
+%end;                                    ! init parm
+!
+!-----------------------------------------------------------------------
+!
+%string %fn term string(%record (termf) %name term, %byte %integer ptr)
+
+   %if ptr=0 %then %result = "" %else %result = string(addr(term_string space)+ptr)
+%end;                                    ! term string
+!
+!-----------------------------------------------------------------------
+!
+%external %routine terminal type %alias "EMAS#terminaltype"
+   %integer conad, type, start, end, flag, t, len, j, j0, try, i, max terminals
+   %string (255) text, w, s
+   %record (optionf) r
+   %record (termf) %array %format termsf(1:abs maxterminals)
+   %record (termf) %array %name terms
+   %record (termf) %name tempterm
+
+   getstring("Type;any,ornull;;call pamhelp(helper:one.one2)", text)
+   %if text="=" %start { report }
+      printstring("Terminal: ")
+      %if ssown_term valid=0 %then printstring("Unspecified") %else %c
+         printstring(term string(ssown_term, ssown_term_name))
+      newline
+      %return
+   %finish
+
+   connect("SS#CHSFILE", 0, 0, 0, conad, type, start, end, flag)
+   connect(chsfile, 0, 0, 0, conad, type, start, end, flag) %unless flag=0
+   ->out %unless flag=0
+   max terminals = (integer(conad+8)-32)//sizeof(tempterm)
+   terms == array(conad+start, termsf)
+
+   %if text="" %start
+      printstring("Terminals supported are:"); newline
+      text = " 0 Unspecified"
+      %cycle j = 1, 1, max terminals
+         w = termstring(terms(j), terms(j)_name)
+         %unless w="" %start
+            w = itos(j)." ".w
+            w = " ".w %if j<10
+            %if text="" %then text = w %else %start
+               text = text." " %while length(text)<36
+               printline(text.w)
+               text = ""
+            %finish
+         %finish
+      %repeat
+      printline(text) %and text = "" %unless text=""
+      try = 3
+   %finish %else try = 1
+
+   %for try = 1, 1, try %cycle
+      %if text="" %then getstring("Type;any", text)
+      i = stoi(text, t)
+      %if i=0 %start
+         %if t=0 %or (1<=t<=max terminals %and term string(terms(t), terms(t)_name)#"") %then ->got
+      %else
+         %for j = 1, 1, max terminals %cycle
+            w = term string(terms(j), terms(j)_name)
+            %if w="" %then %continue
+            w = w.s %while w->w.(" ").s
+            %if w->(text) %then t = j %and ->got
+         %repeat
+      %finish
+      printstring("   -  no such terminal".snl)
+      t = 0
+      text = ""
+   %repeat
+
+got:
+   printstring("Terminal: ")
+   ssown_ssterminaltype = t
+   %if t>0 %start
+      ssown_term = terms(t)
+      ssown_term valid = 1
+      %unless ssown_ssitwidth = ssown_term_columns %start
+         ssown_ssitwidth = ssown_term_columns
+         flag = ssetmode("P10=".itos(ssown_ssitwidth))
+      %finish
+      printstring(term string(terms(t), terms(t)_name))
+   %else
+      ssown_term valid = 0
+      printstring("Unspecified")
+   %finish
+   newline
+
+   getoptions(r)
+   len = 2+length(uinf_itaddr)
+   j0 = 0
+   j = 0
+   %cycle
+      %if j>=r_max %start { not already in }
+         j = j0
+         r_max = j+len
+         %exit
+      %finish
+      %exit %if match(uinf_itaddr, string(addr(r_b(j+1))))=1
+      j = j+2+r_b(j+1)
+      j0 = j %unless j+len>=maxa
+   %repeat
+
+   move(j, addr(r_b(0)), addr(r_b(len))) %if j>0
+   r_b(0) = t
+   string(addr(r_b(1))) = uinf_itaddr
+   write profile(key, r, vsn, flag)
+out:
+   set return code(flag)
+%end;                                    ! terminal type
+!
+!-----------------------------------------------------------------------
+!
+%external %routine ttylist %alias "EMAS#ttylist"
+   %integer conad, type, start, end, flag, j, t, ch, n
+   %string (255) w, h, c
+   %record (optionf) r
+   %record (termf) %array %format termsf(1:abs maxterminals)
+   %record (termf) %array %name terms
+
+   sethelp("call pamhelp(helper:one.one2)")
+   flag = 0
+   get options(r)
+   %if r_max=0 %start
+      printstring("No information")
+      ->out
+   %finish
+
+   connect("SS#CHSFILE", 0, 0, 0, conad, type, start, end, flag)
+   connect(chsfile, 0, 0, 0, conad, type, start, end, flag) %unless flag=0
+   ->out %unless flag=0
+   terms == array(conad+start, termsf)
+   j = 0
+   %cycle
+      t = r_b(j) { terminal type }
+      write(t, 2)
+      space
+      %if t=0 %then w = "unknown" %else w = term string(terms(t), terms(t)_name)
+      w = w." " %while length(w)<22
+      length(w) = 22
+      printstring(w)
+      w = string(addr(r_b(j+1)))
+      h = ""
+      c = ""
+      n = 0
+      %while n<length(w) %cycle
+         n = n+1
+         ch = charno(w, n)
+         c = c.tostring(ch) %if 32<=ch<128
+         h = h.htos(ch, 2)
+      %repeat
+      spaces(15-length(c))
+      printstring(c)
+      space
+      printline(h)
+      j = j+2+r_b(j+1)
+      %exit %if j>=r_max
+   %repeat
+out:
+   set return code(flag)
+%end;                                    ! of ttylist
+!
+!-----------------------------------------------------------------------
+!
+%external %routine ptrap %alias "EMAS#PTRAP"
+   %record (trapf) %array %name traps
+   %record (settrapf) %array %name trset
+   %byte %integer %array %name stkptr
+   %integer %name {MAGICPC,}stktop
+   %integer i, j, k, n, hi, lo, print, pos, n1, n2, ct1, ct2, q, kk, ad
+   %string (15) si
+   %routine %spec outl(%integer %name lo, hi)
+
+   getinteger("Trapno;-1:;-1", n2)
+   %if n2<0 %then n1 = 1 %and n2 = maxtraps %else n1 = n2
+   traps == ssown_traps
+   trset == ssown_trset
+   stkptr == ssown_tstkptr
+! MAGICPC==SSOWN_MAGICPC
+   stktop == ssown_trap stk top
+   j = 0
+   newline
+   printstring("STKTOP   ".itos(stktop))
+   newlines(2)
+   printstring("        1  2  3  4  5  6  7  8  9 10 11 12
+STKPTR")
+   write(stkptr(i), 2) %for i = 1, 1, 12
+   newlines(2)
+   printstring("       13 14 15 16 17 18 19 20 21 22 23 24
+STKPTR")
+   write(stkptr(i), 2) %for i = 13, 1, 24
+   newlines(2)
+   printstring("TRAP TABLE
+")
+   %for i = n1, 1, n2 %cycle
+      %if traps(i)_gr(11)#0 %then %start
+         printstring("P        ")
+         write(i, 2)
+         printstring("        STATUS    ")
+         %if traps(i)_prot=0 %then printstring("Unprot  ") %else printstring("*Prot*  ")
+         printstring("  TYPE      ")
+         %if traps(i)_type=0 %then printstring("Default") %else printstring("User")
+         newline
+         print line("Registers:")
+         %for ct1 = 0, 4, 12 %cycle
+            %for ct2 = 0, 1, 3 %cycle
+               ad = addr(traps(i)_gr(ct1+ct2))
+               %for kk = 0, 1, 3 %cycle; ! Byte at a time to avoid unass chk
+                  printstring(htos(byteinteger(ad+kk), 2))
+               %repeat
+               spaces(3)
+            %repeat
+            newline
+         %repeat
+         j = -1
+      %finish
+   %repeat
+   %if j=0 %then printstring("       *No current entries*
+")
+   j = 0
+   printstring("
+TRAPS SET
+")
+   %for i = 1, 1, maxsetr %cycle
+      %if trset(i)_id#0 %then %start
+         wrsn("SET ID        ", i)
+         k = trset(i)_id
+         wrsn("STKPTR ID     ", k)
+         k = stkptr(trset(i)_id)
+         wrsn("P             ", k)
+         k = trset(i)_class
+         wrsn("CLASS        ", k)
+         printstring("SUBCLASS   ")
+         lo = -1
+         hi = -1
+         print = 0
+         q = 0
+         %for j = 0, 1, 3 %cycle
+            n = j<<5
+            %for k = 0, 1, 31 %cycle
+               pos = n+k
+               %if trset(i)_sub(j)&(X'80000000'>>k)#0 %then %start
+                  ! Bit is set
+                  hi = pos
+                  lo = pos %if lo<0
+                  q = 1
+               %finish %else %start
+                  ! Not set
+                  %if lo>=0<=hi %then outl(lo, hi); ! Something to output
+               %finish
+            %repeat
+         %repeat
+         outl(lo, hi);                   ! In case last bit is set
+         %if q=0 %then printstring("*None*")
+         q = 0
+         newline
+         j = -1
+      %finish
+   %repeat
+   %if j=0 %then printstring("       *No current entries*
+")
+   %return
+   %routine outl(%integer %name lo, hi)
+      %string (11) strhi
+      %return %if lo<0>hi
+      si = itos(lo)
+      si = " ".si %while length(si)<4
+      %if hi#lo %then %start
+         strhi = itos(hi)
+         si = si."-".strhi
+      %finish
+      si = si." " %while length(si)<8
+      print = (print+1)&3
+      printstring(si)
+      %if print=0 %then printstring("
+           ")
+      hi = -1
+      lo = -1
+      %return
+   %end;                                 ! of OUTL
+%end;                                    ! of PTRAP
+!
+!-----------------------------------------------------------------------
+!
+
+
+
+
+%external %routine %spec holdvol %alias "s#holdvol"(%string (6) tape, %integer %name flag)
+%external %routine %spec releasevol %alias "s#releasevol"(%string (6) tape, %integer %name flag)
+
+!-----------------------------------------------------------------------
+
+%external %routine holdmt %alias "EMAS#HOLDMT"
+   %string (255) parms
+   %integer f
+
+   getstring("Volume;any,uc;?;call pamhelp(helper:one.one8);volume", parms)
+   %if length(parms)>6 %then length(parms) = 6
+   holdvol(parms, f)
+   %if f>1 %start
+      ssown_ssfname = "Too many held tapes"
+      f = 100
+   %finishelse f=0  { =1 means 'claimed already`}
+   set return code(f)
+%end;                                    !  OF HOLDMT
+
+!-----------------------------------------------------------------------
+
+%external %routine releasemt %alias "EMAS#RELEASEMT"
+   %string (255) parms
+   %integer f
+
+   getstring("Volume;any,uc;?;call pamhelp(helper:one.one8);volume", parms)
+   %if length(parms)>6 %then length(parms) = 6
+   releasevol(parms, f)
+   %if f>0 %start
+      f = 100
+      %if parms=".ALL" %then ssown_ssfname = "No tapes held" %else ssown_ssfname = "Tape ".parms." not held"
+   %finish
+   set return code(f)
+%end;                                    !  OF RELEASEMT
+
+!-----------------------------------------------------------------------
+
+%external %routine definemt %alias "EMAS#DEFINEMT"
+   %const %integer tape permit= X'8000'
+   %const %string (17) null dsn= "?????????????????"
+   %const %integer pf= 1
+   %const %integer slf= 2
+   %const %integer ring needed= X'40'
+   %const %integer mod flag= 8
+   %const %string (80) %array pv(0:5)= %c
+  "Channel;-79:-2,1:;?;;tapechannel",
+  "Tape filename;any,uc,ornull;;;tapefilename",
+  "Volume;any,uc;?;;volume",
+  "Label;any,uc;1;;label",
+  "Recfm;any,uc,ornull;;;recfm",
+  "Blocksize;0,18:32760;0;;blocksize"
+   %const %integer minblocksize= 18
+   %const %integer maxblocksize= 32767
+   %const %integer optblocksize= 4096
+   %switch blockcheck(1:6)
+   %const %integer maxrecfms= 14
+   %const %string (4) %array recfms(1:maxrecfms)= %c
+"F","FA","FB","FBA",
+ "V","VA","VB","VBA","VS","VSA","VBS","VBSA",
+ "U",""
+   %const %integer %array asa(1:maxrecfms)= %c
+0,16,0,16,0,16,0,16,0,16,0,16,0,0
+   %const %byte %integer %array minrec(1:maxrecfms)=18(4),1(8),18,0
+   %const %byte %integer %array blockat(1:maxrecfms)= %c
+1(2),2(2),1(2),2(2),3(2),4(2),1,0
+   %const %byte %integer %array rectype(1:maxrecfms)=1(4),2(8),3,255
+   %const %integer %array maxrec(1:maxrecfms)= %c
+32760(4),32752(4),32767(2),99999(2),32760,0
+   %const %byte %integer %array bccode(1:maxrecfms)=1(2),2(2),3(2),4(2),5(4),6(2)
+   %string (255) s, recfm, srecsize
+   %string (17) dsn
+   %string (6) vol
+   %integer chan, label, blocksize, afd, flag, i, char, ring, recfmcode, lpmode, openflag
+   %integer recsize, permits
+   %record (fdf) %name f
+   %string (31) dsfis
+   %integer %array dsfiia(0:31)
+
+   sethelp("call pamhelp(helper:one.one8)")
+   flag = dsfi(uinfs(1), -1, 38, 0, dsfis, dsfiia)
+   %if flag=0 %then permits = dsfiia(0)
+   %if flag#0 %then ->err
+   %if permits&tape permit#tape permit %and uinfi(2)&1=1 %then flag = 395 %and ->err
+   ring = 0;                             !NO RING BY DEFAULT
+   open flag = 0
+   !
+   getinteger(pv(0), chan);              ! channel number
+   !
+   getstring(pv(1), s);                  ! tape file name
+   %if length(s)>17 %then s = substring(s, length(s)-16, length(s))
+   !  if no file name given, insert special name because a
+   !  null file name means free file descriptor to some parts
+   !  of the subsystem
+   %if s="" %then s = nulldsn
+   dsn = s
+
+   getstring(pv(2), s);                  ! volume
+   %if charno(s, length(s))='*' %start
+      length(s) = length(s)-1
+      ring = ringneeded
+      label = -1;                        !  no default label while writing
+   %finish %else %start
+      !  ring not requested
+      label = 1;                         !  default
+      !????? test open flag.  if set to mod flag then
+      !????? generate error
+   %finish
+   %unless 1<=length(s)<=6 %then ssown_ssfname = s %and ->badparam
+   vol = s
+
+   getstring(pv(3), s);                  ! label
+   %if length(s)>0 %and charno(s, 1)='P' %then %start
+      s = substring(s, 2, length(s))
+      lpmode = pf
+   %finish %else lpmode = slf
+   %if length(s)>3 %and substring(s, length(s)-3, length(s))="-MOD" %then %start
+      length(s) = length(s)-4;           !  remove "-mod"
+      open flag = mod flag
+   %finish
+   %if s#"" %then label = pstoi(s)
+   %unless 1<=label %then ssown_ssfname = s %and ->badparam
+
+   getstring(pv(4), s);                  ! recfm
+   %if s#"" %start;                      !user provides FORMAT information
+      recfm = ""
+      %for i = 1, 1, length(s) %cycle
+         char = charno(s, i)
+         %unless 'A'<=char<='Z' %then %exit
+         recfm = recfm.tostring(char)
+      %repeat
+      %if recfm=s %then ssown_ssfname = s %and ->badparam
+      srecsize = substring(s, length(recfm)+1, length(s))
+      recsize = pstoi(srecsize)
+      %for recfmcode = 1, 1, maxrecfms %cycle
+         %if recfm=recfms(recfmcode) %start; !recfm found
+            %unless minrec(recfmcode)<=recsize<=maxrec(recfmcode) %then ssown_ssfname = s %and ->badparam
+            %exit
+         %finish
+         %if recfmcode=maxrecfms %then ssown_ssfname = s %and ->badparam
+      %repeat
+
+      getinteger(pv(5), blocksize)
+
+      ->blockcheck(bccode(recfmcode))
+
+blockcheck(1):                           !fixed
+      %if blocksize#0 %then %start
+         %if blocksize#recsize %then ->badblocksize
+      %finish %else blocksize = recsize
+      ->endblock
+
+blockcheck(2):                           !fixed blocked
+      %if blocksize#0 %start
+         %unless (blocksize//recsize)*recsize=blocksize %then ->badblocksize
+      %finish %else %start
+         blocksize = recsize
+         blocksize = blocksize+recsize %while blocksize<optblocksize
+      %finish
+      !choose a suitable size
+      ->endblock
+
+blockcheck(3):                           !variable un-blocked
+      %if blocksize#0 %start
+         %if blocksize<recsize+8 %then ->badblocksize
+      %finish %else blocksize = recsize+8
+      ->endblock
+
+blockcheck(4):                           !variable blocked
+      %if blocksize#0 %start
+         %if blocksize<recsize+8 %then ->badblocksize
+      %finish %else %start
+         %if recsize<optblocksize-8 %then blocksize = optblocksize %else blocksize = recsize+8
+      %finish
+      ->endblock
+
+blockcheck(5):                           !spanned
+      %if blocksize=0 %then blocksize = optblocksize
+      ->endblock
+
+blockcheck(6):                           !unstructured
+      %if blocksize#0 %start
+         %if blocksize<recsize %then ->badblocksize
+      %finish %else %start
+         %if blocksize=0 %then blocksize = recsize
+      %finish
+endblock:
+
+      %unless minblocksize<=blocksize<=maxblocksize %then ->badblocksize
+   %finish %else recsize = 0 %and blocksize = 0 %and recfmcode = 14
+   !format info not supplied
+
+   idefine(chan, ".NULL", afd, flag);    !get empty descriptor
+   %if flag#0 %then ->err
+   f == record(afd)
+   f_accessroute = 5;                    !magnetic tape
+   f_modeofuse = 2;                      !sequential
+   f_mode = 11;                          !for fortran i/o
+   f_rectype = rectype(recfmcode)
+   f_flags = f_flags!asa(recfmcode)!ring!ebcdicbit!openflag
+   f_relfilenum = label;                 !file on tape
+   %if f_rectype=1 %then f_minrec = recsize %else f_minrec = minrec(recfmcode)
+   f_maxrec = recsize
+   f_blocklength = blocksize
+   f_lpmode = lpmode
+   f_blocking = blockat(recfmcode)
+   f_dsn = dsn
+   f_volume = vol
+   flag = 0
+!? newline : printstring("channel     =") : write(f_dsnum,0)
+!? newline : printstring("file name   = ") : printstring(f_dsn)
+!? %if f_flags & x'08' > 0 %then printstring(", mod open")
+!? newline : printstring("volume      = "): printstring(f_volume)
+!? %if f_flags & x'40' > 0 %then printstring(" + ring")
+!? newline : printstring("label       =") : write(f_rel file num,0)
+!? %if f_lpmode = 1 %then printstring(" - unlabelled")
+!? newline : printstring("rectype     =") : write(f_rectype,0)
+!? newline : printstring("recsize     =") : write(f_maxrec,0)
+!? newline : printstring("blocksize   =") : write(f_blocklength,0)
+!? newline : printstring("blocking    =") : write(f_blocking,0)
+   ->err
+badblocksize:
+   ssown_ssfname = itos(blocksize)
+badparam:
+
+   flag = 202
+   ->err
+
+err:
+   set return code(flag)
+%end;                                    !of definemt
+
+!-----------------------------------------------------------------------
+
+
+%external %routine tidypdfile %alias "EMAS#TIDYPDFILE"
+   %string (255) pdname
+   %integer flag
+   getstring("Pdfile;file,pdfile,write;?;call pamhelp(HELPER:TWO.TWO61)", pdname)
+   modpdfile(5, pdname, "", "", flag)
+   setreturncode(flag)
+%end;                                    ! of TIDYPDFILE
+!
+!-----------------------------------------------------------------------
+!
+%end %of %file

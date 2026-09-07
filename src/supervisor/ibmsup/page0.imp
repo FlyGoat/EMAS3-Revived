@@ -1,0 +1,32 @@
+
+!
+! The first 512 bytes of page 0 are hardware defined. (See Princs of Op)
+! EMAS defines some addition locations for convenience
+!
+!     X200 (512)                        Soft crash psw Set by G-C.
+!     X208 (520)                        System Program error psw.
+!                                       Set by G-C as the New PE psw and
+!                                       copied to here by L-C when its sets
+!                                       the User PE psw to 104.
+!     X210 (528)                        The local cpu timer PSW. Set
+!                                       by L-C and used by G-C when clock interrupt
+!                                       is due to cpu timer exceeded.
+!     X218 (536)                        Local controller initial activate
+!                                       PSW. Set by G-C
+!     X220 (544)                        Local Contoller exit PSW. Set by G-C
+!                                       for fast return.
+!     X228 (552)                        (Copy of) Restart PSW set ny ENTER
+!     X230 (560)                        Top of store marker for dump program
+!     X238-X27f (568-639)               unused
+!     X280-X2bf (640-703)               G-C context(16 regs) actaully only
+!                                       5-14 need to be reloaded
+!     X2C0 -X2ff (704-767)              G-C control registers dumped here
+!
+!     X800 (2048)                       Temporary dump area for Global ints
+!     X900 (2304)                       Temporary dump area for local ints
+!      xA00-xA10                        Restart sequence for 2nd (&3rd etc) OCPs
+!
+!     rest undefined
+!
+!     N.B. G-C = Global Controller.  L-C = Local Controller
+!

@@ -1,0 +1,11 @@
+%include "xautils_ctoptxa"
+%systemstringfunctionspec htos(%integer value,places)
+%constantinteger XIMPLP64=0
+%if XIMPLP64=1 %start
+%externalroutine ibmrecode(%longinteger xstart,finish,%integer cax)
+%include "ibmrecobody.imp"
+%finish %else %start
+%externalroutine ibmrecode(%integer xstart,finish,cax)
+%include "ibmrecobody.imp"
+%finish
+%endoffile

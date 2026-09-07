@@ -1,0 +1,847 @@
+! S26 - IBM OPEN
+%ENDOFLIST
+%INCLUDE "SUBARC:SSOWNF3"
+%LIST
+%CONSTSTRING (31) VSN = "370 Version VII 10 Sep 86"
+! OPEN, CLOSE and INQUIRE routines for Fortran 77 under EMAS-370
+! Based on EMAS 2900 implementation - Mike Brown MCMLXXXV
+! Tracing enabled at run-time by specifying PARM DEBUG
+!
+! July     1985 - Version   I (IBM Fortran Release 0.01)
+! October  1985 - Version  II (IBM Fortran Release 1.14)
+! November 1985 - Version III (IBM Fortran Release 1.15)
+! November 1985 - Version  IV (IBM Fortran Release 1.19)
+! December 1985 - Version   V (IBM Fortran Release 1.20)
+! 24 July  1986 - Version  VI (Sub-system variation ???)
+! 10 Sep   1986 - Version VII (Includes changes to EMAS 2900 OPEN vsn XXI)
+!
+%RECORD %FORMAT DAHF(%INTEGER DATAEND, DATASTART, SIZE, FILETYPE, DATE, TIME, FORMAT, RECORDS)
+
+%CONST %INTEGER VTEMP= X'20000000'
+
+%EXTERNAL %INTEGER %FN %SPEC CHECKNAME %ALIAS "S#CHECKNAME"(%STRING %NAME NAME,
+   %INTEGER %NAME TYPE, QUALIFIER)
+%EXTERNAL %ROUTINE %SPEC MONPARAMS %ALIAS "S#MONPARAMS"(%STRING (255) TEMPLATE)
+%EXTERNAL %ROUTINE %SPEC FILL %ALIAS "S#FILL"(%INTEGER LEN, FROM, FILLER)
+%EXTERNAL %ROUTINE %SPEC PHEX %ALIAS "S#PHEX"(%INTEGER I)
+
+%EXTERNAL %STRING %FN %SPEC UCSTRING %ALIAS "S#UCSTRING"(%STRING (255) S)
+%RECORD %FORMAT OLDCONF(%INTEGER CONAD, FILETYPE, DATASTART, DATAEND)
+%EXTERNAL %ROUTINE %SPEC CONNECT %ALIAS "S#OLDCONNECT"(%STRING (255) FILE, %INTEGER MODE, HOLE,
+   PROT, %RECORD (OLDCONF) %NAME R, %INTEGER %NAME FLAG)
+
+%EXTERNAL %ROUTINE %SPEC DESTROY %ALIAS "S#DESTROY"(%STRING (255) FILE, %INTEGER %NAME FLAG)
+%EXTERNAL %ROUTINE %SPEC OUTFILE %ALIAS "S#OUTFILE"(%STRING (255) FILE, %INTEGER MODE, HOLE,
+   PROT, %INTEGER %NAME CONAD, FLAG)
+%EXTERNAL %ROUTINE %SPEC ALLOCATEFD %ALIAS "S#ALLOCATEFD"(%INTEGERNAME AFD,
+   FLAG)
+%EXTERNAL %ROUTINE %SPEC FINDF77FD %ALIAS "S#FINDF77FD"(%STRINGNAME FILENAME, %INTEGERNAME AFD)
+%EXTERNAL %STRING %FN %SPEC ITOS %ALIAS "S#ITOS"(%INTEGER INT)
+%EXTERNAL %STRING %FN %SPEC UINFS %ALIAS "S#UINFS"(%INTEGER INDEX)
+%EXTERNAL %INTEGER %FN %SPEC CLOSENCLEAR %ALIAS "S#CLOSENCLEAR"(%INTEGER AFD)
+%EXTERNAL %INTEGER %FN %SPEC EXIST %ALIAS "S#EXIST"(%STRING (255) PARAM)
+%EXTERNAL %INTEGER %FN %SPEC MAPSSFD %ALIAS "S#FDMAP"(%INTEGER DSNUM)
+%EXTERNAL %INTEGER %FN %SPEC GETHEAP %ALIAS "S#GETHEAP"(%INTEGER LEN)
+%EXTERNAL %INTEGER %FN %SPEC ENTERAFD %ALIAS "S#ENTERAFD"(%INTEGER CHAN, AFD)
+%EXTERNAL %INTEGER %MAP %SPEC COMREGMAP %ALIAS "S#COMREGMAP"(%INTEGER ENTRY)
+
+%OWN %RECORD (FDF) ID
+!
+!     ERROR RESULT CODE MESSAGES
+! %result =     <MESSAGE>
+!     118  File already connected
+!     119  Access conflict
+!     120  RECL conflict
+!     121  Form conflict
+!     122  Status conflict
+!     151  Channel not defined
+!     152  File does not exist
+!     164  Invalid channel number
+!     165  Too many files defined
+!     167  Invalid filename
+!     168  File already exists
+!     179  File description incorrect for D.A.
+!     180  File record size incorrect for D.A.
+!     188  RECL too large
+!     189  NREC too large
+!     192  Delete status invalid
+!     199  Number of DA records not specified
+!     201  Invalid username
+!     220  Invalid filename
+!     267  Invalid filetype
+!     294  Illegal use of .NULL
+
+
+%EXTERNALINTEGERFN F77CLOSE %ALIAS "S#F77CLOSE" (%INTEGER DSNUM, STATUS, %INTEGERNAME FDT)
+   %INTEGER AFD, FLAG, MONFLAG
+   %STRING (255) IDEN
+   %RECORD (FDF) %NAME F
+   MONFLAG = COMREGMAP(27)&X'40000'!(ssown_ssnote&4)
+   %IF MONFLAG#0 %THEN MONPARAMS(">jrjriw")
+   %IF-1<=DSNUM<=0 %THEN FLAG=164 %ELSE %START {A}
+      AFD=MAPSSFD(DSNUM)
+      %IF MONFLAG#0 %THEN %START
+         PRINTSTRING("   AFD:"); PHEX(AFD); NEWLINE
+      %FINISH
+      %IF AFD=0 %THEN FLAG=0 %ELSE %START {B}
+
+         F==RECORD(AFD)
+         FDT=0
+         IDEN=F_IDEN
+
+         FLAG=CLOSENCLEAR(AFD);          ! DO THE CLOSE
+         %IF FLAG<=0 %AND STATUS=1 %THEN {SCRATCH FILE} DESTROY(IDEN, FLAG)
+      %FINISH {B}
+   %FINISH {A}
+
+   %IF MONFLAG#0 %THEN MONPARAMS("<jrjriw*Result ".ITOS(FLAG))
+   %RESULT=FLAG
+%END;                                    !F77CLOSE
+
+!-----------------------------------------------------------------------
+
+
+%EXTERNALINTEGERFN F77OPEN %ALIAS "S#F77OPEN" (%INTEGER DSNUM, STATUS, ACCESS, FORM, BLANKS,
+   RECL, NREC, %STRINGNAME FILEX, DESC, %INTEGERNAME FDT)
+
+! STATUS & filename parameter values:
+!0..If file has been defined on this channel, use this file.
+!   Otherwise, if filename="" use scratch file.
+!   Otherwise, if filename#"", use specified file.
+!1..No filename specified, use scratch file
+!2..new file..must not exist
+!3..existing file..must exist
+!4..same as 3
+!5..append mode, otherwise as status=0
+   %INTEGER AFD, FLAG, TTYFLAG, CONAD, APPENDFLAG, MAXREC, RECSIZE
+   %INTEGER MONFLAG, ENTFLAG, RESULTFLAG, INCOPEN
+!* %integer mode
+   %BYTE %INTEGER CHARFILE
+   %RECORD (FDF) %NAME F
+   %RECORD (OLDCONF) RR
+   %RECORD (CONFF) %NAME CUR
+   %STRING (255) FILENAME
+
+   %INTEGER %FN %SPEC FDAOPEN(%INTEGER DSNUM, NUMBLOCKS, BLKSIZE);  ! BASED ON FORTRANDF
+   %ROUTINE %SPEC ACCESS PROPERTIES
+   %ROUTINE %SPEC PREPARE OPEN(%INTEGER %NAME FLAG, %INTEGER STATUS, CALL);  ! PROCESS OPEN CALL
+
+   %IF SSOWN_SSNOTE&4#0 %THEN MONPARAMS(">jrjrjrjrjrjrjrsbsbiw")
+   MONFLAG=COMREGMAP(27)&X'40000'!(ssown_ssnote&4)
+
+   INCOPEN=NO
+   FILENAME=FILEX
+   %IF MONFLAG#0 %THEN %START
+      PRINTSTRING(SNL."       F77OPEN ".VSN.SNL.SNL)
+      PRINTSTRING("ENTER F77OPEN : DSNUM= ".ITOS(DSNUM)." STATUS= ".ITOS(STATUS))
+      PRINTSTRING(" ACCESS= ".ITOS(ACCESS)." FORM= ".ITOS(FORM).SNL)
+      PRINTSTRING("   BLANKS= ".ITOS(BLANKS)." RECL= ".ITOS(RECL)." NREC= ".ITOS(NREC).SNL)
+      PRINTSTRING("   FILENAME = ".FILENAME."   FILETYPE =".DESC.SNL)
+   %FINISH
+
+   CHARFILE=0
+   DESC=UCSTRING(DESC)
+   %IF DESC="DATA" %THEN DESC=""; !desc="DADESC" used in test AK18
+   %IF DESC="CHARACTER" %THEN DESC="C"
+   %IF DESC#"" %AND DESC#"C" %THEN RESULTFLAG=267 %AND ->GIVERESULT
+!* Following line moved to later..SH 11-02-87
+!*    %IF STATUS=2 %AND NREC=0 %AND ACCESS=1 %THEN NREC=X'40000'//RECL
+   %IF ACCESS=1 %AND DESC="C" %THEN RESULTFLAG=179 %AND ->GIVERESULT
+   %IF DESC="C" %THEN CHARFILE=1
+   TTYFLAG=0
+   FDT=0
+!*    MAXREC = SSOWN_DEFAULTDEFINESIZE >> 10
+   maxrec=1024; !max record length for seq file.
+!* Previous line changed May 88, SH. Use DEFINE if larger maxrec req.
+   RECSIZE = 1024
+
+   appendflag=0
+   %IF STATUS=5 %THEN %START;            ! APPEND MODE
+      STATUS=0
+      APPENDFLAG=1
+   %FINISH
+
+   %if filename#"" %and charno(filename,1)='.' %thenstart
+      filename=ucstring(filename)
+      ttyflag=1
+      %IF FILENAME=".IN" %THEN %START
+         %if status=0 %then status=3; !existing file
+         %if status#3 %then resultflag=122 %and ->giveresult
+      %FINISHelseIF FILENAME=".OUT" %THEN %START
+         %if status=0 %then status=2; !old file
+         %if status#2 %then resultflag=122 %and ->giveresult
+      %FINISHelsestart
+         resultflag=167 %and ->giveresult; !invalid filename
+      %finish
+   %finish
+
+   %IF TTYFLAG=1 %THEN %START
+      %IF ACCESS#0 %THEN RESULTFLAG=119 %AND ->GIVERESULT
+      %IF FORM#1 %THEN RESULTFLAG=127 %AND ->GIVERESULT
+      %IF BLANKS#0 %THEN RESULTFLAG=127 %AND ->GIVERESULT
+      %IF RECL#0 %THEN RESULTFLAG=127 %AND ->GIVERESULT
+      %IF DESC#"" %THEN RESULTFLAG=127 %AND ->GIVERESULT
+   %FINISH
+
+   %IF ttyflag=0 %and FILENAME#"" %START
+      RESULTFLAG=CHECKNAME(FILENAME, 1 {FILE OR MEM}, 0 {PRO TEM})
+      %IF RESULTFLAG#0 %THEN ->GIVERESULT
+   %FINISH
+
+   %IF-1<=DSNUM<=0 %THEN RESULTFLAG=164 %AND ->GIVERESULT
+   AFD=MAPSSFD(DSNUM)
+   FDT=AFD
+   %IF MONFLAG#0 %THEN %START
+      PRINTSTRING("   AFD: "); PHEX(AFD); NEWLINE
+   %FINISH
+
+   %IF AFD#0 %THEN %START
+      F==RECORD(AFD)
+!*       %IF F_IDEN=FILENAME %THEN %START;  ! SAME FILE - SAME UNIT
+!*          %IF MONFLAG#0 %THEN PRINTSTRING("   SAME FILE - SAME UNIT".SNL)
+!*          %IF F_STATUS # 0 %OR F_F2 # 0 %THEN RESULTFLAG = 0 %AND ->GIVERESULT
+!*          ! RESULTFLAG = 0    {  REMOVE PRO TEMPORE [D228]}
+!*       %FINISH
+      %if f_recsize>recsize %then recsize=f_recsize
+!*       %if f_maxrec>maxrec %then maxrec=f_maxrec
+      %if f_maxrec#0 %then maxrec=f_maxrec; !define overrides
+      %if filename="" %and status#1 %thenstart
+         !no filename specified, and not scratch..use previous def.
+         filename=f_iden
+         status=f_f77status
+      %finish
+      %if (filename="" %and status=1) %orc
+         (filename#"" %and filename#f_iden %and filename#uinfs(1).":".f_iden) %thenstart
+         %if monflag#0 %thenstart
+            %if filename#"" %thenstart
+               printstring("   F_IDEN:".f_iden." - USERFILENAME:".filename.snl)
+            %finishelsestart
+               printstring("   Scratch file already open - closing it".snl)
+            %finish
+            printstring("   Call F77CLOSE, and return to F77OPEN".snl)
+         %finish
+         flag=f77close(dsnum, 0, fdt)
+         %if flag#0 %then resultflag=flag %and ->giveresult; !close failed
+         afd=0; !no afd now
+      %finish
+   %finish
+
+   !** the following code is dependent on AFD=0
+   !If AFD#0, we are using filename and status from a previous open.
+   !SH. 14-Jan-87.
+   ! or DEFINE..SH MAY 88
+   %if afd=0 %and ttyflag=0 %thenstart
+      %if filename="" %thenstart
+         %if status=0 %then status=1
+      %finishelsestart
+         %IF STATUS=1 %THEN RESULTFLAG=122{status conflict} %AND ->GIVERESULT
+         CONNECT(FILENAME, 1, 0, 16{seq}, RR, FLAG)
+         %IF FLAG=0 %THEN %START;         ! CHECK FILETYPE
+            %IF 4#RR_FILETYPE#3 %THEN RESULTFLAG=267 %AND ->GIVERESULT;  ! FILE NOT CHAR. OR DATA
+            %IF STATUS=2 %THEN RESULTFLAG=168 %AND ->GIVERESULT
+            %if status=0 %then status=3; !now known to exist
+         %finishelsestart
+            !flag#0..file does not exist
+            %if flag#218 %then resultflag=flag %and ->giveresult; !cannnot connect
+            %IF STATUS = 3 %THEN RESULTFLAG=152 %AND ->GIVERESULT
+            %IF STATUS = 4 %THEN RESULTFLAG = 218 %AND ->GIVERESULT
+            %if status = 0 %then status=2; !does not exist
+            APPENDFLAG=0; !in case append mode was set
+            %if access=0 %thenstart
+               !seqential access, CREATE FILE IF NOT EXIST
+               !for da files, prepare open will create
+               OUTFILE(FILENAME, 4096, 0, 16{seq}, CONAD, FLAG)
+               %IF FLAG#0 %THEN RESULTFLAG=FLAG %AND ->GIVERESULT
+               %if charfile=0 %thenstart
+                  integer(conad+x'0c')=4; !data file
+                  integer(conad+x'18')=maxrec<<16!2; !V, maxrec
+               %finish
+            %finish
+   !*       %IF ACCESS=1 %THEN NEWDA=1
+         %FINISH
+      %FINISH
+   %finish
+
+   !* default file size for scratch and permanent files, if
+   !* new, and direct access.
+   %IF NREC=0 %and access=1 %and 1<=status<=2 %THEN NREC=X'40000'//RECL
+!*    AFD=MAPSSFD(DSNUM); !already done
+   FDT=AFD
+   %IF MONFLAG#0 %THEN %START
+      PRINTSTRING("   FILE :".FILENAME.SNL)
+      PRINTSTRING("    DSNUM : ".ITOS(DSNUM)." AFD :"); PHEX(AFD); NEWLINE
+   %FINISH
+
+   %IF AFD=0 %THEN %START;               ! UNIT NOT CONNECTED
+!*    %IF STATUS=0 %AND FILENAME="" %THEN STATUS=1
+      %IF MONFLAG#0 %THEN %START
+         PRINTSTRING("   UNIT NOT CONNECTED ".ITOS(DSNUM).SNL)
+         PRINTSTRING("   STATUS : ".ITOS(STATUS).SNL)
+      %FINISH
+      %IF STATUS=1 %THEN %START
+         FILENAME=UINFS(1).":T#WORK".ITOS(DSNUM)
+!*       %IF EXIST(FILENAME)#0 %THEN DESTROY(FILENAME, FLAG)
+         %if access=0 %thenstart
+            !sequential access
+            OUTFILE(FILENAME, 4096, 0, VTEMP!16{seq}, CONAD, FLAG)
+            %IF FLAG#0 %THEN RESULTFLAG=FLAG %AND ->GIVERESULT
+            INTEGER(CONAD+X'C')=4;             ! DATA FILE
+         %finishelsestart
+            !direct access..prepare open will create
+            %if exist(filename)#0 %then destroy(filename,flag)
+         %finish
+!*       %IF ACCESS=1 %THEN NEWDA=1
+      %FINISH %ELSE %START
+         !status#1..not a scratch file
+         %if ttyflag=0 %then FINDF77FD(FILENAME, AFD)
+         ! A file can be used once only in F77 definitions (though it may
+         ! simultaneously be in use as (e.g.) an IMP i/o definition).  We must
+         ! look for the F77 use (look at F77FLAG).
+         ! Allow multiple definitions of .IN and .OUT
+
+         %IF AFD # 0 %THEN %START
+            ! Filename exists on another channel - use that FD
+            %IF MONFLAG # 0 %THEN PRINTSTRING("   FILE KNOWN - DSNUM : ".ITOS(DSNUM).SNL)
+            F==RECORD(AFD)
+            %IF F_MODEOFUSE=1 %THEN CHARFILE=1
+            %IF F_MODEOFUSE=3 %THEN F_MODE=13;   ! file already (F77) connected
+            %IF F_CURSTATE<8 %THEN RESULTFLAG=118 %AND ->GIVERESULT;  ! FILE ALREADY CONNECTED
+
+            %IF F_CURSTATE=9 %THEN %START
+               F_CURSTATE=8
+            %FINISH %ELSE %START;        ! FILE CLOSED - CHECK STATUS
+               %IF STATUS=2 %AND F_F77STATUS # 2 %THEN RESULTFLAG=168{already exists} %AND ->GIVERESULT
+               %IF STATUS=3 %AND F_F77STATUS # 3 %THEN RESULTFLAG=152{does not exist} %AND ->GIVERESULT
+            %FINISH
+
+            STATUS=F_F77STATUS
+            %IF MONFLAG # 0 %THEN PRINTSTRING("   STATUS : ".ITOS(STATUS).SNL)
+            F_DSNUM=DSNUM
+            %IF F_STATUS>1 %THEN F_STATUS=1
+            F_CURSTATE=0
+            %IF F_F77FLAG # 0 %AND F_F77FORM # FORM %THEN RESULTFLAG=121{FORM conflict} %AND ->GIVERESULT
+            ACCESS PROPERTIES
+            AFD=ADDR(F_LINK)
+            ENTFLAG=ENTERAFD(DSNUM, AFD)
+            %IF ENTFLAG # 0 %THEN PRINTSTRING("**ENTERAFD FAILS ".ITOS(ENTFLAG).SNL)
+
+            PREPARE OPEN(RESULTFLAG, STATUS, 0)
+            ->GIVERESULT
+            !-------------- (FINISHED) ------------------
+         %FINISH %ELSE %START;           ! FILE NOT KNOWN
+            %IF MONFLAG # 0 %THEN PRINTSTRING("   FILE NOT KNOWN".SNL)
+         %FINISH
+      %FINISH
+
+      ! CREATE NEW FILE DEFINITION TABLE
+      ALLOCATEFD(AFD, FLAG)
+      %IF FLAG#0 %THEN RESULTFLAG=FLAG %AND ->GIVERESULT
+
+      F==RECORD(AFD)
+      F=0
+      F_DSNUM=DSNUM
+      ENTFLAG=ENTERAFD(DSNUM, AFD)
+      %IF ENTFLAG # 0 %THEN PRINTSTRING("**ENTERAFD FAILS ".ITOS(ENTFLAG).SNL)
+
+      FDT=AFD
+      F_LINK=SSOWN_LOADLEVEL
+      F_IDEN==STRING(GETHEAP(LENGTH(FILENAME)+1))
+      F_IDEN=FILENAME
+      F_F77FLAG=1
+      ACCESS PROPERTIES
+      F_ACCESSROUTE=8
+!     The following code has been moved to precede file creation.
+!*    %IF STATUS=0 %AND TTYFLAG=0 %THEN %START
+!*       %IF EXIST(FILENAME)=0 %THEN STATUS=2 %ELSE STATUS=3;  ! STATUS NOW KNOWN
+!*    %FINISH
+      %IF STATUS=2 %AND DESC="C" %THEN CHARFILE=1
+      PREPARE OPEN(RESULTFLAG, STATUS, 1)
+      %IF MONFLAG # 0 %THEN PRINTSTRING("   RESULT FROM 1".SNL)
+      ->GIVERESULT
+
+   %FINISH %ELSE %START;                 ! UNIT CONNECTED
+
+      %IF MONFLAG # 0 %THEN PRINTSTRING("   UNIT CONNECTED".SNL)
+      !the following code has been moved to an earlier position..SH
+!*    F == RECORD(AFD)
+!*    %IF F_RECSIZE > RECSIZE %THEN RECSIZE = F_RECSIZE
+!*    %IF F_MAXREC  > MAXREC  %THEN MAXREC  = F_MAXREC
+!*    %IF FILENAME = "" %THEN %START
+!*       %IF STATUS=1 %THEN %START;      ! SCRATCH FILE
+!*          %IF MONFLAG # 0 %THEN PRINTSTRING("   CALL F77CLOSE".SNL)
+!*          FLAG=F77CLOSE(DSNUM, 0, FDT)
+!*          %IF MONFLAG # 0 %THEN PRINTSTRING(SNL."RETURN TO F77OPEN".SNL)
+!*          %IF FLAG=0 %THEN ->NOTCONN
+!*          RESULTFLAG=FLAG %AND ->GIVERESULT
+!*       %FINISH
+!*       FILENAME=F_IDEN
+!*       STATUS=F_F77STATUS
+!*     %FINISH %ELSE %START
+!*        %IF FILENAME # F_IDEN %AND FILENAME # UINFS(1).":".F_IDEN %THEN %START
+!*          %IF MONFLAG # 0 %THEN %START
+!*             PRINTSTRING("   F_IDEN:".F_IDEN." - USERFILENAME:".FILENAME.SNL)
+!*             PRINTSTRING("   CALL F77CLOSE".SNL)
+!*          %FINISH
+!*          FLAG=F77CLOSE(DSNUM, 0, FDT);  ! CLOSE UNIT IF NOT SAME FILE
+!*          %IF MONFLAG # 0 %THEN PRINTSTRING(SNL."RETURN TO F77OPEN".SNL)
+!*          %IF FLAG=0 %THEN ->NOTCONN
+!*          RESULTFLAG=FLAG %AND ->GIVERESULT
+!*       %FINISH
+!*    %FINISH
+
+      %IF MONFLAG # 0 %THEN %start
+         PRINTSTRING("   STATUS : ".ITOS(STATUS).SNL)
+         printstring("   F_STATUS:".itos(f_status).snl)
+      %finish
+
+      %IF F_STATUS=0 %THEN %START;       ! FILE PRECONNECTED
+         %IF MONFLAG # 0 %THEN PRINTSTRING("   FILE PRECONNECTED".SNL)
+         %IF F_MODEOFUSE=1 %THEN CHARFILE=1
+         %IF F_F77STATUS=2 %OR F_F77STATUS=1 %OR %c
+            (ttyflag=0 %and FILENAME # "" %AND EXIST(FILENAME)=0) %orc
+            (ttyflag#0 %and filename=".OUT") %THEN %START
+            ;                            ! PRECONNECTED FILE DOES NOT EXIST
+            %IF STATUS=3 %THEN RESULTFLAG=152 %AND ->GIVERESULT
+            %IF STATUS=0 %THEN STATUS=2
+            %IF F_F2=0 %THEN ACCESS PROPERTIES
+            PREPARE OPEN(FLAG, STATUS, 2)
+            %IF FLAG>0 %THEN RESULTFLAG=FLAG %AND ->GIVERESULT
+            %IF MONFLAG # 0 %THEN PRINTSTRING("   RESULT FROM 2".SNL)
+            RESULTFLAG=0
+            ->GIVERESULT
+         %FINISH
+                                         ! PRECONNECTED FILE EXISTS
+         %IF F_F2=0 %THEN %START;        ! EXTERNALLY PRECONNECTED
+            ACCESS PROPERTIES
+            PREPARE OPEN(FLAG, STATUS, 6)
+            %IF FLAG>0 %THEN RESULTFLAG=FLAG %AND ->GIVERESULT
+            %IF MONFLAG # 0 %THEN PRINTSTRING("   RESULT FROM 6".SNL)
+            RESULTFLAG=0
+            ->GIVERESULT
+         %FINISH
+         %IF F_F77ACCESS # ACCESS %THEN RESULTFLAG=119{} %AND ->GIVERESULT
+         %IF F_F77RECL # RECL %THEN RESULTFLAG=120{RECL conflict} %AND ->GIVERESULT
+         %IF F_F77FORM # FORM %THEN RESULTFLAG=121{FORM conflict} %AND ->GIVERESULT
+         %IF STATUS=2 %THEN RESULTFLAG=122{STATUS conflict} %AND ->GIVERESULT
+!*       MODE=2
+         PREPARE OPEN(FLAG, STATUS, 3)
+         %IF FLAG>0 %THEN RESULTFLAG=FLAG %AND ->GIVERESULT
+         %IF MONFLAG # 0 %THEN PRINTSTRING("   RESULT FROM 3".SNL)
+         RESULTFLAG=0
+         ->GIVERESULT
+
+      %FINISH %ELSE %START;              ! NOT PRECONNECTED
+
+         %IF MONFLAG # 0 %THEN PRINTSTRING("   FILE NOT PRECONNECTED".SNL)
+         %IF F_MODE-11 # ACCESS+ACCESS %THEN RESULTFLAG=119 %AND ->GIVERESULT
+         %IF STATUS=2 %THEN RESULTFLAG=122{STATUS conflict} %AND ->GIVERESULT
+         %IF F_MAXREC<RECL %THEN RESULTFLAG=188 %AND ->GIVERESULT
+         %IF F_STATUS=1 %THEN %START;    ! ??????
+            F_F77UFD=X'48'!form
+            %IF ACCESS=1 %THEN %START
+               F_RECSIZE=RECL
+               F_MINREC=RECL
+            %FINISH
+            PREPARE OPEN(FLAG, STATUS, 4)
+            %IF FLAG>0 %THEN RESULTFLAG=FLAG %AND ->GIVERESULT
+            %IF MONFLAG # 0 %THEN PRINTSTRING("   RESULT FROM 4".SNL)
+            RESULTFLAG=0
+            ->GIVERESULT
+         %FINISH %ELSE %START
+            %IF F_F77UFD # 0 %AND F_F77UFD&X'01' # FORM %THEN RESULTFLAG=121 %AND ->GIVERESULT
+            f_f77blank=blanks; !change blanks param, even though file open
+            %IF MONFLAG # 0 %THEN PRINTSTRING("   RESULT FROM 5".SNL)
+            RESULTFLAG=0
+            ->GIVERESULT
+         %FINISH
+      %FINISH {Unit connected}
+   %FINISH
+
+GIVERESULT:
+   %IF INCOPEN=YES %START
+      CUR==RECORD(SSOWN_CONF(SSOWN_CONFPOS))
+      CUR_OPENS=CUR_OPENS+1
+   %FINISH
+   %IF SSOWN_SSNOTE&8 # 0 %THEN MONPARAMS("<jrjrjrjrjrjrjrsbsbiw*".ITOS(RESULTFLAG))
+   %RESULT=RESULTFLAG
+
+
+%INTEGER %FN FDAOPEN(%INTEGER DSNUM, NUMBLOCKS, BLKSIZE);  ! BASED ON FORTRANDF
+%RECORD (FDF) %NAME F
+%RECORD (DAHF) %NAME H
+%RECORD (OLDCONF) RR
+%INTEGER FLAG, AFD, SIZE, HEADR, Z
+   !%if monflag # 0 %then monparams(">jrjrjr")
+   AFD=MAPSSFD(DSNUM)
+   %IF AFD=0 %THEN FLAG=151 %AND ->DAOUT;  ! NOT DEFINED
+   F==RECORD(AFD)
+   %IF F_STATUS # 0 %THEN FLAG=0 %AND ->DAOUT;  ! ALREADY OPEN - IGNORE CALL
+   %IF F_ACCESSROUTE=10 %THEN FLAG=294 %AND ->DAOUT;  ! ILLEGAL USE OF .NULL
+   F_VALIDACTION=67;                     ! READ,WRITE,SEEK BY DEFAULT
+   F_MODEOFUSE=13;                       ! FORTRAN DA
+   %IF BLKSIZE<=4096 %THEN %START;       ! CALCULATE OPTIMUM HEADER SIZE
+      %IF 4096//BLKSIZE*BLKSIZE # 4096 %THEN HEADR=32 %ELSE %START
+         Z=BLKSIZE
+         %CYCLE
+            %IF Z>=32 %THEN %EXIT
+            Z=Z+BLKSIZE
+         %REPEAT
+         HEADR=Z
+      %FINISH
+   %FINISH %ELSE %START
+      %IF BLKSIZE=BLKSIZE//4096*4096 %THEN HEADR=4096 %ELSE HEADR=32
+   %FINISH
+   SIZE=HEADR+NUMBLOCKS*BLKSIZE
+!* %IF NEWDA=1 %THEN DESTROY(F_IDEN, FLAG);  ! WISH TO RECREATE IT RIGHT SIZE
+
+   ! The x400 bit in MODE for CONNECT was provided specially for FDAOPEN, to
+   ! allow a write-mode connect if possible, but to provide read-mode connection
+   ! if available if write-mode is not.  This allows Direct Access to READ-permitted
+   ! files for read-only operations.  We should really try to mark the file
+   ! descriptor so that write-operations will be rejected, as at present an
+   ! address error will occur.  Need to speak to Mike/Andy about this.
+
+   CONNECT(F_IDEN, x'403', 0, 4{perm}, RR, FLAG);   ! TRY TO CONNECT IN WRITE MODE
+   %IF FLAG=218 %THEN %START
+      %IF MONFLAG # 0 %THEN PRINTSTRING("      FLAG = 218 FILE DOES NOT EXIST".SNL)
+      OUTFILE(F_IDEN, SIZE, 0, 4{perm}, RR_CONAD, FLAG);  ! TRY TO CREATE
+      %IF FLAG # 0 %THEN ->DAOUT
+      H==RECORD(RR_CONAD)
+      H_DATAEND=SIZE
+      H_DATASTART=HEADR
+      H_FILETYPE=4
+      H_FORMAT=(BLKSIZE<<16)!1
+      H_RECORDS=NUMBLOCKS
+   %FINISH %ELSE %START;                 ! FAILED TO CONNECT WRITE
+      %IF FLAG # 0 %THEN %START
+         CONNECT(F_IDEN, 0, 0, 4{perm}, RR, FLAG)
+         %IF FLAG # 0 %THEN ->DAOUT
+         F_VALIDACTION=65;               ! READ AND SEEK ONLY
+      %FINISH
+      H==RECORD(RR_CONAD)
+      %IF (H_DATAEND-H_DATASTART)<(NUMBLOCKS*BLKSIZE) %OR H_FILETYPE # 4 %OR H_FORMAT&X'FF' # 1 %THEN %C
+         FLAG=179 %AND ->DAOUT
+! INVALID FILE FOR DA
+      %IF H_FORMAT>>16 # BLKSIZE %THEN FLAG=180 %AND ->DAOUT;  ! WRONG RECORD LENGTH FOR DA
+   %FINISH
+
+   F_CONAD=RR_CONAD
+   F_DATASTART=H_DATASTART;              ! HEADER MIGHT NOT BE 32 BYTES
+   %IF MONFLAG # 0 %THEN %START
+      PRINTSTRING("      F_DATASTART:"); PHEX(F_DATASTART); NEWLINE
+   %FINISH
+   F_RECTYPE=1;                          ! FIXED FORMAT
+   F_MAXSIZE=H_RECORDS
+   F_MAXREC=BLKSIZE
+   F_MINREC=BLKSIZE
+   F_RECSIZE=BLKSIZE
+   F_STATUS=3;                           ! READ/WRITE
+   F_CURSTATE=1
+   F_DARECNUM=1;                         ! ASSUME STARTS AT BLOCK 1
+   INCOPEN=YES
+DAOUT:
+   !%if monflag # 0 %then monparams("<jrjrjr*Result=".itos(flag))
+   %RESULT=FLAG
+%END;                                    !FDAOPEN
+
+!-----------------------------------------------------------------------
+
+
+%ROUTINE ACCESS PROPERTIES
+   %IF MONFLAG # 0 %THEN %START
+      PRINTSTRING("   ENTER ACCESS PROPERTIES".SNL)
+      PRINTSTRING("      ACCESS: ".ITOS(ACCESS).SNL)
+   %FINISH
+   %IF ACCESS = 0 %THEN %START;            ! SEQUENTIAL
+      F_MODE = 11
+!*       F_MINREC = 1
+      F_MAXREC = MAXREC
+      F_RECSIZE = RECSIZE
+!*       F_RECTYPE = 2
+      %if f_rectype=0 %or charfile=1 %then f_rectype=2
+         !V type unless specified, V type if character file
+      ! Changed SH 12-Oct-88
+      F_MODEOFUSE = 2
+      F_VALIDACTION = X'7F'
+      %IF APPENDFLAG # 0 %THEN F_FLAGS = F_FLAGS!8
+   %FINISH %ELSE %START;                 ! DIRECT
+      F_MODE = 13
+!*       F_MINREC = RECL
+      F_MAXREC = RECL
+      F_RECSIZE = RECL
+      F_RECTYPE = 1
+      F_MODEOFUSE = 3
+      F_VALIDACTION = X'43'
+   %FINISH
+   %if f_rectype&3=2 {V} %thenstart
+      f_minrec=1; !for V format
+   %finishelsestart
+      f_minrec=f_maxrec; !for F format
+   %finish
+   %IF MONFLAG # 0 %THEN PRINTSTRING("   EXIT ACCESS PROPERTIES".SNL)
+%END;                                    !ACCESS PROPERTIES
+
+!-----------------------------------------------------------------------
+
+
+%ROUTINE PREPARE OPEN(%INTEGER %NAME FLAG, %INTEGER STATUS, CALL);  ! PROCESS OPEN CALL
+   !%if monflag # 0 %then monparams(">iwjrjr")
+   %IF CHARFILE = 1 %THEN F_MODEOFUSE = 1
+   F_LINK = SSOWN_LOADLEVEL
+   F_F2 = 1;                               ! INDICATES OPENED BY F77
+   F_ASVAR = 0;                            ! NOT USED IN F77
+   F_F77UFD = X'48'!form
+   F_F77FORM = FORM
+   F_F77NREC = NREC
+   F_F77RECL = RECL
+   F_F77BLANK = BLANKS
+   F_F77STATUS = STATUS
+   F_F77ACCESS = ACCESS
+   %IF TTYFLAG # 0 %THENstart
+      %if filename=".IN" %then f_accessroute=1 {primary input} %c
+      %else f_accessroute=2 {primary output}
+   %finish
+   %IF NREC>0 %THEN F_MAXSIZE = NREC %ELSE F_MAXSIZE = SSOWN_DEFAULTDEFINESIZE
+
+   %IF F_MODE = 13 %THEN FLAG = FDAOPEN(DSNUM, NREC, RECL) %ELSE %START;  ! FDAOPEN FOR DA FILE
+      FLAG = 0
+      F_DATASTART=32;                    ! FUDGE - INCONSISTENCEY IN OPEN AND NEWFILEOP
+   %FINISH
+
+   %IF MONFLAG # 0 %THEN %START
+      PRINTSTRING("      F_CONAD:"); PHEX(F_CONAD); PRINTSTRING(" F_DATASTART:")
+      PHEX(F_DATASTART); NEWLINE
+      %IF FLAG # 0 %THEN PRINTSTRING("      FLAG: ".ITOS(FLAG).SNL)
+   %FINISH
+   !%if monflag # 0 %then monparams("<iwjrjr")
+%END;                                    ! PREPARE OPEN
+
+!-----------------------------------------------------------------------
+
+%END;                                    ! F77OPEN
+
+!-----------------------------------------------------------------------
+
+
+%EXTERNALINTEGERFN F77INQUIRE %ALIAS "S#F77INQUIRE" (%INTEGER DSNUM, %STRINGNAME FILENAME,
+   %INTEGERNAME ADDRESS, FDT)
+   ! These "owns" are unchanged always
+   %OWN %STRING (2) NO= "NO"
+   %OWN %STRING (3) YES= "YES"
+   %OWN %STRING (4) NULL= "NULL"
+   %OWN %STRING (4) ZERO= "ZERO"
+   %OWN %STRING (6) DIRECT= "DIRECT"
+   %OWN %STRING (9) UNKNOWN= "UNKNOWN"
+   %OWN %STRING (9) FORMAT= "FORMATTED"
+   %OWN %STRING (10) SEQUENT= "SEQUENTIAL"
+   %OWN %STRING (11) UNFORMAT= "UNFORMATTED"
+   %RECORD %FORMAT RESULTSF(%INTEGER RESULTS, EXISTS, OPENED, NUMBER, NAMED, NAME, ACCESS, SEQ, DIR,
+      FORM, FORMATTED, UNFORMATTED, RECL, NEXTREC, BLANK, FILETYPE, NREC, NOAD, UNKNOWNAD, YESAD,
+      SEQAD, DIRAD, UNFORMAD, FORMAD, NULLAD, ZEROAD) {26 WORDS}
+   %INTEGER AFD, EX, FLAG, MONFLAG
+   %RECORD (FDF) %NAME F
+   %RECORD (RESULTSF) %NAME RSLT
+   %ROUTINE %SPEC SET PROPERTIES(%INTEGER %NAME EXISTS, OPENED, NUMBER, NAMED, NAME)
+   %IF SSOWN_SSNOTE&4#0 %THEN MONPARAMS(">jrsbiwiw")
+   MONFLAG=COMREGMAP(27)&X'40000'!(ssown_ssnote&4)
+
+   FDT=0
+   %IF SSOWN_INQUIRE=0 %THEN %START;     ! SET TEXT ADDRESSES
+      SSOWN_INQUIRE=GETHEAP(26*4)
+      RSLT==RECORD(SSOWN_INQUIRE)
+      RSLT_UNKNOWNAD=ADDR(UNKNOWN)
+      RSLT_NOAD=ADDR(NO)
+      RSLT_YESAD=ADDR(YES)
+      RSLT_NULLAD=ADDR(NULL)
+      RSLT_ZEROAD=ADDR(ZERO)
+      RSLT_DIRAD=ADDR(DIRECT)
+      RSLT_SEQAD=ADDR(SEQUENT)
+      RSLT_UNFORMAD=ADDR(UNFORMAT)
+      RSLT_FORMAD=ADDR(FORMAT)
+   %FINISH %ELSE RSLT==RECORD(SSOWN_INQUIRE)
+   FILL(68, SSOWN_INQUIRE, 255)
+   !try to set up some defaults - which would be better than undefined.
+   !the following code -never released - was not totally successful, and so
+   !has been removed. SH 14-Jan-87
+!*    %cycle flag=0,4,16<<2
+!*       integer(ssown_inquire+flag)=addr(unknown); !say we don't know
+!*    %repeat
+!*    rslt_nextrec=-1; !next record number
+!*    rslt_nrec=-1; !number of records in file (?)
+!*    rslt_recl=-1; !record length
+   FLAG=0
+   %IF MONFLAG#0 %THEN PRINTSTRING("   DSNUM: ".ITOS(DSNUM).SNL)
+
+   %IF DSNUM>=0 %THEN %START;            ! INQUIRE BY UNIT
+      %IF MONFLAG#0 %THEN PRINTSTRING("   INQUIRE BY UNIT".SNL)
+      RSLT_EXISTS=1
+      %IF-1#DSNUM#80 %THEN AFD=MAPSSFD(DSNUM) %ELSE FLAG=164 %AND ->INQOUT
+      FDT=AFD
+      %IF AFD=0 %THEN %START
+         RSLT_OPENED=0
+         ADDRESS=SSOWN_INQUIRE
+         ->INQdone
+      %FINISH
+
+      F==RECORD(AFD)
+      SET PROPERTIES(EX, RSLT_OPENED, RSLT_NUMBER, RSLT_NAMED, RSLT_NAME)
+
+   %FINISH %ELSE %START;                 ! INQUIRE BY FILE
+
+      %IF MONFLAG#0 %THEN PRINTSTRING("   INQUIRE BY FILE  : FILE = ".FILENAME.SNL)
+
+      FLAG=CHECKNAME(FILENAME, 1, 0)
+      %IF FLAG#0 %THEN ->INQOUT
+
+      FINDF77FD(FILENAME, AFD)
+      ! A file can be used once only in F77 definitions (though it may
+      ! simultaneously be in use as (e.g.) an IMP i/o definition).  We must
+      ! look for the F77 use (look at F77FLAG).
+
+      %IF AFD=0 {NOT KNOWN TO F77} %START
+
+         ! FILE NOT CONNECTED (MAY NOT EXIST)
+         RSLT_OPENED=0
+         %IF EXIST(FILENAME)=0 %THEN %START;  ! FILE DOES NOT EXIST
+            RSLT_EXISTS=0
+            ADDRESS=SSOWN_INQUIRE
+            %IF MONFLAG#0 %THEN %START
+               PRINTSTRING(FILENAME.SNL)
+               PRINTSTRING("   RESULT FROM 1 - ADDRESS: "); PHEX(ADDRESS); NEWLINE
+            %FINISH
+            FLAG=0
+            ->INQdone
+         %FINISH
+         RSLT_EXISTS=1;                  ! FILE DOES EXIST
+         F==ID
+         EX=1
+         RSLT_NAMED=1
+         RSLT_NAME=ADDR(FILENAME)
+
+      %FINISH %ELSE %START;              ! FILE CONNECTED
+
+         F==RECORD(AFD)
+         SET PROPERTIES(EX, RSLT_OPENED, RSLT_NUMBER, RSLT_NAMED, RSLT_NAME)
+         FLAG=1
+         RSLT_EXISTS=EX
+      %FINISH
+   %FINISH
+   ;                                     ! EXAMINE PROPERTIES
+   %IF FLAG=0 %OR (FLAG=1 %AND RSLT_EXISTS#0) %THEN %START
+      %IF MONFLAG#0 %THEN PRINTSTRING("   FLAG : ".ITOS(FLAG).SNL)
+      %IF F_F77UFD=0 %OR EX=0 %THEN %START;  ! FORMAT UNKNOWN
+         RSLT_UNFORMATTED=RSLT_UNKNOWNAD
+         RSLT_FORMATTED=RSLT_UNKNOWNAD
+      %FINISH %ELSE %START;              ! FORMAT KNOWN
+         %IF F_F77UFD&X'01'=0 %THEN %START;  ! UNFORMATTED
+            RSLT_FORMATTED=RSLT_NOAD
+            RSLT_UNFORMATTED=RSLT_YESAD
+         %FINISH %ELSE %START;           ! FORMATTED
+            RSLT_FORMATTED=RSLT_YESAD
+            RSLT_UNFORMATTED=RSLT_NOAD
+         %FINISH
+      %FINISH
+
+      %IF MONFLAG#0 %THEN PRINTSTRING("   F_MODE : ".ITOS(F_MODE).SNL)
+      %IF F_MODE=11 %THEN %START;        ! SEQUENTIAL ACCESS
+         %IF F_FLAGS&X'08'=0 %OR F_RECTYPE=1 %THEN RSLT_DIR=RSLT_UNKNOWNAD %ELSE RSLT_DIR=RSLT_NOAD
+         RSLT_SEQ=RSLT_YESAD
+      %FINISH
+      %IF F_MODE=13 %OR F_MODEOFUSE=3 %OR F_MODEOFUSE=13 %THEN %START;  ! DIRECT ACCESS
+         %IF F_MODE#13 %THEN F_MODE=13
+         %IF F_MODEOFUSE#13 %THEN F_MODEOFUSE=13
+         %IF F_FLAGS&X'01'#0 %THEN RSLT_SEQ=RSLT_NOAD %ELSE RSLT_SEQ=RSLT_YESAD
+         RSLT_DIR=RSLT_YESAD
+      %FINISH
+   %FINISH
+
+   %IF F_MODE=0 %THEN %START
+      RSLT_DIR=RSLT_UNKNOWNAD
+      RSLT_SEQ=RSLT_UNKNOWNAD
+   %FINISH
+
+   %IF RSLT_OPENED=0 %THEN %START;       ! FILE NOT OPENED
+      ADDRESS=SSOWN_INQUIRE
+      %IF MONFLAG#0 %THEN %START
+         PRINTSTRING("   RESULT FROM 2 - ADDRESS:"); PHEX(ADDRESS); NEWLINE
+      %FINISH
+      ->INQdone
+   %FINISH
+
+   %IF F_MODE=11 %THEN %START;           ! SEQUENTIAL ACCESS
+      RSLT_ACCESS=RSLT_SEQAD
+   %FINISH %ELSE %START;                 ! DIRECT ACCESS
+      RSLT_ACCESS=RSLT_DIRAD
+      RSLT_NREC=F_F77NREC
+      RSLT_RECL=F_F77RECL
+      RSLT_NEXTREC=F_DARECNUM
+      %IF RSLT_NEXTREC=0 %THEN RSLT_NEXTREC=1
+   %FINISH
+
+   %IF (F_F77UFD!f_f77form)&X'01'=0 %then %start;  ! UNFORMATTED
+      RSLT_FORM=RSLT_UNFORMAD
+   %FINISH %ELSE %START;                 ! FORMATTED
+      RSLT_FORM=RSLT_FORMAD
+      %IF F_F77BLANK=0 %THEN RSLT_BLANK=RSLT_NULLAD %ELSE RSLT_BLANK=RSLT_ZEROAD
+   %FINISH
+
+   ADDRESS=SSOWN_INQUIRE
+inqdone:
+   flag=0
+INQOUT:
+   %IF MONFLAG#0 %THEN MONPARAMS("<jrsbiwiw*Result=".ITOS(FLAG))
+   %RESULT=FLAG
+
+%ROUTINE SET PROPERTIES(%INTEGER %NAME EXISTS, OPENED, NUMBER, NAMED, NAME)
+   !%if monflag#0 %then monparams(">ibibibibib")
+   %IF F_CURSTATE>=8 %THEN %START;       ! FILE CLOSED
+      OPENED=0
+      %IF F_CURSTATE=9 %THEN %START;     ! FILE DOES NOT EXIST
+         EXISTS=0
+         NAMED=0
+         %IF MONFLAG#0 %THEN PRINTSTRING("   EXIT FROM SET PROPERTIES - 0".SNL)
+         ->SETPOUT
+      %FINISH
+   %FINISH %ELSE %START;                 ! FILE CONNECTED
+      OPENED=1
+      NUMBER=F_DSNUM
+      %IF F_FLAGS&X'08'=X'08' %THEN %START;  ! CONNECTION OF A WORKFILE
+         %IF F_STATUS=0 %THEN %START;    ! FILE DOES NOT EXIST
+            EXISTS=0
+            NAMED=0
+            %IF MONFLAG#0 %THEN PRINTSTRING("   EXIT FROM SET PROPERTIES - 1".SNL)
+            ->SETPOUT
+         %FINISH %ELSE %START;           ! FILE DOES EXIST
+            EXISTS=1
+            NAMED=1
+            %IF MONFLAG#0 %THEN PRINTSTRING("   EXIT FROM SET PROPERTIES - 2".SNL)
+            ->SETPOUT
+         %FINISH
+      %FINISH
+      %IF F_STATUS=0 %THEN %START;       ! EXAMINE A PRECONNECTION
+         %IF EXIST(F_IDEN)=0 %THEN %START;  ! FILE DOES NOT EXIST
+            EXISTS=0
+            NAMED=0
+            %IF MONFLAG#0 %THEN PRINTSTRING("   EXIT FROM SET PROPERTIES - 3".SNL)
+            ->SETPOUT
+         %FINISH
+      %FINISH
+   %FINISH
+   EXISTS=1
+   NAMED=1
+   NAME=ADDR(F_IDEN)
+SETPOUT:
+   !%if monflag#0 %then monparams("<ibibibibib")
+%END;                                    !SET PROPERTIES
+
+!-----------------------------------------------------------------------
+
+%END;                                    ! F77INQUIRE
+
+!-----------------------------------------------------------------------
+
+
+%END %OF %FILE
+
+!-----------------------------------------------------------------------
+

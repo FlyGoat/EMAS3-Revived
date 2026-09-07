@@ -1,0 +1,1554 @@
+! S30 Commands
+%end %oflist
+%include "subarc:SSOWNF3"
+   %list
+
+
+!***********************************************************************
+!*                                                                     *
+!*                           Record formats                            *
+!*                                                                     *
+!***********************************************************************
+
+! This format out of alphabetic sequence since DPERMF requires it
+%record %format prmsf(%string (6) user, %byte %integer uprm)
+
+%record %format afrecf(%string (11) name, %integer kbytes, %string (8) date, %string (6) tape,
+   %short %integer prefix, chapter, %byte %integer eep, phead, spare, count)
+%const %integer afrecsize=40
+%record %format dpermf(%integer bytesreturned, ownp, eep, spare, %record (prmsf) %array prms(0:15))
+%record %format frecf(%string (11) name, %integer sp12, kbytes, %byte %integer arch, codes, cct,
+   ownp, eep, use, codes2, ssbyte, flags, phead, dayno, group)
+%const %integer frecsize=32
+%record %format printf(%string (42) fname, %byte %integer type, %string (8) date, %integer size,
+   errmess)
+! N.B. PRMSF declared above.
+
+
+
+
+!***********************************************************************
+!*                                                                     *
+!*                              Constants                              *
+!*                                                                     *
+!***********************************************************************
+
+
+%const %integer clistsize=x'300000';     !MAX SIZE OF COMPILATION LISTING FILE
+%const %integer code=2
+%const %integer defjcpl=30;              !DEFAULT JOB CPULIMIT - SECONDS
+%const %integer ebcdicbit=x'20'
+%const %integer maxjcpl=7200;            !MAX CPULIMIT FOR DETACHED JOBS - SECONDS
+%const %integer ssfformat=1
+%const %integer ssmaxworksize=x'200000'; !Max size for compiler workfile.
+%const %integer ssuformat=3
+%const %integer ssvformat=2
+%const %integer matched=1, on the skip=2
+%const %integer true=1,false=0
+%const %integer aset= 1
+%const %integer bset= X'2'
+%const %integer cset= X'4'
+%const %integer dset= X'8'
+%const %integer eset= X'10'
+%const %integer fset= X'20'
+%const %integer gset= X'40'
+%const %integer hset= X'80'
+%const %integer iset= X'100'
+%const %integer jset= X'200'
+%const %integer kset= X'400'
+%const %integer lset= X'800'
+%const %integer mset= X'1000'
+%const %integer nset= X'2000'
+%const %integer oset= X'4000'
+%const %integer pset= X'8000'
+%const %integer qset= X'10000'
+%const %integer rset= X'20000'
+%const %integer sset= X'40000'
+%const %integer tset= X'80000'
+%const %integer uset= X'100000'
+%const %integer vset= X'200000'
+%const %integer wset= X'400000'
+%const %integer xset= X'800000'
+%const %integer yset= X'1000000'
+%const %integer zset= X'2000000'
+%const %integer maxinitialr=100
+%const %integer maxr=1000;               !MAXIMUM VALUE OF R
+
+
+!%const %string (4) %array pper(0:15)= "None","R   ","W   ","WR  ","E   ","RE  ",
+! "WE  ","All ",
+! "P   ","RP  ","WP  ","WRP ","EP  ","REP ","WEP ","WREP"
+! These permissions amended to omit reference to execute perm, since it doesnt
+! have a meaningful effect
+   %const %string (4) %array pper(0:15)= "None","R   ","W   ","RW  ","E   ","R   ",
+ "W   ","RW  ",
+ "P   ","RP  ","WP  ","RWP ","P   ","RP  ","WP  ","RWP "
+
+!***********************************************************************
+!*                                                                     *
+!*                     %system Routine/fn/map spec                     *
+!*                                                                     *
+!***********************************************************************
+
+
+%external %string %fn %spec ucstring %alias "s#ucstring"(%string (255) s)
+%external %routine %spec workspace %alias "s#workspace"(%integer bytes, %integer %name start, flag)
+%external %routine %spec connect %alias "S#CONNECT"(%string (255) file, %integer mode, hole,
+   prot, %integer %name fconad, ffiletype, fdatastart, fdataend, flag)
+%external %routine %spec printline %alias "s#printline"(%string (255) s)
+%external %integer %fn %spec ddaynumber
+%external %routine %spec emas3(%string %name command, parms, %integer %name flag)
+%external %routine %spec get string %alias "s#getstring"(%string (255) vector, %string %name value)
+%external %routine %spec get integer %alias "s#getinteger"(%string (255) vector,
+   %integer %name value)
+%external %integer %fn %spec dirtoss %alias "S#DIRTOSS"(%integer flag)
+%external %integer %fn %spec iocp %alias "S#IOCP"(%integer ep, parm)
+%external %routine %spec mon params %alias "s#monparams"(%string (255) template)
+%external %routine %spec move %alias "S#MOVE"(%integer length, from, to)
+%external %integer %fn %spec outpos %alias "s#outpos"
+%external %routine %spec setreturncode %alias "s#setreturncode"(%integer i)
+%external %routine %spec uctranslate %alias "S#UCTRANSLATE"(%integer naddress, nlength)
+%external %string %fn %spec itos %alias "s#itos"(%integer n)
+%external %string %fn %spec substring %alias "S#SUBSTRING"(%string %name s, %integer i, j)
+%external %string %fn %spec unpack date %alias "S#UNPACKDATE"(%integer np)
+%external %integer %fn %spec massage name %alias "s#massagename" (%stringname name)
+%external %integer %fn %spec dfilenames(%string %name group, %integer %name filenum, maxrec,
+   nfiles, fsys, type, %record (frecf) %array %name inf)
+%external %integer %fn %spec dfinfo(%string %name fileindex, file, %integer %name fsys,
+   %string %name s, %integer %array %name i)
+%external %integer %fn %spec dpermission(%string %name fileindex, user, date, file,
+   %integer %name fsys, type, ad)
+%external %integer %fn %spec dsfi(%string %name fileindex, %integer %name fsys, type, set,
+   %string %name s, %integer %array %name i)
+%external %integer %fn %spec outstream %alias "s#outstream"
+%external %integer %fn %spec uinfi %alias "s#uinfi"(%integer n)
+%external %routine %spec prompt %alias "s#prompt"(%string (255) s)
+%external %routine %spec finfo %alias "s#finfo"(%string (255) file, %integer mode,
+   %record (frf) %name rr, %integer %name flag)
+
+
+
+!-----------------------------------------------------------------------
+
+%integer %fn do we prompt
+%integer flag
+   flag = false
+   %if uinfi(2) = 1 {foreground, not obey} %andc
+       ssown_outf_access route = 9 {no re-direction} %andc
+       ssown_ssterminaltype >= 4 {video} %c
+   %then flag = true
+   %result = flag
+%end; ! do we prompt
+
+!----------------------------------------------------------
+
+%integer %fn {PRINT INDEX PERMS}pxp(%string %name fileindex, before, after)
+! PRINT .ALL PERMISSIONS, IF ANY.
+%record (dpermf) dperm
+%integer n, i, flag, width
+   flag = dpermission(fileindex, "", "", "", -1, 8, addr(dperm)) { index list }
+   %result = flag %unless flag=0
+   n = (dperm_bytesreturned-16)//8;      !NO. OF INDIV PERMS
+   %if n>0 %start
+      width = uinfi(15)
+      printstring(before)
+      i = 0
+      %while i<n %cycle
+         printstring(dperm_prms(i)_user." ".pper(dperm_prms(i)_uprm))
+         %if outpos+15>width %then newline %else spaces(3)
+         i = i+1
+      %repeat
+      printstring(after)
+   %finish
+   %result = flag
+%end;                                    ! of PXP {PRINT INDEX PERMS}.
+
+!-----------------------------------------------------------------------
+
+%external %routine groupsize %alias "s#groupsize"(%string (255) fullgroupname, %integer %name tn,
+   tkb, pn, pkb)
+
+! The parameter FULLGROUPNAME may be a file index name (WITH terminating ":")
+! or a group name WITH or WITHOUT terminating "."
+! The %integername parameters need not be set up beforehand - the routine
+! returns the total "group" size data in those variables
+
+%integer flag, xtn, xtk, xpn, xpk, j
+%record (frecf) %name p
+
+%const %integer maxon= 800  { *32 = 25600 }
+%const %integer arraybytes=maxon*32+8{8 for rounding, not strictly necessary}
+%record (frecf) %array %format paf(0:maxon-1)
+%record (frecf) %array %name pa
+
+%integer filenum, nfiles, count, arrayad
+%integer nperm, ntemp, permk, tempk
+
+   ! Use stack for the array for DFILENAMES, trimming back according to the
+   ! number of elements actually returned.  We shall recurse, and need to
+   ! avoid unnecessary gobbling of the stack.
+   *l_1, arraybytes
+   *st_11, arrayad
+   *ar_11, 1
+   arrayad = (arrayad+7)&(\7)
+
+   pa == array(arrayad, paf)
+   flag = 0
+
+   count = 0
+   filenum = 0
+   nfiles = maxon
+
+   nperm = 0; ntemp = 0
+   permk = 0; tempk = 0
+   flag = dfilenames(fullgroupname, filenum, nfiles, count, -1, 0, pa)
+   %if flag=0 %start
+      ! Bring stack top down to cover data given, exactly
+      j = arrayad+nfiles*32
+      *l_11, j
+      %for j = 0, 1, nfiles-1 %cycle
+         p == pa(j)
+         %if p_kbytes=0 %start
+            ! A group.  The "fullgroupname" may or may not include a terminating dot.
+            ! In fact it can be the indexname WITH the ":", or a full group name
+            ! with or without the "."
+
+            %if ':'#charno(fullgroupname, length(fullgroupname))#'.' %then %c
+               fullgroupname = fullgroupname.gsep{.}
+            groupsize(fullgroupname.p_name, xtn, xtk, xpn, xpk)
+            nperm = nperm+xpn; permk = permk+xpk
+            ntemp = ntemp+xtn; tempk = tempk+xtk
+         %finish %else %if p_codes&x'0C'=0 %start
+            !     PERMANENT
+            nperm = nperm+1
+            permk = permk+p_kbytes
+         %finish %else %start
+            !TEMPORARY
+            ntemp = ntemp+1
+            tempk = tempk+p_kbytes
+         %finish
+      %repeat
+   %finish %else %start
+      printline("Dfilenames fails ".itos(flag))
+   %finish
+
+   tn = ntemp; tkb = tempk; pn = nperm; pkb = permk
+%end;                                    ! GROUPSIZE
+
+!--------------------------------- pmatch --------------------------------------
+
+%external %integer %fn pmatch %alias "s#pmatch"(%string (255) name, pattern,
+   %record (matchrecf) %name m)
+! neither will be null
+%integer negate, i
+%string (255) s1, s2
+
+!............................. matchinner.................................
+
+%integer %fn matchinner(%string (255) name, pattern)
+   ! this appears to be inefficient, in that it analyses probably the same
+   ! pattern on every call for a set of names at one level. An attempt was
+   ! made to improve this by preprocessing the pattern once and then using
+   ! that on subsequent calls. The differenece was undetectable except for
+   ! very long wild and literal fields. The added complication was not
+   ! considered worthwhile.
+%integer qs, asks, ls, le, pl, c, ll
+%string (255) lit, before, after, plantlit
+   %if pattern=name="" %then %result = true
+   %if pattern="" %then %result = false; ! ie name is not null
+! other than for the primary entry this can only be when literal text
+! was on RH of pattern one level out, and was not at the end of the name
+
+! name="", pattern#"" is ok if only asks. this comes out ok below
+   pl = length(pattern)
+! find start and end of first literal field if any
+! counting asks and qs as we go
+   asks = 0
+   qs = 0
+   ls = 1
+   uctranslate(addr(name)+1, length(name))
+   %while ls<=pl %cycle
+      c = charno(pattern, ls)
+      %if c='*' %then asks = asks+1 %else %if c='?' %then qs = qs+1 %else %exit
+      ! literal start
+      ls = ls+1
+   %repeat
+   %if ls<=pl %start;                    ! literal is present
+      le = ls+1
+      %while le<=pl %cycle
+         c = charno(pattern, le)
+         %if c='*' %or c='?' %then %exit
+         le = le+1
+      %repeat
+      ! so ls up to le-1 is lit
+      lit = substring(pattern, ls, le-1)
+      ll = le-ls
+      plantlit = ""
+      plantlit = plantlit."@" %while length(plantlit)<ll
+      %if le<=pl %start;                 ! more pattern to right
+         pattern = substring(pattern, le, pl)
+      %finish %else pattern = ""
+      %while name->before.(lit).after %cycle
+         %if length(before)>qs %and asks=0 %start
+            ! the front bit is longer than it can be. no good looking
+            ! further right
+            %result = false
+         %finish
+         %if length(before)<qs %or matchinner(after, pattern)=false %start
+            ! ie the front bit is not already longer than it can be,
+            ! and either the front bit is shorter than it must be, or the back bit
+            ! doesn't match, ....
+            ! then we may have got an early resolution, so try again further along
+            name = before.plantlit.after; ! ie same length but first occurence replaced
+         %finish %else %start;           ! a success. record the wild scrap if any
+            %unless qs=asks=0 %start
+               ! ie there was a wild pattern to the left of this literal
+               m_l to right wilds(m_wilds) = length(lit)+length(after)
+               m_length wilds(m_wilds) = length(before)
+               m_wilds = m_wilds+1
+            %finish
+            %result = true
+         %finish
+      %repeat
+      %result = false
+   %finish
+! get here if there is no literal text in pattern
+   %if length(name)<qs %then %result = false
+   %if length(name)>qs %and asks=0 %then %result = false
+   m_l to right wilds(m_wilds) = 0
+   m_length wilds(m_wilds) = length(name)
+   m_wilds = m_wilds+1
+   %result = true;                       ! yipee
+%end;                                    ! fn matchinner
+
+!............................................................ match starts
+   %if pattern->s1.("\").s2 %and s1="" %start
+      negate = true
+      pattern = s2
+   %finish %else negate = false
+   m_wilds = 0
+   %if negate=matchinner(name, pattern) %start
+      i = m_bits
+      m = 0;                             ! it wont be if negate=true
+      m_bits = i
+      %result = false
+   %finish
+   %if negate=true %start
+      ! it was a false, so the matchrecord is not set.
+      ! we make it look like a single wild only pattern
+      m_wilds = 1
+      m_l to right wilds(0) = 0
+      m_length wilds(0) = length(name)
+   %finish;                              ! else m is correct
+   m_bits = m_bits!matched
+   %result = true
+%end;                                    ! of pmatch
+
+!------------------------ select names -----------------------------------------
+
+%external %routine select names %alias "s#select names"(%string (255) node, pattern,
+   %record (mff) %array %name mfs, %integer %name mfn, %integer options, qualifier, days unused,
+   %integer %name flag)
+! node is the current level.
+! on entry 'mfn' is the dimension of array 'mfs' in which the names
+! matching pattern and with correct cherish status are returned.
+! (entry with cherish=hazard=1 is ok and result depends on pattern only,
+!   as is cherish=hazard=0.
+! qualifier is bit significant
+!     1 can be read
+!     2        written
+!   x20 object file         (type 1)
+!   x40 non-standard        (type 2)
+!   x80 character file      (type 3 + old type 0)
+!  x100 data filetype       (type 4)
+!  x200 corrupt object      (type 5)
+!  x400 pdfile              (type 6)
+!  x800 directory           (type 7)
+! on exit, 'mfn' is how many.
+! on exit, flag is director flag
+! the match record in each included entry is as follows:-
+!  bits&on the skip>0 if this level was entered on a ..
+!  bits&matched>0 if this level gave a positive match
+!        (note that both these may be set for the 0 skipped case,
+!         and that one or other must be set)
+!  wilds=the number of wild fields in the pattern, up to 12.
+!  then for each such wild filed
+!  l to right wild(i) and length wild(i) give the length to the right
+!  and the length of the text fragments in the name whcih correspond
+!  to the wild fields in RIGHT to LEFT order.
+%record (mff) %name mf
+%integer max mfn, cherish, hazard, thash, nfiles, qualtypebits, today, len suffix, len name
+%string (255) pdpattern, s1, s2
+
+
+!.................................. apply pattern .............................
+
+%routine apply pattern(%string (255) node, pattern, %integer level, %integer %name nfiles)
+%record (frecf) %array descsa(0:255)
+%record (frecf) %array %format descsaf(0:16383)
+%record (frecf) %array %name descs
+%record (frecf) %name desc
+%integer %array nexta(1:256)
+%integer %array %format nextaf(1:16384)
+%integer %array %name next
+%integer fileno, maxrec, next nfiles, skip, groups only, save mfn, cherishset, parent slot
+%integer i, mbits, ad
+%string (255) tp, rop;                   ! this pattern, rest of pattern
+%string (19) fileindex
+%string (255) subnode
+%record (matchrecf) m
+%const %integer topbit=x'80000000'
+
+%routine %spec include pd members(%integer pdfilestart, fmems, %string (255) pdpattern)
+
+!.................................... sort files ..............................
+
+%routine sort files(%integer a, b)
+!* quick sort
+%integer l, u, d
+   %return %if a>=b
+   l = a; u = b; d = next(u)
+   ->l2
+l1:
+   l = l+1
+   ->l4 %if l=u
+l2:
+   ->l1 %unless descs(next(l))_name>descs(d)_name
+   next(u) = next(l)
+l3:
+   u = u-1
+   ->l4 %if l=u
+   ->l3 %unless descs(next(u))_name<descs(d)_name
+   next(l) = next(u)
+   ->l1
+l4:
+   next(u) = d
+   sort files(a, l-1)
+   sort files(u+1, b)
+%end;                                    ! of routine sort files
+
+!..................................... statusok ...............................
+
+%integer %fn statusok
+! result is false if cherish status is relevant and inappropriate,
+! result is false if this  starts with '#' or (starts with 'T#' and thash=0),
+! result is false if starts with 'T#' and node=ssowner and doesnt end with sssuffix
+!      i.e. its a temp file of a brother process
+! result is false if this is a file and f option is not set
+! result is false if this is a group and g option not set
+! result is false if pdpattern#"" or qualifier#0 and this is agroup,
+!     pdpattern#"" implies PDs only
+! result is false if this is a file and read/write in the qualifier is relevant
+! and inappropriate,
+! result is false if pdpattern#"" and this is not a PD file
+! result is false if this is a file and the filetype in the qualifier is
+! relevant and inappropriate,
+! result is false if this is a file and the days unused is relevant and
+! inappropriate
+! else true
+%record (reportf) rr
+%string (6) dfins
+%string (3) removedsuffix
+%integer %array dfini(0:12)
+%integer type, isthash
+   %if cherish#hazard %and (cherish&cherishset)!(hazard&(\cherishset))=0 %then %result = false
+! now remove inappropriate names
+   %if charno(desc_name, 1)='#' %then %result = false
+   removedsuffix = ""
+   %if length(desc_name)>=2 %and substring(desc_name, 1, 2)="T#" %start
+      isthash = true
+      %if thash=0 %then %result = false
+      %if node->(ssown_ssowner.usep) %start; !belongs to me
+         ! must also belong to this incarnation if we've got this far
+         removedsuffix = ssown_sssuffix
+      %finish
+   %finish %else isthash = false
+   %if (desc_group=0 %and options&fset=0) %or (desc_group#0 %and options&gset=0) %then %c
+      %result = false
+   %if days unused>0 %or pdpattern#"" %or qualifier#0 %start
+      ! there are some unused, filetype and/or permit things
+      %if desc_group=0 %start;           ! a file
+         flag = dfinfo(fileindex, subnode.desc_name.removedsuffix, -1, dfins, dfini)
+         %if flag#0 %start
+            flag = dirtoss(flag)
+            ssown_ssfname = node.desc_name.removedsuffix
+            %result = false
+         %finish
+         %if qualifier&2>dfini(1)&2 %then %result = false; ! thats the read write status
+         ! now the filetype?
+         %if pdpattern#"" %or qualtypebits#0 %start
+            %if dfini(12)=0 %start;      ! not set. need to connect to get it
+               %if isthash=true %start
+                  ! cant afford to connect these?
+                  ! assume them to be non-standard
+                  type = 2
+               %finish %else %start
+                  ! so we can connect to find the type
+                  connect(node.desc_name, 0, 0, 2 {Level zero connection}, rr_conad, type,
+                     rr_datastart, rr_dataend, flag)
+                  flag = 0 %and %result = false %if flag=273
+                  ! file on offer, so we cant connect.
+                  ! just exclude it.
+                  %if flag=218 %start
+                     ! not exist. which means caller has privilege to
+                     ! get the name, but no permission to connect
+                     printstring("No permission to connect ".node.desc_name." to determine type.")
+
+                     newline
+                     flag = 0
+                     %result = false
+                  %finish
+                  %result = false %if flag#0
+               %finish
+            %finish %else type = dfini(12)
+            %if pdpattern#"" %start
+               ! lookin for PDs only
+               %if type#6 %then %result = false
+            %finish %else %if qualtypebits#0 %and 1<<(type&15)&qualtypebits=0 %then %result = false
+            ! ie the typebits check is not applied when we are looking
+            ! for PDs only and have found one. it will be applied to its mebers
+         %finish
+         ! now days unused
+         %if days unused>0 %and (today-desc_dayno)&255<days unused %then %result = false
+      %finish %else %result = false;     ! file type thing for a group
+   %finish;                              ! qualifier#0
+   %result = true
+%end;                                    ! statusok
+
+!....................................... include ...............................
+
+%routine include
+%record (frf) rr
+%string (255) pdname
+%integer type, flag, savemfn
+   %if mfn<max mfn %start
+      mf == mfs(mfn)
+      mf_name = desc_name
+      mf_kbytes = desc_kbytes
+      mf_level = level
+      mf_arch = desc_arch
+      mf_codes = desc_codes
+      mf_ownp = desc_ownp
+      mf_eep = desc_eep
+      mf_dayno = desc_dayno
+      mf_group = desc_group
+      mf_match = m
+      mf_parent slot = parent slot
+   %finish
+   mfn = mfn+1
+   ! now if pdpattern is set, and this is a pd file, then also include any
+   ! matching members
+   %if desc_group=0 %and pdpattern#"" %start
+      pdname = node.desc_name
+      finfo(pdname, 0, rr, flag)
+      %if rr_ssbyte=0 %start;            ! not set. need to connect to get it
+         finfo(pdname, 1, rr, flag)
+         type = rr_filetype
+      %finish %else type = rr_ssbyte
+      %if flag=0 %and type=6 %start
+         ! now connect it to extract member names
+         connect(pdname, 0, 0, 2, rr_conad, rr_filetype, rr_datastart, rr_dataend, flag)
+         %return %unless flag=0
+         ! first reset _kbytes for the pd entry itself. a size will
+         ! be included for each member separately
+         ! the pd entry is here really being treated as part of the path
+         ! rather than the end object
+         mf_kbytes = 0
+         savemfn = mfn
+         include pd members(rr_conad, integer(rr_conad+28), pdpattern)
+         %if pdpattern#"" %and savemfn=mfn %then mfn = mfn-1
+         ! ie strictly PDs only and this one has contributed no members
+         ! so remove it
+         emas3("disconnect", pdname, flag)
+      %finish
+   %finish
+%end;                                    ! include
+
+!.............................. include pd members .............................
+
+%routine include pd members(%integer pdfilestart, fmems, %string (255) pattern)
+%integer offset, i, j, moff, type, pdmems, nb, savemfn, save parent slot
+%integer %array next(1:fmems)
+%string (255) tp
+   !
+%routine sort pd mems(%integer a, b)
+   !* quick sort
+%integer l, u, d
+   %return %if a>=b
+   l = a; u = b; d = next(u)
+   ->l2
+l1:
+   l = l+1
+   ->l4 %if l=u
+l2:
+   ->l1 %unless string(nb+next(l)<<5)>string(nb+d<<5)
+   next(u) = next(l)
+l3:
+   u = u-1
+   ->l4 %if l=u
+   ->l3 %unless string(nb+next(u)<<5)<string(nb+d<<5)
+   next(l) = next(u)
+   ->l1
+l4:
+   next(u) = d
+   sort pd mems(a, l-1)
+   sort pd mems(u+1, b)
+%end;                                    ! of routine sort pd mems
+   !
+   save parent slot = parent slot
+   parent slot = mfn-1
+   %if pattern->tp.("_").pattern %start
+      %if pattern="" %then pattern = "*"
+      %if tp="" %start
+         ! __ meaning keep going indefinitely
+         tp = "*"
+         pattern = "_";                  ! to keep next level going
+      %finish
+   %finish %else %start
+      tp = pattern
+      pattern = ""
+   %finish
+   offset = integer(pdfilestart+24)
+   nb = pdfilestart+offset+4
+   next(i) = i-1 %for i = 1, 1, fmems;   ! for sorting
+   sort pd mems(1, fmems)
+   ! we reuse parent descriptor, which we are finished with.
+   desc_group = 2;                       ! ie pd member
+   ! everything else except name and kbytes remains
+   level = level+1;                      ! artificially
+   %for i = 1, 1, fmems %cycle
+      j = next(i)
+      moff = integer(pdfilestart+offset+j<<5)
+      desc_name = string(nb+j<<5)
+      %continue %if pmatch(desc_name, tp, m)=false
+      type = integer(pdfilestart+moff+12)
+      %unless 1<=type<=sstopfiletype %then type = 2 {non standard}
+      %if pattern#"" %and pattern#"_" %start
+         ! ie we want PDs only
+         %if type#6 %then %continue
+      %finish %else %if qualtypebits#0 %and 1<<(type&15)&qualtypebits=0 %then %continue
+      ! other things such as read/write, and permissions must be ok
+      %if type=6 %and pattern#"" %then desc_kbytes = 0 %else %c
+         desc_kbytes = (integer(pdfilestart+moff)-integer(pdfilestart+moff+4))>>10
+      include
+      %if type=6 %and pattern#"" %start; ! another level requd
+         pdmems = integer(pdfilestart+moff+28)
+         savemfn = mfn
+         include pd members(pdfilestart+moff, pdmems, pattern) %unless pdmems<=0
+         %if pattern#"" %and savemfn=mfn %then mfn = mfn-1
+         ! strictly PDs only and this contributed nothing so remove it
+      %finish
+   %repeat
+   parent slot = save parent slot
+   level = level-1
+%end;                                    ! include pd members
+
+!........................................................apply pattern starts
+   parent slot = mfn-1
+   node -> fileindex.(usep).subnode
+! thats for dfinfo in statusok to use
+   skip = false
+   mbits = 0
+   groups only = false
+   rop = pattern
+l1:
+   %if rop->tp.(gsep).rop %start
+      %if tp#"" %start
+         %if rop#gsep %then groups only = true
+         ! rop=gsep means it was '*..' or the like, in which case we don't
+         ! want to exclude files at this level
+      %finish %else %start;              ! it began with '.'
+         skip = true
+         mbits = on the skip
+         ->l1;                           ! ie treat rop as if it was pattern on entry
+      %finish
+   %finish %else %start;                 ! no '.'
+      tp = rop
+      rop = ""
+   %finish
+
+! so,
+! 'pattern' is unchanged from entry
+! 'skip' is true if pattern began with '.', meaning skip >=0 levels,
+!        else is false, meaning it must match by level
+! 'tp' is the first pattern element (can only be null if skip=true,
+!      ie when skipping to undefined, ie when pattern had RH '..')
+! 'rop' is the rest of pattern after tp resolved off. may be null
+! 'groups only' is true if any gsep other than a leading one or a pair
+!               of trailing ones found, else false
+
+   fileno = 0
+   maxrec = 256
+   flag = dfilenames(node, fileno, maxrec, nfiles, -1, 0, descsa)
+   %if flag=0 %start
+      %if nfiles>256 %start;             ! wont go on the stack in a oner. get some space
+! Ha Ha - this next call creates another file
+         nfiles = nfiles+10 { to be on the safe side }
+         workspace(nfiles*(frecsize+4), ad, flag)
+         %if flag=0 %start
+            descs == array(ad, descsaf)
+            next == array(ad+nfiles*frecsize, nextaf)
+         %finish
+      %finish %else %start
+         descs == descsa
+         next == nexta
+      %finish
+   %finish
+   %unless flag=0 %start
+      flag = dirtoss(flag)
+      ssown_ssfname = node
+      %return
+   %finish
+   %if nfiles=0 %then %return
+   %if nfiles>256 %start
+      fileno = 0
+      maxrec = nfiles
+      flag = dfilenames(node, fileno, maxrec, nfiles, -1, 0, descs)
+      %unless flag=0 %start
+         flag = dirtoss(flag)
+         ssown_ssfname = node
+         %return
+      %finish
+   %finish
+   descs(i)_name = ucstring(descs(i)_name) %for i = 0, 1, maxrec-1
+   next(i) = i-1 %for i = 1, 1, maxrec;  ! for the sort
+   sort files(1, maxrec)
+   %for i = 1, 1, maxrec %cycle
+      m = 0;                             ! the match record
+      m_bits = mbits
+      desc == descs(next(i))
+      cherishset = (desc_codes&x'10')>>4
+      %if desc_group=0 %start;           ! its a file (as opposed to a group)
+         %if length(desc_name)>=2 %and substring(desc_name, 1, 2)="T#" %and %c
+            node->(ssown_ssowner.usep) %start
+            ! does it belong to this incarnation ?
+            len name = length(desc_name)
+            %if ssown_sssuffix=substring(desc_name, len name-len suffix+1, len name) %start
+               ! yes it does
+               length(desc_name) = len name-len suffix
+            %finish %else %continue;     ! not this incarnation
+         %finish
+         %if skip=true %start
+            %if tp="" %or (groups only=false %and pmatch(desc_name, tp, m)=true) %start
+               ! tp="" is case where pattern had a RH '..', meaning go all the way
+               include %if statusok=true
+               %return %unless flag=0
+            %finish
+         %finish %else %start;           ! not skip
+            ! tp cannot be null
+            %if groups only=false %and pmatch(desc_name, tp, m)=true %start
+               include %if statusok=true
+               %return %unless flag=0
+            %finish
+         %finish
+         ! all that could be collapsed into a more compact condition
+         ! but leave it spread for understanding
+      %finish %else %start;              ! a group
+         %if skip=true %start
+            %if tp="" %start;            ! pattern had a RH '..', so keep going
+               include;                  ! provisionally
+               ! it has to be provisional even though all names match, until
+               ! we find out if terminal status is appropriate
+               save mfn = mfn
+               apply pattern(node.desc_name.gsep, gsep, level+1, next nfiles)
+               ! gsep as the pattern gives skip mode and tp="" next level down
+               %return %unless flag=0;   ! unless director error
+               ! now unless something has been added unconditionally, or this
+               ! is empty and its own status is appropriate, this should be revoked
+               %unless mfn>savemfn %or (next nfiles=0 %and statusok=true) %then mfn = mfn-1
+               ! statusok will not have called dfinfo there
+            %finish %else %start;        ! tp not null
+               %if pmatch(desc_name, tp, m)=true %start; ! it matches at this level
+                  %if rop#"" %start;     ! there is more pattern to the right
+                     ! include it provisionally
+                     include;            ! regardless of status
+                     save mfn = mfn;     ! rmember
+                     apply pattern(node.desc_name.gsep, rop, level+1, next nfiles)
+                     ! mode dependant on rop
+                     %return %unless flag=0
+                     %if mfn>save mfn %or (rop=gsep %and next nfiles=0 %and statusok=true) %then %c
+                        %continue
+                     ! ie it contributed something, or
+                     ! it matched here as '*..' or the like but is empty and its
+                     ! status is appropriate
+                     ! otherwise this one is revoked
+                     mfn = mfn-1;        ! to overwrite it
+                     ! now drop out to case where match=false
+                     ! we have just failed to match something like ..b.c to x.b.y
+                     ! now we have to continue to see if x.b.y.b.c exists
+                     m = 0
+                     m_bits = mbits
+                  %finish %else %start;  ! rop is null
+                     ! no more pattern, so this one is good, but go no deeper
+                     include %if statusok=true
+                     ! it will not have called dfinfo
+                     %continue
+                  %finish
+               %finish;                  ! match=true
+               ! drop thru either in match=false or next level down failed
+               include;                  ! provisionally
+               savemfn = mfn
+               apply pattern(node.desc_name.gsep, pattern, level+1, next nfiles)
+               ! ie descend with same pattern as on entry, ie skip and tp not null
+               %return %unless flag=0
+               %unless mfn>savemfn %then mfn = mfn-1
+               ! %continue
+            %finish;                     ! tp not null
+         %finish %else %start;           ! not skip mode
+            ! tp can not be null
+            %if pmatch(desc_name, tp, m)=true %start; ! matches at this level
+               %if rop="" %start;        ! no more pattern, so its good but no deeper
+                  include %if statusok=true
+                  ! it will not have callde dfinfo
+               %finish %else %start;     ! more pattern
+                  include;               ! provisional
+                  save mfn = mfn
+                  apply pattern(node.desc_name.gsep, rop, level+1, next nfiles)
+                  ! descend with mode dependent on whats at the front of rop
+                  %return %unless flag=0
+                  %unless mfn>savemfn %or (rop=gsep %and next nfiles=0 %and statusok=true) %then %c
+                     mfn = mfn-1
+               %finish
+            %finish;                     ! match=true
+            ! nothing to do if match=false, or revoked
+         %finish;                        ! not skip mode
+      %finish;                           ! group
+   %repeat
+%end;                                    ! apply pattern
+
+!........................................................select names starts
+   len suffix = length(ssown_sssuffix)
+   thash = 0
+   cherish = 0
+   hazard = 0
+   %if options&(fset!gset)=0 %then options = options!fset!gset
+   %if options&cset>0 %then cherish = 1
+   %if options&hset>0 %then hazard = 1
+   %if options&eset>0 %or options&pset>0 %then thash = 1
+   qualtypebits = qualifier>>4&x'fe'
+   max mfn = mfn
+   mfn = 0
+   %if pattern->pattern.("_").pdpattern %start
+      %if pdpattern="" %then pdpattern = "*"
+   %finish %else pdpattern = ""
+   length(pattern) = length(pattern)-1 %while %c
+      length(pattern)>2 %and substring(pattern, length(pattern)-2, length(pattern))="..."
+! reduce trailing dots to two of same
+   %if pattern="." %or pattern=".." %then pattern = "*.."
+   %if days unused>0 %then today = ddaynumber
+   apply pattern(node, pattern, 0, nfiles)
+%end;                                    ! select names
+
+!------------------------------- generate names ----------------------------------
+
+%external %routine generate names %alias "s#generate names"(%string (255) node, pattern,
+   %record (mff) %array %name mfs, %integer mfn, options, %integer %name flag)
+
+! prints the file names in 'mfs' according to 'pattern'.
+! if pattern is null, they are printed as they stand.
+
+%const %string (2) indentpergroup="."
+%const %integer lengthipg=1;             ! length of above constant string
+%const %integer max strip length=20
+%record (mff) %name mf
+%integer mfc, j, max level, extra, pos, perline, totalsize, max print length
+%integer daynumber
+%const %integer max asks=31,max ddots=11
+%string (11) %array asks(0:max asks)
+%string (255) %array ddots(0:max ddots)
+%string (255) s, name
+
+!.............................. decoration ....................................
+
+%string %fn decoration
+! generates cherish, archive and unused signs.
+! uses recordname mf free
+%string (2) charch
+   %if options&zset>0 %then %result = ""
+   charch = "  "
+   %if mf_codes&x'10'>0 %start;          ! cherished
+      %if mf_arch&x'80'>0 %then charch = "**" %else charch = "* "
+   %finish %else %start
+      %if mf_group=0 %and (daynumber-mf_dayno)&255>28 %then charch = "- "
+   %finish
+   %result = charch
+%end;                                    ! stringfn decoration
+
+!................................ print level .................................
+
+%routine print level(%string (255) prefix, %integer paskn, pddotn, pskipping)
+! prints the filenames for one hierarchical level
+! uses mfc free from generate names
+%integer this level, next level
+%string (255) name
+%string (1) sep
+%integer i, j, from, to
+%record (matchrecf) %name m
+%string (255) plastddot
+%integer askn, ddotn, skipping
+
+!............................... print this one ...............................
+
+%routine print this one
+! uses 'name' free from print level
+%integer tn, tk, pn, pk
+%integer askc, ddotc, i, c
+%string (255) s
+%byte %integer %array b(0:256)
+
+!.................................number ......................................
+
+%integer %fn number(%integer default)
+! uses i and b free from print this one
+%integer n, savei
+   savei = i
+   n = 0
+   %if b(i)='[' %start
+      i = i+1
+      %while '0'<=b(i)<='9' %cycle
+         n = n*10+b(i)-'0'
+         i = i+1
+      %repeat
+      %if b(i)=']' %start
+         i = i+1
+         %result = n
+      %finish
+      i = savei
+   %finish
+   %result = default
+%end;                                    !  fn number
+
+!...................................................... print this one starts
+   %if pattern="" %start
+      %if mf_group=1 %then name = name.gsep
+      printstring(decoration.name)
+      %if extra>0 %start
+         %if length(name)<32 %then spaces(32-length(name)) %else space
+         %if mf_group=1 %start
+            groupsize(node.name, tn, tk, pn, pk)
+            write(tk+pk, 5)
+            totalsize = totalsize+tk+pk
+         %finish %else %start
+            write(mf_kbytes, 5)
+            totalsize = totalsize+mf_kbytes
+         %finish
+         spaces(3)
+         printstring(pper(mf_ownp&15))
+         spaces(3)
+         printstring(pper(mf_eep&7))
+         write((daynumber-mf_dayno)&255, 6) %if mf_group=0
+      %finish
+      newline
+   %finish %else %start
+      ! pattern not "", which means use it as template filling wild and ddot
+      ! fields with those currently defined
+      s = ""
+      askc = 0
+      ddotc = 0
+      string(addr(b(0))) = pattern
+      b(b(0)+1) = 0
+      i = 1
+      %while i<=b(0) %cycle
+         c = b(i)
+         %if c='*' %start
+            i = i+1
+            askc = number(askc)
+            %if askc<askn %start
+               s = s.asks(askc)
+               askc = askc+1
+            %finish
+         %finish %else %if c='.' %and b(i+1)='.' %start
+            i = i+2
+            ddotc = number(ddotc)
+            %if ddotc<ddotn %start
+               s = s.ddots(ddotc)
+               ddotc = ddotc+1
+            %finish
+         %finish %else %start
+            i = i+1
+            s = s.tostring(c)
+         %finish
+      %repeat
+      printstring(s)
+      newline
+   %finish
+   mfc = mfc+1
+%end;                                    ! print this one
+
+!...................................................... print level starts
+   %if pskipping=true %then plastddot = ddots(pddotn)
+   skipping = false
+   askn = 0
+   ddotn = 0
+   %while mfc<mfn %cycle
+      mf == mfs(mfc)
+      %if pattern#"" %start
+         ! each time round we have to reset askn, ddotn and skipping as on entry
+         ! we may also need to reset the last ddot
+         askn = paskn
+         ddotn = pddotn
+         %if pskipping=true %then ddots(ddotn) = plastddot
+         skipping = pskipping
+         ! that's all a bit grotesque. I think it means there is something basic
+         ! wrong with the structure of the mfs array, but I can't see what.
+         !
+         name = mf_name
+         m == mf_match
+         %if m_bits&on the skip>0 %start
+            ! this name is part of a .. sequence. maybe the first or last
+            %if skipping=false %start;   ! its the first
+               skipping = true
+               ddots(ddotn) = ""
+            %finish
+         %finish
+         %if m_bits&matched>0 %start
+            ! this name was a positive match. it may signal the end of a ..sequence
+            ! possibly one just started above, if it was the 0 case of 0 or more.
+            %if skipping=true %start
+               skipping = false
+               ddots(ddotn) = ddots(ddotn).gsep
+               ddotn = ddotn+1
+            %finish
+            ! now set up wild substrings for this matched name
+            i = m_wilds-1
+            %unless i<0 %start
+               %for j = i, -1, 0 %cycle
+                  from = length(name)-m_l to right wilds(j)-m_length wilds(j)+1
+                  to = from+m_length wilds(j)-1
+                  asks(askn) = substring(name, from, to)
+                  askn = askn+1
+               %repeat
+            %finish
+         %finish %else %start;           ! skip and not matched
+            ! tack this on to current ddot
+            ddots(ddotn) = ddots(ddotn).gsep.name
+         %finish
+      %finish %else %start;              ! pattern null
+         name = prefix.mf_name
+      %finish
+      %if mfc<mfn-1 %start;              ! not last
+         this level = mf_level
+         next level = mfs(mfc+1)_level
+         %if next level>this level %start
+            mfc = mfc+1
+            %if mf_group=1 %then sep = gsep %else sep = "_"
+            ! a file has _group=0 and a pd member has it =2
+            print level(name.sep, askn, ddotn, skipping)
+            ! we return looking at the next
+            %if mfc=mfn %or mfs(mfc)_level<this level %then %return
+            %continue
+         %finish
+         %if next level<mf_level %start
+            %if skipping=true %start
+               ! a trailing .. sequence
+               %if mf_group=1 %then ddots(ddotn) = ddots(ddotn).gsep
+               ddotn = ddotn+1
+            %finish
+            print this one
+            %return
+         %finish
+      %finish
+      ! here for last one, or if next is at same level
+      %if skipping=true %start
+         ! a trailing .. sequence
+         %if mf_group=1 %then ddots(ddotn) = ddots(ddotn).gsep
+         ddotn = ddotn+1
+      %finish
+      print this one
+   %repeat
+%end;                                    ! print level
+
+!................................. strip printing .............................
+
+%routine strip(%integer framesize, striplength, stripn)
+%byte %integer %array frame(0:framesize)
+%integer frameadr
+%integer stripwidth, stripsize
+%integer textmax, bad
+%string (255) line, separator
+%integer lineinstrip, strip, i, j, k
+%string (255) s
+
+%routine initialise strips
+%integer i, j
+   frame(i) = ' ' %for i = 0, 1, framesize
+   textmax = stripwidth-1
+   stripsize = striplength*stripwidth
+   frameadr = addr(frame(0))
+   line = ""
+   lineinstrip = 1
+   strip = 0
+   bad = frameadr
+%end;                                    ! initialise strips
+
+%routine printstrips
+%integer i, j, k, l
+   %if strip=0 %and lineinstrip>1 %then l = lineinstrip-2 %else l = striplength-1
+   %for i = 0, 1, l %cycle
+      %for j = 0, 1, strip %cycle
+         %for k = 0, 1, stripwidth-1 %cycle
+            printsymbol(byteinteger(frameadr+i*stripwidth+j*stripsize+k))
+         %repeat
+      %repeat
+      newline
+   %repeat
+%end;                                    ! printstrips
+
+%routine strip printstring(%string (255) s)
+   line = line.s %if length(line)+length(s)<255
+%end;                                    ! strip printstring
+
+%routine strip newline
+   %if length(line)>textmax %start
+      length(line) = textmax
+      charno(line, textmax) = '>'
+   %finish
+   move(length(line), addr(line)+1, bad)
+   line = ""
+   bad = bad+stripwidth
+   lineinstrip = lineinstrip+1
+   %if lineinstrip>striplength %start
+      lineinstrip = 1
+      strip = strip+1
+   %finish
+%end;                                    ! strip newline
+
+%integer %fn notfullormore
+%integer i
+   %if strip=stripn %start
+      ! the previous line filled the frame
+      strip = strip-1
+      printstrips
+      %if outstream = 0 %and do we prompt = true %start
+         !interactive and to non hardcopy terminal
+         getinteger("more..;word,,1,2,3,4,5,6,7,8,9,q;();1-9 for that many columns,q or null;", i)
+         %if i=10 %then %result = false
+         %if i#0 %start
+            stripn = i
+            stripwidth = uinfi(15)//stripn
+         %finish
+      %finish %else %start;              ! not to terminal
+         newline
+         printstring(separator)
+         newline
+      %finish
+      striplength = max strip length;    ! for second and subsequent frames
+      initialise strips
+   %finish
+   %result = true
+%end;                                    ! not full or more
+
+   separator = %c
+      "-----------------------------------------------------------------------------------------".%c
+      "-----------------------------"
+   length(separator) = uinfi(15);        ! the width of the displayed frame
+   stripwidth = uinfi(15)//stripn
+   initialise strips
+   %for i = 0, 1, mfn-1 %cycle
+      %if notfullormore=false %then %return
+      mf == mfs(i)
+      s = ""
+      %if mf_level>0 %start
+         %if mf_group=2 %start;          ! a pd member
+            s = " ".s %for j = 0, 1, mf_level-2
+            s = s."_"
+         %finish %else %start
+            s = indentpergroup.s %for j = 0, 1, mf_level-1
+         %finish
+      %finish
+      s = decoration.s.mf_name
+      s = s.gsep %if mf_group=1
+      strip printstring(s)
+      stripnewline
+   %repeat
+   %if strip=stripn %then strip = strip-1; ! the last line filled the frame
+   printstrips
+%end;                                    ! strip
+
+!.......................................................... generate names starts
+   daynumber = ddaynumber
+   totalsize = 0;                        ! for e option
+   extra = 0
+   perline = uinfi(15)//15;              !no of filenames per line
+   perline = 1 %if options&sset>0
+   extra = 1 %and perline = 1 %if options&eset>0
+   %if pattern#"" %or options&zset>0 %start
+      perline = 0
+      extra = 0
+   %finish
+   %if perline<=1 %start;                ! gen pattern or opts z,e or s set
+      ! do them one per line, expanded to the right
+      ! if  gen pattern or z, then expanded on left else decorated on left
+      %if extra=1 %then printstring( %c
+         "  Name                             Kbytes  OWNP   EEP   Unused(days)
+")
+      %if perline=0 %then s = node %else s = ""
+      mfc = 0
+      print level(s, 0, 0, false)
+      ! that takes care of expansion on the left and 'decoration' takes
+      ! care of itself
+      %if extra>0 %start
+         spaces(20)
+         printstring("Total kbytes: ")
+         write(totalsize, 5)
+         newline
+      %finish
+   %finish %else %start;                 ! so we either print them across or in columns
+      ! dpeneding on how many levels there are
+      max level = 0
+      max print length = 0
+      %for mfc = 0, 1, mfn-1 %cycle
+         j = mfs(mfc)_level
+         %if j>max level %then max level = j
+         j = length(mfs(mfc)_name)+j*lengthipg+4
+         ! thats 2 for LH decoration, plus 1 for a RH gsep and 1 for a RH gap
+         %if j>max print length %then max print length = j
+      %repeat
+      %if max level=0 %start;            ! only one level represented
+         ! do them as of olden days
+         pos = 1
+         %for mfc = 0, 1, mfn-1 %cycle
+            mf == mfs(mfc)
+            name = decoration.mf_name
+            %if mf_group=1 %then name = name.gsep
+            printstring(name)
+            %if pos<perline %start
+               pos = pos+1
+               spaces(15-length(name))
+            %finish %else %start
+               pos = 1
+               newline
+            %finish
+         %repeat
+         newline
+      %finish %else %start;              ! multiple levels
+         ! strip print them
+         %if options&pset>0 %then pos = 12 %else pos = 0
+         ! cumulative totals already printed if p set
+         j = uinfi(15)//max print length; ! stripn to accomodate widest name
+         j = 1 %if j<1
+         strip(max strip length*uinfi(15), max strip length-pos, j)
+      %finish
+   %finish
+%end;                                    ! generate names
+
+!--------------------------------- SFILES ------------------------------------
+
+%external %routine sfiles %alias "S#FILES"(%string (255) pattern, %integer opti, qual,
+   days unused, %integer %name flag)
+%integer cherish, hazard, afile, mfn, mfc, proc, part, ad
+%record (mff) %name mf
+%string (255) owner
+%string (255) file index
+%string (255) node, s1, s2, apattern
+%const %integer barraysize=25600
+%const %integer maxon= barraysize//mfrecsize
+%const %integer maxoff= barraysize//afrecsize
+%byte %integer %array b(0:barraysize-1)
+%record (mff) %array %format mfaf(0:16383)
+%record (mff) %array %name mfs
+%record (afrecf) %array %format apaf(0:16383)
+%record (afrecf) %array %name apa
+%string (255) dfins
+%integer %array dfini(0:12)
+%integer nperm, ntemp, permk, tempk, gsize, totk, j
+%string (7) dsfips, garch
+%integer %array dsfipa(0:7)
+%integer tlimit, maxfsize
+
+%routine %spec filesa
+   %if ssown_ssnote&4#0 %then monparams(">trjrjrjriw")
+   mfs == array(addr(b(0)), mfaf)
+   apa == array(addr(b(0)), apaf)
+   apattern = pattern
+   %if pattern="" %or (pattern->s1.("_").s2 %and s1="") %then pattern = "*".pattern
+   flag = massage name(pattern)
+   -> err %unless flag = 0
+
+   %unless pattern->(usep) %then pattern = ssown_path to be used.pattern
+   pattern -> fileindex.(usep).pattern
+   %if pattern="" %then pattern = "*"
+   %if fileindex="" %or charno(fileindex, 1)=isepchl %then fileindex = ssown_ssowner.fileindex
+
+   owner = fileindex %unless fileindex->owner.(isepl)
+
+apattern = pattern
+   cherish = 0
+   hazard = 0
+   afile = 0
+   proc = 0
+
+   opti = opti!iset %if opti&(\(fset!gset))=0
+   opti = eset!sset!aset!pset %if opti=-1
+   proc = 1 %if opti&pset>0
+   afile = 1 %if opti&aset>0
+   afile = 2 %if opti&bset>0
+   afile = 3 %if opti&rset>0 { 'recoverable' files }
+   afile = 5 %if opti&nset>0;            ! network filestore
+   cherish = 1 %if opti&cset>0
+   hazard = 1 %if opti&hset>0
+   cherish = 1 %and hazard = 1 %if opti&iset>0
+
+   %if proc>0 %start
+      %if pattern->s1.("_").s2 %then pattern = s1.".." %else pattern = pattern.".."
+      ! disable pd expansion since it leads to kb totals which do not include
+      ! pd directory space.
+   %finish
+   !
+   ! now if pattern is an unwilded group name we want to tack ".*" on the end
+   ! and get size of group
+   garch = ""
+   gsize = -1
+   %if charno(pattern, 1)#'.' %and %not (pattern->("..") %or pattern->("*") %or %c
+      pattern->("?") %or pattern->("\") %or pattern->("_")) %start
+      flag = dfinfo(file index, pattern, -1, dfins, dfini)
+      %if flag=0=dfini(0) %start;        ! a group
+         garch = "  "
+         %if dfini(9)&x'10'>0 %start;    ! cherished
+            %if dfini(5)&x'80'>0 %then garch = "**" %else garch = "* "
+         %finish
+         groupsize(fileindex.usep.pattern, ntemp, tempk, nperm, permk)
+         gsize = (permk+tempk)<<10
+         length(pattern) = length(pattern)-1 %if charno(pattern, length(pattern))='.'
+         pattern = pattern.".*"
+         apattern = pattern
+      %finish
+   %finish
+
+   node = fileindex.usep
+   part = false
+   %while pattern->s1.(gsep).s2 %and s1#""#s2 %and %not (s1->("*") %or s1->("?") %or %c
+      s1->("\") %or s1->("_")) %cycle
+      part = true
+      node = node.s1.gsep
+      pattern = s2
+   %repeat
+
+   %if (opti&sset>0 %or opti&eset>0) %and cherish=0=hazard %then %start; ! e or s and neither c nor h
+      cherish = 1
+      hazard = 1
+   %finish
+
+   %if opti&zset>0 %and opti&aset=0 %start;               ! undecorated, one to a line, expanded both sides
+      cherish = 1
+      hazard = 1
+      proc = 0
+      afile = 0
+   %finish
+
+   %unless cherish=0 %and hazard=0 %and proc=0 %start
+      ad = 0
+      mfn = maxon
+again:
+      select names(node, pattern, mfs, mfn, opti, qual, days unused, flag)
+      %if ad=0 %and mfn>maxon %start
+         mfn = mfn+10 { to leave space for WORK files }
+         workspace(mfn*mfrecsize, ad, flag)
+         %if flag=0 %start
+            mfs == array(ad, mfaf)
+            ->again
+         %finish
+      %finish
+      %if flag#0 %then ssown_ssfname = node %and ->err
+   %finish
+
+   %if proc=1 %start;                    ! opt p
+      nperm = 0; ntemp = 0
+      permk = 0; tempk = 0
+      %for mfc = 0, 1, mfn-1 %cycle
+         mf == mfs(mfc)
+         %if mf_group#1 %start
+            %if mf_codes&x'0C'=0 %start; ! perm
+               nperm = nperm+1
+               permk = permk+mf_kbytes
+            %finish %else %start
+               ntemp = ntemp+1
+               tempk = tempk+mf_kbytes
+            %finish
+         %finish
+      %repeat
+      flag = dsfi(fileindex, -1, 11, 0, dsfips, dsfipa)
+      %if flag=0 %start
+         tlimit = dsfipa(0)
+         flag = dsfi(fileindex, -1, 12, 0, dsfips, dsfipa)
+         maxfsize = dsfipa(0)
+         flag = dsfi(fileindex, -1, 30, 0, dsfips, dsfipa)
+         totk = dsfipa(1)-dsfipa(5);     ! total perm kb
+         flag = dsfi(fileindex, -1, 4, 0, dsfips, dsfipa); !DSFI ENTRY 4
+         ! DSFIPA(1) is the number of descriptors in use.
+         newline
+         printstring("Cumulative totals for files")
+         %if part=true %then printstring(" in ".node)
+         printline(", matching pattern '".pattern."' :")
+         printstring("Perm files (size)  : ".itos(nperm)." (".itos(permk)."K)")
+         printstring("    Temp files (size)  : ".itos(ntemp)." (".itos(tempk)."K)")
+         newlines(2)
+         printline("Whole index data  :")
+         printline("Total perm kb (including system files)  : ".itos(totk)."K")
+         printstring("Total limit  : ".itos(tlimit)."K")
+         printline("   Maxfilesize  : ".itos(maxfsize)."K")
+         printline("Index size  : ".itos(dsfipa(3))."K")
+         printline("Index space unused  :")
+         printstring("File Descs  : ".itos(dsfipa(2)))
+         printstring("    Sect Descs  : ".itos(dsfipa(5)))
+         printline("    Perm Descs  : ".itos(dsfipa(7)))
+      %finish %else flag = dirtoss(flag)
+
+      ! now print .all permissions, if any - only if user=self
+      %if owner=ssown_ssowner %start
+         flag{PRINT INDEX PERMS} = pxp(fileindex, ".ALL Access Permissions  :
+", "
+
+")
+         flag = dirtoss(flag)
+      %finish
+   %finish
+
+   %unless cherish=hazard=0 %start
+      %if part=true %and opti&zset=0 %start
+         printstring("Group: ".garch.node)
+         %if gsize>=0 %then printstring("    Size: ".itos(gsize)." bytes")
+         newlines(2)
+      %finish
+      %unless mfn=0 %start
+         generate names(node, "", mfs, mfn, opti, flag)
+      %finish
+   %finish
+
+err:
+   %if afile>0 %then filesa
+
+   %if ssown_ssnote&4#0 %then monparams("<trjrjrjriw")
+   %return
+
+!---------------------------------- filesa ----------------------------------
+
+%routine filesa
+%integer px, skip, maxrec, nfiles, i, lines, max, ad
+%record (afrecf) %name a
+%string (255) name, s, line
+%record (matchrecf) dummy
+
+   %const %string (18) %array text(1:5)= %c
+   "Archived",
+   "Backed up",
+   "Recoverable",
+   "Recovered",    {not seen by user}
+   "Network file-store"
+
+%routine frameprintstring(%string (255) s)
+   line = line.s
+%end;                                    ! frameprintstring
+
+%integer %fn framenewline
+%integer more
+   lines = lines+1
+   %if lines=24 %and outstream = 0 %and do we prompt = true %start
+      getinteger("more..;word,,q;();null to continue, q to quit;", more)
+      %if more#0 %then %result = 1
+      lines = 1
+   %finish
+   printline(line)
+   line = ""
+   %result = 0
+%end;                                    ! framenewline
+
+%routine framewrite(%integer n, places)
+%string (31) s
+   s = itos(n)
+   s = " ".s %while length(s)<places
+   line = line.s
+%end;                                    ! framewrite
+
+   %if fileindex="" %start
+      %unless apattern->fileindex.(usep {":"}).apattern %then fileindex = ssown_ssowner
+      %if fileindex="" %or charno(fileindex, 1)=isepchl {"{"} %then %c
+         fileindex = ssown_ssowner.fileindex
+   %finish
+
+   %if apattern="" %then apattern = "*"
+   s = apattern
+   line = ""
+   lines = 0
+   skip = 0;                             !first file to be provided - most recent
+   max = maxoff
+   %cycle
+again:
+      maxrec = max
+      flag = dfilenames(fileindex, skip, maxrec, nfiles, -1, afile, apa)
+      %if flag=625 %start;               ! not enough space for groups even
+         max = max<<1;                   ! double up
+         workspace(max*afrecsize, ad, flag)
+         %if flag=0 %start
+            apa == array(ad, apaf)
+            ->again
+         %finish
+      %finish
+      flag = 0 %if flag=24
+      %if flag#0 %start
+         ssown_ssfname = fileindex
+         flag = dirtoss(flag)
+         %return
+      %finish
+      %if skip=0 %and opti&zset=0 %then %start
+         frameprintstring(text(afile)." files : ")
+         framewrite(nfiles, 1)
+         %if framenewline#0 %then %return; ! he did a q to more?
+      %finish
+      i = 0
+      %while i<maxrec %cycle
+         px = i
+         a == apa(px)
+         %if a_kbytes>0 %start { not a group name }
+            skip = skip+1
+            name = a_name
+            %cycle
+               px = a_prefix
+               %exit %if px=0
+               a == apa(px)
+               name = a_name.gsep.name
+            %repeat
+            %if pmatch(name, apattern, dummy)=true %start
+               frameprintstring(apa(i)_date)
+               framewrite(apa(i)_kbytes, 7)
+               frameprintstring("  ")
+               frameprintstring(name)
+               %if framenewline#0 %then %return; ! quit please
+            %finish
+         %finish
+         i = i+1
+      %repeat
+   %repeat %until skip>=nfiles
+%end;                                    ! of filesa
+%end;                                    ! of sfiles
+
+!---------------------------------- files ---------------------------
+
+%external %routine files %alias "EMAS#FILES"
+   %const %string (1) %array type(0:6)="O","N","C","D","","P","Y"
+%integer opti, out, cost, flag, i, qual, days unused
+%string (255) pattern, types
+
+   get string("Pattern;any,ornull;;call pamhelp(helper:two.two8)", pattern)
+   get integer("Options;options;;", opti)
+   get integer("Out;out1;;", out)
+   get string("Filetype;any,ornull;;", types)
+   getinteger("Unused;0:255;0;", days unused)
+   qual = 0
+   %if types#"" %start
+      %for i = 0, 1, 6 %cycle
+         %if types->(type(i)) %then qual = qual!(1<<i)
+      %repeat
+      qual = qual<<5
+   %finish
+   cost = outstream
+   select output(out) %unless out=0
+
+   sfiles(pattern, opti, qual, days unused, flag)
+
+   i = iocp(16, out) %if out#0;          ! Must do this, as no tidyfiles is done for basefile commands
+   select output(cost)
+   setreturncode(flag)
+%end;                                    ! of files
+
+%end %of %file

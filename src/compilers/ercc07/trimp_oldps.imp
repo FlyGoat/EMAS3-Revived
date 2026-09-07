@@ -1,0 +1,223 @@
+
+%EXTERNALROUTINE OLDPS(%STRING(63) S)
+%EXTERNALSTRINGFNSPEC DATE
+%INTEGER I, J, K, SS, NBIP
+%STRING(31) ST49,ST50,ST51
+%STRING(127)HEADER
+%EXTERNALROUTINESPEC DEFINE(%STRING(63)S)
+%INTEGERARRAY CLETT(0:1000), SYMBOL(1300:3000), CC(0:300)
+%INTEGER CNEXT, DNEXT, CNUM, DNUM, ALT, DEF, ASL, NIDFLAG
+%INTEGERARRAY KK, PUSE, DWORD(1001:1200), DLETT(0:1000), CWORD(1:200)
+%ROUTINESPEC READ STRING(%INTEGER TERMINATOR)
+%ROUTINESPEC RECORD(%INTEGERARRAYNAME WORD, LETT,  %C
+            %INTEGERNAME NUM, NEXT)
+%ROUTINESPEC LOOK UP(%INTEGERARRAYNAME WORD, LETT,  %C
+            %INTEGER FIRST, LAST, INSERT)
+%ROUTINESPEC PDDICT
+%ROUTINESPEC PRINT STR(%INTEGERARRAYNAME CC, %INTEGER PTR)
+%ROUTINESPEC PCDICT
+         %UNLESS S->ST49.(",").ST50.(",").ST51 %THEN %C
+            PRINTSTRING("PARAMS?????") %AND NEWLINE %AND %RETURN
+         DEFINE("ST49,".ST49)
+         DEFINE("ST50,".ST50)
+         DEFINE("ST51,".ST51)
+         SELECT INPUT(49)
+         SELECT OUTPUT(51)
+         HEADER="! PRODUCED BY OLDPS FROM ".ST49." ON ".DATE
+         PRINTSTRING(HEADER)
+         ASL=1300
+         CNEXT=0
+         DNEXT=0
+         CNUM=0
+         NIDFLAG=0
+         DNUM=1000
+         READ(NBIP)
+         %CYCLE I=1001,1,1200
+         PUSE(I)=0
+         %REPEAT
+NEXTS:   READ SYMBOL(I)
+         %IF I='D' %THEN %START;            !'D'
+            READ SYMBOL(I)
+            READSTRING(')')
+            RECORD(DWORD, DLETT, DNUM, DNEXT)
+            ->NEXTS
+         %FINISH
+         %IF I='P' %THEN ->PHRS
+         %IF I='E' %THEN ->EEND
+         ->NEXTS
+PHRS:    NEWLINES(2)
+         PRINTSYMBOL(I)
+         READSYMBOL(I)
+         PRINTSYMBOL(I)
+         READ STRING(')')
+         PRINT STR(CC, 0)
+         PRINTSYMBOL(')')
+         LOOK UP(DWORD, DLETT, 1001+NBIP, DNUM, 0)
+         KK(I)=ASL
+         DEF=ASL
+         ALT=ASL+1
+         ASL=ASL+2
+NEXTP:   READ SYMBOL(I)
+         PRINTSYMBOL(I)
+         %IF I='(' %THEN ->BIPORPHR
+         %IF I=M'''' %THEN ->LIT
+         %IF I=',' %THEN %START
+            SYMBOL(ALT)=ASL
+            ALT=ASL
+            ASL=ASL+1
+            ->NEXTP
+         %FINISH
+         %IF I=';' %THEN SYMBOL(ALT)=ASL %AND SYMBOL(DEF)=ASL %C
+                   %AND ->NEXTS
+         %IF I='0' %THEN SYMBOL(ASL)=1000 %AND ASL=ASL+1 %AND ->NEXTP
+         %IF I='*' %THEN SYMBOL(ASL)=999 %AND ASL=ASL+1 %AND ->NEXTP
+         ->NEXTP
+BIPORPHR:READ STRING(')')
+         PRINT STR(CC, 0)
+         PRINTSYMBOL(')')
+         LOOK UP(DWORD, DLETT, 1001, DNUM, 0)
+         PUSE(I)=PUSE(I)+1
+         SYMBOL(ASL)=I
+         ASL=ASL+1
+         ->NEXTP
+LIT:     READ STRING(M'''')
+         PRINT STR(CC, 0)
+         PRINTSYMBOL(M'''')
+         LOOK UP (CWORD,CLETT,1,CNUM,1)                                        
+         SYMBOL(ASL)=I
+         ASL=ASL+1
+         ->NEXTP
+EEND:    PCDICT
+         PDDICT
+         %CYCLE I=1300, 1, ASL-1
+            %IF 1<=SYMBOL(I)<=CNUM %THEN SYMBOL(I)=CWORD(SYMBOL(I))
+            %IF 1001+NBIP<=SYMBOL(I)<=DNUM %C
+               %THEN SYMBOL(I)=KK(SYMBOL(I))
+         %REPEAT
+         SS=KK(DNUM)
+         NEWLINE
+         %CYCLE K=1, 1, 2
+            SELECT OUTPUT(50) %IF K=2
+            PRINTSTRING(HEADER)
+            PRINTSTRING("
+%CONSTBYTEINTEGERARRAY CLETT(0:")
+            WRITE(CNEXT-1, 1)
+            PRINTSTRING(")=")
+            %CYCLE I=0, 1, CNEXT-1
+               WRITE(CLETT(I), 3)
+               J=','
+               J=';' %IF I=CNEXT-1
+               PRINT SYMBOL(J)
+               NEWLINE %IF I-(I//14)*14=0
+            %REPEAT
+            NEWLINE
+         PRINTSTRING("
+%CONSTINTEGERARRAY SYMBOL(1300:")
+            WRITE(ASL-1, 1);  PRINTSTRING(")=")
+            %CYCLE I=1300, 1, ASL-1
+               WRITE(SYMBOL(I), 5)
+               J=','
+               J=';' %IF I=ASL-1
+               PRINTSYMBOL(J)
+               NEWLINE %IF (I-1299)-((I-1299)//10)*10=1
+            %REPEAT
+            NEWLINE
+            PRINTSTRING("%CONSTINTEGER SS=")
+            WRITE(SS, 1)
+            NEWLINE
+            %RETURN %UNLESS NIDFLAG=0
+         %REPEAT
+         SELECT OUTPUT(99)
+         PRINTSTRING("NO ERRORS
+")
+         %CYCLE I=1001,1,DNUM-1
+            %IF PUSE(I)=0 %THEN %START
+               PRINTSTRING("
+WARNING PHRASE NOT USED :")
+               PRINT STR(DLETT,DWORD(I))
+               NEWLINE
+            %FINISH
+         %REPEAT
+         %RETURN
+%ROUTINE READ STRING(%INTEGER TERMINATOR)
+%INTEGER UNDER;  UNDER=0
+         J=0
+NEXTS:   READ SYMBOL(I)
+         %IF I='%' %THEN UNDER=128 %AND ->NEXTS
+         %IF 'A'<=I<='Z' %THEN I=I+UNDER %ELSE UNDER=0
+         %IF I=32 %THEN ->NEXTS;            !'_'                             
+                                        !         
+         %IF I=TERMINATOR %THEN CC(0)=J %AND %RETURN
+         J=J+1
+         CC(J)=I
+         ->NEXTS
+%END
+%ROUTINE RECORD(%INTEGER %ARRAY %NAME WORD,LETT,           %C           
+%INTEGER %NAME NUM,NEXT)                                                
+         NUM=NUM+1
+         WORD(NUM)=NEXT
+         %CYCLE I=0, 1, CC(0)
+            LETT(NEXT+I)=CC(I)
+         %REPEAT
+         NEXT=NEXT+CC(0)+1
+%END
+%ROUTINE LOOK UP(%INTEGERARRAYNAME WORD, LETT,  %C
+            %INTEGER FIRST, LAST, INSERT)
+         I=FIRST
+         %WHILE I<=LAST %CYCLE
+            J=WORD(I)
+            %CYCLE K=0, 1, LETT(J)
+               %IF LETT(J+K)#CC(K) %THEN ->NXT
+            %REPEAT
+            %RETURN
+NXT:        I=I+1
+         %REPEAT
+         %IF INSERT=0 %THEN %START
+            PRINTSTRING("
+****************PHRASE NOT IN DICTIONARY***********   ")
+            PRINT STR(CC, 0)
+            NIDFLAG=NIDFLAG+1
+            %RETURN
+         %FINISH
+         RECORD(WORD, LETT, CNUM, CNEXT)
+                                        ! INSERT INTO C DICTIONARY       
+         I=CNUM
+%END
+%ROUTINE PCDICT
+%INTEGER J, K, L
+         NEWPAGE
+         PRINTSTRING(" KEY TO LITERAL DICTIONARY (CLETT)
+")
+         %CYCLE J=1, 1, CNUM
+            K=CWORD(J)
+            WRITE(K, 4);  SPACES(2)
+            PRINT STR(CLETT, K)
+            SPACES(17-SS)
+            NEWLINE %IF J&3=0
+         %REPEAT
+%END
+%ROUTINE PRINT STR(%INTEGERARRAYNAME CC, %INTEGER PTR)
+%INTEGER I, J, K, DEL
+         SS=CC(PTR);  K=SS; DEL=0
+         %CYCLE I=1, 1, K
+            J=CC(PTR+I)
+            %IF DEL=0 %AND J>128 %THEN SS=SS+1 %AND DEL=1 %AND %C
+                   PRINT SYMBOL('%')
+            PRINT SYMBOL(J)
+         %REPEAT
+%END
+%ROUTINE PDDICT
+%INTEGER J
+         NEWLINES(4)
+         PRINTSTRING(" KEY TO MAIN TABLE (SYMBOL)
+")
+         %CYCLE J=1001, 1, DNUM
+            %IF J<=1000+NBIP %THEN WRITE(J, 4) %ELSE WRITE(KK(J), 4)
+            SPACES(2)
+            PRINT STR(DLETT, DWORD(J))
+            SPACES(17-SS)
+            NEWLINE %IF (J-1000)&3=0
+         %REPEAT
+%END
+%END
+%ENDOFFILE

@@ -1,0 +1,11 @@
+link ,m
+:m.diag6y
+:m.mr_iocp4y
+:m.mailery
+.end
+mz
+vsmfix mz,mt,md
+newgen mt,:m8m
+rename mt,:m8m
+permit :m8m,mailer
+

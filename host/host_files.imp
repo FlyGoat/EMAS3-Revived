@@ -1,0 +1,158 @@
+! SPDX-License-Identifier: MIT
+! Copyright (c) 2026 Jiaxun Yang <jiaxun.yang@flygoat.com>
+
+! Connected EMAS host files.
+
+%externalroutine host outfile(%string(255) name,%integer length,hole,protection,%byteintegername address,%integername flag)
+%record(statef)%name s
+%record(filef)%name f
+%longinteger p,size,data
+%integer ignored
+  put address(address,0);flag=unix error("EINVAL")
+  %return %if valid name(name)=0 %or length<32 %or length>X'7FFFF000'
+  flag=unix error("ENOTSUP")
+  %return %if hole#0 %or (protection#0 %and protection#X'20000000')
+  flag=unix error("EBUSY");%return %if find file(name)#0
+  size=length;size=(size+4095)&\4095
+  p=addr(unix allocate(sizeof(file size)));flag=unix error("ENOMEM");%return %if p=0
+  f==record(p);f_fd=-1;f_size=size;f_writable=1;f_name=name
+  %if protection=X'20000000' %start
+    data=addr(unix allocate(size))
+    %if data=0 %then unix free(byteinteger(p)) %and %return
+  %finish %else %start
+    f_fd=unix open(name,1)
+    %if f_fd<0 %then flag=unix errno %and unix free(byteinteger(p)) %and %return
+    flag=unix truncate(f_fd,size)
+    %if flag#0 %then ignored=unix close(f_fd) %and unix free(byteinteger(p)) %and %return
+    data=addr(unix map(f_fd,size,1))
+    %if data=0 %then flag=unix errno %and ignored=unix close(f_fd) %and unix free(byteinteger(p)) %and %return
+  %finish
+  integer(data)=32;integer(data+4)=32;integer(data+8)<-size
+  f_data=data;s==state;f_next=s_files;s_files=p
+  put address(address,data);flag=0
+%end
+%externalroutine host connect(%string(255) name,%integer mode,hole,protection,%byteintegername address,%integername kind,start,end,flag)
+%record(filef)%name f
+%record(statef)%name s
+%longinteger p,size,data
+%integer fd,ignored
+  put address(address,0);kind=0;start=0;end=0;flag=unix error("EINVAL")
+  %return %if valid name(name)=0
+  flag=unix error("ENOTSUP");%return %if mode#0 %or hole#0 %or protection#0
+  flag=unix error("EBUSY");%return %if find file(name)#0
+  fd=unix open(name,0)
+  %if fd<0 %then flag=unix errno %and %return
+  size=unix length(fd)
+  flag=unix error("EINVAL")
+  %if size<32 %or size>X'7FFFFFFF' %then ignored=unix close(fd) %and %return
+  data=addr(unix map(fd,size,0))
+  %if data=0 %then flag=unix errno %and ignored=unix close(fd) %and %return
+  %if integer(data+4)<32 %or integer(data)<integer(data+4) %or integer(data)>size %start
+    ignored=unix unmap(byteinteger(data),size);ignored=unix close(fd);%return
+  %finish
+  p=addr(unix allocate(sizeof(file size)))
+  %if p=0 %then flag=unix error("ENOMEM") %and ignored=unix unmap(byteinteger(data),size) %and ignored=unix close(fd) %and %return
+  f==record(p);f_name=name;f_data=data;f_size=size;f_fd=fd
+  s==state;f_next=s_files;s_files=p
+  put address(address,data);kind=integer(data+12);start=integer(data+4);end=integer(data);flag=0
+%end
+%externalroutine host disconnect(%string(255) name,%integername flag)
+%record(statef)%name s
+%record(filef)%name f,previous
+%longinteger p,prev
+%integer error
+  flag=unix error("EINVAL");%return %if valid name(name)=0
+  s==state;p=s_files;prev=0
+  %while p#0 %cycle
+    f==record(p);%exit %if f_name=name
+    prev=p;p=f_next
+  %repeat
+  flag=unix error("ENOENT");%return %if p=0
+  flag=0
+  %if f_fd<0 %start
+    unix free(byteinteger(f_data))
+  %finish %else %start
+    flag=unix sync(byteinteger(f_data),f_size);%return %if flag#0
+    flag=unix unmap(byteinteger(f_data),f_size);%return %if flag#0
+    %if f_trimsize#0 %then flag=unix truncate(f_fd,f_trimsize)
+    error=unix close(f_fd);%if error#0 %then flag=error
+  %finish
+  %if prev=0 %then s_files=f_next %else previous==record(prev) %and previous_next=f_next
+  unix free(byteinteger(p))
+%end
+%externalroutine host trim(%string(255) name,%integername flag)
+%record(filef)%name f
+%longinteger p,size
+%integer fd,n,ignored,newsize
+%integerarray header(0:3)
+  flag=unix error("EINVAL");%return %if valid name(name)=0
+  p=find file(name)
+  %if p#0 %start
+    f==record(p);flag=unix error("EBUSY")
+    %return %if f_writable=0 %or f_fd<0
+    %for n=0,1,3 %cycle
+      header(n)=integer(f_data+4*n)
+    %repeat
+    flag=unix error("EINVAL")
+    %return %if header(1)<32 %or header(0)<header(1) %or header(0)>X'7FFFF000' %or header(0)>f_size
+    f_trimsize=(header(0)+4095)&\4095
+    %if header(3)<8 %then integer(f_data+8)<-f_trimsize
+    flag=0;%return
+  %finish
+  fd=unix open(name,2);%if fd<0 %then flag=unix errno %and %return
+  n=unix read at(fd,byteinteger(addr(header(0))),16,0)
+  size=unix length(fd)
+  %if n=16 %and size>=0 %and header(1)>=32 %and header(0)>=header(1) %and header(0)<=X'7FFFF000' %and header(0)<=size %start
+    newsize=(header(0)+4095)&\4095
+    %if newsize<=size %start
+      flag=0
+      %if header(3)<8 %start
+        n=unix write at(fd,byteinteger(addr(newsize)),4,8)
+        %if n#4 %then flag=unix error("EIO")
+      %finish
+      %if flag=0 %start
+        flag=unix truncate(fd,newsize)
+        %if flag#0 %and header(3)<8 %start
+          n=unix write at(fd,byteinteger(addr(header(2))),4,8)
+          %if n#4 %then flag=unix error("EIO")
+        %finish
+      %finish
+    %finish
+  %finish
+  ignored=unix close(fd);%if flag=0 %then flag=ignored
+%end
+%externalroutine host newgen(%string(255) source,destination,%integername flag)
+%record(filef)%name f
+%longinteger p
+  flag=unix error("EINVAL")
+  %return %if valid name(source)=0 %or valid name(destination)=0 %or source=destination
+  flag=unix error("EBUSY");%return %if find file(destination)#0
+  p=find file(source)
+  %if p#0 %start
+    f==record(p);flag=unix error("ENOTSUP");%return %if f_fd<0
+    flag=unix sync(byteinteger(f_data),f_size);%return %if flag#0
+  %finish
+  flag=unix rename(source,destination)
+  %if flag=0 %and p#0 %then f_name=destination
+%end
+%externalstring(255)%fn host failuremessage(%integer flag)
+  %result=unix error string(flag)
+%end
+%externalroutine host oldconnect(%string(255) name,%integer mode,hole,protection,%record(connectionf)%name rr,%integername flag)
+  host connect(name,mode,hole,protection,byteinteger(addr(rr_conad)),rr_kind,rr_start,rr_end,flag)
+%end
+%externalbyteintegermap host rdfilead(%string(255) name)
+%record(connectionf) rr
+%integer flag
+  host oldconnect(name,0,0,0,rr,flag)
+  %if flag#0 %then printstring("RDFILEAD: ".unix error string(flag)) %and newline %and %result==byteinteger(0)
+  %result==byteinteger(rr_conad)
+%end
+%externalbyteintegermap host nwfilead(%string(255) name,%integer pages)
+%record(connectionf) rr
+%integer flag
+  %result==byteinteger(0) %if pages<=0 %or pages>X'7FFFF000'//4096
+  host outfile(name,pages*4096,0,0,byteinteger(addr(rr_conad)),flag)
+  %if flag#0 %then printstring("NWFILEAD: ".unix error string(flag)) %and newline %and %result==byteinteger(0)
+  %result==byteinteger(rr_conad)
+%end

@@ -1,0 +1,4043 @@
+!TITLE DIAG Module
+!>
+%external %routine dirldr
+%external %routine %spec director(%integer diroutpad)
+%external %routine %spec signal
+%integer diroutpad
+
+   *la_11,96(11)
+   *lr_13,12
+   *la_2,32
+   *sr_13,2 {GR13 now points to start of file}
+   *A_13,24(13) {add on GLA(P) offset}
+   *BASR_1,0
+   *USING_1
+   *ltr_0,0
+   *BC_7,<DIRECT>
+   *DROP_1
+   signal
+   *MC_0(0),0
+direct:
+   *st_0,diroutpad
+   director(diroutpad)
+
+
+
+
+%end
+
+
+
+%include "dirarc:D.c03FORMATS"
+
+
+
+
+
+
+%external %integer %fn %spec allocate cbt(%integer vsparm)
+   ! %external %integer %fn %spec deallocate inactive
+%external %integer %fn %spec badpage(%integer %name type, fsys, bitno)
+%external %integer %fn %spec dchsize(%string %name file index, file, %integer %name fsys, nkb)
+      %EXTERNALINTEGERFNSPEC %C
+DFINFO(%STRINGNAME FILE INDEX, FILE, %INTEGERNAME FSYS, %STRINGNAME S, %INTEGERARRAYNAME I)
+!
+      %EXTERNALINTEGERFNSPEC %C
+DGETDA(%STRINGNAME FILE INDEX, FILE, %INTEGERNAME FSYS, %INTEGERARRAYNAME I)
+!
+%external %integer %fn %spec dprimecontingency(%routine ontrap)
+%integer %fn %spec dresume(%integer %array %name regs)
+%external %integer %fn %spec dstop(%integer %name n)
+%integer %fn %spec into(%integer fn, %string (11) template)
+%integer %fn %spec outof(%integer flag)
+
+
+
+%external %integer %fn %spec av(%integer fsys, type)
+%external %integer %fn %spec countprocsin(%string (6) usergroup, %integer %name iprocs)
+%external %integer %fn %spec dchaccess(%string %name xfile index, xfile, %integer %name xfsys, xnewmode)
+%external %integer %fn %spec dconnecti(%string (19) findex, %string (255) file, %integer fsys,
+   mode, %integer %name seg, gap)
+%external %integer %fn %spec dcreatef(%string (19) findex, %string (255) file, %integer fsys,
+   nkb, alloc, leave, %integer %name da)
+%external %integer %fn %spec ddisconnecti(%string (19) findex, %string (255) file, %integer fsys,
+   lo)
+%external %routine %spec ddump(%integer a, b, c, d)
+%external %string %fn %spec derrs(%integer n)
+%external %integer %fn %spec dmon(%string %name s)
+%external %routine %spec doper2(%string (255) s)
+%external %integer %fn %spec dponi(%record (parmf) %name p)
+%external %integer %fn %spec douti(%record (parmf) %name p)
+%external %routine %spec emptydvm
+%external %integer %fn %spec equser(%string (255) user, passu)
+%external %integer %fn %spec fbase2(%integer fsys, adr)
+%external %routine %spec fill(%integer length, from, with)
+%external %integer %fn %spec find(%integer findad, %string %name file, %integer %name index)
+%external %string %fn %spec fromstring(%string (255) s, %integer i, j)
+%string %fn %spec htos(%integer n, places)
+%string %fn %spec itos(%integer n)
+%external %integer %fn %spec listmod(%string (6) s1, %integer n1, n2)
+%external %integer %fn %spec map file index(%string %name index, %integer %name fsys, findad,
+   %string (63) txt)
+%external %routine %spec move(%integer length, from, to)
+%external %integer %fn %spec movesection(%integer fsys1, startp1, fsys2, startp2, epgs)
+%external %routine %spec place(%string (39) text, %integer screen, line, col, action)
+%external %routine %spec prec(%string (255) s, %record (parmf) %name p, %integer n)
+%external %string (255) %fn %spec prefixs(%string %name index, %integer fsys, prefix)
+%routine %spec prhex(%integer n)
+%external %routine %spec printstring(%string (255) s)
+%external %routine %spec printsymbol(%integer symbol)
+%routine %spec prx(%integer i, pl)
+%external %integer %fn %spec showusecount(%integer fsys, srce, cnsl)
+%external %integer %fn %spec stoi(%string (255) s)
+%external %integer %fn %spec stoi2(%string (255) s, %integer %name i)
+%external %integer %fn %spec ddtentry(%integer %name adr, %integer fsys)
+%external %routine %spec uctranslate(%integer adr, len)
+%external %integer %fn %spec uif(%string %name index, file, una, ina, full)
+%external %integer %fn %spec val(%integer adr, len, rw, psr)
+%external %routine %spec vv(%integer semaddr, semano)
+%external %routine %spec write(%integer n, places)
+%external %routine %spec wrs(%string (255) s)
+%routine %spec wrsnt(%string (255) s, %integer n, t)
+%routine %spec wrsn(%string (255) s, %integer n)
+%external %routine %spec wrss(%string (255) s1, s2)
+
+!-----------------------------------------------------------------------
+
+%external %routine enter subsystem(%integer sct block ad)
+%const %integer code= basefile seg << seg shift
+%integer gla, subsys dt stamp, refpword
+%integer %array %format ift(0:14)
+%integer %array %name ldata
+%record %format ofmf(%integer start, l, prop)
+%record (ofmf) %array %format ofmaf(1:11)
+%record (ofmf) %array %name ofm
+%record %format rf(%integer arealoc, baseloc)
+%record %format relf(%integer link, n, %record (rf) %array r(1:4000))
+%record (relf) %name rel
+%record %format centf(%integer link, loc, %string (31) id)
+%record (centf) %name cent
+%record %format sctf(%string (31) id, %integer code, gla, ep, pword)
+%record (sctf) %array %format sctaf(0:255)
+%record (sctf) %array %name sct
+%record (sctf) %name s
+%record (scthdrf) %name scthdr
+%integer link, n, j, loc, r11, r12, r13, r14, gladifference, subfixed
+%integer areacode, basecode, areadisp
+%integer %array base(2:5)
+
+   scthdr==record(sct block ad)
+   sct==array(sct block ad+32, sctaf)
+   subsys dt stamp=integer(code+integer(code)-8)
+   %if integer(code+integer(code)-12)=m'SSys' %then subfixed=1 %else subfixed=0
+   %if subsys dt stamp=scthdr_dt stamp %start { can share }
+      integer(x'4c38020') = x'7fffffff' %if subfixed = 1
+         { so that we dont immediately fail 'off stack top' }
+      gla=code+integer(code+8) { point to glap }
+   %else
+      ! Can't share
+
+      gla=(code+integer(code)+segmask)&(\segmask)
+
+      ! Set GLADIFFERENCE to be the amount to be added to GLA references, being
+      ! the difference between what they were fixed up to and where the GLA is
+      ! actually going to be. (This is relevant only for SUBFIXed processes).  Namely:
+
+      gladifference=gla-(code+integer(code+8))
+      ! doper2("GLAdiff=".htos(gladifference, 8))
+
+      integer(x'4c38020') = x'7fffffff' %if subfixed = 1
+         { so that we dont immediately fail 'off stack top' }
+      move(integer(code+12), code+integer(code+8), gla)
+      n=integer(sct block ad)-2
+      ldata==array(code+integer(code+24), ift)
+
+      ! Fix up Subsystem references to Director procedures and amend
+      ! Subsystem procedure references which are NOT references to Director
+      ! procedures by GLADIFFERENCE (This applies only to SUBFIXed "subsystems, i.e.
+      ! not the executive processes. The execs are distinguished by SUBSYS DT STAMP
+      ! not being X'9E' in the leftmost byte).  This code assumes that SUBFIX has fixed
+      ! GLA references for a shareable-basegla situation.
+
+      link=ldata(7)
+      %while link#0 %cycle
+         cent==record(code+link)
+         link=cent_link
+         loc=gla+cent_loc&X'FFFFFF'
+         %cycle j=0, 1, n
+            s==sct(j)
+            %if cent_id=s_id %start
+               integer(loc)=s_code
+               integer(loc+4)=s_gla
+               integer(loc+8)=s_ep
+
+               ! For SUBFIX the reference Pwords are in a compressed format (see notes in SUBFIX)
+               refpword=integer(loc+12)
+
+               %if subfixed#0 %and refpword>>20=X'041' %then %c
+                  refpword=((refpword<<4)&X'000F0000')!(refpword&X'FFF')
+
+               %unless refpword=s_pword %then %c
+                  doper2(s_id." MISMATCH"." ".htos(refpword, 8)." ".htos(s_pword, 8))
+               %exit
+            %finish
+            doper2(cent_id." NOT FOUND") %if j=n
+         %repeat
+      %repeat
+
+      ! For SUBFIXed processes the relocations need adjustment.  We are treating relocations
+      ! according to base of GLA and UST only.
+
+      %if subfixed#0 %start
+         ofm==array(code+integer(code+28), ofmaf)
+         base(2)=gla
+         base(5)=gla+ofm(2)_l
+         link=ldata(14)
+         %while link#0 %cycle
+            rel==record(code+link)
+            %for n=1, 1, rel_n %cycle
+               areacode=rel_r(n)_arealoc>>24
+               areadisp=rel_r(n)_arealoc&x'FFFFFF'
+               basecode=rel_r(n)_baseloc>>24
+               %if basecode=2 %or basecode=5 %start
+                  loc=base(areacode)+areadisp
+                  integer(loc)=integer(loc)+gladifference
+               %finish
+            %repeat
+            link=rel_link
+         %repeat
+      %finish;                           ! SUBFIXed
+   %finish
+
+   d_dirlevel=0
+   r11=stack seg<<seg shift
+   r12=code+32
+   r13=gla
+   r14=integer(code+16)
+   *lm_11,14,r11
+   *mc_13(0),0
+   *BASR_15,14
+%end;                                    ! ENTER SUBSYSTEM
+
+!-----------------------------------------------------------------------
+
+!<DPROCLIST
+%external %integer %fn dproclist(%integer %name n, adr)
+
+%integer j, seg, gap, a, cur
+%record (logfhdf) %name h
+%record (procdatf) %name p
+
+   j=into(44, "KI")
+   ->out %unless j=0
+
+   i(0) {n}=0
+   a=i(1) {adr}
+   seg=0
+   gap=0
+   j=dconnecti("VOLUMS", "#LOGMAP", -1, 11, seg, gap)
+   ->out %unless j=0 %or j=34
+   h==record(seg<<segshift+x'10000')
+   cur=h_slivehd
+
+   %while cur#sendlist %cycle
+      p==record(a)
+      p=h_proclist(cur)
+      i(0) {n}=i(0) {n}+1
+      a=a+64
+      cur=h_proclist(cur)_slink
+   %repeat
+   j=ddisconnecti("VOLUMS", "#LOGMAP", -1, 0)
+out:
+   %result=outof(j)
+%end;                                    ! dproclist
+
+!-----------------------------------------------------------------------
+
+%integer %fn dprgp(%string (19) index, %string (255) fname, %string (6) label,
+   %integer file fsys, site, direction)
+   ! DIRECTION = 0   PRG
+   !             1   UNPRG
+%integer site fsys, sys start, ep, np, findad, link
+%integer pags, flag, checkpags
+%integer startp
+%integer j, omit pages, nsd, entad
+%record (fdf) %name fl
+%record (ff) %name f
+%record (fdf) %array %name fds
+%integer %name sd
+%integer %array %name sds
+%record(ddtf)%name ddt
+%const %string (5) fn= "DPRGP"
+
+   flag=8
+   ->out %unless length(label)=6
+   ->out %unless stoi2(fromstring(label, 5, 6), site fsys)=0
+
+   flag=23;                              ! DISC NOT AVAILABLE
+   ->out %if av(site fsys, 1)=no
+
+   flag=ddtentry(entad, site fsys)
+   ->out %unless flag=0
+   ddt == record(entad)
+   sys start = ddt_sbase
+   flag = 75 {not an IPL disc}
+   -> out %unless ddt_base > x'40'
+
+   flag=map file index(index, file fsys, findad, fn)
+   ->out %unless flag=0
+
+   f==record(findad)
+
+   flag=find(findad, fname, j)
+   ->vout %unless flag=16
+
+   fds==array(findad+f_fdstart, fdsf)
+   fl==fds(j)
+
+   flag=5;                               ! not available
+   ->vout %unless fl_codes&unava=0
+
+   pags=fl_pgs
+   sds==array(findad+f_sdstart, sdsf)
+   nsd=(f_fdstart-f_sdstart)>>2
+   omit pages=0
+   omit pages=1 %and site=0 %if site=-1
+
+   flag=1;                               ! SITE NOT X40-aligned
+   ->vout %unless site&X'3F'=0
+
+   flag=27;                              ! file too big
+   checkpags=128
+   checkpags=256 %if site>=subsys site
+   ->vout %if pags>checkpags
+
+
+   sd==fl_sd;                            ! proceed down sections chain
+   ep=pags
+   %while ep>0 %cycle
+      np=ep
+      np=sec pgs %if np>sec pgs
+      ep=ep-np
+      link=sd>>19
+      startp=(sd<<13)>>13
+      startp=startp+omit pages
+      np=np-omit pages
+      omit pages=0
+      %if direction=0 %then j=move section(file fsys, startp, site fsys, site+sys start,
+         np) %else j=move section((1<<31)!site fsys, site+sys start, file fsys, startp, np)
+      ! top bit set in param1 to suppress active block check
+      flag=25 %and ->vout %unless j=0
+
+      site=site+np
+
+      %exit %unless 0<link<=nsd
+      sd==sds(link)
+   %repeat
+   fl_codes=fl_codes&(\violat)
+   flag=0
+vout:
+   vv(addr(f_sema), f_semano)
+out:
+   %result=flag
+%end;                                    ! DPRGP
+
+!-----------------------------------------------------------------------
+
+!<DPRG
+
+%external %integer %fn dprg(%string %name file index, file, %integer %name fsys,
+   %string %name label, %integer %name site)
+
+! This privileged procedure moves the contents of file FILE belonging to
+! file index FILE INDEX on disc-pack FSYS to site SITE on the EMAS 2900
+! disc-pack labelled LABEL.
+
+! SITE is an epage number which must be X'40'-aligned.  The physical
+! size of the file must not exceed 256 Kbytes (512 Kbytes for sites
+! X'380' and X'400'.
+!>
+%integer j
+%string (6) uname
+%string (11) iname
+%string (31) full
+   j=into(66, "SSISI")
+   ->out %unless j=0
+
+   j=93
+   ->out %unless d_dtrying<<6<0
+
+   j=uif(file index, file, uname, iname, full)
+   ->out %unless j=0
+
+   j=dprgp(file index, file, label, fsys, site, 0)
+out:
+   %result=outof(j)
+%end;                                    ! DPRG
+
+!-----------------------------------------------------------------------
+
+!<DUNPRG
+
+%external %integer %fn dunprg(%string %name file index, file, %integer %name fsys,
+   %string %name label, %integer %name site)
+
+! This privileged procedure creates a 256 Kbyte file FILE belonging to
+! file index FILE INDEX on disc-pack FSYS and copies into it 256 Kbytes
+! from site SITE on the EMAS 2900 disc-pack labelled LABEL.  [For sites
+! X'380 and X'400, the size has been extended to 512 Kbytes]
+!>
+%integer j, da, nkb, seg, gap, k
+%string (6) uname
+%string (11) iname
+%string (31) full
+%record (fhdrf) %name fhdr
+   j=into(85, "SSISI")
+   ->out %unless j=0
+
+   j=93
+   ->out %unless d_dtrying<<6<0
+
+   j=uif(file index, file, uname, iname, full)
+   ->out %unless j=0
+
+   nkb=512
+   nkb=1024 %if site>=subsys site;       ! bigger file for SS
+   j=dcreatef(file index, file, fsys, nkb, 1, 0, da)
+   j=dprgp(file index, file, label, fsys, site, 1) %if j=0
+   ->out %unless j=0
+
+   ->out %unless nkb=1024
+
+   seg=0 { trim subsys }
+   gap=0
+   j=dconnecti(file index, file, fsys, 1, seg, gap)
+   ->out %unless j=0
+
+   fhdr==record(seg<<seg shift)
+   nkb=(fhdr_nextfreebyte+1023)>>10
+   j=dchsize(file index, file, fsys, nkb)
+   k=ddisconnecti(file index, file, fsys, 0)
+out:
+   %result=outof(j)
+%end;                                    ! DUNPRG
+
+!-----------------------------------------------------------------------
+
+!<PRINTMP
+%external %routine printmp(%integer seg1, seg2)
+
+! PRINTMP stands for PRINT Master Page tables. The procedure lists
+! details of the segments SEG1 to SEG2 to DIRLOG. If SEG2 is zero,
+! then HISEG is used, a value supplied by Supervisor.
+!>
+%integer seg, ent, nsecs
+%integer j, savedt
+%string (19) index
+%string (11) fname
+%string (255) full
+%record (ctf) %name ct
+
+%routine %spec psection
+
+   %if seg2=0 %start
+      seg2=ownseg
+   %finish
+
+   wrs("-------------- MASTER PAGE TABLES ---------------")
+
+   save dt=d_log action&dt
+   d_log action=d_log action-save dt
+
+   wrs("128 x80 new block     CBT FLAGS")
+   wrs(".64 x40 read only")
+   wrs(".32 x20 active")
+   wrs("..8 x08 continuation")
+   wrs("..4 x04 advisory sequential")
+   wrs("..2 x02 multiple use")
+
+   wrsn("D_CBT1", d_cbt1); wrsn("D_CBT2", d_cbt2)
+   wrs("..SEGMENT CBT CBTENTRY")
+   wrs("                                .FLAGS.")
+   wrs("..DEC HEX      DISCADDR AMTX LEN CBT  CT USER".usep."FILE")
+
+   %cycle seg=seg1, 1, seg2
+      ent=sst(seg)
+
+      %if ent#dendsst %start
+         psection
+         ct==d_conlist(d_cpoint(seg))
+         prx(ct_flags, 2)
+         printsymbol(' ')
+         full=ct_full
+         %if full->index.(usep).fname %and ct_prefix>0 %then %c
+            full=index.usep.prefixs(index, ct_fsys, ct_prefix).fname
+         wrs(full)
+
+!         %unless target=370 %start
+!            %if ent>d_cbt1 %start { more sections to print }
+               nsecs=segment table(seg)
+               %if target=amdahl %start
+                  nsecs=nsecs>>28
+               %finish
+               nsecs=((nsecs&15)+2)>>1
+               %cycle
+                  nsecs=nsecs-1
+                  %exit %if nsecs=0
+                  ent=ent+1
+                  psection
+                  printsymbol(nl)
+               %repeat
+!            %finish
+!         %finish
+      %finish
+   %repeat
+
+   d_log action=d_log action!save dt
+out:
+   %return
+
+
+%routine psection
+%integer da, j
+%record (discdataf) data
+   printsymbol('.')
+   write(seg, 3)
+   printstring(" X")
+   printstring(htos(seg, 3))
+   %if ent&not alloc mask=not alloc %start
+      printstring("     CBT not alloc  ")
+      %if ent&newcopy seg#0 %then printstring(" Newcopy ") %else printstring("         ")
+   %finish %else %start
+      write(ent, 3)
+      %if 0<=ent<=d_cbtop+3 %start
+
+         da=cbta(ent)_da
+         prx(da, 8)
+         prx(cbta(ent)_amtx0, 2)
+         printstring(htos(cbta(ent)_amtx1, 2))
+         printsymbol(' ')
+         prx(cbta(ent)_length, 2)
+         printstring(" ")
+         prx(cbta(ent)_flags, 2)
+      %finish
+   %finish
+%end;                                    ! PSECTION
+%end;                                    ! PRINTMP
+
+!-----------------------------------------------------------------------
+
+%external %routine ncode(%integer pc)
+%end %oflist
+
+
+%const %integer oneh=1, twoh=2, threeh=3
+%const %integer no ops=0<<2, one op=1<<2, two ops=2<<2, three ops=3<<2
+%const %integer null=oneh
+
+%const %integer rr=1, rrb=2, rre=3, rx=4, rs=5, si=6, sfm=7, ssa=8, ssb=9, ssc=10, sse=11
+%const %integer extend1=12, extend2=13, extend3=14{this latter for the (*370*) opcodes}
+
+%const %integer lastc=extend3
+
+
+%const %byte %integer %array types(0:255)= %c
+{00} null,
+{01} null,
+{02} null,
+{03} null,
+{04 SET PROGRAM MASK               } rr<<4  !one op  !oneh,
+{05 BRANCH AND LINK                } rr<<4  !two ops  !oneh,
+{06 BRANCH ON COUNT                } rr<<4  !two ops  !oneh,
+{07 BRANCH ON CONDITION            } rr<<4  !two ops  !oneh,
+{08 SET STORAGE KEY                } rr<<4  !two ops  !oneh,
+{09 INSERT STORAGE KEY        *370*} rr<<4  !two ops  !oneh,
+{0A SUPERVISOR CALL           *370*} rrb<<4 !one op   !oneh,
+{0B BRANCH AND SET MODE            } rr<<4  !two ops  !oneh,
+{0C BRANCH AND SAVE AND SET MODE   } rr<<4  !two ops  !oneh,
+{0D BRANCH AND SAVE                } rr<<4  !two ops  !oneh,
+{0E MOVE LONG                      } rr<<4  !two ops  !oneh,
+{0F COMPARE LOGICAL LONG           } rr<<4  !two ops  !oneh,
+{10 LOAD POSITIVE                  } rr<<4  !two ops  !oneh,
+{11 LOAD NEGATIVE                  } rr<<4  !two ops  !oneh,
+{12 LOAD AND TEST                  } rr<<4  !two ops  !oneh,
+{13 LOAD COMPLEMENT                } rr<<4  !two ops  !oneh,
+{14 AND                            } rr<<4  !two ops  !oneh,
+{15 COMPARE LOGICAL                } rr<<4  !two ops  !oneh,
+{16 OR                             } rr<<4  !two ops  !oneh,
+{17 EXCLUSIVE OR                   } rr<<4  !two ops  !oneh,
+{18 LOAD                           } rr<<4  !two ops  !oneh,
+{19 COMPARE                        } rr<<4  !two ops  !oneh,
+{1A ADD                            } rr<<4  !two ops  !oneh,
+{1B SUBTRACT                       } rr<<4  !two ops  !oneh,
+{1C MULTIPLY                       } rr<<4  !two ops  !oneh,
+{1D DIVIDE                         } rr<<4  !two ops  !oneh,
+{1E ADD LOGICAL                    } rr<<4  !two ops  !oneh,
+{1F SUBTRACT LOGICAL               } rr<<4  !two ops  !oneh,
+{20 LOAD POSITIVE (LONG)           } rr<<4  !two ops  !oneh,
+{21 LOAD NEGATIVE (LONG)           } rr<<4  !two ops  !oneh,
+{22 LOAD AND TEST (LONG)           } rr<<4  !two ops  !oneh,
+{23 LOAD COMPLEMENT                } rr<<4  !two ops  !oneh,
+{24 HALVE (LONG)                   } rr<<4  !two ops  !oneh,
+{25 LOAD ROUNDED (EXTENDED TO LONG)} rr<<4  !two ops  !oneh,
+{26 MULTIPLY (EXTENDED)            } rr<<4  !two ops  !oneh,
+{27 MULTIPLY (LONG TO EXTENDED)    } rr<<4  !two ops  !oneh,
+{28 LOAD (LONG)                    } rr<<4  !two ops  !oneh,
+{29 COMPARE (LONG)                 } rr<<4  !two ops  !oneh,
+{2A ADD NORMALISED (LONG)          } rr<<4  !two ops  !oneh,
+{2B SUBTRACT NORMALISED (LONG)     } rr<<4  !two ops  !oneh,
+{2C MULTIPLY (LONG)                } rr<<4  !two ops  !oneh,
+{2D DIVIDE (LONG)                  } rr<<4  !two ops  !oneh,
+{2E ADD UNNORMALISED (LONG)        } rr<<4  !two ops  !oneh,
+{2F SUBTRACT UNNORMALISED (LONG)   } rr<<4  !two ops  !oneh,
+{30 LOAD POSITIVE (SHORT)          } rr<<4  !two ops  !oneh,
+{31 LOAD NEGATIVE (SHORT)          } rr<<4  !two ops  !oneh,
+{32 LOAD AND TEST (SHORT)          } rr<<4  !two ops  !oneh,
+{33 LOAD COMPLEMENT (SHORT)        } rr<<4  !two ops  !oneh,
+{34 HALVE (SHORT)                  } rr<<4  !two ops  !oneh,
+{35 LOAD ROUNDED (LONG TO SHORT)   } rr<<4  !two ops  !oneh,
+{36 ADD NORMALISED (EXTENDED)      } rr<<4  !two ops  !oneh,
+{37 SUBTRACT NORMALISED (EXTENDED) } rr<<4  !two ops  !oneh,
+{38 LOAD (SHORT)                   } rr<<4  !two ops  !oneh,
+{39 COMPARE (SHORT)                } rr<<4  !two ops  !oneh,
+{3A ADD NORMALISED (SHORT)         } rr<<4  !two ops  !oneh,
+{3B SUBTRACT NORMALISED (SHORT)    } rr<<4  !two ops  !oneh,
+{3C MULTIPLY (SHORT TO LONG)       } rr<<4  !two ops  !oneh,
+{3D DIVIDE (SHORT)                 } rr<<4  !two ops  !oneh,
+{3E ADD UNNORMALISED (SHORT)       } rr<<4  !two ops  !oneh,
+{3F SUBTRACT UNNORMALISED (SHORT)  } rr<<4  !two ops  !oneh,
+{40 STORE HALFWORD                 } rx<<4  !two ops  !twoh,
+{41 LOAD ADDRESS                   } rx<<4  !two ops  !twoh,
+{42 STORE CHARACTER                } rx<<4  !two ops  !twoh,
+{43 INSERT CHARACTER               } rx<<4  !two ops  !twoh,
+{44 EXECUTE                        } rx<<4  !two ops  !twoh,
+{45 BRANCH AND LINK                } rx<<4  !two ops  !twoh,
+{46 BRANCH ON COUNT                } rx<<4  !two ops  !twoh,
+{47 BRANCH ON CONDITION            } rx<<4  !two ops  !twoh,
+{48 LOAD HALFWORD                  } rx<<4  !two ops  !twoh,
+{49 COMPARE HALFWORD               } rx<<4  !two ops  !twoh,
+{4A ADD HALFWORD                   } rx<<4  !two ops  !twoh,
+{4B SUBTRACT HALFWORD              } rx<<4  !two ops  !twoh,
+{4C MULTIPLY HALFWORD              } rx<<4  !two ops  !twoh,
+{4D BRANCH AND SAVE                } rx<<4  !two ops  !twoh,
+{4E CONVERT TO DECIMAL             } rx<<4  !two ops  !twoh,
+{4F CONVERT TO BINARY              } rx<<4  !two ops  !twoh,
+{50 STORE                          } rx<<4  !two ops  !twoh,
+{51} null,
+{52} null,
+{53} null,
+{54 AND                            } rx<<4  !two ops  !twoh,
+{55 COMPARE LOGICAL                } rx<<4  !two ops  !twoh,
+{56 OR                             } rx<<4  !two ops  !twoh,
+{57 EXCLUSIVE OR                   } rx<<4  !two ops  !twoh,
+{58 LOAD                           } rx<<4  !two ops  !twoh,
+{59 COMPARE                        } rx<<4  !two ops  !twoh,
+{5A ADD                            } rx<<4  !two ops  !twoh,
+{5B SUBTRACT                       } rx<<4  !two ops  !twoh,
+{5C MULTIPLY                       } rx<<4  !two ops  !twoh,
+{5D DIVIDE                         } rx<<4  !two ops  !twoh,
+{5E ADD LOGICAL                    } rx<<4  !two ops  !twoh,
+{5F SUBTRACT LOGICAL               } rx<<4  !two ops  !twoh,
+{60 STORE (LONG)                   } rx<<4  !two ops  !twoh,
+{61} null,
+{62} null,
+{63} null,
+{64} null,
+{65} null,
+{66} null,
+{67 MULTIPLY (LONG TO EXTENDED)    } rx<<4  !two ops  !twoh,
+{68 LOAD (LONG)                    } rx<<4  !two ops  !twoh,
+{69 COMPARE (LONG)                 } rx<<4  !two ops  !twoh,
+{6A ADD NORMAILSED (LONG)          } rx<<4  !two ops  !twoh,
+{6B SUBTRACT NORMALISED (LONG)     } rx<<4  !two ops  !twoh,
+{6C MULTIPLY (LONG)                } rx<<4  !two ops  !twoh,
+{6D DIVIDE (LONG)                  } rx<<4  !two ops  !twoh,
+{6E ADD UNNORMAILSED (LONG)        } rx<<4  !two ops  !twoh,
+{6F SUBTRACT UNNORMALISED (LONG)   } rx<<4  !two ops  !twoh,
+{70 STORE (SHORT)                  } rx<<4  !two ops  !twoh,
+{71} null,
+{72} null,
+{73} null,
+{74} null,
+{75} null,
+{76} null,
+{77} null,
+{78 LOAD (SHORT)                   } rx<<4  !two ops  !twoh,
+{79 COMPARE (SHORT)                } rx<<4  !two ops  !twoh,
+{7A ADD NORMALISED (SHORT)         } rx<<4  !two ops  !twoh,
+{7B SUBTRACT NORMALISED (SHORT)    } rx<<4  !two ops  !twoh,
+{7C MULITPLY (SHORT TO LONG)       } rx<<4  !two ops  !twoh,
+{7D DIVIE (SHORT)                  } rx<<4  !two ops  !twoh,
+{7E ADD UNNORMALISED (SHORT)       } rx<<4  !two ops  !twoh,
+{7F SUBTRACT UNNORMALISED (SHORT)  } rx<<4  !two ops  !twoh,
+{80 SET SYSTEM MASK                } sfm<<4  !one op  !twoh,
+{81} null,
+{82 LOAD PSW                       } sfm<<4  !one op  !twoh,
+{83 DIAGNOSE                       } sfm<<4  !one op  !twoh,
+{84} null,
+{85} null,
+{86 BRANCH ON INDEX HIGH           } rs<<4  !three ops  !twoh,
+{87 BRANCH ON INDEX LOW OR EQUAL   } rs<<4  !three ops  !twoh,
+{88 SHIFT RIGHT SINGLE LOGICAL     } rs<<4  !two ops  !twoh,
+{89 SHIFT LEFT SINGLE LOGICAL      } rs<<4  !two ops  !twoh,
+{8A SHIFT RIGHT SINGLE             } rs<<4  !two ops  !twoh,
+{8B SHIFT LEFT SINGLE              } rs<<4  !two ops  !twoh,
+{8C SHIFT RIGHT DOUBLE LOGICAL     } rs<<4  !two ops  !twoh,
+{8D SHIFT LEFT DOUBLE LOGICAL      } rs<<4  !two ops  !twoh,
+{8E SHIFT RIGHT DOUBLE             } rs<<4  !two ops  !twoh,
+{8F SHIFT LEFT DOUBLE              } rs<<4  !two ops  !twoh,
+{90 STORE MULTIPLE                 } rs<<4  !three ops  !twoh,
+{91 TEST UNDER MASK                } si<<4  !two ops  !twoh,
+{92 MOVE (IMMEDIATE)               } si<<4  !two ops  !twoh,
+{93 TEST AND SET                   } sfm<<4  !one op  !twoh,
+{94 AND (IMMEDIATE)                } si<<4  !two ops  !twoh,
+{95 COMPARE LOGICAL (IMMEDIATE)    } si<<4  !two ops  !twoh,
+{96 OR (IMMEDIATE)                 } si<<4  !two ops  !twoh,
+{97 EXCLUSIVE OR (IMMEDIATE)       } si<<4  !two ops  !twoh,
+{98 LOAD MULTIPLE                  } rs<<4  !three ops  !twoh,
+{99 TRACE                          } rs<<4  !three ops  !twoh,
+{9A} null,
+{9B} null,
+{9C00 START I/O                    } extend3<<4  !one op  !twoh,
+{9D00 TEST I/O                     } extend3<<4  !one op  !twoh,
+{9E00 HALT I/O                     } extend3<<4  !one op  !twoh,
+{9F00 TEST CHANNEL                 } extend3<<4  !one op  !twoh,
+{A0} null,
+{A1} null,
+{A2} null,
+{A3} null,
+{A4} null,
+{A5} null,
+{A6} null,
+{A7} null,
+{A8} null,
+{A9} null,
+{AA} null,
+{AB} null,
+{AC STORE THEN AND SYSTEM MASK     } si<<4  !two ops  !twoh,
+{AD STORE THEN OR SYSTEM MASK      } si<<4  !two ops  !twoh,
+{AE SIGNAL PROCESSOR               } rs<<4  !three ops  !twoh,
+{AF MONITOR CALL                   } si<<4  !two ops  !twoh,
+{B0} null,
+{B1 LOAD REAL ADDRESS              } rx<<4  !two ops  !twoh,
+{B202 STORE CPU ID                 } extend1<<4  !one op  !twoh,
+{B3} null,
+{B4} null,
+{B5} null,
+{B6 STORE CONTROL                  } rs<<4  !three ops  !twoh,
+{B7 LOAD CONTROL                   } rs<<4  !three ops  !twoh,
+{B8} null,
+{B9} null,
+{BA COMPARE AND SWAP               } rs<<4  !three ops  !twoh,
+{BB COMPARE DOUBLE AND SWAP        }  rs<<4  !three ops  !twoh,
+{BC}  null,
+{BD COMPARE LOGICAL CHARACTERS UNDER MASK }  rs<<4  !three ops  !twoh,
+{BE STORE CHARACTERS UNDER MASK    }  rs<<4  !three ops  !twoh,
+{BF INSERT CHARACTERS UNDER MASK   }  rs<<4  !three ops  !twoh,
+{C0}  null,
+{C1}  null,
+{C2}  null,
+{C3}  null,
+{C4}  null,
+{C5}  null,
+{C6}  null,
+{C7}  null,
+{C8}  null,
+{C9}  null,
+{CA}  null,
+{CB}  null,
+{CC}  null,
+{CD}  null,
+{CE}  null,
+{CF}  null,
+{D0}  null,
+{D1 MOVE NUMERICS                  }  ssb<<4  !two ops  !threeh,
+{D2 MOVE (CHARACTER)               }  ssa<<4  !two ops  !threeh,
+{D3 MOVE ZONES                     }  ssb<<4  !two ops  !threeh,
+{D4 AND (CHARACTER)                }  ssa<<4  !two ops  !threeh,
+{D5 COMPARE LOGICAL (CHARACTER)    }  ssa<<4  !two ops  !threeh,
+{D6 OR (CHARACTER)                 }  ssa<<4  !two ops  !threeh,
+{D7 EXCLUSIVE OR (CHARACTER)       }  ssa<<4  !two ops  !threeh,
+{D8}  null,
+{D9 MOVE WITH KEY                  }  ssc<<4  !three ops  !threeh,
+{DA MOVE TO PRIMARY                }  ssc<<4  !three ops  !threeh,
+{DB MOVE TO SECONDARY              }  ssc<<4  !three ops  !threeh,
+{DC TRANSLATE                      }  ssa<<4  !two ops  !threeh,
+{DD TRANSLATE AND TEST             }  ssa<<4  !two ops  !threeh,
+{DE EDIT                           }  ssa<<4  !two ops  !threeh,
+{DF EDIT AND MARK                  }  ssa<<4  !two ops  !threeh,
+{E0}  null,
+{E1}  null,
+{E2}  null,
+{E3}  null,
+{E4}  null,
+{E500 LOAD ADDRESS SPACE PARAMETERS }  extend2<<4  !two ops  !threeh,
+{E6}  null,
+{E7}  null,
+{E8}  null,
+{E9}  null,
+{EA}  null,
+{EB}  null,
+{EC}  null,
+{ED}  null,
+{EE}  null,
+{EF}  null,
+{F0 SHIFT AND ROUND DECIMAL        }  ssc<<4  !three ops  !threeh,
+{F1 MOVE WITH OFFSET               }  ssb<<4  !two ops  !threeh,
+{F2 PACK                           }  ssb<<4  !two ops  !threeh,
+{F3 UNPACK                         }  ssb<<4  !two ops  !threeh,
+{F4}  null,
+{F5}  null,
+{F6}  null,
+{F7}  null,
+{F8 ZERO AND ADD                   }  ssb<<4  !two ops  !threeh,
+{F9 COMPARE DECIMAL                }  ssb<<4  !two ops  !threeh,
+{FA ADD DECIMAL                    }  ssb<<4  !two ops  !threeh,
+{FB SUBTRACT DECIMAL               }  ssb<<4  !two ops  !threeh,
+{FC MULTIPLY DECIMAL               }  ssb<<4  !two ops  !threeh,
+{FD DIVIDE DECIMAL                 }  ssb<<4  !two ops  !threeh,
+{FE}  null,
+{FF}  null
+
+%const %string (5) %array mnems(0:255)= %c
+"","","","","SPM","BALR","BCTR","BCR","SSK","ISK","SVC","BSM","BASSM","BASR",
+ "MVCL","CLCL", "LPR","LNR","LTR","LCR","NR","CLR","OR","XR","LR","CR","AR",
+ "SR","MR","DR","ALR","SLR", "LPDR","LNDR","LTDR","LCDR","HDR","LRDR","MXR",
+ "MXDR","LDR","CDR","ADR","SDR","MDR","DDR","AWR", "SWR", "LPER","LNER","LTER",
+ "LCER","HER","LRER","AXR","SXR","LER","CER","AER","SER","MER","DER","AUR",
+ "SUR", "STH","LA","STC","IC","EX","BAL","BCT","BC","LH","CH","AH","SH","MH",
+ "BAS","CVD","CVB", "ST","","","","N","CL","O","X","L","C","A","S","M","D","AL",
+ "SL", "STD","","","","","","","MXD","LD","CD","AD","SD","MD","DD","AW","SW",
+ "STE","","","","","","","","LE","CE","AE","SE","ME","DE","AU","SU",
+ "SSM","","LPSW","DG","","","BXH","BXLE","SRL","SLL","SRA","SLA","SRDL","SLDL","SRDA","SLDA",
+ "STM","TM","MVI","TS","NI","CLI","OI","XI","LM","TRACE","","","","","","",
+ "","","","","","","","","","","","","STNSM","STOSM","SIGP","MC",
+ "","LRA","STIDP","","","","STCTL","LCTL","","","CS","CDS","","CLM","STCM","ICM",
+ "","","","","","","","","","","","","","","","",
+ "","MVN","MVC","MVZ","NC","CLC","OC","XC","","MVCK","MVCP","MVCS","TR","TRT","ED","EDMK",
+ "","","","","","LASP","","","","","","","","","","",
+ "SRP","MVO","PACK","UNPK","","","","","ZAP","CP","AP","SP","MP","DP","",""
+
+! The following array contains type for the extended mnemonics. X'02'-X'3C' are for the
+! B2 opcodes.  X'3C'+1 to X'3C'+2 are for the E5 opcodes.  X'3C'+3 to X'3C'+5
+! are for the 9C (*370*) opcodes.  X'3C'+5 to X'3C'+6 are for the 9D (*370*).
+! X'3C'+7 to X'3C'+8 are for the 9E  (*370*) opcodes.  X'3C'+9 to X'3C'+A are
+! for the 9F (*370*) opcodes.
+
+%const %byte %integer %array etypes(X'02':X'3C'+2+3+2+2+2)= %c
+{B202 STORE CPU ID                 } sfm<<4  !one op  !twoh,
+{B203 STORE CHANNEL ID        *370*} sfm<<4  !one op  !twoh,
+{B204 SET CLOCK                    } sfm<<4  !one op  !twoh,
+{B205 STORE CLOCK                  } sfm<<4  !one op  !twoh,
+{B206 SET CLOCK COMPARATOR         } sfm<<4  !one op  !twoh,
+{B207 STORE CLOCK COMPARATOR       } sfm<<4  !one op  !twoh,
+{B208 SET CPU TIMER                } sfm<<4  !one op  !twoh,
+{B209 STORE CPU TIMER              } sfm<<4  !one op  !twoh,
+{B20A SET PSW KEY FROM ADDRESS     } sfm<<4  !two ops !twoh,
+{B20B INSERT PSW KEY               } sfm<<4  !no ops  !twoh,
+{B20C} null,
+{B20D PURGE TLB                    } sfm<<4  !no ops  !twoh,
+{B20E-B20F} null,null,
+{B210 SET PREFIX                   } sfm<<4  !one op  !twoh,
+{B211 STORE PEFIX                  } sfm<<4  !one op  !twoh,
+{B212 STORE CPU ADDRESS            } sfm<<4  !one op  !twoh,
+{B213 RESET REFERENCE BIT     *370*} sfm<<4  !one op  !twoh,
+{B214 START INTERPRETIVE EXXCUTION } sfm<<4  !one op  !twoh,
+{B215-B217} null,null,null,
+{B218 PROGRAM CALL                 } sfm<<4  !one op  !twoh,
+{B219 SET ADDRESS SPACE CONTROL    } sfm<<4  !one op  !twoh,
+{B21A-20} null(7),
+{B221 INVALIDATE PAGE TABLE ENTRY  } rre<<4  !two ops !twoh,
+{B222 INSERT PROGRAM MASK          } rre<<4  !one op  !twoh,
+{B223 INSERT VIRTUAL STORAGE KEY   } rre<<4  !two ops !twoh,
+{B224 INSERT ADDRESS SPACE CONTROL } rre<<4  !one op  !twoh,
+{B225 SET SECONDARY ASN            } rre<<4  !one op  !twoh,
+{B226 EXTRACT PRIMARY ASN          } rre<<4  !one op  !twoh,
+{B227 EXTRACT SECONDARY ASN        } rre<<4  !one op  !twoh,
+{B228 PROGRAM TRANSFER             } rre<<4  !two ops !twoh,
+{B229 INSERT STORAGE KEY EXTENDED  } rre<<4  !two ops !twoh,
+{B22A RESET REFERENCE BIT EXTENDED } rre<<4  !two ops !twoh,
+{B22B SET STORAGE KEY EXTENDED     } rre<<4  !two ops !twoh,
+{B22C TEST BLOCK                   } rre<<4  !two ops !twoh,
+{B22D DIVIDE (EXTENDED)            } rre<<4  !two ops !twoh,
+{B22E} null,
+{B22F} null,
+{B230 CLEAR SUBCHANNEL             } sfm<<4  !one op  !twoh,
+{B231 HALT SUBCHANNEL              } sfm<<4  !one op  !twoh,
+{B232 MODIFY SUBCHANNEL            } sfm<<4  !one op  !twoh,
+{B233 START SUBCHANNEL             } sfm<<4  !one op  !twoh,
+{B234 STORE SUBCHANNEL             } sfm<<4  !one op  !twoh,
+{B235 TEST SUBCHANNEL              } sfm<<4  !one op  !twoh,
+{B236 TEST PENDING INTERRUPTION    } sfm<<4  !one op  !twoh,
+{B237 SET ADDRESS LIMIT            } sfm<<4  !one op  !twoh,
+{B238 RESUME SUBCHANNEL            } sfm<<4  !one op  !twoh,
+{B239 STORE CHANNEL REPORT WORD    } sfm<<4  !one op  !twoh,
+{B23A STORE CHANNEL PATH STATUS    } sfm<<4  !one op  !twoh,
+{B23B RESET CHANNEL PATH           } sfm<<4  !one op  !twoh,
+{B23C SET CHANNEL MONITOR          } sfm<<4  !one op  !twoh,
+{E500 LOAD ADDRESS SPACE PARAMETERS } sse<<4  !two ops !threeh,
+{E501 TEST PROTECTION              } sse<<4  !two ops !threeh,
+{9C00 START I/O               *370*} sfm<<4  !one op  !twoh,
+{9C01 START I/O FAST RELEASE  *370*} sfm<<4  !one op  !twoh,
+{9C02 RESUME I/O              *370*} sfm<<4  !one op  !twoh,
+{9D00 TEST I/O                *370*} sfm<<4  !one op  !twoh,
+{9D01 CLEAR I/O               *370*} sfm<<4  !one op  !twoh,
+{9E00 HALT I/O                *370*} sfm<<4  !one op  !twoh,
+{9E01 HALT DEVICE             *370*} sfm<<4  !one op  !twoh,
+{9F00 TEST CHANNEL            *370*} sfm<<4  !one op  !twoh,
+{9F01 CLEAR CHANNEL           *370*} sfm<<4  !one op  !twoh
+! The following array contains the extended mnemonics. X'02'-X'3C' are for the
+! B2 opcodes.  X'3C'+1 to X'3C'+2 are for the E5 opcodes.  X'3C'+3 to X'3C'+5
+! are for the 9C (*370*) opcodes.  X'3C'+5 to X'3C'+6 are for the 9D (*370*).
+! X'3C'+7 to X'3C'+8 are for the 9E  (*370*) opcodes.  X'3C'+9 to X'3C'+A are
+! for the 9F (*370*) opcodes.
+
+%const %string (5) %array emnems(X'02':X'3C'+2+3+2+2+2)= %c
+ "STIDP", "STIDC"{B203 *370*}, "SCK", "STCK", "SCKC", "STCKC", "SPT",
+ "STPT", "SPKA", "IPK", ""{B20C}, "PTLB", ""(2){B20E,B20F}, "SPX",
+ "STPX", "STAP", "RRB"{B213 *370*}, "SIE", ""(3){B215-B217}, "PC", "SAC", ""(7){B21A-B220}, "IPTE",
+ "IPM", "IVSK", "IAC", "SSAR", "EPAR", "ESAR", "PT",
+ "ISKE", "RRBE", "SSKE", "TB", "DXR", ""(2){B22E,B2F}, "CSCH",
+ "HSCH", "MSCH", "SSCH", "STSCH", "TSCH", "TPI", "SAL",
+ "RSCH", "STCRW", "STCPS", "RCHP", "SCHM", "LASP", "TPROT",
+ {9C}  "SIO", "SIOF", "RIO", {9D} "TIO", "CLRIO", {9E} "HIO", "HDV", {9F} "TCH",  "CLRCH"
+
+
+!------------------------------------- IBMRECODE -------------------------------
+
+
+%integer xstart, finish, cax
+
+!  Parameters  xstart, finish  are the virtual addresses between which recoding
+!                              is to be performed.
+!  Parameter   cax             is the address, corresponding to start, which is
+!                              to be printed at the first instruction recoded
+!                              (and incremented for following instructions).
+
+%integer halfwords, type, jj, nopds, opcode, ix, curbasereg, yy
+%integer b2, b3, b4, b5, b6, h2, h3, hex1, hex2, testval, printline, basereg
+%integer lineno
+%string (255) wk
+%switch isw(0:lastc)
+
+
+%routine printcode(%integer halfwords) {param must be one, two or three}
+%integer j, top
+%string (6) wk
+%switch ap(1:3)
+   printstring(htos(xstart, 8))
+   printstring("  ")
+   top=halfwords<<1 { ie 2, 4 or 6 }
+   %cycle j=0, 1, 7
+      %if j<top %then printstring(htos(byteinteger(xstart+j), 2)) %else printstring("  ")
+   %repeat
+%end {printcode}
+
+%routine bd(%integer half)
+%integer twelve bits
+   twelve bits=half&x'FFF'
+   %if twelve bits>36 %start
+      %if hex1=0 %then hex1=twelve bits %else hex2=twelve bits
+   %finish
+   write(twelve bits, 4); printstring("(")
+   write(half>>12, 2); printstring(")")
+%end {bd}
+
+%routine xbd(%integer x, half)
+%integer twelve bits
+   twelve bits=half&x'FFF'
+   %if twelve bits>36 %start
+      %if hex1=0 %then hex1=twelve bits %else hex2=twelve bits
+   %finish
+   write(twelve bits, 4); printstring("(")
+   write(x, 2); printstring(",")
+   write(half>>12, 2); printstring(")")
+%end {xbd}
+
+%routine establish full lineno
+%integer kstart, halfwords, opcode, y, b2, b3, h2, basereg
+   y=xstart
+   kstart=xstart-1024
+   kstart=xstart>>segshift<<segshift %if kstart<xstart>>segshift<<segshift
+   %while kstart<y %cycle
+      opcode=byteinteger(kstart)
+      b2=byteinteger(kstart+1); b3=byteinteger(kstart+2);
+      h2=b3<<8!byteinteger(kstart+3)
+      halfwords=types(opcode)&3
+      ! Update lineno, if poss
+      %if opcode=x'92' {mvi} %start
+         basereg=b3>>4
+         %if 5<=basereg<=10 %start
+            %if basereg#curbasereg %then lineno=0 %and curbasereg=basereg
+            %if h2&x'FFF'=2 %then lineno=(lineno&x'FFFF00FF')!b2<<8 %else %if h2&x'FFF'=3 %then %c
+               lineno=(lineno&x'FFFFFF00')!b2
+         %finish
+      %finish
+      kstart=kstart+halfwords<<1
+   %repeat
+%end {establish full lineno}
+
+!-------------------------------------------------------------------------------
+!                              |         H2        |        H3     |
+!       ilc          |    B2   |   B3    |   B4    |   B5   |  B6  |
+
+!           0        |8        |16       |24       |32
+!          +---------+----+----+
+!   RRa   0|   OP    | R1 | R2 |
+!          +---------+----+----+
+
+!          +---------+---------+
+!     b   0|   OP    |   R1    |
+!          +---------+---------+
+
+!          +-------------------+----+----+----+----+
+!   RREa  2|        OP         |\\\\\\\\\| R1 | R2 |
+!          +-------------------+----+----+----+----+
+
+!          +-------------------+----+----+----+----+
+!      b  2|        OP         |\\\\\\\\\| R1 |\\\\|
+!          +-------------------+----+----+----+----+
+
+!          +---------+----+----+----+--------------+
+!   RX    1|   OP    | R1 | X1 | B2 |      D2      | Note: ilc is 2 for LRA
+!          +---------+----+----+----+--------------+       instruction only
+
+!          +---------+----+----+----+--------------+
+!   RS    2|   OP    | R1 | R3 | B2 |      D2      |
+!          +---------+----+----+----+--------------+
+
+!          +---------+----+----+----+--------------+
+!   SI    2|   OP    |    I2   | B1 |      D1      |
+!          +---------+----+----+----+--------------+
+
+!          +-------------------+----+--------------+
+!   S     2|          OP       | B2 |      D2      |
+!   (sfm)  +-------------------+----+--------------+
+
+!          +---------+----+----+----+--------------+----+-------------+
+!   SSa   3|   OP    |    L    | B1 |      D1      | B2 |      D2     |
+!          +---------+----+----+----+--------------+----+-------------+
+
+!                    +----+----+
+!     b              | L1 | L2 |
+!                    +----+----+
+
+!                    +----+----+
+!     c              | R1 | R3 |
+!                    +----+----+
+
+!          +-------------------+----+--------------+----+-------------+
+!   SSE   3|         OP        | B1 |      D1      | B2 |      D2     |
+!          +-------------------+----+--------------+----+-------------+
+
+
+!-------------------------------------------------------------------------------
+
+
+!--------------------------------- body ----------------------------------------
+
+   xstart=pc-128
+   finish=pc+128
+   cax=xstart
+   wrs("Code around ".htos(pc, 8))
+
+   lineno=0; curbasereg=-1; printline=0
+
+   xstart=xstart&(\1); cax=cax&(\1)
+   yy=finish-xstart; yy=6 %if yy<6
+   hex1=0; hex2=0
+
+   ! Validate the area
+   %unless val(xstart, yy, 0, 0)=0 %start
+      %unless val(xstart, 6, 0, 0)=0 %then ->nonvalid area
+      testval=1
+   %finish %else testval=0
+
+   %while xstart<finish %cycle
+      %if testval#0 %and val(xstart, 6, 0, 0)#0 %then ->nonvalid area
+      opcode=byteinteger(xstart)
+      b2=byteinteger(xstart+1); b3=byteinteger(xstart+2);
+      b4=byteinteger(xstart+3); b5=byteinteger(xstart+4)
+      b6=byteinteger(xstart+5)
+      h2=b3<<8!b4
+      h3=b5<<8!b6
+      jj=types(opcode)
+      type=jj>>4
+      halfwords=jj&3
+      nopds=(jj>>2)&3
+      %if type<extend1 %start
+         printcode(halfwords)
+         wk=mnems(opcode)
+         wk=wk." " %while length(wk)<5
+         printstring(wk)
+      %finish
+      ->isw(type)
+
+isw(rrb):
+      write(b2, 4)
+      ->out
+
+isw(rre):
+      b2=b4
+isw(rr):
+      write(b2>>4, 4)
+      %if nopds>1 %then printstring(",") %and write(b2&15, 1)
+      ->out
+
+isw(rx):
+      write(b2>>4, 4)
+      %if nopds>1 %then printstring(",") %and xbd(b2&15, h2)
+      ->out
+
+isw(rs):
+      write(b2>>4, 4)
+      %if nopds>2 %then printstring(",") %and write(b2&15, 2)
+      %if nopds>1 %then printstring(",") %and bd(h2)
+      ->out
+
+isw(si):
+      ! Update lineno, if poss
+      %if opcode=x'92' {mvi} %start
+         basereg=h2>>12&15
+         %if 5<=basereg<=10 %start
+            %if curbasereg<0 %then establish full lineno
+            %if basereg#curbasereg %then lineno=0 %and curbasereg=basereg
+            %if h2&x'FFF'=2 %then lineno=(lineno&x'FFFF00FF')!b2<<8 %else %if h2&x'FFF'=3 %then %c
+               lineno=(lineno&x'FFFFFF00')!b2
+            %if b5=x'92' {mvi} {also} %then printline=0 {defer printing} %else printline=1
+         %finish
+      %finish
+
+      bd(h2)
+      %if nopds>1 %then printstring(",") %and write(b2, 1)
+      ->out
+
+isw(sfm):
+      bd(h2)
+      ->out
+
+isw(ssa):
+      xbd(b2+1, h2)
+      %if nopds>1 %then printstring(",") %and bd(h3)
+      ->out
+
+isw(ssb):
+isw(ssc):
+      xbd(b2>>4+1, h2)
+      %if nopds>1 %then printstring(",") %and xbd(b2&15+1, h3)
+      %if nopds>2 %then printstring(",") %and write(b2&15, 2)
+      ->out
+
+isw(sse):
+      bd(h2)
+      %if nopds>1 %then printstring(",") %and bd(h3)
+      ->out
+
+isw(extend3):
+      %if X'00'<=b2<=X'02' %start
+         ix=x'3C'+2+1+b2
+         %if opcode>x'9C' %start
+            %if b2=2 %then ->fail
+            ix=ix+3
+         %finish
+         %if opcode>x'9D' %then ix=ix+2
+         %if opcode>x'9E' %then ix=ix+2
+         ->ext1
+      %finish
+      ->fail
+
+isw(extend2):
+      %if X'00'<=b2<=X'01' %then ix=X'3C'+1+b2 %and ->ext1
+      ->fail
+
+isw(extend1):
+      %unless X'02'<=b2<=X'3C' %and etypes(b2)#null %then printcode(1) %and ->fail
+      ix=b2
+ext1:
+      jj=etypes(ix)
+      type=jj>>4
+      halfwords=jj&3
+      nopds=(jj>>2)&3
+      printcode(halfwords)
+      wk=emnems(ix)
+      wk=wk." " %while length(wk)<5
+      printstring(wk)
+      %if nopds=no ops %then ->out
+      ->isw(type)
+isw(*):
+fail:
+      halfwords=1
+out:
+      %if hex1>0 %or hex2>0 %start
+!         spaces(68-outpos)
+         printstring("     ")
+         printstring(" X")
+         wk=htos(hex1, 8)
+         wk->("0").wk %while charno(wk, 1)='0'
+         printstring(wk)
+         %if hex2>0 %start
+            wk=htos(hex2, 8)
+            wk->("0").wk %while charno(wk, 1)='0'
+            printstring(" x")
+            printstring(wk)
+         %finish
+         hex1=0; hex2=0
+      %finish
+      %if printline#0 %start
+!         printline=outpos
+!         %if printline<61 %start
+!            spaces(61-printline)
+         printstring("   ")
+         printstring("Code for line"); write(lineno, 1)
+         printline=0
+!         %finish {else defer printing till there's room}
+      %finish
+      printsymbol(nl)
+      cax=cax+halfwords<<1
+      xstart=xstart+halfwords<<1
+   %repeat
+   %return
+nonvalid area:
+   printstring("RECODE: address validation fails")
+   printsymbol(nl)
+   %list
+%end;                                    ! NCODE
+
+!-----------------------------------------------------------------------
+
+
+%integer %fn getint(%integer adr, %integer %name i)
+%integer j
+   j=val(adr, 4, 0, 0)
+   i=integer(adr) %if j=0
+   %result=j
+%end;                                    ! getint
+
+
+
+%integer %fn getshort(%integer adr, %short %integer %name s)
+%integer j
+   j=val(adr, 2, 0, 0)
+   s=shortinteger(adr) %if j=0
+   %result=j
+%end;                                    ! getshort
+
+
+
+%integer %fn next lnb(%integer lnb, stackbase)
+%integer i, j, low
+%const %integer min=64;                  ! minimum stack frame
+   low=integer(lnb+4*10)
+   %for i=9, -1, 5 %cycle
+      j=integer(lnb+4*i)
+      %exit %if j>lnb-min %or j<=low %or j#integer(j+4*11)
+      low=j
+   %repeat
+   %result=low
+%end;                                    ! next lnb
+
+!-----------------------------------------------------------------------
+
+%routine print var(%integer adata, lnb, gla)
+!***********************************************************************
+!*_______output the next variable in the current block.                *
+!*_______a variable entry in the tables is:-                           *
+!*_______flag<<20!vbreg<<18!disp                                       *
+!*_______where:-                                                       *
+!*_________vbreg is variable's base register, disp is it's offset      *
+!*_________and flags=nam<<6!prec<<3!type                               *
+!***********************************************************************
+%integer i, k, disp, vbreg, vaddr, v, arr, len
+%integer nam, type, prec
+%const %integer unassi=x'80808080'
+%string (255) mess
+%switch intv, realv(3:7)
+   i=integer(adata)
+   disp=i&x'ffff'
+   vbreg=i&x'40000'
+   k=i>>20
+   type=k&7
+   prec=k>>4&7
+   arr=k>>8&3
+   nam=k>>10&1
+   ->not ass %unless val(adata+4, 1, 0, 0)=0
+   len=byteinteger(adata+4)
+   ->not ass %unless len<12 %and val(adata+5+len, 1, 0, 0)=0
+   mess=string(adata+4)
+   mess=mess." " %while length(mess)<11
+   length(mess)=11
+   print string(mess."=")
+   %if vbreg=0 %then vaddr=lnb %else vaddr=gla
+   vaddr=vaddr+disp
+   %if arr=0 %and nam#0 %start
+      vaddr=vaddr+4 %if type=5
+      ->not ass %unless val(vaddr, 4, 0, 0)=0
+      vaddr=integer(vaddr)
+      ->not ass %if vaddr=unassi %or val(vaddr, 32, 0, 0)#0
+   %finish
+   ->ill ent %if prec<3;                 ! bits not implemented
+   %if prec>=5 %or arr#0 %or type=3 %start
+      ->not ass %unless val(vaddr, 4, 0, 0)=0
+      v=integer(vaddr)
+   %finish
+   ->array %if arr#0
+   %if type=1 %then ->intv(prec)
+   %if type=2 %then ->realv(prec)
+   %if type=3 %then ->rec
+   %if type=5 %then ->str
+intv(4):                                 ! 16 bit integer
+   v=shortinteger(vaddr)
+   mess="x'".htos(v, 8)."' ".itos(v)
+   ->omess
+intv(7):                                 ! 128 bit integer
+realv(3):                                ! 8 bit real
+realv(4):                                ! 16 bit real
+ill ent:                                 ! should not occurr
+   mess="unknown type of variable"
+   ->omess
+intv(5):                                 ! 32 bit integer
+   ->not ass %if v=un assi
+   mess="x'".htos(v, 8)."' ".itos(v)
+   ->omess
+intv(3):                                 ! 8 bit integer
+   write(byteinteger(vaddr), 1); ->newl
+realv(5):                                ! 32 bit real
+   ->not ass %if v=un assi
+   mess="x'".htos(v, 8)."'"
+   ->omess
+intv(6):                                 ! 64 bit integer
+realv(6):                                ! 64 bit real
+realv(7):                                ! 128 bit real
+rec:                                     ! record print 1st 4 words
+array:                                   ! array print 128 bit header
+   ->not ass %if un assi=v
+   mess="x'".htos(v, 8).htos(integer(vaddr+4), 8)
+   %if prec=7 %or arr#0 %or type=3 %then %start
+      mess=mess." ".htos(integer(vaddr+8), 8).htos(integer(vaddr+12), 8)
+   %finish
+   mess=mess."'"; ->omess
+str:->not ass %if byte integer(vaddr+1)=unassi&255=byteinteger(vaddr)
+   ->toolong %if byteinteger(vaddr)>50
+   mess="""".string(vaddr).""""
+   ->omess
+too long:
+   mess=" too long "; ->omess;           ! assume short strings
+not ass:
+   mess=" not assigned"
+omess:printstring(mess)
+newl:printsymbol(nl)
+%end;                                    ! print var
+
+!-----------------------------------------------------------------------
+
+%routine print locals(%integer adata, lnb, gla)
+   ! adata points to the first entry for locals in the symbol tables
+%integer j
+   j=val(adata, 4, 0, 0)
+   ->out %unless j=0
+
+   wrs("No local variables") %and %return %if integer(adata)=-1
+   ->two %if integer(adata)=-2
+one:
+   print var(adata, lnb, gla)
+   j=val(adata+4, 4, 0, 0)
+   ->out %unless j=0
+   adata=(adata+8+byte integer(adata+4))&(-4)
+   j=val(adata, 4, 0, 0)
+   ->out %unless j=0
+   ->one %unless integer(adata)<0
+   %return %unless integer(adata)=-2
+two:
+   wrs("environmental variables")
+   adata=adata+4
+   ->one
+out:
+   printstring("Print locals aborts after val failure
+")
+%end;                                    ! print locals
+
+!-----------------------------------------------------------------------
+
+%routine indiag(%integer oldreg, lnb, %integer %name newregs, %integer stackbase)
+%integer gla, sst ptr, dtable, fline, fbline, adata, btype, prev blk
+%integer k, j
+%string (255) name
+   j=getint(oldreg+4*13, gla)
+   ->out %unless j=0
+
+   j=val(lnb, 4, 0, 0)
+   ->out %unless j=0
+
+   sstptr=shortinteger(lnb)&x'ffff';     ! ptr to diags for this block
+   fline=shortinteger(lnb+2);            ! failing line no.
+   %cycle
+      wrs("-------------------------------------------------")
+      j=getint(gla+20, dtable)
+      ->out %unless j=0
+      dtable=dtable+sst ptr
+      j=val(dtable, 13, 0, 0)
+      ->out %unless j=0
+      fbline=shortinteger(dtable);       ! routine/block start
+      k=byteinteger(dtable+12)
+      %if k=0 %start;                    ! begin
+         btype=0
+         prev blk=shortinteger(dtable+6)&x'ffff'
+         adata=dtable+20
+      %finish %else %start;              ! routine/fn/map
+         j=val(dtable+13, k, 0, 0)
+         ->out %unless j=0
+         name=string(dtable+12)
+         length(name)=31 %if length(name)>31
+         uctranslate(addr(name)+1, length(name)) %unless name=""
+         btype=1
+         adata=(dtable+k+20)&(-4)
+      %finish
+      %if fbline<=0 %start
+         printstring("IMP environmental block")
+         newregs=0
+         %exit
+      %finish
+      %if fline>=fbline %start
+         printstring("Line")
+         write(fline, 1)
+         printstring(" of ")
+      %finish
+      %if bty pe=0 %then printstring("block") %else print string(name)
+
+      printstring(" @")
+      write(fbline, 1)
+      printsymbol(nl)
+
+      print locals(adata, lnb, gla)
+
+      %if btype=0 %start
+         %if prev blk=0 %start
+            newregs=0
+            %exit
+         %finish
+         fline=fbline
+         sst ptr=prev blk
+         %continue
+      %finish
+      j=val(lnb, 64, 0, 0)
+      ->out %unless j=0
+      newregs=next lnb(lnb, stackbase)
+      %if newregs=lnb %then newregs=0
+      newregs=0 %if name="director"
+      %exit
+   %repeat
+   printsymbol(nl)
+   %return
+out:
+   printstring("Indiag aborts after validation failure
+")
+   newregs=0
+%end;                                    ! iNdiag
+
+!-----------------------------------------------------------------------
+
+%external %routine ndiag %alias "S#NDIAG"(%integer pcount, lnb, fault, inf)
+%integer stack base, top of stack, soft
+%integer gla, oldreg, newreg
+%string (1) failno
+%integer %array regs(0:24);              ! GRs & FRs in here
+   printstring("Ndiag:")
+   printstring(htos(pcount, 8))
+   printstring("  ".htos(lnb, 8))
+   printstring("  ".htos(fault, 8))
+   printstring("  ".htos(inf, 8))
+   printstring("  Stk:".htos(top of stack, 8))
+   printsymbol(nl)
+
+   %if fault=x'15' %then printstring("No Result") %else %if fault=x'701' %then %c
+      printstring("String resolution fault") %else %if fault=x'601' %then %c
+      printstring("Capacity exceeded") %else %if fault=x'602' %then %c
+      printstring("Array bounds exceeded") %else %if fault=x'801' %then %c
+      printstring("Unassigned variable")
+   printsymbol(nl)
+
+   failno="1"
+   stack base=lnb>>seg shift<<seg shift
+
+   *st_11,topofstack
+   %if inf#0 %and top of stack>>seg shift=sig seg %start
+      ! Use registers in interrupted context
+      *l_2,regs
+      *l_3,inf
+      *MVC_0(64,2),0(3)
+      soft=0
+   %finish %else %start
+      ! Use registers dumped in display for this procedure (NDIAG)
+      *l_2,regs
+      *MVC_0(64,2),0(10)
+      printstring("Soft".tostring(10))
+      soft=1
+   %finish
+
+   gla=regs(13)
+   failno="3"
+   %if gla#0 %and gla&3=0 %start
+      wrsn("fault no=", fault)
+      printsymbol(nl)
+
+      newreg=0
+      oldreg=addr(regs(0))
+
+      %cycle
+         failno="4" %and %exit %unless byteinteger(gla+16)=3
+         indiag(oldreg, lnb, newreg, stackbase);  ! imp diags
+         %if newreg=0 %then failno="0" %and %exit
+         oldreg=lnb
+         lnb=newreg
+      %repeat
+
+   %finish
+   wrss("NDIAG fails ", failno) %unless failno="0"
+   %if soft>0 %then doper2("Provoke hard-fail") %and integer(-1)=0
+%end;                                    ! Ndiag
+
+!-----------------------------------------------------------------------
+
+!TITLE Contingency Handling
+! The contingency scheme works as follows.  If the subsystem has not
+! called PRIME CONTINGENCY, and a contingency occurs, then the process
+! is stopped with an Oper message SIGNAL FAIL 1.  If PRIME CONTINGENCY
+! has been called, the ONTRAP routine is executed, with LNB set to the
+! value of SF at the time of the contingency, and SF set 7 words higher.
+! (If there is deemed to be insufficient space above SF to execute the
+! ONTRAP routine, LNB is set to a suitably lower value.  In this case an
+! "OFF STACK TOP" contingency (Class 67) is generated.  The ONTRAP
+! routine should be declared to have two integer parameters CLASS and
+! SUBCLASS.  CLASS will be set (by Director when it calls the routine)
+! according to the table below.
+
+! SUBCLASS will normally be zero, except as shown below:
+
+!     (i) for single-character INT: messages (Class 65) it contains the
+!         INT: character.
+
+!    (ii) for text messages (Class 66), if non-zero, it contains two
+!         half-word pointers, being offsets of the first byte and byte
+!         after last byte of a broadcast text message in the file
+!         VOLUMS.BROADCAST.
+
+!   (iii) for "off stack top" (Class 67) it is the Class of the original
+!         contingency.
+
+!    (iv) for a System Call error (Class 16) it is
+
+!          0  I-value out of range
+!          1  J-value out of range
+!          2  ACR check (insufficient privilege)
+!          3  New stack invalid (validate fails, SSN+1 not resident, or
+!             new stack=current stack)
+!          4  Task call (not implemented)
+!          5  Invalid inward return
+!         33  ACR check (outward call ACR < current ACR, or inward call
+!             ACR > current ACR)
+!         34  Invalid code or PLT descriptor in SCT entry.
+
+! Once PRIME CONTINGENCY has been called, the ONTRAP routine environment
+! remains recorded, and is invoked on the specified contingencies until
+! a further call of PRIME CONTINGENCY specifies a different ONTRAP
+! routine or until a call of DRESET CONTINGENCY (see below) causes the
+! first-set ONTRAP routine environment (if any) to be reinstated.
+
+! However, before the ONTRAP routine can be re-invoked for a further
+! contingency after a contingency has occurred, the function DRESUME
+! (see below) must be called.  Indeed, occurrence of a further
+! synchronous interrupt, other than "instruction counter", before DRESUME
+! is called will cause repeated contingencies, culminating in a SIGNAL
+! FAIL 3 (signal loop stop).  Execution of the ONTRAP routine will
+! normally be followed by a call of READ ID (read interrupt data,
+! described below), which gives details of the process environment at the
+! time of the contingency, and then a call of DRESUME.
+
+! If an asynchronous interrupt has occurred and the ONTRAP routine is
+! entered, further asynchronous interrupts are inhibited until a call of
+! DRESUME is made.  Inhibited asynchronous interrupts are queued up to a
+! current maximum of 4, after which they are discarded, with a main Oper
+! message MESSAGE LOST.
+
+! Note that, at process start-up, asynchronous messages are inhibited
+! until the subsystem calls DRESUME, LNB=-2.  Also note that only
+! asynchronous contingencies can be queued.
+
+!              Contingency           CLASS
+
+!              Floating overflow         0
+!              Floating underflow        1
+!              Fixed overflow            2
+!              Decimal overflow          3
+!              Zero divide               4
+!              Bound check               5
+!              Size error                6
+!              B overflow                7
+!              Stack error               8
+!              Privilege                 9
+!              Descriptor               10
+!              String                   11
+!              Instruction              12
+!              Accumulator              13
+!              System Call              16
+!              Instruction counter      17
+!              Disc transfer fail       18
+!              Block wrong length       19
+!              ("should not occur")
+!              Hard store fault         20
+!              Illegal OUT              21
+!              Local Controller error   22
+!              Virtual store error      32
+!              Interval timer           64*  { * = async }
+!              Single-character "INT:"  65*
+!              Text message             66*
+!              Off stack top            67
+!              Message from another invocation    68*
+
+! Failures on the Signal Stack
+! ----------------------------
+
+! Director sometimes fails on the 'signal stack' for one of the following
+! reasons:
+
+%const %integer max sigfail= 17
+%const %string (36) %array sigfail(1:max sigfail)= %c
+      "1  NO CONTINGENCY INFO",
+      "2  PROGERR IN ONTRAP RT",
+      "3  SIGNAL LOOP STOP",
+      "4  FINAL IC INTERRUPT",
+      "5  INT STACK OVERFLOW",
+      "6  DIRECTOR FAILED",
+      "7  ILLEGAL RESUME (LNB TOO HIGH)",
+      "8  ILLEGAL RESUME (NOT STACK 1)",
+      "9  ILLEGAL RESUME (AFTER VSERROR)",
+      "10 ILLEGAL RESUME (NOT FROM ONTRAP)",
+      "11 SHOULD NOT OCCUR",
+      "12 INVALID UNINHIBIT",
+      "13 XST RECEIVED",
+      "14 ST RECEIVED",
+      "15 TOO MANY LOST MESSAGES",
+      "16 DSTOP on user stk. (Not an error)",
+      "17 Forced STOP after EOT received"
+
+!<DASYNCINH
+
+%external %integer %fn dasync inh(%integer %name xact)
+
+! This procedure supplies a subsystem with a means of inhibiting
+! asynchronous contingencies for short periods of time (such as that
+! required for updating critical tables).  A call with ACT=0 is used to
+! allow interrupts, non zero to inhibit them.  Interrupts are initially
+! inhibited.  The field UINF_INT COUNT contains the number of meaasges
+! currently queued.
+!>
+
+%integer savekey, j
+   j=into(-1, "I") { the '-1' was '257'}
+   ->out %unless j=0
+   ! wrsn("Dasync called: ", i(0))
+   ->out %if i(0)=1
+
+   ! i(0) = 1 %unless i(0) = 0
+   ! j = 53 %and -> out %if i(0) = 0 %and d_environ0(0) = 0  { no ontrap routine }
+
+   *ipk_0(0); *st_2,savekey; *spka_0(0)
+   context(curcontext)_async inhib=i(0)
+   *l_2,savekey; *spka_0(2)
+out:
+   %result=outof(j)
+%end;                                    ! DASYNC INH
+
+!-----------------------------------------------------------------------
+
+%routine lmsg(%string (255) s)
+   wrss("SIGNAL ------------- ", s)
+%end;                                    ! LMSG
+
+!-----------------------------------------------------------------------
+
+%routine set bad page(%integer intparam)
+%integer seg, j, da, ent, rel sec in seg, rel epg in sec
+   seg=intparam>>seg shift
+   rel sec in seg=(intparam&segmask)>>sec shift
+   rel epg in sec=(intparam&secmask)>>12
+   ent=sst(seg)
+
+   %if ent&cbt not available=0 %start
+      ent=ent+rel sec in seg
+      da=cbta(ent)_da+rel epg in sec
+      j=bad page(1, da>>24, da<<8>>8) %unless da=0
+   %finish
+%end;                                    ! SET BAD PAGE
+
+!-----------------------------------------------------------------------
+
+%string %fn tim(%integer secs)
+%integer mins
+%string (31) wk1
+   mins=secs//60
+   secs=secs-mins*60
+   wk1=""
+   %if mins>0 %then wk1=itos(mins)."M "
+   %result=wk1.itos(secs)
+%end;                                    ! TIM
+
+!-----------------------------------------------------------------------
+
+%routine print segment table
+%integer i, j, save
+   wrs("Segment table")
+   save=d_log action
+   d_log action=save&(\dt)
+
+   j=0
+   %cycle i=0, 1, own seg
+      %unless sst(i)=dendsst %start
+         write(i, 4)
+         printstring(" ".htos(segment table(i), 8))
+         j=j+1
+         printsymbol(nl) %if j&7=0
+      %finish
+   %repeat
+   printsymbol(nl)
+   d_logaction=save
+%end;                                    ! PRINT SEGMENT TABLE
+
+!--------------------------------------- STOP ON STACK -----------------------------------------
+
+%integer %fn stop on stack
+%integer j
+   j=dstop(d_reason)
+   %result=0 { but should never get this far }
+%end;                                    ! stop on stack
+
+!--------------------------------------- DNOMINATE TRAP ---------------------------------------
+
+%external %integer %fn dnominate trap(%integer %fn next context)
+%integer jj, adr, adr0, flag
+%record (sigoutpf) asyncm
+   flag=into(1, "I")
+   ->out %unless flag=0
+
+   adr=addr(d_environ(0))
+   *l_1,adr
+   *l_2,nextcontext
+   *l_3,12(2) { address of environment }
+   *mvc_16(44,1),16(3) { 4 - 14 from environment }
+   *mvc_48(8,1),0(2) { code & gla to 12 & 13 }
+   *mvc_60(4,1),8(2) { ep to 15 }
+   d_environ(0)=M'GR0 '
+   d_environ(1)=M'GR1 '
+   d_environ(2)=M'GR2 '
+   d_environ(3)=M'GR3 '
+
+   %if d_environ0(0)=0 %start { first call }
+      adr0=addr(d_environ0(0))
+      *l_1,adr
+      *l_2,adr0
+      *mvc_0(64,2),0(1)
+   %finish
+
+   %if d_async inhib=101 %start
+      ! We are going to throw away any async ints accumulated up to the first
+      ! call of DNOMINATE TRAP (which is called early on in SSINIT), but we must
+      ! look for, and unfortunately treat separately any EOT which has arrived - this is
+      ! about the only thing which can arrive, probably, since other things would
+      ! need to be generated by the user, and he'll have a job getting in so quickly.
+      ! And we really need to recognise the EOT before the Subsystem starts to
+      ! produce terminal output, which is why we have to have these special
+      ! arrangements here (we would prefer to have handled the EOT through the
+      ! normal contingency arrangements, the SIGNAL procedure below, but in fact
+      ! that's rather too late.
+
+      %for jj=0, 1, d_aqd-1 %cycle
+         asyncm=d_signal ams(d_signal next)
+         %if asyncm_dest&x'FFFF'=intdact %and (asyncm_p3>>16=x'0159' %or %c
+            asyncm_p3>>16=x'0119') %then jj=dstop(18)
+         ! An arbitrary number but different from other reasons
+         d_signal next=(d_signal next+1)&maxm1
+      %repeat
+
+      ! OK, no EOT in queue.  Clear everything out anyway
+      d_aqd=0
+      d_signal in=0
+      d_signal next=0
+      d_async inhib=1
+   %finish
+
+out:
+   %result=outof(flag)
+%end;                                    ! DNOMINATE TRAP
+
+!------------------------------------------- DSET WRITE ONCE ----------------------------------
+
+%external %integer %fn DSET WRITE ONCE(%integer %name adr, len)
+
+! This procedure is used to store LEN bytes in a write-once, read-only area.
+! The read-only address of the area supplied is placed in word 0, 1, 2, ... of
+! the area commencing at UINF_WO BASE at successive calls of DSET WRITE ONCE.
+
+! If ADR is zero or negative, however, no bytes are stored, except that the
+! next word above WO BASE is set with the value of ADR.
+
+! The word PROCBITS in the local controller stack is "spare" to local controller, but is set initially to
+! m'CNTX' to give visibility to the CONTEXTS in a machine dump, but is hardly
+! needed for this purpose.  The bottom bit of this word is set when this procedure
+! is called to enable the Subsystem later to discover whether or not it is a
+! "special" Subsystem invocation.
+
+%integer flag, j, savekey, loclen, pointer
+   flag=into(1, "I")
+   ->out %unless flag=0
+
+   loclen=len
+   %if adr>0 %then flag=val(adr, loclen, 0{READ}, 0) %else loclen=0
+   ->out %unless flag=0
+
+   %if loclen+4>uinf_wo ptr2-uinf_wo ptr1 %start
+      flag=9 {not enough space}
+   %else
+      *ipk_0(0); *st_2,savekey; *spka_0(0)
+      lctables_procbits=lctables_procbits!1
+      uinf_wo ptr2=uinf_wo ptr2-loclen;   ! Allocate and reduce "top" pointer
+      %if adr>0 %then pointer=uinf_wo ptr2 %else pointer=adr
+      integer(uinf_wo ptr1)=pointer;      ! Record position of area allocated
+      uinf_wo ptr1=uinf_wo ptr1+4;        ! Increment "bottom" pointer
+      move(loclen, adr, uinf_wo ptr2)
+      *l_2,savekey; *spka_0(2)
+      flag=0
+   %finish
+
+out:
+   %result=outof(flag)
+%end;                                    ! DSET WRITE ONCE
+
+!-------------------------------------------------------------------------------
+
+%external %integer %fn d prime contingency(%routine ontrap)
+   %result=55
+%end;                                    ! D PRIME CONTINGENCY
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn dresume(%integer %array %name regs)
+   %result=55
+%end;                                    ! DRESUME
+
+%external %integer %fn dreadid(%integer %array %name regs)
+   %result=55
+%end;                                    ! DREADID
+
+!-----------------------------------------------------------------------
+
+%routine printcontext(%record (contextf) %name r)
+%integer j
+   printstring("PSW: ")
+   prhex(r_psw0)
+   printsymbol(' ')
+   prhex(r_psw1)
+   printsymbol(nl)
+
+   %cycle j=0, 1, 15
+      printstring(" GR")
+      printstring(itos(j))
+      printsymbol(':')
+      printsymbol(' ') %if j<10
+      prhex(r_gr(j))
+      printsymbol(nl) %if (j+1)&3=0
+   %repeat
+
+   %cycle j=0, 2, 6
+      printstring(" FR".itos(j).":")
+      prhex(r_fr(j))
+      prhex(r_fr(1+j))
+      printsymbol(nl) %if (j&2)>0
+   %repeat
+
+   %cycle j=0, 1, 15
+      printstring(" CR".itos(j).":")
+      printsymbol(' ') %if j<10
+      prhex(r_cr(j))
+      printsymbol(nl) %if (j+1)&3=0
+   %repeat
+
+   printstring("Timer: ")
+   prhex(r_timer0)
+   prhex(r_timer1)
+   printsymbol(nl)
+
+   printstring("Async: ".itos(r_async inhib))
+   printstring(" Susp: "); prhex(r_susp)
+   printstring(" PE: ".itos(r_pecode))
+   printstring(" IL: ".itos(r_ilen))
+   wrs(" Last vsparm: ".itos(r_last vsparm))
+%end;                                    ! PRINTCONTEXT
+
+
+!-------------------------------- SIGNAL ---------------------------------------
+
+%external %routine signal
+   ! ACTIVATED BY LOCAL CONTROLLER FOR 3 REASONS
+%integer interrupted context, susp, savekey, adr, destination context
+%integer mode {24 or 31}, save dirlevel
+%integer j, k, dact, jj, sigep
+%integer dirfail, reason
+%integer class, subclass
+%integer operno, inhibit, nc, stack
+%long %integer ck
+%string (255) s, s1, s2
+
+
+%record (parmf) workp
+%record (parmf) %name p
+%record (parmf) %name ps
+%record (sigoutpf) %name dd
+%record (sigoutpf) asyncm
+
+%record (sigoutpf) copy sigoutp
+
+
+%record (contextf) %name icontext { interrupted context }
+
+
+%const %string (12) %array astype(0:topasact)= %c
+"INVALID", "INT: MSG", "RESUME", "TEXT MSG",
+ "UNINHIB", "DIR MSG", "NULL ACT", "USECOUNT",
+ "CLOSEMSG", "INTER", "NEWCONTEXT"  {10},
+ "GOTOCONTEXT1", "", "GOTOCONTEXT3", "GOTOCONTEXT4",
+ "EOTTICK"
+%switch asact(0:topasact)
+%switch post act(1:16)
+%switch type(1:3)
+
+
+%const %string (24) %array pei(0:topei)= %c
+      "Floating point overflow",
+      "Floating point underflow",
+      "Fixed point overflow",
+      "Decimal underflow",
+      "Zero divide",
+      "Bound check",
+      "Size",
+      "B overflow",
+      "Stack",
+      "Privilege",
+      "Descriptor",
+      "String",
+      "Instruction",
+      "Accumulator",
+      "Esr errors",
+      "--15--",
+      "System call",
+      "Instruction counter",
+      "Disc transfer fail",
+      "Block wrong length",
+      "Hard store fault",
+      "Illegal OUT",
+      "Local Controller Error"
+
+
+%routine %spec print dumps(%record (contextf) %name r, %integer intparam)
+%routine %spec oper(%integer srce, %string (255) s)
+
+
+back in:
+   j = integer(-1) %if d_procuser = "FCHECK"
+   copy sigoutp=outp(2)
+   interrupted context=copy sigoutp_context
+   d_log action=d_log action!log %if d_procuser="DIRECT"
+   dirfail=0
+   subclass=0
+   s1=""
+
+   j=com_secsfrmn-d_signal time
+   j=j+24*60*60 %if j<0
+   d_signal loop count=0 %if j>4
+   d_signal time=com_secsfrmn
+
+   d_signal loopcount=d_signal loopcount+1
+   %if d_signal loopcount>=sigloopstop %start
+      %if d_signal loopcount>sigloopstop %start
+         j=dstop(2)
+      %finish
+      reason=3
+      ->mon out
+   %finish
+
+   reason=30
+   ->monout %unless 0<=interrupted context<lcontn
+
+   icontext==context(interrupted context)
+
+   mode=31
+   %if target = xa %start
+      mode = 24 %if icontext_psw1 & x'80000000' = 0
+   %else
+      mode=24 %if icontext_psw0&X'08000000'=0
+   %finish
+
+   sigep=copy sigoutp_errtype
+   ->type(sigep) %if 1<=sigep<=3
+   reason=31
+   ->monout
+
+
+
+type(1):                                 ! VIRTUAL STORE ERROR
+   s1="VIRTUAL STORE ERROR, PARAMETER = ".htos(copy sigoutp_p1,
+      8)."  icontext_last vsparm = ".htos(icontext_last vsparm, 8)
+   class=32;                             ! JOBBER-DEFINED
+   subclass=copy sigoutp_p1
+   ->diagnose
+
+
+
+type(2):                                 ! PROGRAM ERROR
+   class=copy sigoutp_p1&X'7F'
+   subclass=(copy sigoutp_p1>>8)&255
+   s1="PROGRAM ERROR, PARAMETER = ".htos(copy sigoutp_p1,
+      8)."   CLASS = ".itos(class)."/".itos(subclass)."    "
+   s1=s1.pei(class) %if class<=topei
+   ! EXCLUDE ARITHMETIC EXCEPTIONS FROM CONTINGENCY LOOP COUNT
+   d_signal loopcount=d_signal loopcount-1 %if class<=4 %or mode = 24
+   set bad page(copy sigoutp_p1) %if class=18;  ! disc transfer fail, INTPARAM=VA of the page
+   ->diagnose
+
+
+
+type(3):                                 ! ASYNCHRONOUS INTERRUPT
+   d_signal loop count=d_signal loop count-1
+   dact=copy sigoutp_dest&X'FFFF'
+   dact=0 %unless 0<dact<=topasact
+
+   wrss("Async int received, SIGOUTP TYPE = ", astype(dact)) %unless d_dirmon=0
+
+   operno=0
+   class=99;                             ! not required, but otherwise unassigned, and confusing
+   ->asact(dact)
+
+asact(delayed eot dact):                 ! DELAYED EOT DACT
+   ! This is the delayed EOT message initiated on receipt of the EOT.  This
+   ! message is cancelled in DSTOP, so the fact that we are receiving it means
+   ! either  (1)  we are stuck somewhere, possibly on an earlier OUT or perhaps
+   !              during the STOP sequence
+   ! or      (2)  the message is not for this process at all, despite the fact
+   !              that the issuing process has tries not to leave one around.
+   !              This is what the D_EOT MSG ID field is for, in part.
+
+   doper2("Forced stop after EOT ")
+   %if d_gotsema#0 %then doper2("but sema ".htos(d_semanoheld, 8)." held") %c
+      %and ->resume
+
+   %if d_eot msg id=0 %then ->resume;    ! Not wanted/requested by this process
+
+   ! Bash ahead and stop the process somehow
+   reason=17;                            ! Forced after EOT failed to stop it
+   ->monout
+
+asact(1):                                ! INTDACT
+
+   j=addr(copy sigoutp_p3)
+   subclass=byteinteger(j+1);  ! The single Int char
+
+   %if subclass='Y' %or subclass=25 %start
+      %if subclass='Y' %then s2=d_procuser.": EOT" %else s2=d_procuser.": CLR " %c
+         .htos(byteinteger(j+2), 2)." ".htos(byteinteger(j+3), 2)
+      doper2(s2)
+      doper2("ITaddr ".string(addr(uinf_itaddr0)))
+
+      ! Choose 31 bits out of the clock for an ID for a single message to be
+      ! PONned to the async service number for this process.  The idea is that
+      ! if EOT or CLR {or ST or VST no, not these} is received, we shall try to get out of the
+      ! situation in which the process will not go away because it's waiting for
+      ! a service which cannot terminate (for some reason).  For example, SPOOLR
+      ! or MAILER has gone dumb and cannot reply.  If the process closes down in
+      ! good order the clock tick will be cancelled in DSTOP, otherwise a closedown should
+      ! be forced despite process suspension in context1.
+
+      %unless d_eot msg id=0 %then doper2("Double EOT") %and ->resume;  ! "should NOT occur"!
+
+      *la_1,ck
+      *stck_0(1)
+      *lm_0,1,0(1)
+      *la_15,12
+      *srdl_0,0(15)
+      *st_1,j;                           ! 32 bits of tolerably "unique" ID
+
+      *ipk_0(0); *st_2,savekey; *spka_0(0)
+      outp(curcontext)=0
+      outp(curcontext)_dest=x'000A0001';  ! Repeated PON, to be sent every P_P2 seconds
+      outp(curcontext)_p1=uinf_async dest!delayed eot dact;  ! To this process' async service
+      outp(curcontext)_p2=15;            ! Seconds
+      outp(curcontext)_p3=j;             ! EOT msg ID, returned in P_P1 of eventual message
+      *l_2,savekey; *spka_0(2)
+      *mc_6(0),0;                        ! PON
+
+      d_eot msg id=j
+
+      ! Now make the EOT message overtake and eliminate ALL other queued messages.
+      ! Certainly we want to get rid of things like Int:T which produce terminal
+      ! output, and maybe we don't need to get rid of all tpyes of message.
+      ! However, there seems no advantage in retaining any,should there be any. So.
+      ! The main thing is to let the EOT go through the "queue it"/"give next"
+      ! sequence so that inhibitions are observed.  Thus we hope to be able to stop
+      ! the process in good order, but if we cannot, for reasons mentioned above, then
+      ! the Clock Tick message will do the job later.
+
+      d_aqd=0
+      d_signal next=0
+      d_signal in=0
+   %finish {Special treatment of EOT}
+
+asact(3):                                ! TXTDACT
+asact(8):                                ! CLODACT
+asact(9):                                ! receive class 68 int, twixt process
+asact(*):                                ! go to new context
+queue it:
+
+   %if d_aqd>maxm1 %start
+      oper(operno, "MESSAGE LOST")
+      d_signal lost count=d_signal lost count+1
+      ->resume %if d_signal lost count<0;  ! enough is enough!!
+      prec("LOST: ", copy sigoutp, 12)
+
+      workp=d_loutp
+      s=d_loutp state
+      k=addr(workp)
+      printstring("SRCE: ")
+      printstring(d_loutp state)
+      %cycle j=0, 4, 28
+         printsymbol(' ')
+         prhex(integer(k+j))
+      %repeat
+      printsymbol(nl)
+      %if d_signal lost count>25 %start
+         ! Thie number, 25, is intended to be enough to allow 25 RESTORED 
+         ! messages to be received "simultaneously", without blowing it.
+         d_signal lost count=-1000;      ! If more are queued, they just resume
+         ! and let the process get on with stopping
+         reason=15
+         ->monout
+      %finish
+      ->resume
+
+   %finish %else %if d_aqd=maxm1 %start
+
+      ! Check whether it's an Int:, and if so discard it if there's one of
+      ! the same type already queued.
+
+      %if copy sigoutp_dest&X'FFFF'=1 {Int DACT} %start
+         k=(copy sigoutp_p3>>16)&255;    ! The Int character
+         jj=d_signal next
+         %for j=1, 1, maxm1 %cycle
+            dd==d_signal ams(jj)
+            %if dd_dest&X'FFFF'=1 %and (dd_p3>>16)&255=k %start
+               doper2("Multiple Int:".tostring(k))
+               ->resume
+            %finish
+            jj=(jj+1)&maxm1
+         %repeat
+      %finish
+   %finish
+
+   prec("QUEUE: ", copy sigoutp, 12) %unless d_dirmon=0
+
+   d_signal ams(d_signal in)=copy sigoutp
+   d_signal in=(d_signal in+1)&maxm1
+   d_aqd=d_aqd+1
+
+give next:
+   -> resume %if d_async inhib > 10  { dstopping }
+   *ipk_0(0); *st_2,savekey; *spka_0(0)
+   uinf_int count=d_aqd
+   *l_2,savekey; *spka_0(2)
+
+   j=icontext_async inhib
+   %unless d_dirmon=0 %start
+      wrsn("Asynci:", d_asyncinhib)
+      wrsn("J", j)
+      k=j
+      k=integer(k) %if k>(1<<20)
+      wrsnt("Inhibi:", k, 0)
+   %finish
+
+   ->resume %if d_async inhib#0 %or j=-1 %or (j>(1<<20) %and integer(j)>0 %and %c
+      integer(icontext_psw1-4)#X'AF000018')
+
+   asyncm=d_signal ams(d_signal next)
+   interrupted context=asyncm_context
+   d_signal next=(d_signal next+1)&maxm1
+   d_aqd=d_aqd-1
+
+   prec("NEXT: ", asyncm, 12) %unless d_dirmon=0
+
+   *ipk_0(0); *st_2,savekey; *spka_0(0)
+   uinf_int count=d_aqd
+   *l_2,savekey; *spka_0(2)
+   dact=asyncm_dest&X'FFFF'
+   ->post act(dact)
+
+asact(4):                                ! UHIDACT       KICK TO DISPATCH ASYNC INTS, POSSIBLY
+   reason=12 %and ->mon out %if d_aqd=0
+   ->give next
+
+asact(5):                                ! DIRDACT       DIR MSGS
+   operno=copy sigoutp_srce
+   s=string(addr(copy sigoutp_p1))
+
+   %if s="PMON" %and d_pagemon#0 %and integer(d_pagemon)=32 %start
+      j=dmon("SWITCHON")
+      oper(operno, "J=".itos(j))
+      ->resume
+   %finish
+
+   %if s="TIME" %and d_procuser#"DIRECT" %start
+      oper(operno, "T=".tim(accts_millisecs//1000).",PT=".itos(accts_aptrns))
+      ->resume
+   %finish
+
+   %if s->s1.("XST").s2 %and s1="" %start
+      %if d_async inhib#0 %start
+         oper(operno, "Async msgs inhibited")
+         ->resume
+      %finish
+      reason=13
+      ->monout %if s2="" { ie XST }
+      reason=copy sigoutp_p6
+      ->monout1 { XSTOP }
+   %finish
+
+   %if s="CMP" %then printmp(0, 0) %and ->resume
+   %if s="ST" %then copy sigoutp_dest=2 %and ->queue it
+   %if s="VST" %then copy sigoutp_dest=16 %and ->queue it
+   %if s="EMPTYDVM" %then copy sigoutp_dest=15 %and ->queue it
+
+   %if s->("INT ").s %start
+
+      ->query %if s=""
+
+      %if length(s)>1 %and uinf_reason=inter %start
+         *ipk_0(0)
+         *st_2,savekey
+         *spka_0(0)
+         iostat_intmess<-s
+         *l_2,savekey
+         *spka_0(2)
+         ->resume
+      %finish
+
+      ! Then it's a single-character Int:
+      copy sigoutp_dest=1
+      string(addr(copy sigoutp_p3))=s
+      ->queue it
+   %finish
+
+   %if s="SRCE" %start
+      workp=d_loutp
+      s=d_loutp state
+      k=addr(workp)
+      %cycle j=0, 8, 24
+         oper(operno, htos(integer(k+j), 8)." ".htos(integer(k+j+4), 8))
+      %repeat
+      oper(operno, s)
+      oper(operno, "PSW: ".htos(icontext_psw0, 8)." ".htos(icontext_psw1,
+         8)." ".htos(integer(icontext_psw1-4), 8))
+
+      print dumps(icontext, asyncm_p1)
+      ->resume
+   %finish
+
+   %if s->("USECOUNT").s %start
+      %if s="" %then j=-1 %else %start
+         %while s->(" ").s %cycle; %repeat
+         j=stoi(s)
+      %finish
+      %unless-1<=j<=99 %then ->query
+      j=show usecount(j, 1, operno);     ! local process count
+      ->resume
+   %finish
+
+   %if s="FAIL" %then j=integer(-1) %and ->resume
+
+   %if s->s1.(" ").s2 %start
+      j=stoi(s2)
+      %unless j#invi %and (s1="DIRMON" %or s1="SIGMON") %then ->query
+      %if s1="DIRMON" %then d_dirmon=j %else d_sigmon=j
+      ->resume
+   %finish
+
+query:
+   oper(operno, s."?")
+   ->resume
+
+asact(7):                                ! entry to PON a use-count number for fsys P_P1
+   ! back to the DIRECT process.
+   workp=0
+   workp_dest=copy sigoutp_srce
+   workp_p1=asyncm_p1
+   workp_p2=d_fsys usecount(workp_p1)
+   j=dponi(workp)
+   ->resume
+!------------------------------------------------------------------------------------
+
+post act(1):                             ! INT MSG
+   class=65
+   subclass=byteinteger(addr(asyncm_p3)+1);  ! THE SINGLE INT: CHAR
+
+   %if subclass=0 %start
+      ! Interactive terminal address, currently 4 bytes as follows
+      ! binary 3 (no of bytes following)
+      ! Node no, Terminal no, Buffer no.
+      *ipk_0(0); *st_2,savekey; *spka_0(0)
+      uinf_itaddr0=(asyncm_p3<<16)!(asyncm_p4>>16)
+      *l_2,savekey; *spka_0(2)
+      ->resume
+   %finish
+
+   subclass='Y' %if subclass=25
+
+   ->activate ontrap
+
+post act(2):                             ! "ST" RECEIVED
+pa2:
+   class=65;                             ! single-char INT message
+   subclass='X'
+   ->activate ontrap
+
+post act(3):                             ! TXT MSG
+pa3:
+   class=66
+   subclass=asyncm_p3;                   ! THE TEXT POINTERS
+   ->activate ontrap
+
+post act(8):                             ! CLOSE MSG
+   !
+   ! This msg acts exactly as TXT MSG or as DIR MSG "ST" (according to
+   ! the setting of P_P1), except that the message is ignored if the
+   ! process has zero use-counts for all discs which are to be closed.
+   ! The variable FSYS WARN is set (if the user might have to go) or
+   ! cleared (if he now has no segments connected on closing FSYSes).
+   ! This variable is used (only) in routine DDISCONNECTI, before return,
+   ! to decide whether or not to clear the index area VM.
+   !
+   k=0
+recycle:
+   %cycle j=99, -1, 0
+      %if d_fsys usecount(j)#0 %and av(j, 0)=0 %start
+         %if k=0 %start
+            empty dvm
+            k=1
+            ->recycle
+         %finish
+         d_fsys warn=1
+         %if asyncm_p1=0 %start
+            ! This next line relates only to async messages sent by DIRECT
+            ! to the executive processes just to get the FSYS WARN variable
+            ! set.
+            %if asyncm_p3=0 %then ->resume
+            ->pa3
+         %finish %else ->pa2
+      %finish
+   %repeat
+   d_fsys warn=0
+   ->resume
+
+post act(9):
+   class=68
+   subclass=asyncm_p1
+   ->activate ontrap
+
+post act(11):
+post act(13):
+post act(14):                             ! go to new context
+   nc=dact-10
+
+   *ipk_0(0); *st_2,savekey; *spka_0(0)
+
+   context(nc)=d_newcontext
+   outp(curcontext)=0
+   outp(curcontext)_p1=nc { new context }
+   outp(curcontext)_p2=d_newcontext_susp
+
+   *l_2,savekey; *spka_0(2)
+
+   *mc_19(0),0
+   reason=32
+   ->after mc 19
+
+post act(15):
+   emptydvm
+   ->resume
+
+post act(16):                            ! "VST" received (end of session)
+   class=65
+   subclass='V'
+   ->activate ontrap
+
+post act(*):    ! nuldact and any others
+   -> resume
+
+
+!-------------------------------------------------------------------------
+
+diagnose:
+
+   %if sigep=1 {VS error} %start
+      ! The VSparm is in ICONTEXT_LAST VSPARM.  Is the VS error for a segment which
+      ! is connected, but whose CBT entries are not allocated?
+      k=icontext_last vsparm>>segshift;  ! The segment number being referenced
+      %if sst(k)&not alloc mask=not alloc %start
+         ! wrs("New VSerror hit ".htos(icontext_last vsparm, 8))
+         j=allocate cbt(icontext_last vsparm)
+         %if j#0 %then reason=7 %and ->monout
+         d_signal loopcount=d_signal loopcount-1
+         ->resume;                       ! To re-try the failing instruction
+      %finish
+   %finish
+
+   %if mode=31 %start
+      k=d_dirmon
+      %cycle j=2, 1, topexec
+         %exit %unless k=0
+         k=1 %if d_procuser=exec(j)
+      %repeat
+      print dumps(icontext, copy sigoutp_p1) %unless k=0
+   %finish
+
+   %if ((icontext_psw1&x'7fffffff')>>segshift=code seg %or class=22) %and class#17 %start
+      reason=6
+      ->monout
+   %finish
+
+!========================= ACTIVATE CONTINGENCY PROCEDURE =============================
+
+activate ontrap:
+   wrs("Activate Ontrap ".itos(class)."/".itos(subclass)."/".itos(interrupted context)) %unless %c
+      d_dirmon=0
+   print context(icontext) %unless d_dirmon=0
+
+   reason=1
+   ->monout %if d_environ(0)=0 { no ontrap routine }
+   *ipk_0(0); *st_2,savekey; *spka_0(0)
+   uinf_class=class
+   uinf_subclass=subclass
+   uinf_context=interrupted context
+   *l_2,savekey; *spka_0(2)
+
+   ! d_dirlevel = 0
+   adr=addr(d_environ(0))
+   *stm_4,14,16(11) { save current regs }
+   *l_1,adr
+   *st_11,44(1) { to keep GR11 }
+   *lm_4,15,16(1)
+   *mc_13(0),0 { relinquish priv etc }
+   *basr_15,15 { enter the ontrap routine }
+   {---------------}
+   *mc_12(0),0 { get priv back }
+   *st_1,nc { result of ontrap }
+   wrs(" >>> ".itos(nc)) %unless d_dirmon=0
+
+   ->monout %unless nc=1 %or ((nc=3 %or nc=4) %and d_state set(nc)>0)
+
+   *ipk_0(0); *st_2,savekey; *spka_0(0)
+
+   outp(curcontext)=0
+   outp(curcontext)_p1=nc
+   outp(curcontext)_p2=context(nc)_susp {************************}
+
+   *l_2,savekey; *spka_0(2)
+
+   ! d_dirlevel = save dirlevel
+   *mc_19(0),0
+   reason=33
+   ->after mc 19
+
+asact(0):                                ! INVALID
+asact(12):
+resume:
+   *ipk_0(0)
+   *st_2,savekey
+   *spka_0(0)
+   outp(curcontext)=0
+   nc=copy sigoutp_context
+   outp(curcontext)_p1=nc
+   outp(curcontext)_p2=context(nc)_susp {***************************}
+   *l_2,savekey
+   *spka_0(2)
+   %unless d_dirmon=0 %start
+      wrs("Resume to context ".itos(nc))
+      printcontext(context(nc))
+   %finish
+   ! d_dirlevel = save dirlevel
+   *MC_19(0),0
+   reason=34
+   ->after mc 19
+
+!=====================================================================================
+
+asact(resdact):                          ! RESUME
+   ->resume
+   ! %if D_ONTRAP=0 %then REASON=10 %and -> MON OUT
+   !*MC_19(0),0
+   !reason=35
+   !->after mc 19
+
+!======================================================================================
+
+mon out:
+   s=d_procuser." SIGNAL FAIL "
+   %if 1<=reason<=max sigfail %then s=s.sigfail(reason) %else s=s.itos(reason)."?"
+   lmsg(s)
+   length(s)=21
+   doper2(s);                            ! (no oper msg for DSTOP on user stack)
+
+mon out1:
+   %if d_dirmon=0 %and (reason=1 %or reason=6 %or reason=7) %start
+      wrs(s1)
+      print dumps(icontext, copy sigoutp_p1)
+   %finish
+   ! EXECUTE THIS STOP ROUTINE ON THE USER STACK, BECAUSE WE ARE NOT ALLOWED
+   ! TO "SUSPEND" (WHICH CAN HAPPEN FOR SEMAPHORES OR OTHER "OUT"S")
+   ! ON THE SIGNAL STACK
+   d_reason=reason
+   j=d nominate trap(stop on stack)
+
+   stack=stack seg<<seg shift
+   adr=addr(d_environ(0))
+
+   *ipk_0(0); *st_2,savekey; *spka_0(0)
+
+   move(64, adr, contextad+contextl+8)
+   context(1)_susp=0
+
+   %if target = xa %start
+      context(1)_psw1 = (context(1)_psw1 & x'80000000') ! d_environ(15)
+   %else
+      context(1)_psw1=d_environ(15)
+   %finish
+
+   context(1)_gr(11)=stack
+   outp(2)=0
+   outp(2)_p1=1
+
+   *l_2,savekey; *spka_0(2)
+
+   *mc_19(0),0
+   { should not return }
+   reason=36 { just in case it does ! }
+
+after mc 19:
+   %if outp(curcontext)_dest=-1 %start
+      wrs("*mc_19(0),0 failed reason ".itos(reason))
+      ->monout
+   %finish
+   ->back in
+
+!------------------------------------- PRINT DUMPS --------------------------------------
+
+%routine print dumps(%record (contextf) %name r, %integer intparam)
+%integer top, pick, j, gr, stackbase, jp
+
+   top=r_gr(11) { stack top at time of fail }
+   stack base=top>>seg shift<<seg shift
+   pick=top
+   jp=11
+   %cycle j=10, -1, 5
+      gr=r_gr(j)
+      jp=j %and pick=gr %if (pick=top {first time} %or pick<gr {looks closer}) %and %c
+         (gr+64<=top {not beyond stack top }) %and %c
+         (stack base<=gr {but is above stack base !}) %and (integer(gr+44)=gr {chained properly})
+   %repeat
+   prec("SIGNAL: ", copy sigoutp, 12)
+   wrs(s1)
+   wrs("Interrupted context (".itos(interrupted context).")")
+   printcontext(icontext)
+   print segment table
+!      wrs("Contents of D record")
+!      ddump(addr(d_i(0)), addr(d_end of dirownf), 0, 32)
+   printmp(0, 0)
+   ndiag(r_psw1, pick, intparam, addr(r_gr(0)))
+   ncode(r_psw1 & x'7fffffff')
+%end;                                    ! PRINT DUMPS
+
+!-----------------------------------------------------------------------
+
+%routine oper(%integer srce, %string (255) s)
+%record (parmf) %name p
+%integer l
+   srce=X'320007' %if srce>>8=0;         ! JUST IN CASE I FORGOT !
+   p==outp(curcontext)
+
+   wrss("SIGOP: ", s)
+
+   %cycle
+      *ipk_0(0)
+      *st_2,savekey
+      *spka_0(0)
+      p=0
+      p_dest=srce
+      p_s<-s
+      l=length(s)-23
+      p_p1=p_p1!X'80000000' %if l>0 { MORE TO COME }
+      *l_2,savekey
+      *spka_0(2)
+      *MC_6(0),0
+      %return %unless l>0
+      move(l, addr(s)+24, addr(s)+1)
+      length(s)=l
+   %repeat
+%end;                                    ! OF LOCAL VERSION OF OPER WHICH REPLIES TO CALLER
+%end;                                    ! SIGNAL
+
+
+!-----------------------------------------------------------------------
+
+!<DCLEARINTMESSAGE
+%external %integer %fn dclear int message
+
+! When a terminal user presses the ESC key, the TCP software generates
+! a prompt string "INT:".  The message input by the user in response is
+! called an "INT: message" and is transmitted to the user process
+! independently of the input and output streams enabled by the DENABLE
+! TERMINAL STREAM procedure.  INT: messages may be at most 15 characters
+! long, the character used to terminate the message not forming part of
+! the message.
+
+! The EMAS 2900 System distinguishes single-character INT: messages from
+! multi-character INT: messages (null INT: messages are discarded by the
+! TCP).  In the former case, the "contingency mechanism" is invoked.  The
+! DCLEAR INT MESSAGE procedure has no relevance in this case.
+
+! Multi-character INT: messages, by contrast, are placed in a location
+! visible to programs running at any level of privilege, and in
+! particular to the subsystem.  Thus an INT: message may arrive
+! asynchronously with respect to the user process and may be used by it,
+! for example, to re-direct the course of the computation or to take a
+! particular action and then resume the computation.
+
+! The location of the INT: message may be referenced by using the
+! address supplied in the AIOSTAT field of the UINF record .  The format
+! of the record at this address is given by IOSTATF, below.  Access to
+! the location can be achieved as in the following example:
+!        .
+!        .
+!      %recordformat IOSTATF(%integer IAD, %string(15)INT MESS,
+!         %integer INBUFLEN, OUTBUFLEN, INSTREAM, OUTSTREAM)
+!      %record(IOSTATF)%name IOSTAT
+!      %stringname INT MESSAGE
+!        .
+!        .
+!      IOSTAT == RECORD(UINF_AIOSTAT)
+!      INT MESSAGE == IOSTAT_INT MESS
+!        .
+!        .
+!      %if INT MESSAGE = "STOP" %start
+!        .
+!        .
+! When the process has noted the presence of a multi-character INT:
+! message, the message should be cleared so that further examination
+! of the message location will not yield the same message.  The
+! message can only be cleared by a call of the procedure DCLEAR INT
+! MESSAGE, since the message location is not writable at the subsystem's
+! level of privilege.
+
+! Any INT: message arriving before a previous message has been cleared
+! overwrites the previous message.
+!>
+%integer j, savekey
+   *mc_12(0),0
+   j=53
+   ->out %unless uinf_reason=inter
+
+   j=0
+   *ipk_0(0)
+   *st_2,savekey
+   *spka_0(0)
+   iostat_int mess=""
+   *l_2,savekey
+   *spka_0(2)
+out:
+   *mc_13(0),0
+   %result=j
+%end;                                    ! DCLEAR INT MESSAGE
+
+!-----------------------------------------------------------------------
+
+!<DRESETCONTINGENCY
+
+%external %integer %fn dreset contingency
+
+! This procedure causes the first-set ONTRAP routine to be reinstated as
+! the contingency procedure.
+
+%integer j
+   j=into(256+74, "")
+   ->out %unless j=0
+
+   j=53
+   ->out %if d_environ0(0)=0
+
+   %cycle j=0, 1, 15
+      d_environ(j)=d_environ0(j)
+   %repeat
+
+   j=0
+out:
+   %result=outof(j)
+%end;                                    ! DRESET CONTINGENCY
+
+!-----------------------------------------------------------------------
+
+
+%external %integer %fn d goto context(%integer %name new context)
+%integer savekey, j, nc
+   *mc_12(0),0
+   j=55
+   nc=newcontext
+   wrs("D goto context ".itos(nc)." from ".itos(curcontext)) %unless d_dirmon=0
+   ->out %unless nc=1 %or nc=3 %or nc=4
+   ->out %if curcontext=2 { not allowed from signal state }
+
+   ->out %if nc>1 %and d_state set(nc)=0
+
+   j=0
+   ->out %if curcontext=nc { no-op }
+
+   *ipk_0(0)
+   *st_2,savekey
+   *spka_0(0)
+   outp(curcontext)=0
+   outp(curcontext)_p1=nc
+   outp(curcontext)_p2=context(nc)_susp {**************************}
+   *l_2,savekey
+   *spka_0(2)
+   *slr_1,1 { result }
+   *lm_4,15,16(10)
+   *mc_13,0
+   *mc_19(0),0
+   *bcr_15,15
+out:
+   *mc_13(0),0
+   %result=j
+%end
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn d set state(%integer %name context no, %long %integer %name mask,
+   %integer %array %name regs {0:47})
+
+%constinteger top = (ownseg >> 4) - 1  { no of 16's of segs - 1 }
+
+%integer j, k, savekey, c
+%long %integer lmask
+%integer %array %name con
+%const %long %integer never= X'EC0003FFFFFF'  { ie can't set CR(0)-CR(15) }
+   *mc_12(0),0
+
+   c=context no
+   wrs("Context ".itos(curcontext)." sets state for ".itos(c)) %unless d_dirmon=0
+   j=55
+   ->out %unless c=1 %or c=3 %or c=4
+   lmask=mask&never { remove repugnant bits }
+
+   con==array(addr(d_newcontext), ift)
+   d_newcontext=context(c) { current values }
+
+   %cycle k=0, 1, 47
+      con(k)=regs(k) %unless (lmask>>k)&1=0
+   %repeat
+
+   d_newcontext_async inhib=-1 %unless c=1 {d_newcontext_async inhib = 0}
+   d_newcontext_psw0=con(0)!X'07F10000' { ensure problem state }
+
+   %if target = xa %start
+      %if d_newcontext_psw0 & x'08000000' # 0 %start { move mode31 bit }
+         d_newcontext_psw0 = d_newcontext_psw0 & x'f7ffffff'
+         d_newcontext_psw1 = d_newcontext_psw1 ! x'80000000'
+      %finish
+   %finish
+
+   %if target = xa %start
+      d_newcontext_cr(1) = (con(27) & x'7fffff00') ! top
+   %else
+      d_newcontext_cr(1)=(con(27)&X'00FFFFFF')!(top<<24)
+   %finish
+   d_newcontext_susp=0
+   %unless d_dirmon=0 %start
+      wrs("State to be used:")
+      printcontext(d_newcontext)
+   %finish
+   ->out %if con(1)&x'7fffffff'>>seg shift=code seg { don't allow PC in Director }
+   d_state set(c)=1 %if 3<=c<=4
+
+   %if curcontext=c %start { tricky ! }
+      *ipk_0(0)
+      *st_2,savekey
+      *spka_0(0)
+      outp(curcontext)=0
+      outp(curcontext)_dest=((com_async dest+d_process)<<16)!(10+c)
+      *l_2,savekey
+      *spka_0(2)
+      *mc_6(0),0
+   %finish %else %start
+      *ipk_0(0)
+      *st_2,savekey
+      *spka_0(0)
+      context(c)=d_newcontext
+      *l_2,savekey
+      *spka_0(2)
+   %finish
+   j=0
+out:
+   wrs("Set state fails") %unless j=0
+   *mc_13(0),0
+   %result=j
+%end;                                    ! D SET STATE
+
+!-----------------------------------------------------------------------
+
+%routine write to col(%integer i, line, col)
+%string (31) s
+   s=itos(i)
+   place(s, screen2, line, col-length(s), null)
+%end;                                    ! WRITE TO COL
+
+!-----------------------------------------------------------------------
+
+%external %routine init display
+%integer j
+%string (31) s
+   j=count procs in("      ", d_curiusers)
+   place("Interactive Use  -  Status", screen2, 0, 6, clear)
+   write to col(d_maxiusers, 5, 31)
+   write to col(d_curiusers, 5, 38)
+   d_lineno=9
+   place("Current Current", screen2, 2, 25, null)
+   place("limit   number", screen2, 3, 25, null)
+   place("Interactive users:", screen2, 5, 0, null)
+   s=time
+   length(s)=5
+   place("Screen written at ".s."hrs", screen2, lines per page-1, 13, null)
+%end;                                    ! INIT DISPLAY
+
+!-----------------------------------------------------------------------
+
+%integer %fn hasqs(%string (6) u)
+%integer j
+   %cycle j=1, 1, 6
+      %result=1 %if charno(u, j)='?'
+   %repeat
+   %result=0
+%end;                                    ! HASQS
+
+!-----------------------------------------------------------------------
+
+%integer %fn ambiguous(%string (6) user, passu)
+! result is  1  if there exists a 6-char name which belongs to the group
+!               USER and to the group PASSU, otherwise result 0.
+%integer j, chp, chu
+   %result=1 %unless length(user)=6=length(passu);  ! not unambiguous
+   %cycle j=1, 1, 6
+      chu=charno(user, j)
+      chp=charno(passu, j)
+      %result=0 %if chu#chp %and chu#'?' %and chp#'?';  ! unambiguous
+   %repeat
+   %result=1;                            ! ambiguous
+%end;                                    ! AMBIGUOUS
+
+!-----------------------------------------------------------------------
+
+%routine ugretlist(%integer pt)
+%integer k
+   %return %if pt=endl
+   k=d_asl
+   d_asl=pt
+   pt=d_ug(pt)_link %while d_ug(pt)_link#endl
+   d_ug(pt)_link=k
+%end;                                    ! UGRETLIST
+
+!-----------------------------------------------------------------------
+
+%integer %fn onlist(%string (6) user, %integer %name head, %integer act, max)
+
+! FOR ADDTOMAINLIST WE ADD TO THE END OF THE LIST. FOR ADDTOSUBLIST,
+! WE GO DOWN TO THE FIRST ENTRY TO WHICH THE USER IS NON-EQUIVALENT,
+! AND ADD IN FRONT OF THAT.
+
+%integer cur, j, k, inset
+%integer %name prevlink
+%record (ugf) %name r
+%string (6) wu
+   cur=head
+   prevlink==head
+   %while cur#endl %cycle
+      r==d_ug(cur)
+      %if act&display#0 %start
+         act=act!oldscreen %if act&oldscreen=0
+         inset=5
+         inset=10 %if act&sidechain#0
+         place(r_u, screen2, d_lineno, inset, null)
+         write to col(r_max, d_lineno, 31)
+         write to col(r_n, d_lineno, 38)
+         d_lineno=d_lineno+1
+         j=onlist(user, r_sublink, display!sidechain, 0)
+      %finish
+
+      %if act&procreset#0 %start
+         r_n=count procs in(r_u, j)
+         %if user=r_u %then max=r_max %else %start
+            r_max=max %if equser(r_u, user)#0 %and r_max>max
+         %finish
+         j=onlist(user, r_sublink, act!sidechain, max)
+      %finish
+
+      %if equser(user, r_u)#0 %start
+         ! Found equivalent or identical
+         %if act&(checkn!resetn!incre)#0 %start
+            r_n=r_n+max %if act&incre#0
+            r_n=max %if act&resetn#0
+            %result=groupfullflag %if r_n>=r_max %and act&checkn#0
+            %result=onlist(user, r_sublink, act!sidechain, max)
+         %finish;                        ! CHECKN PROCRESET INCRE
+
+         %if user#r_u %start
+            ! Found equivalent, but not identical
+            %if act&(addto!sidechain)=addto!sidechain %start
+               max=r_max %if max>r_max
+            %finish
+            %result=onlist(user, r_sublink, act!sidechain, max) %if act&procreset=0
+         %finish %else %start
+            ! Then found identical
+            r_max=max %and %result=0 %if act&addto#0
+            %if act&remove#0 %start
+               ugretlist(r_sublink)
+               r_sublink=endl
+               j=prevlink
+               prevlink=r_link
+               r_link=endl
+               ugretlist(j)
+               %result=0
+            %finish;                     ! ACT REMOVE
+         %finish;                        ! FOUND IDENT
+      %finish %else %start;              ! FINISH FOUND EQUIV
+         ! Neither identical nor equivalent
+         ! PREVLINK IS MAPPED ONTO LINK POINTING TO CURRENT
+         ! CELL. GET NEW CELL AND PUT IN FRONT OF CURRENT CELL
+         %if act&sidechain=0 %start
+            %if equser(r_u, user)#0 %and act&addto#0 %start
+               prevlink==r_sublink
+               wu=r_u
+               r_u=user
+               user=wu
+               j=r_max
+               r_max=max
+               max=j
+               %exit
+            %finish
+            %result=ambiflag %if ambiguous(user, r_u)#0
+         %finish
+         %exit %if hasqs(r_u)#0 %and act&(addto!sidechain)=addto!sidechain
+      %finish;                           ! Neither identical nor equivalent
+      prevlink==d_ug(cur)_link
+      cur=d_ug(cur)_link
+   %repeat
+
+   %if act&addto#0 %start
+      %result=nofreeflag %if d_asl=endl
+      k=prevlink
+      j=d_asl
+      prevlink=j
+      d_asl=d_ug(d_asl)_link;            ! TAKE OFF FREELIST
+      d_ug(j)_link=k
+      d_ug(j)_u=user
+      d_ug(j)_max=max
+      d_ug(j)_n=0
+      %result=addedflag;                 ! OK
+   %finish
+
+   %result=notinlistflag
+%end;                                    ! ONLIST
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn listmod(%string (6) usergroup, %integer n1, n2)
+! There are 4 calls on this all from XOP
+!     process start                     LM(user, 0, 1)
+!     process stops                     LM(user, 0, -1)
+!     D/USERS                           LM(S1, N1, N2)
+!     checkstart                        LM(user, 0, 0)
+
+
+!  ADDTO 2  add or reset MAXusers for usergroup to value N
+! REMOVE 32   remove USERGROUP from list
+! CHECKN 128   check whether USERgroup may log on
+! INCRE  4   add N to counts for usergroups including USERGROUP
+! PROCRESET  1  reset N-values for all usergroups from process-list
+! DISPLAY  64  display the lists on the screen.
+%integer n, act, j, k
+   n=0
+   %if d_asl=-2 %start
+      ! FREELIST NOT INITIALISED
+      %cycle j=0, 1, topug
+         d_ug(j)_link=j+1
+         d_ug(j)_sublink=endl
+      %repeat
+      d_ug(topug)_link=endl
+      d_asl=0
+      d_maxiusers=com_maxprocs-topexec-2
+   %finish
+   %if length(usergroup)=6 %start
+      %if n1=0 %start;                   ! NOT A D/USERS
+         %if n2=0 %start
+            %if d_curiusers>=d_maxiusers %then %result=sysfullflag
+            act=checkn
+         %finish %else act=incre %and n=n2 %and d_curiusers=d_curiusers+n
+      %finish %else %start
+         ! THEN D/USERS <USERGROUP> PAR
+         %if n2<0 %then act=remove %else %start
+            act=addto
+            n=n2
+            %if n>d_maxiusers %then n=d_maxiusers
+         %finish
+      %finish
+   %finish %else %start
+      %if n1>=0 %start
+         d_maxiusers=n1
+         d_maxiusers=com_maxprocs-topexec-2 %if d_maxiusers>com_maxprocs-topexec-2
+         %result=0
+      %finish
+      act=display
+      init display
+      usergroup="      "
+   %finish
+   j=onlist(usergroup, d_head, act, n)
+   ! If we have just successfully added a new item to the list,
+   ! then reset all counts from process list.
+   %if act#checkn %and act#incre %and act#remove %and act#display %then %c
+      k=onlist(usergroup, d_head, procreset, n)
+   %if act=display %then place("Sub groups:", screen2, 7, 0, screen switch)
+   %if act=checkn %and sysfullflag#j#groupfullflag %then j=0
+   %result=j
+%end;                                    ! LISTMOD
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn request input(%integer output posn, trigger posn)
+%integer savekey, j
+%record (parmf) %name diroutp
+   *mc_12(0),0
+   j=-1
+
+   diroutp==outp(curcontext)
+   ->out %unless iostat_outbuflen>0 %and 0<=output posn<iostat_outbuflen %and %c
+      iostat_inbuflen>0 %and 0<=trigger posn<iostat_inbuflen
+
+   j=0
+   ->out %if iostat_iad#trigger posn
+
+   *ipk_0(0)
+   *st_2,savekey
+   *spka_0(0)
+   diroutp_dest=X'370006'
+   diroutp_p1=iostat_instream
+   diroutp_p2=output posn
+   diroutp_p3=trigger posn
+   diroutp_p4 = uinf_streamid
+   *l_2,savekey
+   *spka_0(2)
+   *mc_2(0),0;                           ! class 0, code 2
+out:
+   *mc_13(0),0
+   %result=j
+%end
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn request output(%integer output posn, trigger posn)
+%integer savekey, j
+%record (parmf) %name diroutp
+%const %integer inst reply=X'370007';    ! COMMC C REPLIES AT ONCE
+%const %integer wait reply=X'370006';    ! REPLIES WHEN OPUT FINISHED
+   *mc_12(0),0
+   j=-1
+
+   diroutp==outp(curcontext)
+   ->out %unless iostat_outbuflen>0 %and 0<=output posn<iostat_outbuflen %and %c
+      -1<=trigger posn<iostat_outbuflen
+
+   *ipk_0(0)
+   *st_2,savekey
+   *spka_0(0)
+   %if trigger posn<0 %then diroutp_dest=inst reply %else diroutp_dest=wait reply
+   diroutp_p1=iostat_outstream
+   diroutp_p2=output posn
+   diroutp_p3=trigger posn
+   *l_2,savekey
+   *spka_0(2)
+   *mc_24(0),0;                          ! class 0, code 24
+   %if diroutp_p2#0 %then j=-2 %else j=diroutp_p5
+out:
+   *mc_13(0),0
+   %result=j
+%end
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn change context
+   *mc_26(0),0;                          ! class 0, code 26
+   %result=0
+%end
+
+!-----------------------------------------------------------------------
+
+%routine itoe(%integer adr, len)
+%integer pt, base
+   base=com_trans
+   %cycle
+      %exit %if len=0
+      len=len-1
+      byteinteger(adr)=byteinteger(base+byteinteger(adr))
+      adr=adr+1
+   %repeat
+%end;                                    ! itoe
+
+!-----------------------------------------------------------------------
+
+%routine etoi(%integer adr, len)
+%integer pt, base
+   base=com_trans+256
+   %cycle
+      %exit %if len=0
+      len=len-1
+      byteinteger(adr)=byteinteger(base+byteinteger(adr))
+      adr=adr+1
+   %repeat
+%end;                                    ! etoi
+
+!-----------------------------------------------------------------------
+
+%external %string %fn htos(%integer value, places)
+%string (8) s
+%const %byte %integer %array h(0:15)= %c
+'0', '1', '2', '3', '4', '5', '6', '7',
+ '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'
+   places=1 %if places<1
+   places=8 %if places>8
+   s=""
+   %cycle
+      s=tostring(h(value&15)).s
+      places=places-1
+      %exit %if places=0
+      value=value>>4
+   %repeat
+   %result=s
+%end
+
+!-----------------------------------------------------------------------
+
+%external %string %fn itos(%integer n)
+%string (16) s
+%integer sign, w, d
+   %result="0" %if n=0
+   sign=1
+   %if n<0 %start
+      sign=-1
+      %if n=X'80000000' %then n=X'7FFFFFFF' %else n=-n
+   %finish
+   s=""
+   %while n>0 %cycle
+      w=n//10
+      d=n-w*10
+      s=tostring('0'+d).s
+      n=w
+   %repeat
+   s="-".s %if sign<0
+   %result=s
+%end
+
+!-----------------------------------------------------------------------
+
+%external %routine wrsnt(%string (255) s, %integer n, type)
+%integer j
+%switch sw(0:3)
+
+!     type & 3 = 0 decimal if small else hex
+!                1 decimal
+!                2 hex
+!                3 decimal and hex
+!     type & 4 = 1 dont put NL at end
+!     type & X70 gives number of digits, 0=8
+   printstring(s)
+   printsymbol(' ')
+   ->sw(type&3)
+sw(0):->sw(2) %unless-256<=n<=255
+sw(3):
+sw(1):printstring(itos(n))
+   ->out %if type&2=0
+sw(2):printstring("X'")
+   j=type>>4&7
+   j=8 %if j=0
+   printstring(htos(n, j))
+out:
+   printsymbol(nl) %if type&4=0
+%end;                                    ! WRSNT
+
+!-----------------------------------------------------------------------
+
+%external %routine wrsn(%string (255) s, %integer n)
+   printstring(s)
+   printsymbol(' ')
+   write(n, 1)
+   printsymbol(nl)
+%end;                                    ! WRSN
+
+!-----------------------------------------------------------------------
+
+%external %routine wrs3n(%string (255) s1, s2, s3, %integer n)
+   printstring(s1); printsymbol(' ')
+   printstring(s2); printsymbol(' ')
+   printstring(s3); printsymbol(' ')
+   write(n, 1)
+   printsymbol(nl)
+%end;                                    ! WRS3N
+
+!-----------------------------------------------------------------------
+
+%external %routine prhex(%integer i)
+   printstring(htos(i, 8))
+%end;                                    ! PRHEX
+
+!-----------------------------------------------------------------------
+
+%external %routine prx(%integer i, pl)
+   printsymbol(' ')
+   printstring(htos(i, pl))
+%end;                                    ! PRX
+
+!-----------------------------------------------------------------------
+
+%routine print record(%integer adr)
+%integer i, j, ch, prev
+   j=adr+8
+
+   %cycle i=-8, 4, 20
+      prhex(integer(i+j))
+      printsymbol(' ')
+   %repeat
+
+   prev=-1
+   %cycle i=j, 1, j+23
+      ch=byteinteger(i)
+      ch=' ' %unless 32<ch<127
+      printsymbol(ch) %unless ch=' '=prev
+      prev=ch
+   %repeat
+%end;                                    ! PRINT RECORD
+
+!-----------------------------------------------------------------------
+
+%routine iupdate(%integer mode, newlimit)
+!  MODE  =  -1   OUT OF DIRECTOR
+!            0   IN OR INTO USER
+!            1   INTO DIRECTOR
+
+! WHEN CALLED WITH MODE -1, DO NOT UPDATE DIRECTOR RECORD UNLESS
+! PREVIOUS MODE WAS 1 (WE DO NOT ATTEMPT TO RECORD EVERY EXIT FROM
+! DIRECTOR).
+%record (hf) %name nh
+%integer tsincelast, tnow
+%integer savekey
+%integer psincelast, pnow, j, newt, newp, newc, msg
+%integer dpence, ct sincelast
+%integer %name hptrns, hmsecs, hconnectt
+
+
+
+   %return %if d_iupdate init=0
+
+   msg=0
+   nh==record(d_ownind)
+
+   hconnectt==nh_connectt
+   %if uinf_reason=batch %start
+      hptrns==nh_bptrns
+      hmsecs==nh_bmsecs
+   %finish %else %start
+      hptrns==nh_iptrns
+      hmsecs==nh_imsecs
+   %finish
+
+   tnow=accts_millisecs
+   tsincelast=tnow-d_preva_millisecs
+   tsincelast=0 %if tsincelast<0
+   d_preva_millisecs=tnow
+   pnow=accts_aptrns
+   psincelast=pnow-d_preva_aptrns
+   psincelast=0 %if psincelast<0
+   d_preva_aptrns=accts_aptrns
+   newt=hmsecs+tsincelast>>d_pfactor
+   newp=hptrns+psincelast>>d_pfactor
+   ct sincelast=com_secsfrmn-d_prev frmn
+   d_prev frmn=com_secsfrmn
+   %if ct sincelast<0 %then ct sincelast=ct sincelast+24*60*60
+   newc=hconnectt
+   %if uinf_reason#batch %then newc=newc+ct sincelast
+! PREVENT OVERFLOW. ACCNTS SHOULD HAVE TAKEN IT BY NOW !
+   %if newt>>29#0 %then msg=2 %and newt=0
+   %if newp>>29#0 %then msg=3 %and newp=0
+   %if newc>>29#0 %then msg=4 %and newc=0
+   hmsecs=newt
+   hptrns=newp
+   hconnectt=newc
+
+! Decrement Scarcity Ration according to site charging formula if we
+! are in a time of scarcity.
+   ! IF:
+   ! no of interactive users >= current "scarcity" setting
+   %if com_ration&ration mask{no of users}>=com_ration>>scarcity shift %and (uinf_reason=inter %or (uinf_reason=batch %and %c
+      uinf_priority>3)) %start
+!--------------------------------------------------------------------------------
+
+!                      Site Formula
+
+
+      dpence=int(4.0*(tsincelast+(psincelast/6.0)));  ! in hundredths of pence
+      {Newsletter Sep 88}
+
+!----------------------------------------------------------------------------
+
+      d_session pence=d_session pence+dpence
+
+      j=uinf_funds-dpence
+      j=0 %if j<0
+      *ipk_0(0); *st_2,savekey; *spka_0(0)
+      uinf_funds=j;                      ! Note: the group holders figure is not adjusted until end of session
+      *l_2,savekey; *spka_0(2)
+
+   %finish
+   newlimit = 1 << 22 { about one hour } %unless d_exec process = no
+   %if newlimit>0 %start
+      *ipk_0(0); *st_2,savekey; *spka_0(0)
+      accts_llimit=newlimit
+      *l_2,savekey; *spka_0(2)
+   %finish
+   %if msg#0 %then wrsn("IUPDATE", msg)
+%end;                                    ! IUPDATE
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn val(%integer adr, len, rw, psr)
+! RESULT = 0  AREA OK (ACCESSIBLE)
+!          45  AREA NOT OK (INACCESSIBLE)
+
+! RW SHOULD BE SET  0  (READ ACCESS)
+!               OR  1  (WRITE ACCESS)
+
+! PARAM PSR IS USED IN THE VALIDATE, BUT IF ZERO, THE
+! PSR OF THE CALLING ROUTINE IS USED
+
+
+
+   !                              370/XA family
+
+
+%integer seg, pgs, w, cx, j, adr0
+%record (cbtf) %name cbt
+   j=1
+   ->out %if adr<0 {ADR < 0}
+   j=2
+   ->out %if len<=0 {LEN <= 0}
+
+   %result=0 %if lctablesad<=adr %and adr+len<=addr(lctables_end) %and rw=0
+   adr0=adr
+
+   %cycle
+      seg=adr>>seg shift
+      %result=0 %if seg=com seg %and rw=0
+      j=7
+      ->out %if seg>top vm seg {ADR too big}
+      ->out %if seg>ownseg-16 %and psr=1 {user call}
+
+      %cycle
+
+         cx=sst(seg)
+         %if cx&not alloc mask=not alloc %start
+            ! Allocate it - it's likely about to be referenced anyway
+            j=allocate cbt(seg<<segshift)
+            %if j#0 %then ->out;         ! Failed to allocate
+         %finish %else %exit
+
+      %repeat
+      j=3
+      ->out %if cx=dendsst {segment not connected}
+      cbt==cbta(cx)
+      j=8
+      ->out %if adr>adr0 %and cbt_flags&cbt continuation=0
+      {the area must lie within a single file}
+
+      j=4
+      ->out %if rw=1 %and cbt_flags&cbt read only#0 {read only}
+      j=5
+      ! -> OUT %unless PSR = 0 %or (BASE FILE SEG <= seg <= UINF SEG) %or seg = STACK SEG
+
+      %if target=370 %start
+         pgs=cbt_length+1
+      %finish %else %start
+         w=segment table(seg)
+         %if target=amdahl %start
+            w=w>>28
+         %finish
+         w=w&15 {number of half sections - 1}
+         w=w>>1 {number of sections - 1}
+         cbt==cbta(cx+w) {last section}
+         pgs=sec pgs*w+cbt_length+1
+      %finish
+
+      w=adr+len-1
+
+      %if seg>=(w>>seg shift) %then %exit
+      ->out %unless pgs=seg pgs {this segment full}
+      w=(seg+1)<<seg shift
+      len=len-(w-adr-1)
+      adr=w+1
+   %repeat
+
+   %result=0 %if w<(seg<<seg shift)+(pgs<<12)
+   j=6
+out:
+   %result=j
+%end;                                    ! VAL
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn into(%integer fn, %string (11) template)
+
+
+! Letters in template have the following meanings:
+
+!             input      input/output      output
+
+!  integer      i             j              k
+
+!   string      s             t              u
+
+!   record      p             q              r
+
+
+%integer ch, k, sp, errtype, dirfn
+%short %integer type, len
+%switch sw(0:4)
+%switch swerr(0:3)
+%integer flag, lnb, lnb1, gla, base, ix, sx, j, t, adr, int
+%integer v, caller, rw, return pc, stack front, monitor
+%string (31) sep
+%string (255) s255
+   *MC_12(0),0  { get access to extra segments }
+   d_async inhib = d_async inhib + 1  { inhibit at least for now }
+
+   *st_11,stackfront
+   flag=val(stack front, 4096, 1, 0)
+   flag=47 %and ->skip %unless flag=0
+
+   monitor=d_dirmon
+   monitor=0 %if fn<0 {for things like DERROR}
+
+   *st_10,lnb
+
+   return pc=integer(lnb+4*15) {check that called from Director}
+   return pc = return pc & X'7fffffff' %if target = xa
+   flag=47 %and ->skip %unless return pc>>seg shift=code seg
+
+   gla=integer(lnb+4*13)
+   lnb1=integer(lnb+4*10)
+
+   return pc=integer(lnb1+4*15) {ie who called D PROCEDURE}
+   return pc = return pc & X'7fffffff' %if target = xa
+   caller=1 {a user}
+   caller=0 %if return pc>>seg shift=code seg
+
+   dirfn=12+integer(gla+20)+(shortinteger(lnb1)&X'FFFF')
+   sep="-> ".string(dirfn)." " %unless monitor=0
+   d_dirfn=dirfn %unless fn<0
+   ix=-1
+   sx=-1
+
+   base=lnb1+60
+   j=0
+   %cycle
+      j = j + 1
+      %exit %if j>length(template)
+      printstring(sep) %unless monitor=0
+      sep = ","
+      base = base + 4
+      errtype=1 {val fails}
+      t=charno(template, j)
+
+      %if t='I' %or t='J' %or t='K' %start {an integer name}
+         ix=ix+1
+         i(ix)=0
+         adr=integer(base)
+! %unless t = 'I' %start
+         rw=1
+         rw=0 %if t='I' {input only}
+         v=val(adr, 4, rw, caller)
+         ->fail %unless v=0
+! %finish
+         %unless t='K' %start {output only}
+            int=integer(adr)
+            i(ix)=int
+            wrsnt("", int, 4) %unless monitor=0
+         %finish
+      %finish
+
+      %if t='S' %or t='T' %or t='U' %start {a string name format:}
+
+         {16 bit type 0=imp                                       }
+         {            1=res for possible long IMP string          }
+         {            2=Fortran/ASCII fixed length, space filled  }
+         {            3=Fortran/EBCDIC fixed and filled           }
+         {            4='C' variable len, zero terminated         }
+         {16 bit max length                                       }
+         {32 bit address                                          }
+         type=shortinteger(base)
+         type = 1 {invalid} %unless 0 <= type <= 4
+         len=shortinteger(base+2)
+         base=base+4
+         adr=integer(base)
+         sx=sx+1
+         s(sx)=""
+! %unless t = 'S' %start
+         rw=1
+         rw=0 %if t='S' {input only}
+         v=val(adr, len, rw, caller)
+         ->fail %unless v=0
+! %finish
+         %unless t='U' %start {output only}
+            errtype=2 {too long}
+            sp=64
+            ->sw(type)
+sw(0):
+            s255=string(adr)
+            ->l
+sw(2):
+            sp=' '
+sw(3):
+            %while len>0 %cycle
+               ch=byteinteger(adr+len-1)
+               %exit %unless ch=sp
+               len=len-1
+            %repeat
+            ->fail %if len>255
+            length(s255)=len
+            %if len>0 %start
+               move(len, adr, addr(s255)+1)
+               etoi(addr(s255)+1, len) %if type=3
+            %finish
+            ->l
+sw(4):
+            length(s255)=255
+            k=0
+            %cycle
+               ch=byteinteger(adr+k)
+               %exit %if ch=0
+               ->fail %if k=255
+               k=k+1
+               charno(s255, k)=ch
+               %exit %if k=len
+            %repeat
+            length(s255)=k
+            ->l
+sw(1):
+            errtype=3 {invalid type}
+            ->fail
+l:
+            s(sx)=s255
+            printstring(s255) %unless monitor=0
+         %finish
+      %finish
+
+      %if t='P' %or t='Q' %or t='R' %start
+         adr=integer(base)
+! %unless t = 'P' %start
+         rw=1
+         rw=0 %if t='P' {input only}
+         v=val(adr, 32, rw, caller)
+         ->fail %unless v=0
+! %finish
+         print record(adr) %unless t='R' {output only} %or monitor=0
+      %finish
+
+      %continue
+
+fail:
+      %if monitor=0 %start {need to be explicit}
+         %if flag=0 %start {first failure, give proc name}
+            printstring(string(dirfn))
+         %finish
+         printstring(" param ".itos(j))
+      %finish
+
+      errtype = 0 %unless 0 <= errtype <= 3
+      -> swerr(errtype)
+swerr(0):
+      printstring(" ???")
+      flag = 8 
+      %continue
+swerr(1):
+      printstring(" val fails")
+      flag = 45
+      %continue
+swerr(2):
+      printstring(" string too long")
+      flag = e + 142
+      %continue
+swerr(3):
+      printstring(" string type ".itos(type)." is invalid")
+      flag = e + 151
+      %continue
+   %repeat
+   printsymbol(nl) %unless monitor=0 %and flag=0
+skip:
+   %if 0<=d_dirlevel<=15 %start
+      d_dirlevel=d_dirlevel+1
+      d_dirfns(d_dirlevel)=fn
+      d_template(d_dirlevel)=template
+   %finish
+
+   %if fn<256 %c
+   %then iupdate(1, 0) { already inhibited } %c
+   %else d_async inhib=d_async inhib-1  { didnt want to inhibit }
+
+! monitors(">> level " . itos(d_dirlevel) . " async " . itos(d_async inhib))
+   %result=flag
+%end;                                    ! INTO
+
+!-----------------------------------------------------------------------
+
+%routine forky(%integer lnb1)
+%integer stackbase, lnb, i, j, gla, sstptr, fline, dtable, fbline
+%string (255) name
+   stackbase=lnb1>>seg shift<<seg shift
+   lnb=integer(lnb1+4*10)
+   %cycle i=9, -1, 5
+      j=integer(lnb1+4*i)
+      %exit %if j>lnb1-64 %or j<=lnb %or j#integer(j+44)
+      lnb=j
+   %repeat
+
+   gla=integer(lnb1+4*13)
+   sstptr=shortinteger(lnb)&x'ffff';     ! ptr to diags for this block
+   fline=shortinteger(lnb+2);            ! failing line no.
+   dtable=integer(gla+20)+sst ptr
+   fbline=shortinteger(dtable);          ! routine/block start
+   name="block"
+   %if byteinteger(dtable+12)>0 %start
+      name=string(dtable+12)
+      length(name)=11 %if length(name)>11
+   %finish
+   %if fbline>0 %start
+      %if fline>fbline %start
+         printstring("{Line")
+         write(fline, 1)
+         printstring(" of ")
+      %finish
+
+      printstring(name)
+
+      printstring(" @")
+      write(fbline, 1)
+      printstring(" }")
+
+   %finish
+%end;                                    ! forky
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn outof(%integer flag)
+%short %integer type, len
+%integer l, lflag, dirfn, in
+%integer fn, lnb, lnb1, gla, act, savekey, monitor
+%integer base, ix, sx, j, t, adr, int
+%integer return pc, relinquish
+%string (11) template
+%string (31) sep
+%string (255) s255
+%switch sw(0:4)
+   fn=0
+   template=""
+   %if 1<=d_dirlevel<=16 %start
+      template=d_template(d_dirlevel)
+      fn=d_dirfns(d_dirlevel)
+      d_dirlevel=d_dirlevel-1
+   %finish
+
+   d_dirmon=d_dirmon-1 %if d_dirmon>0
+
+   *st_10,lnb
+   gla=integer(lnb+4*13)
+   lnb1=integer(lnb+4*10)
+
+   monitor=d_dirmon
+   monitor=0 %if fn<0 {for DERROR}
+
+   dirfn=12+integer(gla+20)+(shortinteger(lnb1)&X'FFFF')
+   base=lnb1+64
+   sep="<- ".string(dirfn)." " %unless monitor=0
+   d_dirfn=dirfn %unless fn<0
+   lflag=0 {for local failures}
+   ix=-1
+   sx=-1
+   j=1
+   %cycle
+      %exit %if j>length(template)
+      printstring(sep) %unless monitor=0
+      t=charno(template, j)
+
+      %if t='I' %or t='J' %or t='K' %start
+         ix=ix+1
+         %unless t='I' %start {input only}
+            int=i(ix)
+            wrsnt("", int, 4) %unless monitor=0
+            ->next %if flag=47
+            adr=integer(base)
+            integer(adr)=int
+         %finish
+      %finish
+
+      %if t='S' %or t='T' %or t='U' %start
+         sx=sx+1
+         base=base+4
+         ->next %if t='S' {input only}
+         s255=s(sx)
+         printstring(s255) %unless monitor=0
+         ->next %if flag=47
+
+         type=shortinteger(base-4)
+         len=shortinteger(base-2)
+         adr=integer(base)
+         l=length(s255)
+         ->fail %if l>len {won't fit}
+         ->sw(type)
+sw(0):
+         string(adr)=s255
+         ->next
+sw(2):
+sw(3):
+         move(l, addr(s255)+1, adr) %if l>0
+         fill(len-l, adr+l, ' ') %if len>l
+         itoe(adr, len) %if type=3
+         ->next
+sw(4):
+         move(l, addr(s255)+1, adr) %if l>0
+         byteinteger(adr+l)=0 %if len>l
+         ->next
+      %finish
+
+      %if t='Q' %or t='R' %start
+         print record(integer(base)) %unless monitor=0
+      %finish
+      ->next
+fail:
+      %if monitor=0 %start {be explicit}
+         %if lflag=0 %start {first failure}
+            printstring(string(dirfn))
+         %finish
+         printstring(" param ".itos(j))
+      %finish
+      printstring(" string too long")
+      lflag=47
+      flag=lflag %if flag=0
+next:
+      j=j+1
+      base=base+4
+      sep=","
+   %repeat
+
+   %unless monitor=0 %and lflag=0 %start
+      forky(lnb1)
+      %if flag=0 %then wrs(" OK") %else wrs(derrs(flag))
+   %finish
+   d_dirflag=flag %unless fn<0
+skip:
+
+   d_async inhib=d_async inhib-1 %if fn<256
+
+   %if d_async inhib<=0 %start
+      in=context(curcontext)_async inhib
+      %if d_aqd>0 %and (in=0 %or (in>(1<<20) %and integer(in)=0)) %start
+!         wrs("OUT pons UHIDACT")
+         *ipk_0(0)
+         *st_2,savekey
+         *spka_0(0)
+         outp(curcontext)=0
+         outp(curcontext)_dest=((com_async dest+d_process)<<16)!uhidact
+         *l_2,savekey
+         *spka_0(2)
+         *MC_6(0),0
+      %finish
+      iupdate(-1, 0)
+   %finish
+
+   return pc=integer(lnb1+4*15) {ie callers ret. pc}
+   return pc = return pc & X'7fffffff' %if target = xa
+   relinquish=1 {give up priv}
+   relinquish=0 %if return pc>>seg shift=code seg {unless going}
+   {back into Director}
+! wrs("<< relin " . itos(relinquish) . " async " . itos(d_async inhib))
+   %if relinquish=1 %start {about to go back to user}
+      *MC_13(0),0 {relinquish PRIV and access to extra segs}
+   %finish
+
+   %result=flag
+%end;                                    ! OUTOF
+
+!-----------------------------------------------------------------------
+
+!<DSETIT
+%external %integer %fn dsetit(%integer %name xmillisecs)
+
+! This procedure is used to set a number of K instructions (1K=1024)
+! which may be executed before an instruction-counter program error
+! contingency is generated. The value of the parameter is subject to the
+! following constraints:
+
+!    it must lie between the nominal values for the number of K
+!    instructions which the machine will execute in 1 second and
+!    two hours.  The field KINSTRS in the public segment 48
+!    communications record format (see Ref. 11) is required for
+!    this calculation.
+
+!    it must not, when added to the number of K instructions so far
+!    executed this session, exceed the session K instruction limit
+!    (value available in the UINF record of the process, as
+!    described in this manual).
+!>
+! ALLOW RANGE APPROX 1 SEC TO TWO HOURS
+! RESULT  =  0   OK
+!            8   PARAM OUT OF RANGE
+%integer flag, msecs
+   flag=into(77, "I")
+   ->out %unless flag=0
+
+   flag=8
+   ->out %unless 10<=i(0) {MILLISECS}<=7200<<10
+
+   msecs=i(0) {MILLISECS}
+   flag=0
+   %if accts_millisecs+msecs>=uinf_sess limit+grace milli %start
+      msecs=uinf_sess limit+grace milli-accts_millisecs
+      flag=57 %and ->out %if msecs<=0;   ! END OF SESSION
+   %finish
+
+   iupdate(0, msecs)
+out:
+   %result=outof(flag)
+%end;                                    ! DSETIT
+
+!-----------------------------------------------------------------------
+
+!<PADOUT procedures
+%externalintegerfn dconnectstream(%integername xcdest,xstreamid,xcomms stream,xcomms flg)
+! iririwiw
+%record (parmf) p
+%integer jj, savekey
+
+   jj = into(77, "IIKK")
+   -> out %unless jj = 0
+
+   i(2) {comms stream}=0; !in case of failure
+   i(3) {comms flg}=0
+
+   jj = 8  { bad param }
+   -> out %unless (i(0) {cdest} !! uinf_sync1dest) & x'ffff0000' = 0 %orc
+      (i(0) {cdest} = uinf_asyncdest ! 1 %and i(1) {streamid} = uinf_streamid)
+   ->out %unless i(1) {streamid} >>24=14; !fe
+
+   jj = 93
+   -> out %unless d_dtrying & x'40004' > 0
+
+   p=0
+   p_dest=x'00370001'
+   p_p1=i(1) {streamid} &1; !0..input, 1..output
+   p_p2=i(0) {cdest}
+   p_p3=i(1) {streamid}; ! 14<<24 + fepno<<16 + strm
+   jj=douti(p)
+   ->out %if jj#0
+   i(3) {comms flg}=p_p2
+   ->out %if i(3) {comms flg} #0
+   i(2) {comms stream}=p_p1
+   %if i(1) {streamid}=uinf_streamid %and %c
+       i(2) {comms stream} # uinf_instream %thenstart
+      *ipk_0(0); *st_2,savekey; *spka_0(0)
+      iostat_instream = i(2) {comms stream}
+      uinf_instream   = i(2) {comms stream}
+      *l_2,savekey; *spka_0(2)
+   %finish
+out:
+   %result=outof(jj)
+%end; ! dconnectstream
+
+!------------------------------------------------------------------------
+
+%externalintegerfn ddisconnectstream(%integername xcommsstream,xcomms flg)
+! iriw
+%record (parmf) p
+%integer jj
+
+   jj = into(77, "IK")
+   -> out %unless jj = 0
+
+   jj = 93
+   -> out %unless d_dtrying & x'40004' > 0
+
+   p=0
+   p_dest=x'00370005'
+   p_p1=i(0) {comms stream}
+   jj=douti(p)
+   i(1) {comms flg}=0
+   ->out %if jj#0
+   i(1) {comms flg}=p_p2
+out:
+   %result=outof(jj)
+%end; ! ddisconnectstream
+
+!---------------------------------------------------------------
+
+%externalintegerfn denablestream(%stringname xindex,xfname, %c
+   %integername xcomms stream,xmode,xcursor,xstrmstart,xlen,xcomms flg)
+! srsririririririw
+%integer jj,diskad,limit
+%record (parmf) p
+%string (255) index,fname
+%integer comms stream,mode,cursor,strmstart,len,comms flg
+%string (6) tran
+%integerarray arr(0:12)
+%integerarray gax(0:2+(512<<3)); !allow for max file size of 512 Mb.
+%constinteger enable format=1; !0..old, 1..new
+
+   comms flg = 0
+   jj = into(77, "SSIIIIIK")
+   -> out %unless jj = 0
+   index = s(0)
+   fname = s(1)
+   comms stream = i(0)
+   mode = i(1)
+   cursor = i(2)
+   strmstart = i(3)
+   len = i(4)
+
+   jj = 93 
+   -> out %unless d_dtrying & x'40004' > 0
+   jj=dgetda(index,fname,-1,gax)
+   ->out %if jj#0; !getda fails
+   diskad=gax(3); !diskad of 1st section
+   limit=gax(2)-1; !no of epages in last section (less 1)
+
+   jj=dfinfo(index,fname,-1,tran,arr)
+   ->out %if jj#0
+   jj=8
+   ->out %unless arr(1)&7=7 %and tran=""; !rup..no write permission
+   ->out %unless arr(11)&1#0; !codes2..check write connected
+
+   p_dest=x'00370002'
+   p_srce=0
+   p_p1=comms stream
+   %if enableformat=0 %thenstart
+      !old format..generally used by other folk
+      p_p2=diskad
+      p_p3=limit; !pages-1
+      p_p4=mode
+      p_p5=cursor<<16 ! strmstart
+      p_p6=len
+   %finishelsestart
+      !new format (ours)
+      p_p2=X'80000000'!diskad
+      p_p3=limit<<16 ! mode
+      p_p4=cursor
+      p_p5=strmstart
+      p_p6=len
+   %finish
+   jj=douti(p)
+   ->out %if jj#0
+   comms flg=p_p2
+out:
+   i(5) {comms flg} = comms flg
+   %result=outof(jj)
+%end; ! denablestream
+
+!----------------------------------------------------------------
+
+%externalintegerfn ddisablestream(%integername xcomms stream,xmode,xcomms flg,xcursor)
+! iririwib
+%integer jj
+%record (parmf) p
+   jj = into(77, "IIKJ")
+   -> out %unless jj = 0
+
+   jj = 93
+   -> out %unless d_dtrying & x'40004' > 0
+
+   p=0
+   p_dest=x'00370004'
+   p_p1=i(0) {comms stream}
+   p_p2=i(1) {mode}; !4..suspend, 5..abort
+   jj=douti(p)
+   i(2) {comms flg}=0
+   %if jj#0 %then ->out
+   i(2) {comms flg}=p_p2
+   %if i(2) {comms flg}#0 %then ->out
+   i(3) {cursor}=p_p5
+out:
+   %result=outof(jj)
+%end; ! ddisablestream
+
+!--------------------------------------------------------
+
+%externalintegerfn drequestoutput2(%integername xcomms stream,xcursor,xtrigger)
+! iririr
+%record (parmf) p
+%integer jj
+
+   jj = into(77, "III")
+   -> out %unless jj = 0
+
+   jj = 93
+   -> out %unless d_dtrying & x'40004' > 0
+
+   p=0
+   p_dest=x'00370006'; !request output..reply when complete
+   p_p1=i(0) {comms stream}
+   p_p2=i(1) {cursor}; !output up to cursor
+   p_p3=i(2) {trigger}; !unless =-1, reply when trigger passed
+   jj=dponi(p)
+out:
+   %result=outof(jj)
+%end; ! drequestoutput2
+
+!----------------------------------------------------------------
+
+!> end padout
+
+
+%externalintegerfn drealise(%integername xvadr, xradr)
+%integer vadr, radr, j
+
+   j = into(77, "IK")
+   -> out %unless j = 0
+
+   vadr = i(0)
+   *basr_15,0
+   *using_15
+   *l_1,vadr
+   *lra_0,0(1)
+   *bc_8,<ok>
+   j = 8
+   -> out
+ok:
+   *st_0,radr
+   *drop_15
+   i(1) = radr
+out:
+   %result = outof(j)
+%end; ! drealise
+%end %of %file

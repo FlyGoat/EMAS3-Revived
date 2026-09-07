@@ -1,0 +1,302 @@
+Initial write-up of 370-XA I/O structure and programming notes       10 Jan 84
+
+
+
+The following i/o instructions are provided and supersede all System/360 and
+System/370 i/o instructions.
+
+   Clear subchannel                     Set channel monitor
+   Halt subchannel                      Start  subchannel
+   Modify subchannel                    Store channel path status
+   Reset channel path                   Store channel report word
+   Resume subchannel                    Store subchannel
+   Set address limit                    Test pending interruption
+                                        Test subchannel
+
+Basically, the concept of device address (channel/control unit) is replaced by
+a route-independent subchannel identifier. Devices have a system-wide unique
+identifier of 16 bits. A device is (normally statically) associated with a
+"subchannel", which is the logical successor of the channel in System/370.
+The subchannel number is 16 bits; a Subchannel-identification word (31 bits)
+comprises a subchannel number in the low-order end with binary 1 (i.e. bit 15
+set) in the high-order end.
+
+64K devices and subchannels are thus catered for. There may be up to eight
+logical paths from mainframe to a given device, via a given channel subsystem,
+and a total of 256 logical paths may exist within a given channel subsystem.
+
+I assume that the device-identifiers and the subchannel numbers are allocated
+by the installing engineer and that they are made available to the mainframe
+software by some poke at the channel subsystem. This appears not to be part of
+the 370-XA i/o specification, and needs further investigation. If true, however,
+it does mean that a "grope" will be possible (at least for devices which
+support a "give-device-type" command).
+
+To deal with IPL first: this operates exactly as on System/370: 24 bytes of
+PSW and old-format CCW come into real address zero, and so on.
+
+We attempt to describe the rest of the concepts in the form of a description of
+a normal i/o operation.
+
+The basic i/o instructions required are:
+
+   Start subchannel,  Test subchannel,  Test pending interruption.
+
+The operand of each of the i/o instructions is base+displacement, viz.
+
+   +--------------+------+------------+
+   |  Opcode      | Base |  Disp      |
+   +--------------+------+------------+
+
+For some functions, GR1 needs to be loaded, usually with the relevant
+subchannel-identification word. And for some functions GR2 is used also.
+
+
+START SUBCHANNEL
+
+   The instruction operand is the address of an ORB (operation-request block).
+   GR1 contains the subsystem-identification word.
+
+   Here is an ORB:
+
+
+           ORB
+           +------------------------------------+
+   word 0  | Interruption parameter             |
+           +---+-+---+-+-+-+-+-+---+---+--------+
+        1  |Key|S|000|F|P|I|A|U|000|LPM|00000000|
+           +---+-+---+-+-+-+-+-+---+---+--------+
+        2  | Channel-program address            |
+           +------------------------------------+
+
+   Interruption parameter is made available unchanged when an interrupt
+                          occurs (e.g. on termination) resulting from the
+                          operation.
+   Key                    is the storage key value to be used during the
+
+                          transfer (if any).
+
+   S                      is the suspend bit, which if set allows a CCW to
+                          specify "suspend channel program" by having a
+                          suspend bit set in the CCW.
+
+   F                      specifies the CCW format: 0 for format-0,
+                                                    1 for format-1 ("XA")
+
+   P                      is the prefetch control bit, and says whether the
+                          channel subsystem is allowed to prefetch CCWs before
+                          execution.
+
+   A                      is the address-limit-checking control (can be used to
+                          prevent over-writing either above or below an absolute
+                          store address).
+
+   U                      is the suppress-suspended-interruption control bit,
+                          and can be used to prevent the interruption associated
+                          with the "suspend channel program function" mentioned
+                          above.
+
+   LPM                    is a logical path mask specifying which logical paths
+                          to the device are to be considered available.
+
+
+   The channel program address field points to a "conventional" chain of CCWs,
+   either format-0 or format-1, according to the F bit. Here are the two
+   formats, for completeness (next page).
+@P{}
+
+   Format-0
+   +-------+--------------------------+  +------+-+--------+----------+
+   |Cmd    |  Data address            |  |flags |0|\\\\\\\\| Count    |
+   +-------+--------------------------+  +------+-+--------+----------+
+
+
+   Format-1
+   +-------+------+-+-----------------+  +-+--------------------------+
+   |Cmd    |flags |0| Count           |  |0|   Data address           |
+   +-------+------+-+-----------------+  +-+--------------------------+
+
+
+   The data address is virtual if the channel subsystem has DAT, else real.
+
+   START SUBCHANNEL sets the condition code:
+
+          0    operation successfully initiated
+
+          1    subchannel is status pending
+
+          2    subchannel busy
+
+          3    subchannel not operational
+
+
+
+
+INTERRUPTIONS
+
+
+Interruptions remain pending until:
+
+          (a)    accepted by a CPU
+          (b)    withdrawn by the subchannel
+          (c)    a TEST PENDING INTERRUPTION instruction is issued to the
+                 subchannel
+          (d)    a TEST SUBCHANNEL instruction is issued to the subchannel
+          (e)    a CLEAR SUBCHANNEL instruction is issued to the subchannel
+      or  (f)    subsystem reset.
+
+The normal sequence is for a CPU to accept the interrupt or to issue TEST
+PENDING INTERRUPTION (see below), and then to issue TEST SUBCHANNEL to get
+details of the termination (or whatever).
+
+When an interruption is accepted by a CPU, the current PSW is stored at real
+address 56 for the CPU, an i/o interruption code is stored at real addresses
+184-191 and a new PSW is loaded from address 120 (these are decimal values).
+
+TEST PENDING INTERRUPTION is a way of "polling" for an i/o interrupt.
+The operand is either an address to receive the interruption code or zero, in
+which case the interruption code is stored in real addresses 184-191 as above.
+The condition code is set zero if an interrupt was pending and a code was
+stored, or one if not.
+
+The format of the interruption code is as follows (it is word-aligned):
+
+           +------------------------------------+
+   word 0  | Subsystem-identification word      |
+           +------------------------------------+
+   word 1  | Interruption parameter             |
+           +------------------------------------+
+
+           Word 0 identifies the subchannel.
+           Word 1 is the value given in the ORB with which the operation was
+                  initiated.
+
+After the interrupt is accepted by one of the above methods, the subchannel
+remains status pending until TEST SUBCHANNEL is issued (or one of the more
+severe actions taken, e.g. CLEAR SUBCHANNEL). 
+
+
+
+TEST SUBCHANNEL
+
+
+The operand of TEST SUBCHANNEL is the address of an area called an IRB
+(interrupt-response block); that is, the area given becomes an IRB on
+successful execution of the instruction. GR1 must be loaded with the
+subsystem-identification word for the required subchannel.The condition code
+settings for TEST SUBCHANNEL are as follows:
+
+           0    IRB stored; subchannel was status-pending
+
+           1    IRB stored; subchannel was not status-pending
+
+           2    --
+
+           3    Not operational
+
+The format of the interrupt-response block is as follows:
+
+           IRB
+           +------------------------------------+
+   word 0  |                                    |
+        1  |     Subchannel status word         |
+        2  |                                    |
+           +------------------------------------+
+        3  |      Extended status word          |
+           +------------------------------------+
+        4  |                                    |
+       ... |     Extended control word          |
+       15  |                                    |
+           +------------------------------------+
+
+
+   The subchannel status word is in fact a subfield of a storage block called
+   the subchannel information block (SCHIB) which the channel subsystem
+   maintains for each subchannel, and which may be obtained by the mainframe
+   operating system at any time by using the STORE SUBCHANNEL i/o instruction.
+
+   Here is the content of the subchannel status word,which is presented in the
+   IRB as a result of TEST SUBCHANNEL.
+
+           SCSW
+           +---+-+-+--+-+-+-+-+-+----------------+
+   word 0  |Key|S|L|CC|F|P|I|A|U|Subchann control|
+           +---+-+-+--+-+-+-+-+-+----------------+
+        1  |            CCW address              |
+           +----------+---------+----------------+
+        2  |Dev status|Schstatus|   Count        |
+           +----------+---------+----------------+
+
+        Key, S, F, P, I, A and U contain the same information which was
+        provided in the ORB of the START SUBCHANNEL instruction.
+
+        L                    says whether the extended status word contains
+                             valid information.
+
+        CC                   is a "deferred condition code" giving the general
+                             reason that the subchannel was status-pending when
+                             TEST SUBCHANNEL was issued.
+
+        Subchannel control   gives infomation relating to conditions at the
+                             subchannel.
+
+        CCW address          shows how far the chain has been progressed.
+
+        Device status        is just that: device end, attention, etc.
+
+        Subchannel status    ditto, viz. program check, incorrect length etc.
+
+        Count                is residual count as in the old days.
+
+
+
+
+SCHIB - Subchannel information block
+
+
+This control block is described here only to give an indication of what's
+going on in the channel subsystem. NOT described here are the timing and
+monitoring facilities; but basically the channel subsystem is prepared to give
+quite a lot of detailed information on demand, in specified blocks of real
+storage (the addresses are supplied in the SET CHANNEL MONITOR instruction).
+
+The SCHIB data are not (it seems to me) of great interest for normal operations.
+The SCHIB gives details of logical paths recently used, and failure indications.
+The SCHIB is also used to save the relevant ORB data, and its contents are
+updated as the requested function proceeds. Some fields of the SCHIB are
+modifiable by the operating system during progress of a request (or otherwise)
+if necessary; this is the purpose of the MODIFY SUBCHANNEL instruction.
+
+           SCHIB
+           +------------------------------------+
+   word 0  |                                    |
+       ... |    Path-management-control word    |
+        6  |                                    |
+           +------------------------------------+
+        7  |                                    |
+        8  |       Subchannel status word       |
+        9  |                                    |
+           +------------------------------------+
+       10  |                                    |
+       11  |        Model-dependend area        |
+       12  |                                    |
+           +------------------------------------+
+
+
+           PMCW (path management control word)
+           +------------------------------------------------+
+   word 0  |     Interruption parameter                     |
+           +------------------------------------------------+
+        1  |00|ISC|000|E|LM|MM|D|T|V|  device number        |
+           +--+---+---+-+--+--+-+-+-+-----------+-----------+
+        2  |  LPM     |   PNOM      |  LPUM     |  PIM      |
+           +----------+-------------+-----------+-----------+
+        3  |         MBI            |   POM     |  PAM      |
+           +----------+-------------+-----------+-----------+
+        4  | CHPID-0  |   CHPID-1   |  CHPID-2  |  CHPID-3  |
+           +----------+-------------+-----------+-----------+
+        5  | CHPID-4  |   CHPID-5   |  CHPID--6 |  CHPID-7  |
+           +----------+-------------+-----------+-----------+
+        6  |   0000   |    0000     |    0000   |    0000   |
+           +----------+-------------+-----------+-----------+
+

@@ -1,0 +1,131 @@
+! SPDX-License-Identifier: MIT
+! Copyright (c) 2026 Jiaxun Yang <jiaxun.yang@flygoat.com>
+
+! Private representation of host EMAS command state.
+%include "unix_host.imp"
+%constinteger XIMPLP64=0
+%recordformat filef(%longinteger next,data,size,trimsize,%integer writable,fd,%string(255) name)
+%recordformat itemf(%longinteger next,%string(255) name,value,%integer fsys,kind,count,replace,%integerarray words(0:1))
+%recordformat sourcef(%longinteger next,%integerarray header(0:7))
+%if XIMPLP64=1 %start
+%recordformat statef(%longintegerarray comregs(0:60),%longinteger files,sources,aliases,parameters,metadata,%integer worksize,maxsize,nextroute,exportready,%string(255) date,filename,exportfile)
+%recordformat connectionf(%longinteger conad,%integer kind,start,end)
+%finish %else %start
+%recordformat statef(%integerarray comregs(0:60),%longinteger files,sources,aliases,parameters,metadata,%integer worksize,maxsize,nextroute,exportready,%string(255) date,filename,exportfile)
+%recordformat connectionf(%integer conad,kind,start,end)
+%finish
+%recordformat rootf(%longinteger active,%integer initialized,%record(statef) default)
+%ownrecord(rootf) root size
+%ownrecord(statef) state size
+%ownrecord(filef) file size
+%ownrecord(itemf) item size
+%ownrecord(sourcef) source size
+%ownbyteinteger statekey=0
+%record(rootf)%map root
+  %result==record(addr(unix local(statekey,sizeof(root size))))
+%end
+%longintegerfn new state
+%longinteger p
+%record(statef)%name s
+  p=addr(unix allocate(sizeof(state size)))
+  %result=0 %if p=0
+  s==record(p)
+  s_worksize=16*1024*1024;s_maxsize=256*1024*1024;s_nextroute=128
+  %result=p
+%end
+%record(statef)%map state
+%record(rootf)%name r
+  r==root
+  %result==record(r_active) %if r_active#0
+  %if r_initialized=0 %start
+    r_default_worksize=16*1024*1024;r_default_maxsize=256*1024*1024;r_default_nextroute=128
+    r_initialized=1
+  %finish
+  %result==r_default
+%end
+%routine put address(%byteintegername dest,%longinteger value)
+%if XIMPLP64=1 %start
+  longinteger(addr(dest))=value
+%finish %else %start
+  integer(addr(dest))<-value
+%finish
+%end
+%integerfn valid name(%string(255) name)
+%integer i
+  %result=0 %if name=""
+  %for i=1,1,length(name) %cycle
+    %result=0 %if charno(name,i)=0
+  %repeat
+  %result=1
+%end
+%string(255)%fn folded(%string(255) s)
+%integer i,c
+  %for i=1,1,length(s) %cycle
+    c=charno(s,i)
+    %if 'A'<=c<='Z' %then charno(s,i)=c+32
+  %repeat
+  %result=s
+%end
+%string(255)%fn c text(%byteintegername source)
+%string(255) s
+%integer i,c
+  %signal 9,3 %if addr(source)=0
+  s=""
+  %for i=0,1,255 %cycle
+    c=byteinteger(addr(source)+i)
+    %result=s %if c=0
+    %signal 6,1,256 %if i=255
+    s=s.tostring(c)
+  %repeat
+  %result=s
+%end
+%longintegerfn find item(%longinteger head,%string(255) key)
+%record(itemf)%name p
+  key=folded(key)
+  %while head#0 %cycle
+    p==record(head)
+    %result=head %if folded(p_name)=key
+    head=p_next
+  %repeat
+  %result=0
+%end
+%integerfn set item(%longintegername head,%string(255) key,value)
+%longinteger address
+%record(itemf)%name p
+  %result=unix error("EINVAL") %if valid name(key)=0
+  address=find item(head,key)
+  %if address=0 %start
+    address=addr(unix allocate(sizeof(item size)))
+    %result=unix error("ENOMEM") %if address=0
+    p==record(address);p_next=head;p_name=key;head=address
+  %finish
+  p==record(address);p_value=value
+  %result=0
+%end
+%routine clear items(%longintegername head)
+%longinteger next
+%record(itemf)%name p
+  %while head#0 %cycle
+    p==record(head);next=p_next
+    unix free(byteinteger(head));head=next
+  %repeat
+%end
+%longintegerfn find file(%string(255) name)
+%record(statef)%name s
+%record(filef)%name f
+%longinteger p
+  s==state;p=s_files
+  %while p#0 %cycle
+    f==record(p)
+    %result=p %if f_name=name
+    p=f_next
+  %repeat
+  %result=0
+%end
+%routine copy result(%byteintegername out,%integer capacity,%string(255) value)
+%integer i
+  %signal 6,1,length(value) %if capacity<length(value)
+  %for i=0,1,length(value) %cycle
+    byteinteger(addr(out)+i)=byteinteger(addr(value)+i)
+  %repeat
+%end

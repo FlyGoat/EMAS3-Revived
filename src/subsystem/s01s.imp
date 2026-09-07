@@ -1,0 +1,2974 @@
+! S01 - Command Interpreter
+
+%endoflist
+%include "SUBARC:SSOWNF3"
+   %list
+!
+!
+%external %routine %spec adjust load level %alias "s#adjustloadlevel"(%integer p)
+%externalroutinespec etoi %alias "s#etoi" (%integer adr, len)
+%externalintegerfnspec scarce %alias "s#scarce"
+%external %integer %fn %spec instream %alias "s#instream"
+%external %integer %fn %spec outstream %alias "s#outstream"
+%external %routine %spec emas3 claim channel(%integer %name chan)
+%external %routine %spec idefine %alias "s#idefine"(%integer chan, %string (255) id,
+   %integer %name afd, flag)
+%external %integer %fn %spec open %alias "s#open"(%integer afd, mode)
+%routinespec emas3xinner(%stringname comm, param, infile, outfile, %integer  from console, %integername flag)
+%external %routine %spec jobspacemacro %alias "s#jobspacemacro"(%string (255) file,
+   %integer start, end)
+%external %routine %spec checkstring %alias "s#checkstring"(%string (255) text, qual,
+   %string %name val, %integer %name flag)
+%external %integer %fn %spec checkname %alias "s#checkname"(%string %name name,
+   %integer %name type, qual)
+%external %routine %spec set comreg36 %alias "s#setcomreg36"(%integer val, by)
+%external %string %fn %spec substring %alias "s#substring"(%string %name s, %integer i, j)
+%external %routine %spec printfd %alias "s#printfd"(%integer afd, mode {#0 for shout})
+%external %string %fn %spec jobspace vtos %alias "s#jobspacevtos"(%record (jobspace varf) %name v)
+%external %integer %fn %spec check for jsv name %alias "s#checkforjsvname"(%string %name line,
+   %record (jobspace varf) %name v)
+%external %integer %fn %spec get value of jsv %alias "s#getvalueofjsv"(%record %c
+   (jobspace varf) %name v)
+%external %routine %spec clear jobspace variables %alias "s#clearjobspacevariables"(%record %c
+   (jobspacef) %name jobspace)
+%external %string %fn %spec translate prompt %alias "s#translateprompt"(%integer type)
+%external %routine %spec control line %alias "s#controlline"(%string %name line,
+   %integer %name flag)
+%external %routine %spec exec %alias "s#exec"(%string (255) outfile, %integer type,
+   %integer %name flag)
+%external %routine %spec queue %alias "s#queue"(%string (255) file, %integer %name flag)
+%external %routine %spec hide %alias "s#hide"(%integer %name flag)
+%external %routine %spec reveal %alias "s#reveal"
+%external %routine %spec init subsys globals %alias "s#initsubsysglobals"
+%external %routine %spec clearllists %alias "S#CLEARLLISTS"
+%external %routine %spec resetcontext %alias "emas3resetcontext"(%integer %name trapid, flag)
+%external %routine %spec trap %alias "emas3trap"(%integer %name id, prot, flag)
+%external %routine %spec settrap %alias "emas3settrap"(%integer %name id, class, subclass, flag)
+%external %integer %fn %spec giveevent %alias "emas3giveevent"(%integer %name class, subclass)
+%external %routine %spec discardtrap %alias "emas3discardtrap"(%integer %name id, flag)
+%const %integer maxuslot=15
+! OWNS & CNSTS for buffer of history lines
+%const %integer maxslot=15
+%record %format histff(%integer ad, len, id)
+!--------------------------------------------------------
+
+%record %format hhf(%integer highestid, nexttoreissue, mostrecentx, oldestx,
+   %byte %integer %array unused(0:maxuslot), %record (histff) %array hist(0:maxslot))
+
+
+!--------------------------------------------------------
+
+!
+!***********************************************************************
+!*                                                                     *
+!*                              Constants                              *
+!*                                                                     *
+!***********************************************************************
+!
+%const %integer abasefile= base seg << seg shift
+!
+%const %integer code=2, macro=4
+%const %real timefactor= 1000.0;         ! SECONDS = DCPUTIME/TIMEFACTOR.
+%const %integer defcpl= 7200;            !DEFAULT VALUE FOR CPULIMIT PER COMMAND
+%const %string (21) bmessage= "MANAGR:BMESSAGE"
+%const %string (21) fmessage= "MANAGR:FMESSAGE"
+!
+!***********************************************************************
+!*                                                                     *
+!*             DIRECTOR and SUPERVISOR Routine/fn/map spec             *
+!*                                                                     *
+!***********************************************************************
+
+%external %integer %fn %spec depmonitor(%string %name text, file)
+%external %integer %fn %spec d set state(%integer %name context, %long %integer %name valid bits,
+   %integer %array %name state)
+%external %integer %fn %spec d goto context(%integer %name n)
+%external %integer %fn %spec dmessage(%string %name user, %integer %name len, act, invoc, fsys,
+   adr)
+%external %integer %fn %spec dasyncinh(%integer %name act)
+%external %integer %fn %spec dcputime
+%external %integer %fn %spec dsetit(%integer %name ki)
+%external %integer %fn %spec dsfi(%string %name index, %integer %name fsys, type, set,
+   %string %name s, %integer %array %name i)
+%external %integer %fn %spec dnominatetrap(%integer %fn r)
+%external %integer %fn %spec dstop(%integer %name r)
+%external %routine %spec mstop %alias "s#mstop"(%string (255) s, %integer n)
+
+!***********************************************************************
+!*                                                                     *
+!*                     %system Routine/fn/map spec                     *
+!*                                                                     *
+!***********************************************************************
+!
+%external %routine %spec dump %alias "s#dump"(%integer start, finish)
+%external %routine %spec pvm %alias "s#pvm"
+%external %routine %spec regs %alias "s#regs"(%integer control, p)
+%external %routine %spec set con level %alias "s#setconlevel"(%string (255) file, %integer level,
+   %integer %name flag)
+%external %routine %spec printline %alias "s#printline"(%string (255) s)
+%external %routine %spec wrsn %alias "s#wrsn"(%string (255) s, %integer n)
+%external %routine %spec job space man %alias "s#jobspaceman"(%string %name line,
+   %integer percents)
+%external %routine %spec ssenter %alias "s#ssenter"(%string %name firsts, %integer %name firsti,
+   %string %name template)
+%external %routine %spec ssexit %alias "s#ssexit"(%string %name firsts, %integer %name firsti,
+   %string %name template)
+%external %integer %fn %spec setmode %alias "s#setmode"(%string (255) s)
+%external %routine %spec readprofile %alias "S#READPROFILE"(%string (11) key, %name info,
+   %integer %name version, uflag)
+%external %routine %spec initdynamicrefs %alias "S#INITDYNAMICREFS"
+%external %routine %spec unload2 %alias "S#UNLOAD2"(%integer loadlevel, fail)
+%external %routine %spec clear %alias "S#CLEAR"(%integer chan, %integer %name flag)
+%external %routine %spec stop %alias "EMAS#STOP"
+%external %integer %fn %spec getheap %alias "s#getheap"(%integer len)
+%external %routine %spec disposeheap %alias "s#disposeheap"(%integer adr)
+%external %integer %fn %spec paminit %alias "s#paminit"(%string %name p, %record (pamf) %name pam)
+%external %integer %fn %spec uinfi %alias "S#UINFI"(%integer i)
+%external %routine %spec shout %alias "s#shout"(%string (255) s)
+%external %routine %spec tidy traps %alias "s#tidytraps"(%integer stktop)
+%external %routine %spec eliminate trap %alias "s#eliminatetrap"(%integer p, id)
+%external %routine %spec find trap %alias "s#findtrap"(%integer class, subclass,
+   %integer %name up, dp, %integer stkfront)
+%external %routine %spec default trap %alias "s#defaulttrap"(%integer %name id, %integer prot,
+   %integer %name resflg)
+%external %routine %spec force trap %alias "S#forcetrap"(%integer p)
+
+%external %integer %fn %spec iocp %alias "S#IOCP"(%integer ep, parm)
+%external %integer %fn %spec pageturns %alias "s#pageturns"
+%external %integer %fn %spec wtfault %alias "S#WTFAULT"(%integer inf)
+
+%routine %spec emas3x(%string %name c, p, fin, fout, %integer %name j)
+%routine %spec allow interrupts
+%external %routine %spec batchstop %alias "s#batchstop"(%integer reason)
+%external %routine %spec closejournal %alias "S#CLOSEJOURNAL"
+%external %routine %spec connect %alias "S#CONNECT"(%string (255) file, %integer mode, hole,
+   prot, %integer %name fconad, ffiletype, fdatastart, fdataend, flag)
+%external %routine %spec console %alias "S#CONSOLE"(%integer ep, %integer %name p1, p2)
+%routine %spec control
+%routine %spec halt
+%external %routine %spec hashcommand %alias "S#HASHCOMMAND"(%string (255) com, param)
+!* %external %routine %spec init trap code %alias "S#INITTRAPCODE"
+%external %routine %spec logoff2 %alias "s#logoff2"(%integer type)
+%external %routine %spec mon params %alias "s#monparams"(%string (255) template)
+%external %routine %spec move %alias "S#MOVE"(%integer length, nfrom, nto)
+%external %routine %spec ndiag %alias "S#NDIAG"(%integer a, b, c, d)
+%external %routine %spec prompt %alias "s#prompt"(%string (255) s)
+%external %routine %spec setreturncode %alias "s#setreturncode"(%integer flag)
+%routine %spec setssinhibit
+%external %routine %spec tidyfiles %alias "S#TIDYFILES"(%integer selectflag)
+%external %routine %spec set io default %alias "S#SETIODEFAULT"(%integer d, i, dummy)
+%external %routine %spec tojournal %alias "S#TOJOURNAL"(%integer a, l)
+%external %routine %spec topntail %alias "s#topntail"(%string %name s)
+%external %routine %spec uctranslate %alias "S#UCTRANSLATE"(%integer addr, nl)
+!
+%external %string %fn %spec htos %alias "s#htos"(%integer h, places)
+%external %routine %spec phex %alias "s#phex"(%integer x)
+%external %string %fn %spec itos %alias "s#itos"(%integer i)
+%external %string %fn %spec uinfs %alias "s#uinfs"(%integer n)
+%external %routine %spec enter2 %alias "EMAS3ENTER"(%integer %name mode, co, go, epo, pw,
+   %string %name param)
+%external %integer %fn %spec loadep %alias "EMAS3LOADEP"(%string %name com, entry,
+   %integer %name type, flag, co, go, epo, pw, ll)
+%external %integer %fn %spec search %alias "S#SEARCH"(%string (31) entry,
+   %record (ent4f) %name ent4, %string %name file, actualepname, %integer %name type, locll)
+%external %string %fn %spec failuremessage %alias "s#failuremessage"(%integer i)
+%integer %fn %spec compare(%string (255) target, a)
+%routine %spec command(%string %name line, cmd, param, %integer hmode, chashmode,
+   %integer %name flag)
+!%external %integer %fn %spec execute macro %alias "s#executemacro"(%string (255) file, command,
+!   param, %integer start, end)
+%integer %fn %spec history(%string %name arg, command, param, %integer type)
+!%external %routine %spec store macro %alias "s#storemacro"(%string %name macro, %integer type)
+%external %integer %fn %spec var rec to profile %alias "s#varrectoprofile"(%integer ap, size,
+   profvsn, %string (11) profname)
+%external %routine %spec funds %alias "s#funds"
+
+!
+%const %string (10) mh=":SS#MACRO_"
+%const %string (3) tmh="T#M"
+%const %integer max llen=255
+
+!-------------------------------------------------------------------------------
+
+%routine substitute(%string %name line)
+%integer j
+%string (255) out, l, v, orig, w
+%record (job spacevarf) var
+%const %string (1) left= "<"
+%const %string (1) right= ">"
+
+   %return %if line=""
+   orig = line
+   out = ""
+   %cycle
+      %exit %unless line->l.(left).v.(right).line
+      out = out.l %unless l=""
+      w = v
+      j = check for jsv name(v, var)
+      %if j=0 %start
+         %if v="" %start
+            j = get value of jsv(var)
+            line = jobspacevtos(var).line %if j=0
+         %finish %else j = 1
+      %finish
+      out = out.left.w.right %unless j=0
+   %repeat
+   out = out.line %unless line=""
+   line = out
+   %if line#orig %and ssown_job spacetrace&1>0 %start
+      shout("Substitute: '".orig."' -> '".line."'")
+   %finish
+%end;                                    ! substitute
+
+!-----------------------------------------------------------------------
+
+%integer %fn readline(%string %name line, %integer %name eof)
+%integer i, moreflag
+
+   %on 9 %start; eof = 1; ->make line; %finish
+
+   moreflag = 0
+
+   line = ""
+   ->input ended %if eof#0
+more:
+   %cycle
+      readsymbol(i)
+      %if i=nl %then %exit
+      ->too long %if length(line)=max llen
+      line = line.tostring(i) %unless line="" %and i=' ' {not leading spaces}
+   %repeat
+make line:
+   length(line) = length(line)-1 %while line#"" %and charno(line, length(line))=' '
+   ! If EOF reached and LINE non-null, give the line and save the eof till next call
+   %if moreflag#0 %and eof#0 %then line = "" %and moreflag = 0
+   ->input ended %if eof#0 %and line="" {input ended}
+   %if line#"" %and charno(line, length(line))=',' %start; ! line continues
+      %if ssown_prompttype&2>0 %then prompt("':'") %else prompt(":")
+      ssown_prompttype = ssown_prompttype!1 { still a 'command prompt' }
+      moreflag = 1
+      ->more
+   %finish
+   %result = 0
+
+too long:
+   printline("Command line too long")
+   printline(line)
+   line = ""
+   ->more
+
+input ended:
+   eof = 0
+   %result = 1 %unless ssown_obeylevel=0 %and ssown_ssreason#batchreason
+   printline("Input ended - ignored")
+   ->more
+%end;                                    ! read line
+!
+!-----------------------------------------------------------------------
+!
+%external %routine remove comments %alias "s#removecomments"(%string %name line)
+%integer i, j, q, len, ch, k
+
+   i = 1
+   j = 0
+   q = 0
+   len = length(line)
+   %cycle
+      %exit %if i>len
+      ch = charno(line, i)
+      i = i+1
+      %if q=0 %start {not in string or comment}
+         %if ch='"' %or ch='''' %start
+            q = ch {in string, q is closing delimiter}
+         %else
+            %if i+length(ssown_startcomment)-2<=len %start
+               q = -1
+               %cycle k = 1, 1, length(ssown_startcomment)
+                  q = 0 %and %exit %unless charno(ssown_startcomment, k)=charno(line, i+k-2)
+               %repeat
+               i = i+k-1 %and %continue %if q=-1 {into a comment}
+            %finish
+         %finish
+      %else
+         %if q<0 %start
+            %continue %unless i+length(ssown_endcomment)-2<=len
+            q = 0
+            %cycle k = 1, 1, length(ssown_endcomment)
+               q = -1 %and %exit %unless charno(ssown_endcomment, k)=charno(line, i+k-2)
+            %repeat
+            i = i+k-1 %if q=0 {out of comment}
+            %continue
+         %else
+            q = 0 %if q=ch {closing quote}
+         %finish
+      %finish
+      %unless j=0 %and ch=' ' %start { remove leading spaces }
+         j = j+1
+         charno(line, j) = ch %if i>j
+      %finish
+   %repeat
+   length(line) = j
+%end;                                    ! remove comments
+!
+!-----------------------------------------------------------------------
+!
+%routine massage(%string %name line)
+%integer i, j
+!  adds a space between a command and its non-alphanumeric parameters
+%const %byte %integer %array type(0:127)=     {2=space, 1=alphanumerics+hash, 0=rest} %c
+1(32), 2, 0(2), 1{#}, 0, 1{%}, 0(10), 1(10), 0(7), 1(26), 0(6), 1(26), 0(5)
+
+   %for i = 1, 1, length(line) %cycle
+      j = type(charno(line, i)&127)
+      %if j#1 %start;                    !end of command part
+         %if j=2 %then %return;          !space already there
+         line = substring(line, 1, i-1)." ".substring(line, i, length(line)) %unless i=1
+         !insert space
+         %return
+      %finish
+   %repeat
+! get here if only alphanumerics encountered
+   %return %if ssown_verbosity = 0
+   %if ssown_verbosity = 1 %c
+   %then line = line . " ?" %c
+   %else line = line . " ??"
+%end;                                    ! massage
+!
+!-----------------------------------------------------------------------
+!
+%external %integer %fn compare %alias "s#compare"(%string (255) target, arg)
+
+!*     Case independent string compare
+!*         Result   1   string equal/equivalent
+!*                  0   not equal/equivalent
+
+%integer i, j, k, res
+
+   res = 0 {potential failure}
+   ->out %unless length(target)=length(arg)
+   %for i = 1, 1, length(target) %cycle
+      j = charno(target, i)
+      k = charno(arg, i)
+      ->out %unless j=k %or ('a'<=j<='z' %and j&x'df'=k) %or ('a'<=k<='z' %and j=k&x'df')
+   %repeat
+   res = 1
+out:
+   %result = res
+%end;                                    ! compare
+!
+!-----------------------------------------------------------------------
+!
+%external %integer %fn check command %alias "s#checkcommand"(%string %name command)
+!***********************************************************************
+!*     Validate 'command'                                              *
+!*                         Result zero: OK,    466: not valid             *
+!***********************************************************************
+%const %integer max len=29
+%integer i, len
+%byte %integer %name b
+
+   len = length(command)
+   %result = 466  %unless 1<=len<=max len
+   %for i = 1, 1, len %cycle
+      b == byteinteger(addr(command)+i)
+      b = b-32 %if 'a'<=b<='z'
+      %result = 466  %unless 'A'<=b<='Z' %or (i>1 %and '0'<=b<='9') %or (i=1 %and b='#')
+   %repeat
+   %result = 0
+%end;                                    ! check command
+!
+!-----------------------------------------------------------------------
+!
+%external %routine castout %alias "s#castout"(%string %name line)
+
+! removes spaces, upper case translates except within quoted strings
+! Quotes are removed
+
+%integer i, j, q, n, ch
+
+   n = length(line)
+   q = 0
+   j = 0
+   i = 1
+   %cycle
+      %exit %if i>n
+      ch = charno(line, i)
+      i = i+1
+      %if q=0 %start
+         q = ch %and %continue %if ch='"' %or ch=''''
+         %continue %if ch=' '
+         ch = ch-32 %if 'a'<=ch<='z'
+      %else
+         q = 0 %and %continue %if ch=q
+      %finish
+      j = j+1
+      charno(line, j) = ch
+   %repeat
+   length(line) = j
+%end;                                    ! castout
+!
+!-----------------------------------------------------------------------
+!
+%routine resolve command line(%string %name line, in, out)
+%integer ip, ip1, op, op1, j, n, q, ch, k
+%string (4) mod
+%const %integer inmark='<'
+%const %integer outmark='>'
+
+   in = ""; out = ""
+   mod = ""
+   ip = 0; op = 0; q = 0; k = 0
+   n = length(line)
+   ip1 = n; op1 = n
+   j = 0
+   %cycle
+      j = j+1
+      %exit %if j>n
+      ch = charno(line, j)
+      %if q=0 %start { not inside string }
+         q = ch %and %continue %if ch='''' %or ch='"'
+         %if ch=inmark %start
+            %return %if ip>0 { a second < }
+            ip = j
+            op1 = j-1 %if op>0
+            k = j %if k=0
+         %finish
+
+         %if ch=outmark %start
+            %if op=0 %start { first one }
+               ip1 = j-1 %if ip>0
+               k = j %if k=0
+            %else
+               %return %if op#j-1 %or mod#""
+               mod = "-MOD"
+            %finish
+            op = j
+         %finish
+      %else
+         q = 0 %if ch=q
+      %finish
+   %repeat
+
+   %if ip>0 %start
+      in = substring(line, ip+1, ip1)
+      topntail(in)
+      j = checkname(in, 1 {fileormem}, x'85' {exist,read,char})
+      k = 0 %and ip = 0 %unless j=0
+   %finish
+   in = "" %if ip=0
+
+   %if k>0 %and op>0 %start
+      out = substring(line, op+1, op1)
+      topntail(out)
+!      j = checkname(out, 2, x'82')
+      checkstring(out, "fileordev,write", "", j)
+      %if j=0 %then out = out.mod %else k = 0 %and op = 0
+   %finish
+   out = "" %if op=0
+
+   line = substring(line, 1, k-1) %if k>0
+
+%end;                                    ! resolve command line
+
+!-----------------------------------------------------------------------
+
+%external %routine emas3 resolve command line(%string %name line, in, out)
+%string (255) x, y, z
+
+   ssenter(x, 0, "sbswsw")
+   resolve command line(x, y, z)
+   ssexit(x, 0, "sbswsw")
+%end;                                    ! emas3 resolve command line
+
+!-----------------------------------------------------------------------
+
+%routine review(%stringname val)
+
+%externalroutinespec emas3 get journal pointers(%integername base,
+   max, cur, flag)
+%externalintegerfnspec iocp %alias "s#iocp" (%integer ep, parm)
+
+%integer base, max, cur, flag, frame, curframe
+%string(255)w
+%constinteger limit = -30
+%integerarray start(limit : 0)
+
+%routine incr(%integername p)
+   %if p = max %then p = base %else p = p + 1
+%end
+
+%routine decr(%integername p)
+   %if p = base %then p = max %else p = p - 1
+%end
+
+%routine printframe(%integer f)
+%integer a, b, len, adr, j, parm, lastch
+
+   printstring("-------------------------------------------------"); newline
+   a = start(f)
+   incr(a)  { to get ch after nl }
+   b = start(f+1)  { final nl }
+
+   parm = addr(len)
+   %if a > b %start  { wrapped }
+      len = max - a + 1
+      adr = a
+      j = iocp(19, parm)
+      a = base
+      lastch = byteinteger(max)
+   %finish
+
+   len = b - a + 1
+   adr = a
+   j = iocp(19, parm) %and lastch = byteinteger(b) %if len > 0
+   newline %unless lastch = nl
+%end
+
+%routine back
+%integer nls, cur0, mul, len
+
+   cur0 = cur
+   nls = 0
+   %cycle
+      decr(cur)
+      %continue %unless byteinteger(cur) = nl %orc
+                        byteinteger(cur) = 255 %orc
+                        byteinteger(cur) = 0
+      len = cur0 - cur
+      mul = len // 80
+      mul = mul + 1 %unless len = 80 * mul
+      nls = nls + mul
+      %while nls > 20 %cycle
+         nls = nls - 1
+         cur = cur + 80
+      %repeat
+      cur0 = cur
+      %continue %unless nls = 20
+      frame = frame - 1
+      start(frame) = cur
+      %exit
+   %repeat
+%end
+
+
+   emas3 get journal pointers(base, max, cur, flag)
+   %return %unless flag = 0
+
+   decr(cur)  { addr of last nl }
+   start(0) = cur
+   frame = 0
+   curframe = -1
+
+   %cycle
+      back %while frame > curframe %and frame > limit
+      printframe(curframe)
+      control line(val, flag)
+      %exit %unless flag = 0
+      %if val = "-" %start
+         curframe = curframe - 1 %if curframe > limit
+         %continue
+      %finish
+      %exit %unless val = ""
+      %exit %if curframe = -1
+      curframe = curframe + 1 %if curframe < -1
+   %repeat
+   ssown_it_jnbase = imod(ssown_it_jnbase)
+   %unless val = "" %start
+      w = translate prompt(0) . val . "
+"
+      tojournal(addr(w)+1, length(w))
+   %finish
+%end; ! review
+
+!------------------------------- ENTERCUSTINIT ---------------------------------
+
+%routine entercustinit(%string %name ssowner, date, time, %integer %name flag, %integer epad)
+   ! Move parameters onto stack for ALLOWCONNECT
+   *mvc_64(28,11),64(10)
+   *l_1,epad
+   *stm_4,14,16(11)
+   *lm_12,14,0(1)
+   *basr_15,14
+%end;                                    ! of ENTERCUSTINIT
+
+!-----------------------------------------------------------------------
+
+%integer %fn get next command line(%string %name line, %integer %name from console)
+
+! Called when another command line required ( only the one call in Command Loop
+
+%integer j, eof, custinit, flag
+%string (255) w, comm, param
+%record (fdf) %name fd
+
+   eof = 0
+   line = ""
+
+   %cycle
+      %if ssown_gcstarted>1 %then %c
+         {#viewer trying it on....}line = "QUIT" {...so log him off} %and %exit
+
+      %if ssown_gcstarted=0 %start
+         ssown_gcstarted = 1
+         %if compare(uinfs(7) {surname}, "#VIEWER")=yes %start
+            line = ssown_ssowner
+            ssown_gcstarted = 2
+            %exit
+         %finish
+
+         custinit = ssown_custinit
+         %if custinit#0 %start
+            flag = 0
+            %if custinit>0 %start
+               comm = ssown_ssowner; param = date; line = time
+               custinit = addr(uinf)+custinit&x'FFFFF'
+               entercustinit(comm, param, line, flag, custinit)
+               ssown_custinit = 0
+            %else
+               j=-custinit
+               printsymbol(byteinteger(j)) %and j=j+1 %while byteinteger(j)#0
+               newline
+            %finish
+            %if custinit<0 %or flag#0 %then logoff2(1)
+            line = ""
+         %finish
+
+         %if ssown_astartfile#0 %start
+            line = "OBEY ".string(ssown_astartfile)
+            disposeheap(ssown_astartfile)
+            ssown_astartfile = 0
+            %exit
+         %finish
+      %finish
+      %exit
+   %repeat
+
+   prompt(ssown_command prompt)
+   ssown_prompt type = ssown_prompt type!1 {prompt is a command prompt}
+
+   from console = 0
+   %if line#"" %start
+      ssown_command echoed = no
+      %result = 0
+   %finish
+
+
+
+   %if ssown_loadlevel=basell {2} %and ssown_ssreason#batchreason %c
+   %then from console = yes %c
+   %else from console = no
+
+   %cycle {until a non null line obtained}
+      j = 0
+      ssown_command echoed = no
+      j = readline(line, eof) %if line=""
+      %result = j %unless j=0 {eof}
+
+      %if line = "-" %and from console = yes %start
+         review(line)
+      %finish
+
+      %continue %if line=""
+      %if ssown_job spacetrace&1>0 %and ssown_loadlevel>2 %start
+         shout("Cmnd: ".line)
+      %finish
+      massage(line) %unless line->("!")
+      %if from console = yes %start {interactive input}
+         j = history(line, comm, param, 0)
+         %unless j=0 %start
+            printline(line." Invalid") %unless j=2
+            line = ""
+            j = 0
+            %continue
+         %finish
+      %finish {call of history}
+      remove comments(line)
+      substitute(line) { textual substitution }
+      %result = 0 %unless line=""
+   %repeat
+%end;                                    ! get next command line
+
+!-----------------------------------------------------------------------
+
+%routine emas3xinner(%stringname cmd, param, infile, outfile, %integer from  console, %integername flag)
+
+%integer inch, outch, afd, cist, cid, in, cost, cod, out
+%string(255)line
+%record (fdf) %name fd
+
+   %if param="" %then line = cmd %else line = cmd." ".param
+   castout(param)
+   in = 0; out = 0
+   %if infile#"" %and infile#".IN" %start
+      cist = instream
+      cid = ssown_indefault
+      in = 1
+      emas3 claim channel(inch)
+      idefine(inch, infile, afd, flag)
+      flag = open(afd, 1) %if flag=0
+      ->out %unless flag=0
+      set io default(0, inch, 0)
+      select input(0)
+   %finish
+
+   %if outfile#"" %and outfile#".OUT" %start
+      cost = outstream
+      cod = ssown_outdefault
+      out = 1
+      emas3 claim channel(outch)
+      idefine(outch, outfile, afd, flag)
+      %if flag=0 %start
+         fd == record(afd)
+         fd_mode of use = 1
+         flag = open(afd, 2)
+      %finish
+      ->out %unless flag=0
+      set io default(1, outch, 0)
+      select output(0)
+   %finish
+
+   adjust load level(+1)
+   command(line, cmd, param, from console, 3, flag)
+   tidyfiles(1)
+   ssown_load level = ssown_load level-1
+out:
+   %if in>0 %start
+      set io default(0, cid, 0)
+      select input(cist)
+      flag = iocp(16, inch)
+      clear(inch, flag)
+   %finish
+
+   %if out>0 %start
+      set io default(1, cod, 0)
+      select output(cost)
+      flag = iocp(16, outch)
+      clear(outch, flag)
+   %finish
+%end; ! emas3xinner
+
+!-----------------------------------------------------------------------
+
+%routine tidy up after obey
+
+%integer i, j, flag, obey level
+%integer %name filenameptr
+%record (jobspacef) %name jobspace
+
+   obey level = ssown_obey level
+   monparams("=*obey level=".itos(obey level)) %if ssown_ssnote&4>0
+   j = ssown_jobspace base(ssown_load level)
+   %unless j=0 %start
+      jobspace == record(j)
+      clear jobspace variables(jobspace)
+   %finish
+   ssown_job spacebase(ssown_load level) = 0
+   set con level("T#MACWK".itos(ssown_load level), 0, j)
+
+   i = ssown_obeystream-1
+   %if i=nullobeystream %then i = -90
+
+   set io default(0, i, 0)
+   select input(0)
+   j = iocp(16, ssown_obeystream) {close}
+   clear(ssown_obeystream, flag)
+
+   ! Close the output stream, too, if there was one other than zero
+
+   %if ssown_obeyfile(ssown_obeylevel+max obeys)#0 %start
+      ! First find out what is the correct output stream to re-instate
+      ! as the default.  This entails looking backwards for the previous
+      ! non-null output obey-file-name, and using the corresponding stream number.
+      ! [Nested OBEYs with output files specified send output to the stated file (obviously).
+      !  Nested OBEYs without output files specified send output to the currently-specified
+      !  output file (if any) of a previous-level OBEY, or to .OUT if no
+      !  previous-level OBEY has an output file specified]
+
+      j = -91
+      %for i = ssown_obeylevel-1, -1, 1 %cycle
+         %if ssown_obeyfile(maxobeys+i)#0 %start
+            j = nullobeystream+maxobeys+i
+            %exit
+         %finish
+      %repeat
+      set io default(1, j, 0)
+      select output(0)
+
+      j = iocp(16, ssown_obeystream+maxobeys) {close}
+      clear(ssown_obeystream+maxobeys, flag)
+   %finish
+!printline("Tidy up after level " . itos(obey level))
+
+   filenameptr == ssown_obeyfile(ssown_obeylevel)
+!      disconnect(string(filenameptr), j)
+   disposeheap(filenameptr)
+   filenameptr = 0
+
+   filenameptr == ssown_obeyfile(ssown_obeylevel+maxobeys)
+   %if filenameptr#0 %start
+!      disconnect(string(filenameptr), j)
+      disposeheap(filenameptr)
+      filenameptr = 0
+   %finish
+
+   ssown_fourdots = 0
+   ssown_dataecho = ssown_echostate(ssown_obeylevel)
+   ssown_obeylevel = ssown_obeylevel-1
+   ssown_obeystream = ssown_obeystream-1
+!   ssown_loadlevel = ssown_loadlevel-1
+   adjust load level(-1)
+   tidyfiles(0);                         ! selecting streams 0
+!   ssown_loadlevel = ssown_loadlevel-1
+   adjust load level(-1)
+%end;                                    ! tidy up after obey
+
+!-----------------------------------------------------------------------
+
+%routine intermittent message
+%longinteger clock
+%integer j
+
+   *basr_15,0; ! *BALR_15,0
+   *USING_15
+   *LA_1,clock
+   *STCK_1(1);                     ! Store TOD clock
+   *BC_7,<notworking>
+   *DROP_15
+   j = shortinteger(addr(clock)+5)
+   ! This halfword comprises bits 32-47 of the clock. Bit 51 represents 1 microsecond
+   %return %unless j&x'7FF'=0 %and ssown_inhibitmessages&4=0
+
+   newlines(2)
+   printline( %c
+      "******************** Automatic message from System Manager ********************")
+   printstring(tostring(7));    ! BEL
+   printline( %c
+      "REMEMBER that your important files should be CHERISHed.  No system back-up is
+made of unCHERISHed files.   In addition such files are eligible for deletion,
+to recover disc space, when they have not been accessed for four weeks.")
+   printline("See   Command:HELP CHERISH   for further details.")
+   printstring( %c
+      "*******************************************************************************")
+   newlines(2)
+not working:
+%end; ! intermittent message
+
+!---------------------------------------------------------
+
+%routine pipe(%stringname line, rest)
+
+%integer j, k, ch, q
+
+   rest = ""
+   q = 0  { not in strng }
+   j = 0; k = length(line)
+
+   %cycle
+      j = j + 1
+      %return %if j > k
+      ch = charno(line, j)
+      %if q = 0 %start
+         q = ch %and %continue %if ch = '''' %or ch = '"'
+         %if ch = '|' %start
+            rest = substring(line, j+1, k) %if j < k
+            length(line) = j - 1
+            %return
+         %finish
+      %else
+         q = 0 %if ch = q
+      %finish
+   %repeat
+%end; ! pipe
+
+!----------------------------- COMMANDLOOP -------------------------------------
+
+%routine command loop
+
+!  The purpose of this routine is to execute commands until certain events occur as follows.
+
+!   Called from BCI.  Execute commands until STOP command (terminates
+!                     process).  Or until INT:A, Q,  when BCI's default trap is executed
+!                     and this routine is thereby re-entered.
+!   Called from execute command, under OBEY.  This is a recursive
+!                    call, and we return at enf-of-file for the file being OBEYed.
+
+%integer eof, j, flag, ndcpu, npt, stkfront, from console
+%integer ptused,cpuused, sub
+%string(31)infile, outfile, to
+%string (max llen) comm, param, line, rest
+%integer base
+%record (jobspace var f) jsv
+%record (job spacef) %name job space
+%integer save cur, save currec, echo
+%record(fdf)%name fd
+
+   eof = 0
+   line = ""
+   %cycle;                               ! main loop
+      j = iocp(27, 1);                   ! new entry - any remaining chars in buffer?
+      newline %if j#0;                   ! output remaining chars
+Loop:
+      select output(0)
+      *st_11,stkfront;                   !we need our stack front for next command
+      tidy traps(stkfront)
+
+      unload2(ssown_loadlevel, 0);       ! Unload temporarily-loaded files
+      tidyfiles(0);                      ! close files at and above current level and select zero
+
+      npt = pageturns;                   ! new page turns
+      ndcpu = dcputime;                  ! new dcpu time
+      %if ndcpu-ssown_lastdcputime>ssown_currms//100 %start
+         ! last command used > 1% of total cpu time
+         flag = dsetit(ssown_currms);    ! more time
+         ssown_lastdcputime = ndcpu
+      %finish
+
+      ptused=npt-ssown_oldpageturns
+      cpuused=ndcpu-ssown_olddcpu
+      j = 0; j=(ptused*1000)//cpuused %unless cpuused=0;          ! = pageturns per CPU second
+
+      %if ssown_ssmonitor&1#0 %start;    ! monitor cpu & page turns
+         write(ptused, 1)
+         printstring(" PT")
+         write(cpuused, 1)
+         printstring(" DCPU  Pageturns per CPU sec =")
+         write(j, 1); newline
+      %finish
+
+      %if j>500 %and cpuused>30000 %start
+         ! I.e. report only if period (CPU time) exceeds 30 seconds.
+         param=itos(j)." pt's per CPU sec, in ".%c
+            itos(cpuused//1000)." secs"
+         j=dmessage("SUBSYS", length(param), 1, 0, -1, addr(param)+1)
+      %finish
+
+      j=cpuused//1000
+      %if j>300 {i.e.>5 minutes} %and ssown_ssreason#batchreason %start
+         param=itos(j)." secs used in one interactive command"
+         j=dmessage("SUBSYS", length(param), 1, 0, -1, addr(param)+1)
+      %finish
+
+      ssown_sscomreg(39) = ssown_sscomreg(39)&(\(16!32))
+
+!      ssown_oldpageturns = npt
+!      ssown_olddcpu = ndcpu
+      %if ndcpu>=uinf_sess limit %then %start
+         %if ssown_ssreason=batchreason %then %start
+            batchstop(1)
+            !close down batch process if all CPU done
+         %finish %else %start
+            printline("*****Session time limit exceeded******")
+            stop
+         %finish
+      %finish
+
+      ssown_vsstrapad = 0
+      ! reset anything that needs to be between commands
+      ssown_ssmp ctl1 = 0
+      ssown_suppress terminal output = no
+      %unless ssown_aitbuffer=0 %start {put journal back on}
+         ssown_it_jnbase = imod(ssown_it_jnbase)
+      %finish
+
+      clearllists;                       ! Forget certain files from the CONF table
+
+      %if ssown_loadlevel=basell %and ssown_ssreason=ireason %start
+         ssown_nocrtrans = 0;            !turn off cr translate suppression
+!         %unless ssown_setmode changed=0 %start
+!            %if ssown_ssowner = "ERCC04" %c
+!            %then stoj("Resetting default mode...")
+!            flag = setmode(ssown_defmode)
+!            ssown_setmode changed = 0
+!         %finish
+
+         intermittent message
+      %finish
+
+      base = ssown_jobspace base(ssown_loadlevel)
+      jobspace == record(base) %unless base=0
+
+      flag = 0
+      %if line = "" %start
+         flag = get next command line(line, from console)
+      %finish
+      ssown_oldpageturns = pageturns
+      ssown_olddcpu = dcputime
+      %exit %unless flag=0
+
+      %unless funds on=0 %start
+         %if ssown_scarcity found=0 %start
+            %if scarce = 1 %start
+               ! interactive users >= scarcity
+               printstring("**Resources are scarce")
+               ssown_scarcity found = 1
+               %if uinfi(20)=0 %then printstring(".  You are liable to pre-emption")
+               newline
+            %finish
+         %finish
+      %finish
+
+      job space man(line, 0)
+      %if line="" %start
+         -> Loop %if (ssown_ssreason = batch reason %or ssown_obey level > 0)
+                           { dont wish a newline character after every 'say' }
+         %continue
+      %finish
+
+      resolve command line(line, infile, outfile)
+
+      %if base#0=eof %start
+         %unless job space_afd=0 %start
+            fd == record(job space_afd)
+            %unless byteinteger(fd_cur)=27 %and ssown_fourdots=2 %start
+               save cur = fd_cur
+               save currec = fd_currec
+               echo = ssown_dataecho { no echo for look ahead }
+               ssown_dataecho = 0
+               j = readline(rest, eof)
+               ssown_dataecho = echo
+               %if rest="----" %start
+                  hide(j)
+                  %cycle
+!                     queue(line, j)
+                     control line(rest, j)
+                     %exit %if rest="++++" %or j#0
+                     %if rest="...." %start
+                        rest = tostring(27)
+                        queue(rest, j)
+                        ssown_fourdots = 2
+                        %exit
+                     %finish
+                     substitute(rest)
+                     queue(rest, j)
+                  %repeat
+!                  exec(outfile, 1, j)
+!                  reveal
+!                  line = ""
+!                  %continue
+                  infile = "T#STACK"
+               %else
+                  fd_cur = save cur
+                  fd_currec = save currec
+                  eof = 0
+               %finish
+            %finish
+         %finish
+      %finish
+
+      sub = 1
+      %cycle
+         pipe(line, rest)
+         %if rest = "" %c
+         %then to = outfile %c
+         %else to = "T#PIPE" . itos(sub) %and sub = sub + 1
+
+         comm = line %and param = "" %unless line->comm.(" ").param
+         %unless check command(comm) = 0 %start
+            printline(translate prompt(1).line) %if ssown_command echoed=no %andc
+               ssown_load level > (basell + 1)
+            printline(line . " invalid")
+            line = ""
+            %exit
+         %finish
+
+         prompt("Data:")
+
+         %if ssown_ssinhibit#0 %start; ! something inhibited
+            shout("** SSINHIBIT non-zero at command level")
+            ssown_ssinhibit = 1
+            allow interrupts
+         %finish
+
+         emas3xinner(comm, param, infile, to, from console, j)
+
+         reveal %if infile = "T#STACK"
+
+         %if ssown_rcode#0 %start
+         %if (ssown_ssreason=batch reason %or ssown_obey level>0) %and %c
+            base#0 %and jobspace_error action>0 %start
+            jsv_name = "erroraction"
+            j = get value of jsv(jsv)
+            %if jsv_type=2 { string } %start
+               %unless jsv_s = "" %start
+                  line = jsv_s
+                  printline("ERROR ACTION '".line."' invoked")
+                  %exit
+               %finish
+            %finish
+         %finish
+         %finish
+
+         %if ssown_fourdots>0 %start
+            ssown_fourdots = 0
+!            -> out
+         %finish
+         top n tail(rest)
+         line = rest
+         %exit %if rest = ""
+         infile = to
+      %repeat
+
+   %repeat
+out:
+   batchstop(0) %if ssown_obeylevel=0
+
+   tidy up after obey
+
+%end;                                    ! of COMMAND LOOP
+
+
+!  This is the COMREG(36) structure at September 1985
+!
+!
+!  %routine  command loop
+!     %cycle
+!        execute command
+!     %repeat
+!  %end
+!
+!  %routine  bci
+!     %if default trap %start
+!        ! ADDRESS ERRORS COME HERE
+!        ndiag; ! does %stop (unless ON-cond found), and hence returns from
+!               ! BCI or from ENTER (these being the two places where COM(36) is set
+!     %else
+!        *ST_10,savecom36 %and COMREG(36)
+!     %finish
+!     command loop
+!  %end
+!
+!  %routine  disaster
+!     i=savecom36; *LM; *BCR
+!  %end
+!
+!  %routine  control
+!     %routine  call bci
+!        init traps
+!        %if default trap %start; ! THIS IS THE PRIME TRAP
+!                                 ! INT:A's come here
+!           %if single-char int, then whatever (e.g. return to cmd level, HALT)
+!           %else
+!               error in subsys
+!           %finish
+!           %return; ! from CALL BCI
+!        %finish
+!
+!        BCI
+!     %end; ! CALL BCI
+!
+!     %cycle
+!        tidy traps
+!        CALL BCI
+!     %repeat
+!  %end; ! CONTROL
+!
+!  %routine  ssinit
+!      %routine  call control
+!         *ST_10,COMREG(36)
+!         CONTROL
+!       %end
+!      CALL CONTROL
+!  %end
+
+%routine bci
+!***********************************************************************
+!*    Basic command interpreter for EMAS-3                             *
+!***********************************************************************
+%integer flag, id, i, enddiagstk
+%record (fdf) %name fd
+
+   default trap(id, 0, flag)
+   %if flag#0 %start;                    ! 1st call sets up trap
+      *st_11,i
+      %if ssown_ssnote&64#0 %then monparams("=*default trap. R11=".htos(i, 8))
+
+      %if ssown_intinfo_gr(11)<enddiagstk %or (ssown_intinfo_class=65 %and %c
+         ssown_intinfo_subclass#'Q') %or ssown_intinfo_class=69 {c#stop} %then %start
+         !sh mod 03-oct-85
+         !INT:..send to outer level for processing
+         ! but note, findtrap currently selects outermost default trap,
+         ! so this code is never exercised.
+         forcetrap(1);                   !signal default trap
+         !does not return
+      %finish
+      *st_11,i
+      i = i+x'400';                      !allow space in case fails, and is re-entered to force lower
+      !trap.  SH.
+      *l_11,i
+
+      %if ssown_sscomreg(25)&4>0 %start
+         regs(1, 0)
+         pvm
+      %finish
+
+      %if ssown_sscomreg(25)&16>0 %start
+         dump(X'4c38000', X'4c3ffff')
+      %finish
+
+      %if ssown_sscomreg(25)&32>0 %start
+         %cycle i = 1, 1, ssown_topfd
+            fd == ssown_fd(i)
+            printfd(addr(fd), 0) %unless fd_dsnum=0
+         %repeat
+      %finish
+
+      ndiag(ssown_intinfo_psw1&x'7fffffff', 0, 10, ssown_intinfo_class)
+      ! This call of NDIAG ends up doing a %stop (unless an ON-condition found)
+      ! Hence it uses COMREG(36) to do a return, and the relevant value therein
+      ! leads EITHER to a return from BCI, OR to a return from ENTER.  These are
+      ! the only two places where COMREG(36) is fiddled with after it's initial
+      ! setting in CALLCONTROL.
+
+   %else
+      %if id<0 %then mstop("Failed to set default trap", 191); ! trap setup failed
+      *st_10,i;                          ! save stack base
+      ssown_savecom36 = i
+      set comreg36(i, 1)
+      ssown_obeylevel = 0
+      ssown_obeystream = nullobeystream
+   %finish
+
+   ssown_loadlevel = basell
+   ssown_suppress terminal output = no
+   ssown_ssmp ctl1 = 0;                  ! SSMP control bits
+   ssown_ssmp ctl4 = 0;                  ! SSMP level
+
+   *st_11,i
+   i = (i+4095+x'4000')&(-4096)
+   *l_11,i
+   command loop
+
+%end;                                    ! of BCI
+!
+!-----------------------------------------------------------------------
+!
+%external %routine obey %alias "s#obey"
+
+   command loop
+%end;                                    ! obey
+
+!------------------------------- ENTERALLOWCOMM --------------------------------
+
+%routine enterallowcomm(%string %name ssowner, commandname, parameters, %integer %name flag,
+   %integer epad)
+   ! Move parameters onto stack for ALLOWCONNECT
+   *mvc_64(28,11),64(10)
+   *l_1,epad
+   *stm_4,14,16(11)
+   *lm_12,14,0(1)
+   *basr_15,14
+%end;                                    ! of ENTERALLOWCOMM
+
+!------------------------------- QUERYRESTRICT ---------------------------------
+
+%routine queryrestrict(%string %name cmd, param, %integer %name flag)
+%integer restrict
+%string (6) ssowner
+   %if ssown_ssnote&4#0 %then monparams(">sbsbiw")
+   flag = 0
+   ! [On 370/XA, UINF_WO BASE points within *Director's* UINF segment number, which is
+   ! different from the Subsystem's segment and inaccessible to it.]
+   restrict = integer(addr(uinf)+uinf_wo base&x'FFFFF'+8)
+   %if restrict<0 %then flag = 289  %else %if restrict>0 %start
+      ssowner = ssown_ssowner
+      restrict = addr(uinf)+restrict&x'FFFFF'
+      enterallowcomm(ssowner, cmd, param, flag, restrict)
+   %finish
+   %if flag#0 %then flag = 289 
+   %if ssown_ssnote&4#0 %then monparams("<sbsbiw")
+%end;                                    ! QUERYRESTRICT
+
+!------------------------------- COMMAND --------------------------------------
+
+%external %routine command %alias "S#COMMAND"(%string %name line, cmd, param,
+   %integer from console, caller, %integer %name lflag)
+!***********************************************************************
+!*     Execute 'command' with 'param'                                  *
+!*     Return loader flag in 'lflag'                                   *
+!*                                                                     *
+!*      from console  to be set 1 if called interactively
+!*                       0 if not
+!*      CALLER    is set  0  on call from execute macro
+!*                        1  on call from COMMANDLOOP
+!*                        2  on call from EMAS3 and EMAS3X
+!*                        3  on call from EMAS3H
+!*
+!*  Only in cases 1 and 3 are we to look for COMMAND if search for
+!*  C#COMMAND fails
+!***********************************************************************
+%integer decll, chashmode, in, out, type, actionflag, cid, save caller
+%integer i, mflag, fconad, ffiletype, fdatastart, fdataend, dum
+%integer pamcontrol, savepamend, savepamad, loop, masters searched
+%record (ent4f) ent4
+%record (pamf) pam
+
+%string (255) obeyoutfile, macrofile, s2, entry{needs to be able to take a (macro)filename}
+
+%const %integer macrofound=0, entrynotfound=1, entryfound=2, otherfail=3
+%const %integer margin= 8192
+%switch cmdact(macrofound:otherfail)
+
+%routine %spec load command(%string (255) cmd, %string %name macfile, %integer %name type,
+   actionflag, %record (ent4f) %name ent4)
+
+
+   %if ssown_ssnote&4#0 %then monparams(">srsrsrjrjriw")
+
+   lflag = 0
+   *st_11,dum
+   %if dum+margin>ssown_topstk %start
+      lflag = 438 
+      ->cmdact(otherfail)
+   %finish
+
+   save caller = ssown_caller of command
+   ssown_caller of command = caller
+   masters searched = 0
+   decll = 0
+
+   %if caller#2 {EMAS3} %start
+
+      ! Is the command name subject to "Course Supervisor's" checking procedure?
+      %if procbits&1#0 %then queryrestrict(cmd, param, lflag)
+      %if lflag#0 %then s2 = cmd %and ->reportout
+
+      %if caller=1 {COMMANDLOOP} %then clear(-200, i); ! Clear negative (temp) channels
+      ssown_sscomreg(6) = 0;             ! Initialisation required for FORTRAN i/o.
+      ssown_suppress terminal output = no
+      ! ssown_ssmp ctl1=0
+   %finish
+   %if caller=1 %or caller=0 {this til TRANSFER sorted to C#} %or caller=3 %then %c
+      chashmode = 1 %else chashmode = 0
+
+   obeyoutfile = ""
+
+   pam = 0
+   %if ssown_obeylevel=0 %and from console=1 %start
+      pam_control = 8;                   !indicates called from console
+   %finish
+
+   %if cmd="" %start
+      printline(line." Invalid")
+      ->out
+   %finish
+
+   %if charno(cmd, 1)='#' %start;        ! hash command
+      savepamad = ssown_currentpamad
+      ssown_currentpamad = addr(pam)
+      pam_command = cmd
+      pam_clicomm = cmd
+      cmd -> ("#").cmd
+      hash command(cmd, param)
+      ssown_currentpamad = savepamad
+      ->out
+   %finish
+
+   !---------------------------------------------- Load and execute -------------------------
+
+   ! Here we plan to increment loadlevel
+   !    (a)   if entry is called from COMMANDLOOP (CALLER=1), even in
+   !          OBEY-file.  [And whether or not the entry is in the basefie]
+   !    (b)   if entry is called via EMAS and entry is not a basefile entry.
+   !    (c)   if entry is called via EMASX (whether or not entry is a basefile
+   !          entry).  This is equivalent to a command-level call and history
+   !          is invoked too.
+
+   ! Whether or not ENTRY is in the basefile is detected by comparing ENT4_GLA with LLINF(-1)_GLA
+   ! We have to increment loadlevel first for the general case, but if the
+   ! required entry is in basefile, then nothing will have been loaded, and we
+   ! can set it back down again without side-effect.
+
+!*    ssown_loadlevel = ssown_loadlevel+1
+   adjustloadlevel(+1)
+   decll = 1 {decrement loadlevel on exit}
+
+retry:
+
+   ! Attempt to load "C#".cmd or just CMD
+   entry = ""
+   load command(cmd, entry, type, actionflag, ent4)
+
+   ->cmdact(actionflag)
+
+
+cmdact(macrofound):
+
+   macrofile = ssown_ssfname
+   fconad = ent4_codeoffset
+   fdatastart = ent4_glaoffset
+   fdataend = ent4_epoffset
+   ->execute
+
+
+cmdact(entrynotfound):
+
+   s2 = ssown_ssfname
+
+   ! SSOWN_NOAUTOSEARCH takes the following values
+   !    0      OPTION AUTOSEARCH=ON       Do the auto-search and add the directory to the searchlist
+   !    1      OPTION AUTOSEARCH=OFF      Do not do any auto-search
+   !    2      OPTION AUTOSEARCH=REPORT   Do the auto-search, reporting if command found
+   !                                      but do not add to searchlist
+
+   ! [On 370/XA, UINF_WO BASE points within *Director's* UINF segment number, which is
+   ! different from the Subsystem's segment and inaccessible to it.]
+
+   %if ssown_noautosearch#1 %and (procbits&1=0 %or (procbits&1#0 %and %c
+      integer(addr(uinf)+uinf_wo base&x'FFFFF'+8)=0)) %and lflag=289 {entry not found} %and s2=cmd %and %c
+      {length(cmd)>2 %and} masters searched=0 %start
+      ! [Do the MASTERDIRS only for COMMANDNAME not found, and not for unsatisfied refs
+      !  during the cascade load.  Do this once only - it is possible to get
+      !  lflag 289 even though an entry has been found in the list of directories
+      !  for example if the file containing the entry has been destroyed or renamed]
+
+      masters searched = 1
+
+      ! Entry not found.  Have a go in the master list of directories.
+      connect("SUBSYS:MASTERDIRS", 0, 0, 0, ent4_codeoffset, ffiletype, fdatastart, fdataend,
+         mflag)
+      %if mflag=0 %start
+         ssown_sscomreg(39) = ssown_sscomreg(39)!32
+         ssown_dirdiscon = 1
+         mflag = search("C#".cmd, ent4, "", "", 2 {code} ! 4 {macro(ECL)}, dum)
+
+         ssown_sscomreg(39) = ssown_sscomreg(39)&(\32)
+         %if mflag=0 %and ssown_noautosearch=0 %then ->retry; ! Entry has been found and Directory added tosearchlist
+      %finish
+   %finish
+
+   ! Not found (even) in extra directories
+
+reportout:
+   printline(translateprompt(1).line) %if ssown_command echoed=no %and ssown_load level-decll>3
+   ! This is not too satisfactory.  If we search for C#cmd then just cmd and fail
+   ! to find entry cmd, then we get the correct error message
+   ! COMMAND fails - Entry cmd not found
+   ! - by chance as it were.  However, if we search only for C#cmd, which is the
+   ! situation we are aiming for, and which already occurs for (a) the Customised
+   ! Subsystem and (b) for calls on EMAS3X, then we get the Entry C#cmd not found
+   ! message, unfortunately.  So we are going to resolve it off.  If it occurs
+   ! at the beginning of S2.
+   %if s2->entry.("C#").macrofile %and entry="" %then s2 = macrofile
+   ssown_ssfname = s2
+cmdact(otherfail):
+   setreturncode(lflag)
+   ->out
+
+
+cmdact(entryfound):
+
+   ! [On 370/XA, UINF_WO BASE points within *Director's* UINF segment number, which is
+   ! different from the Subsystem's segment and inaccessible to it.]
+
+   %if procbits&1#0 %and integer(addr(uinf)+uinf_wo base&x'FFFFF'+8)#0 %and entry#"C#".cmd %and caller#2 %start
+      queryrestrict(entry, param, lflag)
+      %if lflag#0 %then s2 = cmd %and ->reportout
+   %finish
+
+execute:
+
+   ! If call is via EMAS, we ask:
+   ! Was the command loaded part of basefile?  If so, put loadlevel back
+   ! and don't decrement after ENTER
+
+   %if caller=2 {EMAS} %and ent4_gla offset<ssown_llinfo(-1)_gla %start
+      decll = 0 {do not decrement loadlevel on exit - we are doing it here}
+      adjustloadlevel(-1)
+   %finish
+
+   pam_clicomm = cmd
+   ssown_cliparm = param
+   %unless line->(" ").s2 %then s2 = ""
+
+   %if ssown_pamworkad#0 %then savepamend = integer(ssown_pamworkad) %else savepamend = 32
+   savepamad = ssown_currentpamad
+   %if entry->("C#").entry %start; %finish
+   %if entry->(":").entry %start; %finish
+   %cycle; %exit %unless entry->("_").entry; %repeat
+   pam_command <- entry
+   mflag = depmonitor("C ".entry, "SUBSYS:MONITOR")
+   in = ssown_sscomreg(22); out = ssown_sscomreg(23)
+   loop = 0
+
+   %cycle
+      pamcontrol = paminit(s2, pam)
+      %if pamcontrol#0 %then %exit
+      loop = loop+1
+      %if loop>1 %and pam_control&1<<12#0 {tidyrequired} %then tidyfiles(0) %and clear(-200, i)
+      ssown_lastrcode = ssown_rcode
+      ssown_rcode = 0
+      %if type=code %start
+         %if ssown_terminal input>0 %start
+            cid = ssown_indefault
+            set io default(0, -90, 0)
+            select input(0)
+         %finish
+         enter2(0, ent4_code offset, ent4_gla offset, ent4_ep offset, ent4_parmword, param)
+         %if ssown_terminal input>0 %start
+            set io default(0, cid, 0)
+            select input(0)
+         %finish
+      %finish %else %start
+         shout("Call execute macro cmd=".cmd." param=".param." entry=".entry." file=". %c
+            macrofile) %if ssown_job spacetrace&16>0
+         ! mflag = execute macro(macrofile, cmd, param, fdatastart, fdataend)
+         jobspace macro(macrofile, fdatastart, fdataend)
+         mflag = 0
+      %finish
+   %repeat
+
+   lflag = ssown_rcode
+   %if ssown_pamworkad#0 %and savepamend<integer(ssown_pamworkad) %then %c
+      integer(ssown_pamworkad) = savepamend
+   ssown_currentpamad = savepamad
+   selectinput(in); selectoutput(out)
+
+out:
+   tidyfiles(1 {no selects}) %and adjustloadlevel(-1) %if decll#0
+   ssown_caller of command = save caller
+   %if ssown_ssnote&4#0 %then monparams("<srsrsrjrjriw")
+
+
+!--------------------------------- LOAD COMMAND --------------------------------
+
+%routine load command(%string (255) cmd, %string %name entry, %integer %name type, actionflag,
+   %record (ent4f) %name ent4)
+
+! Loads entry "C#".cmd, setting TYPE to CODE or MACRO.  Or failing that, loads
+! CMD as type CODE.
+!
+! Sets ENTRY to be actual entry found (for type=code) or
+!            to macro filename (for type=macro)
+!
+! Sets ACTIONFLAG for next action, and sets the global LFLAG
+! to enable a suitable flag to be printed if a search of SS#MACRO subsequently
+! fails.  [We have given this routine parameters FOR CLARITY, rather than  operate
+! on globals]
+
+%integer i
+%string (31) ep
+
+   ep = "C#".cmd
+   type = code!macro
+   i = loadep(ep, entry, type, lflag, ent4_code offset, ent4_gla offset, ent4_ep offset,
+      ent4_parmword, ssown_loadlevel)
+
+   %if lflag=0 %and type=macro %then actionflag = macrofound %and %return
+
+   %if i=0 {not found} %and lflag#293 {inconsistent dir entry} %and %c
+      ep=entry {don't do further search if alias was found} %and %c
+      lflag#267 {invalid filetype} %and lflag#218 {file does not exist} %and %c
+      lflag#354 {entry already loaded} %and lflag#361 {param mismatch} %and %c
+      lflag#363 {[COmmand found but] Unsatisfied reference} %and %c
+      lflag#279 {Conflicting use in anorther proc} %and chashmode#0 %and (procbits&1=0 %or %c
+      (procbits&1#0 %and integer(addr(uinf)+uinf_wo base&x'FFFFF'+8)=0)) %start
+
+      ! Try non-C#command if CHASHMODE so indicates
+      unload2(ssown_loadlevel, 1)
+      type = code!topbit
+      i = loadep(cmd, entry, type, lflag, ent4_code offset, ent4_gla offset, ent4_ep offset,
+         ent4_parmword, ssown_loadlevel)
+   %finish
+
+   %if i=0 %start
+      unload2(ssown_loadlevel, 1) {Load failed}
+      %if lflag=289 %then actionflag = entrynotfound %else actionflag = otherfail
+   %finish %else actionflag = entryfound
+
+%end;                                    ! of load command
+
+%end;                                    ! of command
+
+!-----------------------------------------------------------------------
+
+
+
+
+%external %integer %fn history %alias "S#HISTORY"(%string %name line, command, param,
+   %integer type)
+!*******************************************************************************
+!*     History mechanism handler - type = 0 : provide command & param          *
+!*                                 type = 1 : store command & param            *
+!*                                 type = 2 : display history                  *
+!*                                 type = 3 : store history in profile         *
+!*                                 type = 4 : retrieve history from profile    *
+!*                                 type = 5 : replace most recent command line *
+!*                                            with LINE                        *
+!*                                                                             *
+!*     Result                                                                  *
+!*               0  success                                                    *
+!*               1  requested command-line not identified                      *
+!*               2  (a) from DISPLAY and store-in-profile                      *
+!*                  (b) this is also a success flag from a TYPE 0 entry,       *
+!*                      enabling a command to be brought to the fron of the    *
+!*                      buffer for further editing without command execution   *
+!*                                                                             *
+!*******************************************************************************
+
+! Data structure:
+!
+!                                   oldestx
+!                                   |
+!     +---+---+---+--- --- --- +---+---+--- - - - +---+
+!     |   |   |   |            |   |   |              |
+!     +---+---+---+--- --- --- +---+---+--- - - - +---+
+!      0   1   2                |                  |
+!                               mostrecentx        maxslot
+
+
+
+! Syntax forms:
+!
+!     The following columns show the value of "rest of line" after the input
+!  line has been resolved on the FIRST "!".
+!
+!        case 1               <null>
+!        case 2               _newpar
+!        case 3               3
+!        case 4               3_newpar
+!        case 5               TXT1
+!        case 6               TXT1_newpar
+!        case 7               TXT1!
+!        case 8               TXT1!_newpar
+!        case 9               TXT1!TXT2
+!        case 10              TXT1!TXT2_newpar
+!        case 11              TXT1!TXT2!
+!        case 12              TXT1!TXT2!_newpar
+
+%external %integer %fn %spec pstoi %alias "S#PSTOI"(%string (255) s)
+%integer %fn %spec find command(%integer n)
+%routine %spec printhist
+%integer %fn %spec nextid(%integer discard)
+%routine %spec hstore(%integer mode)
+
+%integer ix, jx, nextx, newhlen, newid, usead, front, substitute, id, sign
+%integer len, excl2 posn, excl3 posn, nexcl, successflag
+%record (histff) save
+%record (histff) %name oldest
+
+%integer %name highestid, nexttoreissue, mostrecentx, oldestx
+%byte %integer %array %name unused
+%record (histff) %array %name hist
+%record (hhf) %name hhist
+%string (max llen) arg, new command, new param, sub, wk
+
+%const %string (11) histkey="SS#history"
+%switch htp(0:5)
+%switch exclsw(1:3)
+
+   hhist == record(ssown_hconad)
+   highestid == hhist_highestid
+   nexttoreissue == hhist_nexttoreissue
+   mostrecentx == hhist_mostrecentx
+   oldestx == hhist_oldestx
+   unused == hhist_unused
+   hist == hhist_hist
+   successflag = 0
+
+   %if ssown_ssnote&4#0 %then monparams("=sbsbsbjb")
+
+   %if charno(line, length(line))='-' %and line->("!") %then %c
+      length(line) = length(line)-1 %and successflag = 2
+
+   command = line %and param = "" %unless line->command.(" ").param
+   ->htp(type)
+
+result1:
+   printline(translateprompt(1).command." not recognised")
+   %result = 1 {INVALID COMMAND}
+
+htp(0):                                  ! provide command
+   ->display %if line="!=" %or line="!?"
+   ->specialdisplay %if line="!*"
+   ->htp(1) %unless command->("!") %or param="!"
+   %if mostrecentx=255 %then ->result1 {not found}
+   line -> newcommand.("!").arg;         ! resolving on first ! of whole command line
+
+   length(newcommand) = length(newcommand)-1 %while %c
+      newcommand#"" %and charno(newcommand, length(newcommand))=' '
+
+   new param = ""
+   front = 0
+   substitute = 0
+   id = 0
+   %if arg="" %then command = string(hist(mostrecentx)_ad) {just "!"} %else %start
+
+      ! First count remaining !s and remeber positions.  Three max in (original) line
+      nexcl = 1
+      wk = arg;                          ! Rest of original line, after first !
+      len = length(wk)
+      %for jx = 1, 1, length(wk) %cycle
+         %if charno(wk, jx)='!' %start
+            %if nexcl=3 %then ->result1; ! three max
+            nexcl = nexcl+1
+            %if nexcl=2 %then excl2 posn = jx %else excl3 posn = jx
+         %finish
+      %repeat
+
+      ->exclsw(nexcl)
+
+exclsw(1):
+      ! No second "!" in line.  No substitution.  Space (if any) is newparam delimiter
+      %if arg->arg.(" ").newparam %start; %finish
+      front = 1
+      sign = 1
+      %if length(arg)>1 %and charno(arg, 1)='-' %then %c
+         arg = substring(arg, 2, length(arg)) %and sign = -1
+      id = pstoi(arg)
+      %if id<0 %then id = 0 %else id = id*sign
+
+      ->findc
+
+exclsw(2):
+      ! Exactly two !s in original line.
+      !  Cases 7 - 10 above.    7      TXT1!
+      !                         8      TXT1!_newpar
+      !                         9      TXT1!TXT2
+      !                        10      TXT1!TXT2_newpar
+
+      arg = substring(wk, 1, excl2 posn-1)
+      %if arg="" %then ->result1
+      %if excl2 posn<len {Cases 8-10} %start
+         sub = substring(wk, excl2 posn+1, len)
+         %if sub->sub.(" ").newparam %start; %finish
+         %if sub#"" %then substitute = 1
+      %finish {else Case 7}
+
+      ->findc
+
+exclsw(3):
+      ! Exactly three !s in original line
+      !   Cases 11 - 12 above.       11     !TXT1!TXT2!
+      !                              12     !TXT1!TXT2! _newpar
+      substitute = 1
+      arg = substring(wk, 1, excl2 posn-1)
+      %if arg="" %then ->result1
+      sub = substring(wk, excl2 posn+1, excl3 posn-1)
+      %if len>excl3 posn %start
+         ! Case 12
+         %unless len>excl3 posn+1 %and charno(wk, excl3 posn+1)=' ' %then ->result1
+         newparam = substring(wk, excl3 posn+2, len)
+      %finish
+
+findc:
+
+      ! printstring("Wk/Arg/Sub/Substitute=")
+      ! printstring(wk."/".arg."/".sub."/")
+      ! write(substitute, 1); newline
+
+      %if find command(id)=0 %then ->result1 {not found}
+   %finish
+
+   ! Leading spaces from newpar
+   %while newparam#"" %and charno(newparam, 1)=' ' %cycle
+      newparam -> (" ").newparam
+   %repeat
+
+   ! Now COMMAND is set with WHOLE COMMAND LINE from history
+   ! Separate it into command and par and substitute NEWCOMMAND, NEWPARAM as
+   ! necessary.  Set COMMAND, PARAM.
+   %unless command->command.(" ").param %then param = ""
+   command = new command %unless new command=""
+   param = new param %unless new param=""
+
+   ! Construct new version of LINE
+   line = command
+   line = line." ".param %unless param=""
+   printline(translateprompt(1).line)
+   ! and now save it
+
+htp(1):                                  ! store command
+   ! Is line already stored?  If so, promote to most recent position
+   %if mostrecentx#255 {one or more stored} %start
+      ix = mostrecentx
+      %cycle
+         %if string(hist(ix)_ad)=line %start
+            save = hist(ix)
+            ! Move entries from IX+1 through to MOSTRECENTX one position left, and
+            ! put SAVE at most recent position
+            jx = ix
+            %cycle
+               %exit %if jx=mostrecentx
+               nextx = (jx+1)&maxslot
+               hist(jx) = hist(nextx)
+               jx = nextx
+            %repeat
+            hist(mostrecentx) = save
+            %result = successflag
+         %finish
+         %exit %if ix=oldestx
+         ix = (ix-1)&maxslot
+      %repeat
+   %finish
+   ! Then LINE not found already stored.  Store it.
+   newhlen = length(line)+1
+
+   mostrecentx = (mostrecentx+1)&maxslot {set to receieve LINE}
+   ! [The above statement also serves to set the initial 255-value of MOSTRECENTX to zero].
+
+   %if mostrecentx=oldestx %start
+      ! HERE WHEN BUFFER IS FULL
+      oldest == hist(oldestx)
+      %if newhlen<=oldest_len %then usead = oldest_ad %else usead = 0 %and disposeheap(oldest_ad)
+      newid = nextid(oldest_id)
+      oldestx = (oldestx+1)&maxslot
+   %finish %else %start
+      ! HERE WHEN BUFFER IS NOT FULL
+      %if oldestx=255 %then oldestx = 0
+      oldest == hist(mostrecentx)
+      newid = nextid(oldest_id)
+      usead = 0
+   %finish
+
+storeline:
+
+   %if usead=0 %then usead = getheap(newhlen)
+   string(usead) = line
+   hist(mostrecentx)_ad = usead
+   hist(mostrecentx)_len = newhlen
+   hist(mostrecentx)_id = newid
+   %result = successflag
+
+htp(2):
+display:                                 ! display
+
+   ix = oldestx
+   %if ix=255 %then %result = 2
+   %cycle
+      write(hist(ix)_id, 3); spaces(2)
+      printline(string(hist(ix)_ad))
+      %exit %if ix=mostrecentx
+      ix = (ix+1)&maxslot
+   %repeat
+   %result = 2
+
+special display:
+   printhist
+   %result = 2
+
+htp(3):                                  ! Store history info in profile
+htp(4):                                  ! Retrieve history from profile
+   hstore(type)
+   %result = 2
+
+htp(5):                                  ! Replace most recent command line with LINE
+   %if mostrecentx=255 %then %result = 1; ! none stored
+   newid = hist(mostrecentx)_id
+   newhlen = length(line)+1
+   %if newhlen<=hist(mostrecentx)_len %then usead = hist(mostrecentx)_ad %else %c
+      usead = 0 %and disposeheap(hist(mostrecentx)_ad)
+   ->storeline
+
+%integer %fn find command(%integer n)
+!***********************************************************************
+!*     If n=0 then find command case independently using 'arg'         *
+!*             else find command n.                                    *
+!*      Result  0  Not found
+!*             >0  Found.  Whole command-line set into the global COMMAND
+!***********************************************************************
+%string (255) s1, s2, uarg, target
+%integer ix, j, hit, nfrommostrecent
+
+   ! If N#0 this is form (e.g.)  "!3"            where N=3
+   !                         or  "!3_newparam"
+   ! and we allow negative N to mean "-N before most recent"
+
+   ! If N=0 we have one of:
+
+   !   Search for ARG (at front of commandline if FRONT=1) and substitute SUB
+   !   for all occurrences of ARG in the command line
+
+   %if n=0 %start;                       ! substitution required
+      uarg = arg
+      uctranslate(addr(uarg)+1, length(uarg))
+   %finish
+
+   ! Stored command lines are to be searched for string UARG (if N=0)
+   ! SUB is the string to be substituted for the 'UARG' string
+   ! FRONT is 1 if  UARG must be at the front of the command-line, zero if it may be
+   ! anywhere in the command-line
+
+   command = arg
+   param = ""
+
+   ! Obtain required line
+   hit = 0
+   nfrommostrecent = 0
+   ix = mostrecentx
+   %cycle
+      %if n=0 %start;                    ! search for line containing UARG
+         target = string(hist(ix)_ad)
+         uctranslate(addr(target)+1, length(target))
+         %if target->s1.(uarg).s2 %start
+            %unless front#0 %and s1#"" %then hit = 1 %and %exit
+         %finish
+      %finish %else %if hist(ix)_id=n %or nfrommostrecent=n %then hit = 1 %and %exit
+      %exit %if ix=oldestx
+      ix = (ix-1)&maxslot
+      nfrommostrecent = nfrommostrecent-1
+   %repeat
+
+   %result = 0 %if hit=0
+
+   ! Perform substitution if required (SUBSTITUTE#0)
+   ! Give either (a) line with substitutions (n=0 and front=0) or (b) whole line
+   %if n=0 %and front=0 %start
+      command = ""
+      target = string(hist(ix)_ad)
+
+      %if substitute#0 %start
+         %until %not (s2->s1.(uarg).s2) %cycle
+            j = length(s1)
+            command = command.substring(target, 1, j).sub
+            j = j+length(arg)
+            target = substring(target, j+1, j+length(s2))
+         %repeat
+      %finish
+
+      command = command.target
+   %finish %else command = string(hist(ix)_ad)
+   %result = 1
+%end;                                    ! of find command
+
+%integer %fn nextid(%integer discard)
+! We have MAXUSLOT+1 spaces for discarded IDs.  Initially all holes are zero.
+! Before the history bufer is full, DISCARD is zero.  We keep issuing a brand-new
+! ID until the UNUSED buffer is full of (non-zero) IDs, and then re-issue the oldest.
+! There are thus (MAXSLOT+1) + (MAXUSLOT+1) distinct IDs
+
+%integer next
+   next = unused(nexttoreissue)
+   unused(nexttoreissue) = discard %if discard>0
+   nexttoreissue = nexttoreissue+1
+   %if next=0 %then highestid = highestid+1 %and next = highestid
+   nexttoreissue = 0 %if nexttoreissue>maxuslot
+   %result = next
+%end;                                    ! of nextid
+
+%routine printhist
+%integer ix, jx
+   printline("hconad=".htos(ssown_hconad, 8))
+   %for jx = 1, 1, 2 %cycle
+      %for ix = 0, 1, maxuslot %cycle
+         %if jx=1 %start
+            %if ix=nexttoreissue %then printstring("NXT") %else spaces(3)
+         %finish %else write(unused(ix), 2)
+         space
+      %repeat
+      newline
+   %repeat
+   newline
+
+   %for ix = 0, 1, maxslot %cycle
+      %if ix=mostrecentx %then printstring("mostrec")
+      %if ix=oldestx %then printstring(" oldest")
+      %if mostrecentx#ix#oldestx %then spaces(7)
+      write(hist(ix)_id, 4)
+      space
+      phex(hist(ix)_ad); space; phex(hist(ix)_len); space
+      %if hist(ix)_ad>0 %then printstring(string(hist(ix)_ad)) %else printstring("(zero address)")
+      newline
+   %repeat
+%end;                                    ! of printhist
+
+%routine hstore(%integer mode)
+!  Mode = 3: store history in profile.  Mode = 4: retrieve history from profile
+%integer app, avar, ix, aend, j, offset, slen1, vsn
+%record (hhf) %name curstate
+%record (hhf) dum
+%record (%byte %integer %array px(1:4060)) pj; ! 4060 is max profile entry size
+
+   ! First,  map all the history variables onto the record to be passed to PROFILE
+   ! The job here is to copy the strings from the heap to the back of the history variables
+   ! and to write the lot to the profile
+
+   app = addr(pj)
+   aend = app+4060
+   avar = app+sizeof(dum)
+   curstate == record(app)
+   %if mode=3 %start
+      curstate = hhist;                  ! Copy to local record, to pass to profile
+      hhist == record(app);              ! Re-map everything
+   %finish %else %start
+      readprofile(histkey, pj, vsn, j)
+      %if j#0 %and j#239 {info returned smaller than record PJ} %then %return
+      hhist = curstate;                  ! Copy to BGLA position
+   %finish
+
+   highestid == hhist_highestid
+   nexttoreissue == hhist_nexttoreissue
+   mostrecentx == hhist_mostrecentx
+   oldestx == hhist_oldestx
+   unused == hhist_unused
+   hist == hhist_hist
+
+   %if mode=4 %or (mode=3 %and %not (mostrecentx=255 %or mostrecentx=oldestx)) %start
+      ! Only if more than 1 for mode 3
+      %if mode=3 %then ix = (mostrecentx-1)&maxslot %c
+         {Omit most recent - presumably QUIT or STOP etc} %else ix = mostrecentx
+      %cycle
+         %if mode=3 {store in profile} %start
+            %if avar+byteinteger(hist(ix)_ad)+1<=aend %start
+               string(avar) = string(hist(ix)_ad)
+               ! Set ID field to be offset of string from start of profile record
+               offset = avar-app
+               avar = avar+byteinteger(hist(ix)_ad)+1
+               hist(ix)_ad = offset
+            %finish %else hist(ix)_ad = 0 %and %exit {no more room - ignore rest}
+         %finish %else %start
+            ! Retrieve history from profile
+            slen1 = byteinteger(avar)+1
+            hist(ix)_ad = getheap(slen1)
+            hist(ix)_len = slen1;        ! This value SHOULD be already OK, but one time we had a bug
+            string(hist(ix)_ad) = string(avar)
+            avar = avar+slen1
+            %return %if ix=oldestx
+         %finish;                        ! Retrieve history
+         %exit %if ix=oldestx
+         ix = (ix-1)&maxslot
+      %repeat
+      mostrecentx = (mostrecentx-1)&maxslot
+   %finish
+   %if avar-app=sizeof(dum) %then avar = 0 %and vsn = -1 %else avar = avar-app %and vsn = 1
+   j = var rec to profile(app, avar, vsn, histkey)
+%end;                                    ! of hstore
+%end;                                    ! of history
+!
+!-----------------------------------------------------------------------
+!
+!
+%external %routine emas3(%string %name ncom, nparm, %integer %name nflag)
+%integer flag
+%string (255) cmd, param, line
+
+   ss enter(cmd, flag, "srsriw")
+
+   %if param="" %then line = cmd %else line = cmd." ".param
+   uctranslate(addr(cmd)+1, length(cmd))
+
+   command(line, cmd, param, 0 {not interactive}, 2, flag)
+
+   ss exit(cmd, flag, "srsriw")
+%end;                                    ! of EMAS3
+!
+!-----------------------------------------------------------------------
+!
+%external %routine emas3h(%string %name ncom, nparm, %integer %name nflag)
+%integer flag
+%string (255) cmd, param, line, infile, outfile
+
+   ss enter(cmd, flag, "srsriw")
+
+   %if param="" %start
+      line = cmd
+      massage(line) %unless line->("!")
+      cmd = line %unless line->cmd.(" ").param
+   %else
+      line = cmd." ".param
+   %finish
+
+   %unless ssown_ssreason=batchreason %start
+      flag = history(line, cmd, param, 0)
+      flag = 0 %and ->out %if flag=2 {display or command-edit-only}
+   %finish
+
+   flag = 0
+   remove comments(line)
+   ->out %if line=""
+   job space man(line, 0)
+   ->out %if line=""
+   substitute(line)
+   resolve command line(line, infile, outfile)
+   cmd = line %and param = "" %unless line->cmd.(" ").param
+   %unless infile=outfile="" %start
+      emas3x(cmd, param, infile, outfile, flag)
+      ->out
+   %finish
+
+   flag = check command(cmd) %if flag=0
+   ->out %unless flag=0
+   castout(param)
+
+!*    ssown_loadlevel = ssown_loadlevel+1
+   adjustloadlevel(+1)
+   command(line, cmd, param, 1 {interactive}, 3 {from EMAS3H}, flag)
+   tidyfiles(1);                         ! no stream (zero) selects
+   adjustloadlevel(-1)
+out:
+   ss exit(cmd, flag, "srsriw")
+%end;                                    ! of EMAS3h
+!
+!-----------------------------------------------------------------------
+!
+%external %routine emas3x(%string %name ncom, nparm, ninfile, noutfile, %integer %name nflag)
+%integer flag
+%string (255) cmd, param, infile, outfile
+
+   ss enter(cmd, flag, "srsrsrsriw")
+
+   flag = check command(cmd)
+   -> exit %unless flag = 0
+   castout(param)
+
+   emas3xinner(cmd, param, infile, outfile, 0 {not interactive}, flag)
+exit:
+   ss exit(cmd, flag, "srsrsrsriw")
+%end;                                    ! of EMAS3x
+!
+!-----------------------------------------------------------------------
+!
+%external %routine call command %alias "s#callcommand"(%string %name str, %string (255) help,
+   specials, %integer prot, %integer %name cmdindex)
+! This routine will execute a command
+! If prot=0 then the command is read in, executed,  and returned in STR
+! If prot#0      the command in STR is executed
+! Command "?" issues help information given in HELP
+! INT:A, INT:C, INT:Q are dealt with correctly.
+! Special "commands" specified in specials are recognised and identified.
+! Specials format: "&CMD1&CMD2&CMD3....CMDn&" where '&' is space
+! and commands are in UPPER CASE
+! On return, CMDINDEX is set as follows:
+! >0...command as specified in SPECIALS....cmdindex=command number
+!  0...null command line or "?"
+! -1...stop, quit, logoff, or input ended reading command
+! -2...other emas command.
+!* Coded SH 02-SEP-87
+!
+%integer class, subclass
+%integer trapid, com36save, setbysave, flag
+!
+%routine commandinner(%string %name str, %integer %name resflg)
+%integer flag, len, ii
+%string (255) cmd, parm
+   resflg = 0;                           !not resume
+   %if prot#0 %then ->excmd
+   prompt(tostring(10)."Command:")
+   controlline(str, flag)
+   %if flag#0 %then %start
+      cmdindex = -1;                     !input failed
+      %return
+   %finish
+excmd:
+   %while str#"" %and charno(str, 1)=' ' %cycle
+      str = substring(str, 2, length(str)); !remove leading spaces
+   %repeat
+   %if str="" %then %start
+      cmdindex = 0
+      %return
+   %finish
+   %if str="?" %then %start
+      printstring(help)
+      newline
+      cmdindex = 0
+      %return
+   %finish
+   %unless str->cmd.(" ").parm %then %start
+      cmd = str
+      parm = ""
+   %finish
+   uctranslate(addr(cmd)+1, length(cmd))
+   %if specials->cmd.(" ".cmd." ").parm %then %start
+      !special command..find position
+      ii = 1
+      len = 0
+      %cycle
+         %exit %if len=length(cmd)
+         len = len+1
+         %if charno(cmd, len)=' ' %then ii = ii+1
+      %repeat
+      cmdindex = ii
+      %return
+   %finish
+   cmdindex = -2;                        !emas command
+   emas3h(cmd, parm, flag)
+%end
+!
+   com36save = ssown_sscomreg(36)
+   setbysave = ssown_who set comreg36
+   *st_11,flag
+   setcomreg36(flag, 8);                 !in case of %stop or INT:Q
+   trap(trapid, 0, flag);                !interrupts not disabled
+   %if flag#0 %then ->trapocc
+   settrap(trapid, 69, -1, flag);        !all class 69..stop, quit, logoff
+   settrap(trapid, 65, 'A', flag);       !INT:A
+   settrap(trapid, 65, 'C', flag);       !INT:C
+   cmdindex = 0
+   commandinner(str, flag)
+   ->resume
+!
+trapocc:
+   resetcontext(trapid, flag)
+   flag = giveevent(class, subclass)
+   %if class=69 %then %start
+      selectinput(0);                    !just in case
+      selectoutput(0)
+      cmdindex = -1;                     !stop or quit
+      ->resume
+   %finish
+   %if class=65 %then %start
+      !INT:A, INT:C
+      selectoutput(0)
+      selectinput(0)
+      flag = 0
+      console(7, flag, flag);            !kill output
+      %if subclass='C' %then console(8, flag, flag); !kill input
+      printstring("INT:")
+      printsymbol(subclass)
+      newline
+      ->resume
+   %finish
+   !below should not occur
+   printstring("Trap..unexpected class")
+   write(class, 1)
+   write(subclass, 1)
+   newline
+   ->resume
+!
+resume:
+   discardtrap(trapid, flag);            !trap no longer valid
+   setcomreg36(com36save, -setbysave)
+%end;                                    !of EMAS3 CALL COMMAND
+!
+!-----------------------------------------------------------------------
+!
+!%string %fn classtext(%integer class)
+!
+!   %const %string (22) %array text(0:27)= !"Floating overflow",
+! "Floating underflow",
+! "Fixed overflow",
+! "Decimal overflow",
+! "Zero divide",
+! "Bound check",
+! "Size error",
+! "B overflow",
+! "Stack error",
+! "Privilege",
+! "Descriptor",
+! "String",
+! "Instruction",
+! "Accumulator",
+! "Virtual store error",
+! "Unrecognised class",
+! "System Call",
+! "Instruction counter",
+! "Disc transfer fail",
+! "Block wrong length",
+! "Hard store fault",
+! "Illegal OUT",
+! "Local Controller error",
+! "Interval timer",
+! "Single-character INT:",
+! "Text message",
+! "Off stack top",
+! "Message from a process"
+!
+!   class = 14 %if class=32
+!   class = class-41 %if 64<=class<=68
+!   class = 15 %unless 0<=class<=27
+!
+!   %result = text(class)
+!%end;                                    ! of CLASSTEXT
+
+!-----------------------------------------------------------------------
+
+%integer %fn select context
+
+   %result = 3;                          ! Force exit to context 3.
+%end;                                    ! of SELECT CONTEXT
+
+!-----------------------------------------------------------------------
+
+%external %routine control %alias "S#CONTROL"
+%integer flag, i, picad
+%long %integer drh
+%record (reportf) rr
+%string (31) messagefile
+%string (63) ww
+%integer %array dsfii(0:1)
+%routine %spec call bci
+
+   flag = dsfi(ssown_ssowner, ssown_ssownfsys, 17, 0, "", dsfii)
+   ssown_ssnote = dsfii(0) %if flag=0
+
+   ssown_currms = int(defcpl*timefactor); ! DEFAULT COMMAND CPULIMIT
+   ! Give name of trap routine to Director.
+   flag = dnominatetrap(select context)
+   %if ssown_ssreason#batchreason %start; !INTERACTIVE USE
+      ww = "
+
+**** LOG-ON AT ".time." ON ".date." ****
+
+"
+      tojournal(addr(ww)+1, length(ww))
+      !PUT START-UP MESSAGE IN RECALL FILE
+      messagefile = fmessage
+      ssown_dataecho = 0;                !DO NOT ECHO IN FOREGROUND
+   %finish %else %start
+      ssown_dataecho = ssown_dataechooption; !USE OPTION FILE SETTING FOR BATCH
+!     SSOWN_SESSMS = ((UINF_SESSICLIM*TIMEFACTOR)//COM_INSPERSEC)+TIMEFACTOR
+      ! ALLOW ONE SECOND OVER USER REQUESTED
+      newline
+      messagefile = bmessage
+   %finish
+!   print string(uinfs(16)." service,  ")
+!   printstring("Subsys")
+!   %if ssown_unsharedbgla=0 %then printstring(" ") %else printstring("_"); ! UNDERLINE for UNSHARED ASEGLA
+!   printline(version)
+
+!   printstring(date." ".time)
+!   printstring("  Users=".itos(com_users-sysprocs))
+!   wrsn("  Fsys=", ssown_ssownfsys)
+   ssown_dirdiscon = 1
+
+!**FUNDSSTART
+!      %if funds on#0 %start
+         funds
+!      %finish
+!**FUNDSEND
+   %if ssown_ssreason=ireason %start
+      ww = ""
+      %if ssown_term valid=0 %then printline("Terminal type not known") %else %start
+         i = ssown_term_name
+         ww = string(addr(ssown_term_string space)+i) %if i>0
+         printline("Your terminal is ".ww)
+      %finish
+      i = depmonitor(uinf_itaddr." ".ww, "JOURNL:PADUSE")
+   %finish
+
+   connect(messagefile, 0, 0, 2, rr_conad, rr_filetype, rr_datastart, rr_dataend, flag)
+   %if flag=0 %start
+      %if rr_dataend>rr_datastart %start; !FILE CONTAINS SOMETHING
+!        %for I=RR_DATASTART,1,RR_DATAEND-1 %cycle
+!           PRINTCH(BYTEINTEGER(rr_conad+i))
+!        %repeat
+!        Equivalent call on IOCP:
+         drh = (lengtheni(rr_dataend-rr_datastart)<<32)!(rr_conad+rr_datastart)
+         flag = iocp(19, addr(drh))
+         ! ADD NEWLINE TO END OF MESSAGE IF NEC.
+!        %if BYTEINTEGER(I)#NL %then NEWLINE
+         %if byte integer(rr_conad+rr_dataend-1)#nl %then newline
+      %finish
+   %finish
+
+   %if ssown_ssreason=ireason %start
+      %if 30<com_secstocd %and uinf_part close=0 %start
+         !CLOSING SOON
+         newline
+         picad = integer(integer((31<<20)+32)+8) + 48 + 17
+         move(23, picad, addr(ww)+1)
+         etoi(addr(ww)+1, 23)
+         length(ww) = 23
+         printline("Warning - " . ww)
+      %finish
+      console(6, 0, 0) {print any outstanding oper messages}
+   %finish
+
+   ssown_ssstarttime = time
+   ssown_startsecs = com_secsfrmn;       !SECONDS FROM MIDNIGHT FOR METER
+
+   %cycle
+      ssown_trap stk top = 1;            ! Initialise before defining prime trap
+      %for i = maxtraps, -1, 1 %cycle
+         ssown_tstkptr(i) = 0
+         ssown_traps(i) = 0
+      %repeat
+      ! Above lines required for re-entry of CALL BCI after call on prime trap
+      callbci
+   %repeat
+
+!-------------------------------------------------------------------------------
+%routine call bci
+%string (72) mess
+%integer class, subclass, fault, flag, id, i, j
+!* %integer oldstk
+%integer diagsbusy
+%record (intinfof) %name intinfo
+   !
+   ! *** Start of prime (CALLBCI) trap
+   !
+   diags busy = 0
+   default trap(id, 0, j)
+   %if j#0 %then %start
+!*       printstring("stk top:")
+!*       write(ssown_trap stk top,1)
+!*       newline
+      set ssinhibit
+      %cycle
+         %exitif ssown_trap stk top<=3
+         eliminate trap(ssown_trap stk top-1,0); !SH..21-oct-87
+      %repeat
+      allow interrupts
+!*       *st_11,flag;                       !stack top
+!*       tidytraps(flag);                   !tidy up any traps left around
+      intinfo == ssown_intinfo
+      class = intinfo_class
+      subclass = intinfo_subclass
+      fault = 10;                        !INTERRUPT
+      %if class=65 %start;               ! INT:
+         %if subclass='Q' %then %start
+            !normal interrupt to terminate diagnostics
+            selectoutput(0)
+            printline("INT:Q termination requested")
+            ->resetbci
+         %finish
+         %if 'V'<=subclass<='Y' %start;  !FORCED TERMINATION
+            adjustloadlevel(0);    !IN CASE IN OBEYFILE
+            tidyfiles(0);                ! select zero i & o
+            %if subclass='X' %and ssown_ssreason=batchreason %start
+               batchstop(2);             !close down batch..operator stops job
+               !does not return
+            %finish
+
+            %unless ssown_ssreason=batchreason %start
+               ! Store an entirely dummy command, to be thrown away. [HISTORY
+               ! is written so that only MAXHIST records can be written to
+               ! PROFILE]
+               mess = "#QUIT";           !CONTENT IRRELEVANT
+               i = history(mess, mess, mess, 1)
+            %finish
+
+            %if subclass<='X' %start
+               console(7, flag, flag);   !KILL OUTPUT - IF NEC
+               newline
+               %if subclass='V' %then printline("***Session has now ended***") %else %if %c
+                  subclass='W' %then printline("***Session terminated due to inactivity") %else %c
+                  printline("***Session terminated by operator***")
+               stop
+            %finish %else %start;        !INTERACTIVE TERMINAL NOT AVAILABLE
+               mess = "
+
+***Interactive terminal disconnected - session terminated***
+
+"
+               tojournal(addr(mess)+1, length(mess))
+               closejournal
+               halt;                     !CANNOT PRINT ANY OUTPUT SO MUST NOT CALL COMMAND QUIT
+            %finish
+         %finish
+         ssown_intmess(7) <- subclass;   !FOR INT MESSAGE  IN RECALL FILE
+         tojournal(addr(ssown_intmess(1)), 9)
+         class = 0
+         console(7, flag, flag);         !KILL OUTPUT
+         %if subclass='C' %then console(8, flag, flag)
+         !KILL INPUT FOR INT:C
+         %if ssown_ssreason=ireason %then ssown_dataecho = 0
+         !IN CASE SET NON ZERO IN OBEY
+         %if ssown_loadinprogress#0 %then %start
+            unload2(1, 1)
+            ssown_loadinprogress = 0
+         %finish
+
+         tidy up after obey %while ssown_obey level>0
+      %finish %else %if class=69 %start
+         !c#stop interrupt
+         logoff2(subclass);              !does not return
+      %finish %else %start
+         selectoutput(0)
+         printline("Error detected in Subsystem or during diagnostics")
+         printline(failuremessage(wtfault(class)))
+         %if diags busy#0 %then %start
+            printline("failure during subsystem diagnostics")
+            ->resetbci
+         %finish
+         diags busy = 1
+         print line("The following diagnostics may be useful if you need
+to refer this problem to Advisory:")
+         print string("Class: ")
+         write(class, 8)
+         wrsn("            Subclass: ", subclass)
+         ssown_fulldump = 1;             ! Make sure of all possible diagnostics
+         reset context(id, i);    ! changed..sh..21-oct-87
+         printline("CR36/1 ".htos(i, 8)) %if ssown_sscomreg(25)&8>0
+         ndiag(0, 0, 10, ssown_intinfo_class)
+      %finish
+      ! Since we are about to return from CALLBCI then temporarily at least
+      ! the prime trap will be undefined. Ensure no interrupts during gap.
+resetbci:
+      set ssinhibit
+      %return
+      ! We need the %return rather than just drop through to ensure that
+      ! the stack front is decremented. When a default trap is sprung then
+      ! the stack front is NOT decremented so that NDIAG can do its stuff.
+   %finish
+   !
+   ! *** End of prime trap
+   !
+   %if id<0 %then mstop("ID=".itos(id), 190); ! Unable to define trap
+   %if id#1 %then mstop("ID=".itos(id), 189) {Temp - this MUST be the prime trap}
+   i = dasyncinh(1);                     ! Now that we have a trap set up, we can
+   ! take interrupts.
+   ssown_obeylevel = 0
+   adjustloadlevel(0)
+   tidyfiles(0)
+   unload2(ssown_loadlevel, 0)
+   %if ssown_callbcistarted=0 %start;    !FIRST TIME ONLY
+      ssown_callbcistarted = 1
+!*    ssown_intinprogress=0;             ! Allow INT:A during messages.
+      flag = 0;                          ! Because CONSOLE (6) will check its second parameter.
+      console(6, flag, flag);            ! Get any outstanding messages.
+   %finish
+   %if ssown_ssinhibit#0 %and ssown_custinit=0 %start
+      ! [But keep inhibited if the Course Supervisor field is set, requiring
+      !  execution of an initialisation routine]
+      ssown_ssinhibit = 1;               ! Reset after initialisation sequence
+      allow interrupts;                  ! Able to accept interrupts from here on
+   %finish
+   ! SSINHIBIT will now be 0 from above sequence.
+   !* ssown_intinprogress=0;                !SAFE TO RECEIVE INT:A
+   *st_11,i;                             !current stack front
+   i = (i+4095+x'4000')&(-4096);         !round up, and allow space for diagnostics
+   *l_11,i
+   bci
+%end;                                    ! of CALL BCI
+%end;                                    ! of CONTROL
+!
+!-----------------------------------------------------------------------
+!
+%external %routine setvsstrap %alias "EMAS3SETVSSTRAP"(%integer %array %name regs31, regs24)
+   ssown_vsstrapad = addr(regs24(0))
+   ssown_vssregs31 == regs31
+%end;                                    ! of SETVSSTRAP
+
+!-------------------------------------------------------------------------------
+!* %routine printinh(%string(11) id)
+!* %integer flag
+!*    %record (cxstaterf) %name con3state
+!*    con3state == record(uinf_acontext3)
+!*    %if con3state_asyncinh#1 %thenstart
+!*       printstring(id)
+!*       write(con3state_asyncinh,1)
+!*       newline
+!*       flag=dasyncinh(1)
+!*    %finish
+!* %end
+!* !
+
+%routine handle bintt(%integer incar)
+%integer t, pt, p, flag, ndcpu
+%record (pamf) %name pam
+%byte %integer %array b(0:500)
+
+%routine to(%string (255) s)
+
+   move(length(s), addr(s)+1, addr(b(p)))
+   p = p+length(s)
+%end
+
+   pam == record(ssown_currentpamad)
+   ndcpu = dcputime
+   t = int((ndcpu-ssown_olddcpu)/time factor)
+   pt = pageturns-ssown_old pageturns
+   p = 0 { pointer in output buffer }
+   to("Report from Job: ".uinf_jobname.", Document: ".substring(uinf_jobdocfile, 11, 13))
+   to("
+Executing: ".pam_clicomm." ")
+   to(ssown_cliparm)
+   to("
+T=".itos(t)." PT=".itos(pt)."
+")
+to("Total job cpu:".itos(int(ndcpu/time factor)). %c
+" secs.  Job limit:".itos(int(uinf_sess limit/time factor)). " secs.
+")
+   flag = dmessage(ssown_ssowner, p, 1, incar, ssown_ssownfsys, addr(b(0)))
+%end;                                    ! handle bintt
+
+!-----------------------------------------------------------------------
+
+%external %routine ssinit
+! This is the initialisation routine for the subsystem.  It is entered once
+! from ssldr at the start of a session
+
+%integer i, j, interrupted, astate, stkfront
+%integer flag, omstart, omlength
+%integer int type
+!* %integer subclass index
+%integer class, subclass, incar, type
+!* %integer len, lc, lp
+%integer p, utrapno, dtrapno
+%record (cxstaterf) stater
+%integer %array %name statea
+%string (31) strx
+!* %string (11) tostr1
+!* %const %integer subclasses= 9
+!* %const %byte %integer %array subclass id(1:subclasses)= %c
+!*    'Q','W','X','Y','K','T','A','C','V'
+
+! INT TYPE decides what type of interrupt has been encountered.
+! Possible values are:
+!      -1  meaning 'DRESUME where you were interrupted'
+!       0  meaning 'Transfer control to any suitable trap'
+
+%integer %array idata(0:47)
+%record (cxstaterf) %name intstate
+%record (cxstaterf) %name con3state
+%record (trapf) %name loc
+%record (trapf) %array %name traps
+%integer %name stktop
+%string (255) mess
+%switch sw(1:16) {CLASS 68 message handling, 16 meantime}
+%integer %array %format cxstateaf(0:47)
+! The %array %name CXSTATEA may be mapped on to a state record:
+!   CXSTATEA(0)     : PSW0
+!   CXSTATEA(1)     : PSW1
+!   CXSTATEA(2:17)  : GR(0:15)
+!   CXSTATEA(18:25) : FR(0:3)
+!   CXSTATEA(26:41) : CR(0:15)
+!   CXSTATEA(42:43) : TIMER
+!   CXSTATEA(44)    : ASYNCINH
+!   CXSTATEA(45)    : SUSP
+!   CXSTATEA(46)    : (PE<<16) ! ILC
+!   CXSTATEA(47)    : SPARE
+!
+!
+!              Contingency           CLASS
+!
+!              Floating overflow         0
+!              Floating underflow        1
+!              Fixed overflow            2
+!              Decimal overflow          3
+!              Zero divide               4
+!              Bound check               5
+!              Size error                6
+!              B overflow                7
+!              Stack error               8
+!              Privilege                 9
+!              Descriptor               10
+!              String                   11
+!              Instruction              12
+!              Accumulator              13
+!              System Call              16
+!              Instruction counter      17
+!              Disc transfer fail       18
+!              Block wrong length       19
+!              ("should not occur")
+!              Hard store fault         20
+!              Illegal OUT              21
+!              Local Controller error   22
+!              Virtual store error      32
+!              Interval timer           64
+!              Single-character "INT:"  65
+!              Text message             66
+!              Off stack top            67
+!              Message from a process   68
+!
+! Of these, classes 64, 65, 66 and 68 are ASYNCHRONOUS and all the others
+! are SYNCHRONOUS.
+!
+!* %switch int act(-1:0)
+
+%routine %spec call control
+
+   init subsys globals
+   %unless ssown_ssreason=batchreason %start
+      ! Take words for history descriptors
+   %begin
+   %integer j
+   %record (hhf) dummy
+   %record (hhf) %name hhf
+
+      ssown_hconad = ssown_sscurbgla
+      ssown_sscurbgla = (ssown_hconad+sizeof(dummy)+31)&(\31)
+      hhf == record(ssown_hconad)
+      hhf_mostrecentx = 255; hhf_oldestx = 255
+
+      ! Take previous history if any from Profile
+      j = history("", "", "", 4)
+   %end;                                 ! Begin -block
+   %finish
+
+!*    init trap code
+   !
+   ! Set up state for entering context 3:
+   statea == array(addr(stater_psw0), cxstateaf)
+   stater = 0
+!   stater_asyncinh = -1
+   i = addr(stater_psw1)
+   j = addr(stater_gr(0))
+   *L_2,I
+   *L_3,J
+   *BAS_1,<CATCH>
+   !
+   ! Context 3 code:
+   !
+dirtrapl:
+   !
+   con3state == record(uinf_acontext3)
+   %if con3state_asyncinh#-1 %then mstop("State=".itos(con3state_asyncinh), 140)
+   !ensure context 3 still inh..sh
+   intstate == record(uinf_acontext1)
+   interrupted = uinf_context;           ! Interrupted context.
+   class = uinf_class
+   subclass = uinf_subclass
+
+   astate = uinf_acontext1
+   %if 64<=class<=66 %or class=68 %or class=17 %then %start
+      !NB. Asynchronous ints which occur in context 3 are not signalled
+      !    until the process returns to uninhibited mode - context 1. Even so,
+      !    the interrupted context is set to 3, which is nonsense as far
+      !   as subsystem is concerned.
+      interrupted = 1;                   !so we know where to go back
+   %finish %else %start
+      %if interrupted#1 %start
+         mstop(itos(class)."/".itos(subclass)." I=".itos(interrupted), 131)
+      %finish
+   %finish
+
+   %if class<64 %and %c
+      integer(astate)&x'08000000'=0 {Amdahl..24-bit mode} %and %c
+      integer(astate+4)&x'80000000'=0 {XA..24 bit mode} %and %c
+      ssown_vsstrapad#0 %start
+      move(48<<2, astate, ssown_vsstrapad)
+      i = dsetstate(1, x'3FFFF', ssown_vssregs31)
+      i = dgotocontext(1)
+      ->dirtrapl
+   %finish
+
+
+   %if class=68 %then %start
+      ! Message between incarnations of the same process
+      incar = subclass>>24;              ! Incarnation of calling process
+      type = subclass&X'00FFFFFF';       ! Service required
+      ->sw(type)
+
+sw(1): {INT:T to background process}
+      handle bintt(incar)
+      ->out
+sw(*):
+out:
+      int type = -1 {RESUME where interrupted}
+
+   %finish {class 68} %else %if class=66 %start; ! MESSAGE FROM OPERATOR
+
+      ! In the case of broadcast messages subclass contains (OFF1<<16)!OFF2
+      ! where OFF1 and OFF2 are offsets within a file VOLUMS:BROADCAST of the
+      ! START and END+1 of the message.
+      omstart = subclass>>16
+      omlength = subclass&X'FFFF'-omstart; !LENGTH OF MESSAGE
+      %if ssown_stopping=0 %then console(6, omstart, omlength); ! CONSOLE OUTPUT REQUEST
+      int type = -1 {RESUME where interrupted}
+
+   %finish {class 66} %else %start {classes other than 66 & 68}
+
+      %if ssown_stopping=0 %then int type = 0 %else int type = -1
+      %if class=64 %or class=17 %then %start
+         ! instruction counter OVERFLOW
+         flag = dsetit(30000);           !get 1 min extra
+      %finish %else %if class=65 %then %start; !INTERRUPT FROM USER
+         ! Class 65
+         ! For batch jobs, all user interrupts are treated as INT:X.
+         %if ssown_ssreason=batchreason %then subclass = 'X' %else %if 'a'<=subclass<='z' %then %c
+            subclass = subclass-32
+         ! LOWER CASE=UPPER CASE
+         %if ssown_stopping#0 %then %start
+            %if 'V'<=subclass<='Y' %then %start; ! V, W, X, or Y.
+               mstop("Stopping=".itos(ssown_stopping), 113)
+            %finish
+!*          int type=-1; !ignore..already set
+         %finish %else %start
+            %if 'V'<=subclass<='Y' %then %start; !V, W, X or Y
+               %if subclass#'W' %thenstart
+                  ! don't record inactivity
+                  ssown_trapbusy = subclass;       !set this marker in case user does %stop
+                  %if subclass='Y' %then ssown_sstthide = yes; ! send no more output
+               %finish
+            %finish %else %if subclass='K' %then %start
+!*             strx="INT:K..".itos(ssown_ssttact).tostring(10)
+!*             tojournal(addr(strx)+1,length(strx))
+               int type = -1;            !resume required
+               %if ssown_sstthide=no %then %start
+                  ! SSTTACT is  2  during RQOUT
+                  !             1  during GETFEP  and zero otherwise
+                  %if ssown_ssttact=2 %then %start
+                     ssown_ssttkn = yes; !delayed kill output
+                  %finish %else %start
+                     console(7, flag, flag); ! Kill output
+                  %finish
+                  %if ssown_ssttact=1 %start
+                     ! Send prompt if during GETFEP
+                     mess = translateprompt(0)
+                     flag = iocp(7, addr(mess)); ! Printstring
+                     flag = iocp(25, 0); ! Terminate
+                  %finish %else ssown_sstthide = yes {throw away further output}
+               %finish
+            %finish %else %if subclass='T' %then %start
+               int type = -1;            !resume required
+               console(12 {Int:T}, flag, flag)
+            %finish
+         %finish
+      %finish {class 65} %else %if ssown_stopping#0 %then %c
+         mstop("Stopping=".itos(ssown_stopping), 113)
+   %finish
+
+   shout("int type = ".itos(int type))
+   %if int type=-1 %then ->doresume;     !dresume where interrupted
+   ! Fill in INTINFO record for 'transfer of control'
+   move(192, astate, addr(ssown_intinfo_psw0))
+   ssown_intinfo_class = class
+   ssown_intinfo_subclass = subclass
+
+   ! Update SSOWN_SAVEIDATA
+   move(192, astate, addr(ssown_saveidata(ssown_saveidpointer)_psw0))
+   ssown_saveidata(ssown_saveidpointer)_class = class
+   ssown_saveidata(ssown_saveidpointer)_subclass = subclass
+
+   move(9, addr(com_time0)+3, addr(ssown_saveidata(ssown_saveidpointer)_timeofday))
+   ssown_saveidpointer = (ssown_saveidpointer+1)&3
+
+   intstate == record(astate)
+   !we used to call code in lay traps to call force trap.
+   ! as there is not too much code, we might as well do it here in line
+   ! thus saving a stack.   SH 03-oct-85.
+   ssown_ssinhibit = ssown_ssinhibit+1;  !we are inihibitted in state 3
+   !so make sure we do not uninhibit..findtrap calls tidytrap calls inh..sh
+   stkfront = intstate_gr(11);           !stack front at time of failure
+   find trap(ssown_intinfo_class, ssown_intinfo_subclass, utrapno, dtrapno, stkfront)
+   %if utrapno=0 %then %start
+      ! no user trap
+      %if class=65 %and (1<<(subclass-'A'))&x'01E10005'=0 %then %start
+         !ignore user interrupt if no user trap, except
+         !for A,C,Q,V,W,X,Y
+         ssown_ssinhibit = ssown_ssinhibit-1; !restore correct value
+         ->doresume
+      %finish
+      utrapno = dtrapno;                 !use the default trap
+   %finish
+   ! force trap(utrapno)
+   p = utrapno;                          !no of trap to be forced
+   traps == ssown_traps
+   stktop == ssown_trap stk top
+   loc == traps(p)
+! must not eliminate traps here..may be NDIAG, and may be trapped.
+! SH..AUG..87
+!* ! eliminate any traps higher up the stack.
+!* ! any with the same LNB, but more recent, will remain valid.
+!*    i = stktop-1
+!*    %while p<i %and traps(p)_gr(11)<traps(i)_gr(11) %cycle
+!*       eliminate trap(i, 0)
+!*       i = i-1
+!*    %repeat
+!*    ssown_ssinhibit = ssown_ssinhibit-1;  !restore to previous value..sh..reset later
+   move(64, addr(loc_gr(0)), addr(idata(2))); !set registers
+   *bas_4,<lab1>;                        !set r4=addr(startpc)
+   ! exit to context 1, resumes here: startpc
+   *la_1,1
+   *st_1,0(3);                           !set resflg=1
+   *bcr_15,15;                           !return through r15
+!
+lab1:
+   *st_4,i
+   idata(0) = x'0FFD0E00';               ! 31-bit mode PSW0 (Stephen)
+   idata(1) = i;                         !psw1 (pc) = startpc
+!* integer(idata(2+3))=1; !set resflg..gr3
+   %if loc_prot=0 %then %start
+      ssown_ssinhibit = 0
+      idata(44) = 0
+   %finish %else %start
+      idata(44) = 1;                     ! Inhibit interrupts for the trap code in state 1.
+      ssown_ssinhibit = 1;               !must set this too..sh
+   %finish
+   i = d set state(1, X'000010000003FFFF', idata)
+   i = d goto context(1) {Leave context 3 ("DIRTRAP") and resume at FTR1: in INIT TRAP CODE}
+   ->dirtrapl {on next entry to context 3}
+!
+doresume:
+   %if interrupted#1 %then mstop("I=".itos(interrupted), 142); !sh
+   i = d goto context(interrupted)
+   ->dirtrapl {for next entry to context 3}
+   !
+   ! End of context 3 code:
+   !
+catch:
+   *ST_1,0(0,2);                         ! Save PC in PSW1 pointing to the label DIRTRAPL.
+   *STM_0,15,0(3);                       ! Save general registers in GR(0:15).
+   *ST_11,I
+   i = (i+4095)&(-4096);                 !used to save in ssown _ c3base
+   !round up stack pointer for level 3 code
+   stater_gr(11) = i
+   i = i+x'4000';                        !advance beyond context 3 stack
+!*    ssown_c3lim=i
+   *L_11,I
+   i = d set state(3, X'000010000003FFFE', statea)
+   strx = itos(i)
+   shout("Calling D SET STATE to set up context 3: returns ".strx)
+   %if i#0 %then mstop("Flag=".itos(i), 132)
+   initdynamicrefs
+   i = dsetit(40000);                    !LARGE DEFAULT TIME LIMIT
+   call control;                         !THIS IS SUBSYSTEM
+   mstop("", 104);                       !IN CASE WE GET BACK HERE
+
+
+
+%routine call control
+%integer lnb
+   !
+   ! **** **** **** ****
+   *ST_10,LNB
+   ! Dump the current stack frame pointer into LNB.
+   ! **** **** **** ****
+   !
+   set comreg36(lnb, 3);                 !AND STORE IN COMREG 36
+   control;                              !CALL SS CODE
+   !IF FAILURE THEN EFFECTIVELY
+   ! RETURN FROM THIS ROUTINE
+%end;                                    ! of CALL CONTROL
+%end;                                    ! of SSINIT
+!
+!-----------------------------------------------------------------------
+!
+!
+!-----------------------------------------------------------------------
+!
+%routine enter onexit(%integer ad)
+   *l_1,ad; *stm_4,14,16(11); *lm_12,4,0(1); *basr_15,14
+%end;! of enter onexit
+!
+!-----------------------------------------------------------------------
+!
+%external %routine halt %alias "S#HALT"
+   !CALL DIRECTOR STOP TO STOP
+   ! PROCESS
+%integer flag, ad
+   flag = history("", "", "", 3) %unless ssown_ssreason=batchreason; ! Save history in Profile
+   ad = integer(addr(uinf)+uinf_wo base&x'FFFFF'+16)
+   %if ad > 0 %then %start
+      ad = addr(uinf)+ad&x'FFFFF'
+      enter onexit(ad)
+   %finish
+   flag = dstop(100)
+%end;                                    ! of HALT
+!
+!-----------------------------------------------------------------------
+!
+%external %routine setssinhibit %alias "S#SETSSINHIBIT"
+   ssown_ssinhibit = ssown_ssinhibit+1;  ! Increment inhibit count
+%end;                                    ! of SETSSINHIBIT
+!
+!-----------------------------------------------------------------------
+!
+%external %routine allow interrupts %alias "S#ALLOWINTERRUPTS"
+%integer i, n
+
+! Make sure that ALLOW INTERRUPTS does not do anything if there
+! are no traps available. This is important between the call of PRIME
+! CONTINGENCY in CONTROL and setting the traps in CALLBCI. We are completely
+! unprotected in that bit.
+! With a bit of thought it might be possible to close that window.
+
+   %if ssown_trap stk top>1 %then %start
+      %if ssown_ssinhibit=0 %then %start
+         shout{TELLTALE}("** Attempt to decrement 0 SSINHIBIT")
+      %finish %else ssown_ssinhibit = ssown_ssinhibit-1; ! Decrement inhibit count
+      %if ssown_ssinhibit=0 %then %start
+         ! Prepared to accept interrupts
+         %while uinf_int count>0 %cycle; ! TAKE ANY OUTSTANDING ONES
+            n = uinf_int count
+            i = dasyncinh(1)
+            %exit %if n<0 %or n=uinf_int count
+         %repeat
+      %finish
+   %finish
+%end;                                    ! of ALLOW INTERRUPTS
+!
+!-----------------------------------------------------------------------
+!
+%end %of %file

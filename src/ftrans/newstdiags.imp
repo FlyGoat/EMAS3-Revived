@@ -1,0 +1,1453 @@
+!     START routine and diags for Executive processes
+
+%external %integer emas3topstk=x'0ffff000'; !large number
+!for stack checking..beware more than one stack in use
+%const %integer shmon2=1;                !extra monitoring
+%const %string (6) exec="FTRANS"
+
+%external %integer com36;                !integer controlling restart point
+%external %integer diagsbase;            !integer controlling diagnostics end point
+
+%external %integer this context
+%external %integer my fsys;              !file system
+%external %integer my service number
+%external %string (6) my name;           !username
+%external %integer oper no
+
+%own %integer active
+!* %own %long %integer valid bits
+!* %own %integer %array context1(0:47)
+%own %integer %array context3(0:47);     ! for setting them up
+%own %integer %array usercontext(0:47);  !context of failing user
+%own %integer %array diagscontext(0:47); !context for diagnostics
+
+%const %integer xa=1, non xa=2 {2900=2900 not included}
+%const %integer target=xa
+!* %const %long %integer vbagr414p1=x'10000001ffc2'
+! valid bits for dset state, ie asyncinh, gr(4-14), psw1
+%const %long %integer regmask1=x'30000003fffe'
+!susp, async inh, general registers, pc.
+!not control registers, floating point regs, or ps
+%const %long %integer regmask2=x'300003ffffff'
+!susp, async inh, float regs, general regs, pc, ps
+!* %const %long %integer vbagr01414p1=x'10000001ffce'
+! async, gr(0,1,4-14), psw1
+%const %integer readac=0, writeac=1
+%const %integer maxfaults=34
+%const %integer arraysize=12
+%const %integer stringlen=31
+%const %integer levels limit=31
+%const %integer file header size= 32;    !SS STANDARD FILE HEADER SIZE
+%const %integer already exists= 16;      !DIRECTOR FLAG
+%const %integer r= b'00000001';          !READ PERMISSION
+%const %integer w= b'00000010';          !WRITE PERMISSION
+%const %integer zerod= b'00000100';      !ZERO FILE ON CREATION
+%const %integer tempfi= b'00000001';     !TEMP FILE ON CREATION
+%const %integer epage size= 4096
+%const %string (1) snl="
+"
+%const %integer ok=0
+%if target=xa %start
+   %const %integer seg shift=20;         !31 bit addressing, 1024k segment
+%else
+   %const %integer seg shift=16;         !24 bit addressing, 64k segment
+%finish
+%record %format tmodef(%byte flag0, flag1, flag2, flag3, %byte %integer promptchar, endchar,
+   %byte %array breakbit1(0:3) {%or %halfintegerarray breakbit2(0:1))}, %byte %integer pads, rptbuf, linelimit,
+   pageleng, %byte %integer %array tabvec(0:7), %byte %integer cr, esc, del, can, %byte %integer flags,
+   internal state, leadin1, leadin2, xlo, xhi)
+%record %format uinff(%string (6) user, %string (31) jobdocfile, %byte %integer context, %integer mark, fsys,
+   procno, isuff, reason, batchid, sess limit, int count, i2, startcnsl, aiostat, sct date, sync1 dest, sync2 dest,
+   async dest, aacct rec, i3, %string (15) jobname, %string (31) basefile, %integer i4, itaddr0, itaddr1, itaddr2,
+   itaddr3, itaddr4, stream id, dident, scarcity, preemptat, %string (11) spoolrfile, %integer funds, sesslen,
+   priority, decks, drives, part close, %record (tmodef) tmodes, %integer pslot, %string (63) itaddr,
+   %integer %array fclosing(0:3), %integer clo fes, %integer output limit, acontext1, acontext3, acontext4,
+   %integer out, %string (15) outname, %integer hiseg, %string (31) fork, %integer instream, outstream,
+   %integer dirvsn, i8, sct block ad, %integer protocol, %byte %integer isepchl, isepchr, usepch, gsepch,
+   %string (1) isepl, isepr, usep, gsep, %integer class, subclass, %integer uend)
+%const %integer uinf seg=239
+%const %record (uinff) %name uinf=uinf seg<<seg shift
+
+
+!     Director specs
+
+%external %integer %fn %spec dasyncinh(%integer %name act)
+%external %integer %fn %spec dconnect(%string %name file index, file, %integer %name fsys, mode, seg, gap)
+%external %integer %fn %spec dcreate(%string %name file index, file, %integer %name fsys, nkb, type, da)
+%external %integer %fn %spec ddestroy(%string %name file index, file, date, %integer %name fsys, type)
+%external %integer %fn %spec ddisconnect(%string %name file index, file, %integer %name fsys, dstry)
+%external %integer %fn %spec dflag(%integer %name flag, %string %name txt)
+%external %integer %fn %spec dnominate trap(%integer %fn next context)
+%external %integer %fn %spec dsetit(%integer %name millisecs)
+%external %integer %fn %spec dsetstate(%integer %name context, %long %integer %name vb, %integer %array %name state)
+%externalintegerfnspec dsfi(%stringname file index,%integername fsys,
+  type, set, %stringname s, %integerarrayname i)
+%external %integer %fn %spec dgotocontext(%integer %name context)
+%external %integer %fn %spec dvalidate(%integer %name adr, len, rw)
+
+!     Service routine specs
+
+%external %integer %function %spec validate(%integer adr, len, rw)
+%external %routine %spec move(%integer length, from, to)
+%external %string (15) %function %spec i to s(%integer n)
+!* %external %routine %spec dump(%integer start, finish, conad)
+
+!     Local specs
+
+%integer %fn %spec validate gla(%integer address)
+%routine %spec trans(%integer %name fault, event, subevent)
+%routine %spec ermess(%integer n)
+
+%string %fn derrs(%integer flag)
+   %string (255) text
+   %integer f
+   f = dflag(flag, text)
+   %result = text
+%end;                                    !of derrs
+
+%string(8)%fn htos(%integer value, places)
+%constbyteintegerarray hex(0 : 15) =            %c
+ '0','1','2','3','4','5','6',
+ '7','8','9','A','B','C','D','E','F'
+%string(8) s
+places=1 %if places<1
+places=8 %if places>8
+s=""
+%cycle
+  s=tostring(hex(value&15)).s
+  places=places-1
+  %result=s %if places=0
+  value=value>>4
+%repeat
+%end;                                   !of stringfn h to s
+
+%routine phex(%integer i)
+   printstring(htos(i, 8))
+%end;                                    !of phex
+
+%string %fn strhex(%integer n)
+   %result = htos(n, 8)
+%end;                                    ! strhex
+
+%routine opout(%string (255) s)
+   printstring(s.snl)
+%end;                                    !of opout
+
+%routine dir mess(%string (255) s, %integer flag)
+   %integer f
+   %string (255) text
+!*  outputs a failure messages to the op console with the failure     *
+!*  string as supplied by director.                                   *
+   f = dflag(flag, text)
+   opout(s." fails ".text)
+%end;                                    !of routine dir mess
+
+
+!---------------------------------- NEXTLNB ----------------------------------
+%integer %fn nextlnb(%integer lnb)
+! Currently works only for IMP.  Attempts to work out next LNB.  If it cannot
+! progress from LNB supplied (either because non-IMP language noted or because
+! bottom of stack reached), then the result returned is the same as the parameter
+! supplied.
+   %integer i, j, low, language
+   %const %integer min=64;               ! minimum stack frame
+   low = lnb
+   language = byteinteger(integer(lnb+4*13)+16)
+   %if lnb#diagsbase %and (language=1 %or language=3) %start
+      %for i = 10, -1, 5 %cycle
+         j = integer(lnb+4*i)
+         %if ((lnb=low %and j+min<=low) %or (lnb-min>=j>low)) %and j>=diagsbase %and integer(j+44)=j %then low = j
+      %repeat
+   %finish
+   %result = low
+%end {NEXTLNB}
+!
+!----------------------------------- GIVELNB ----------------------------------
+%routine givelnb(%integer %name lnb, %integer aregs)
+! Looks at registers (5-10) pointed to by AREGS (format 16 words 0-15)
+! Tries to deduce the LNB value.
+   %integer %array gr(0:15)
+   %integer j, reg
+   %integer %fn %spec check
+   move(64, aregs, addr(gr(0)))
+   %if gr(10)>>20#gr(11)>>20 %or gr(10)=x'83838383' %then printstring("LNB not available") %and newline
+   reg = 10
+   gr(0) = gr(10)
+   %cycle
+      gr(1) = gr(reg-1)
+      j = check
+      %exit %if j=0 %or reg=5
+      reg = reg-1
+   %repeat
+   lnb = gr(0)
+   %integer %fn check
+      ! If (the following tests) then "finished"
+      %result = 0 %if gr(1)>gr(11) %or gr(1)<=gr(0) %or gr(1)#integer(gr(1)+44)
+      ! else r1->r0 and "return"
+      gr(0) = gr(1)
+      %result = 1
+   %end {check}
+%end {givelnb}
+!
+!----------------------------------- ONCOND -----------------------------------
+%routine oncond(%integer event, subevent, lnb, lnb above, gla)
+!***********************************************************************
+!*       UNWIND THE IMP STACK LOOKING FOR ON CONDITIONS                *
+!*       There is only one call of ONCOND - it is in NDIAG.            *
+!***********************************************************************
+   %integer bit, onword, par1, par2, pc
+   %integer sst ptr, dtable, fline, fbline, btype, prev blk
+   %integer newregs
+   %string (11) name
+
+   %unless 1<=event<=14 %then %return
+   bit = 1<<(event+17)
+
+   %cycle
+      sstptr = byteinteger(lnb)<<8!byteinteger(lnb+1); ! Short(LNB)
+      fline = byteinteger(lnb+2)<<8!byteinteger(lnb+3); ! Short(LNB+2)
+
+      dtable = integer(gla+20)+sst ptr
+      %if validate(dtable, 1, readac)=0 %start
+         printstring("DTABLE invalid")
+         newline
+         %return
+      %finish
+      fbline = byteinteger(dtable)<<8!byteinteger(dtable+1) {Short(DTABLE)}
+      btype = byteinteger(dtable+12) {name-length, hence blocktype}
+
+      %if btype>11 %start
+         printstring("Invalid symbol tables") {remove when code checked out]}
+         newline
+         %return
+      %finish
+
+      prev blk = byteinteger(dtable+6)<<8!byteinteger(dtable+7)
+      name = string(dtable+12) {null if block}
+      onword = integer((dtable+btype+16)&(-4))
+
+      %if btype=0 %then printstring("Block") %else printstring("Routine/fn/map ")
+      spaces(13-length(name))
+      printstring(name)
+      printstring(" starting at line")
+      write(fbline, 4)
+      printstring("  ONWORD = "); printstring(htos(onword, 8))
+      newline
+
+      %if onword&bit#0 %then %exit
+
+      fline = fbline
+      sst ptr = prev blk
+      gla = integer(lnb+4*13)
+      newregs = nextlnb(lnb)
+      %return %if newregs=lnb
+      lnb above = lnb
+      lnb = newregs
+   %repeat
+
+   ! ON CONDITION found.
+
+   printstring("On event HIT.  Dest LNB = X"); phex(lnb)
+   newline
+
+   par1 = event<<8!subevent
+   par2 = byteinteger(lnb+2)<<8!byteinteger(lnb+3) {the line number}
+   active = 0
+   pc = integer(gla+onword&x'3ffff')
+   *L_15,pc
+   *L_2,lnbabove
+   *LM_0,1,par1
+   *LM_4,14,16(2)
+   *BCR_15,15
+
+%end {ONCOND}
+
+!---------------------------- NDIAG ------------------------------------------
+
+%external %routine ndiag %alias "S#NDIAG"(%integer pcount{or subclass}, lnb, fault, inf)
+! if fault=10 then we have arrived here via interrupt for a fault detected
+! by the H/W or supervisor. 'inf' is the fault number:-
+!     0 - real overflow
+!     1 - real underflow
+!     2 - integer overflow
+!     3 - decimal overflow
+!     4 - zero divide
+!     5 - not used
+!     6 - not used
+!     7 - not used
+!     8 -  addressing
+!     9 - privilege
+!    10 - specification
+!    11 - segtable format
+!    12 - operation
+!    13 - data
+!    14 - emulation
+!    15 - not used
+!    16 - illegal system call
+!    17 - excess instructions
+!    18 - disc read fails
+!    19 - change block size
+!    20 - ocp/store
+!    21 - illegal out
+!    22 - local controller fails
+!    32 - virtual store error
+!    65 - single char int (Q only gets this far)
+!    67 - off stack top
+! these fault numbers are translated on entry to yield 1-26.
+! in this case the failing environment is to be found at uinf_acontext1
+!
+! if fault#10 then we have arrived by a routine call after a compiler
+! detected fault, when 'fault'=event<<8!subevent, and inf is not set.
+! these events are translated to fault numbers 27-34, and the failing
+! environment is is found at LNB here.
+! the events we expect are:-
+!     5/1 - illegal cycle, fault 27
+!     5/5 - illegal exponent,    28
+!     5/6 - array inside out,    29
+!     6/1 - capacity exceeded,   30
+!     6/2 - array bound fault,   31
+!     7/1 - resolution fault,    32
+!     8/1 - unassigned variable, 33
+!     8/2 - switch label not set,34
+!
+!
+   %integer gla, aregs, newreg, j, lnbhere, display above, test
+   %integer limit, level, subevent, event
+!*    %integer %array regs(0:24)
+   %string (20) failno
+   %routine %spec indiag(%integer gla, lnb, %integer %name newregs)
+! This array and counter is designed to enable us to suppress the repeated
+! presentation of the same environmental variables for a given call on NDIAG
+   %const %integer maxe=5
+   %integer ecounter
+   %integer %array environmentals printed(0:maxe)
+
+! >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+! There is an unresolved problem here.
+! NDIAG can apparently loop up to 5 times before it fails (SSOWN_ACTIVE)
+! and each entry will lay down a new trap. The trap code guarantees 1 free
+! slot for the NDIAG trap so if the table was almost full and we looped
+! we wouldn't have room. It seems wasteful to reserve 5 slots so we will
+! proceed as coded at the moment and see what happens.
+! It depends to some extent on whether there are any normal sequences of
+! operations which would put NDIAG on the stack more than once.
+! >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+!
+! ** Start of NDIAG trap
+!
+   printstring("ndiag entered: fault= ".itos(fault).", inf= ".itos(inf))
+   newline
+   ecounter = 0
+   level = 0
+   limit = levels limit
+   %if fault#0 %then selectoutput(0)
+   active = active+1
+   %if active>1 %then failno = " looping" %and ->eout
+
+   %if fault#10 %start
+      ! Situation 1.  NDIAG called from run-time system
+
+      test = 0
+      *st_10,j
+      lnbhere = j
+      aregs = lnbhere
+      %if lnb<lnbhere %start
+         %until j=lnb %or j=display above {means NEXTLNB is not progressing further} %cycle
+            display above = j
+            j = nextlnb(j)
+         %repeat
+         aregs = display above
+         gla = integer(display above+4*13)
+         test = validate gla(gla)
+      %finish %else %start
+         printstring("LNB HERE ="); phex(lnbhere)
+         newline
+         test = 0
+      %finish
+   %finish %else %start
+      ! Situation 2.  Call following interrupt
+      aregs = addr(usercontext(2));      ! for ONCOND
+      %cycle
+         gla = integer(aregs+13<<2)
+         %if shmon2#0 %then %start
+            printstring("gla:")
+            phex(gla)
+            newline
+         %finish
+         givelnb(lnb, aregs)
+         %exit %if gla>>segshift#x'043'
+         %if shmon2#0 %then %start
+            printstring("in director..losing a level..lnb:")
+            phex(lnb)
+            newline
+         %finish
+         aregs = lnb
+      %repeat
+      test = validate gla(gla)
+   %finish
+
+   printstring("LNB = "); printstring(htos(lnb, 8))
+   printstring("  GLA at "); printstring(htos(gla, 8))
+   newline
+
+   %if validate(lnb, 1, 1)=0 %start
+      printstring("Validate LNB fails"); newline
+      ->quit
+   %finish
+
+   subevent = 0; event = 0
+   %if fault=10 %start
+      %if inf<=22 %then fault = inf+1 %else %if inf=32 %then fault = 24 %else %if inf=65 %then fault = 25 %else %if %c
+         inf=67 %then fault = 26
+   %finish %else %start
+      event = fault>>8
+      subevent = fault&255
+      fault = 0;                         ! for 'trans'
+   %finish
+!* printstring("Entering TRANS".snl)
+   trans(fault, event, subevent);        ! Ensures that FAULT, EVENT and SUBEVENT are all set
+   ! to define the same occurrence.
+
+!* printstring("Entering ONCOND".snl)
+   oncond(event, subevent, lnb, aregs, gla)
+
+   ! ie oncond has made a hit and set up a state to go to
+
+   newline
+   printstring("Monitor entered from IMP [Amdahl diagnostics]")
+   newline
+   %if fault>=0 %then %start
+      %if fault=0 %and event#0 %start
+         printstring("Event"); write(event, 1)
+         printsymbol('/'); write(subevent, 1)
+      %finish %else %start
+         ermess(fault)
+      %finish
+      newline
+   %finish %else event = 0
+
+   newreg = 0
+
+   %cycle
+      indiag(gla, lnb, newreg);          ! imp diags
+      level = level+1
+      %if newreg=0 %or level>=limit %or lnb<=diagsbase %then ->exit
+
+      ! Continue to unwind stack
+      gla = integer(lnb+52)
+      lnb = newreg
+   %repeat
+
+
+eout:                                    ! error exit
+   newline
+   printstring("NDIAG fails ".failno)
+   newline
+exit:
+quit:
+   active = 0
+   %if fault=0=event %then %start
+      printstring("return to calling program")
+      newline
+      %return
+   %finish
+   %if inf=65 %and pcount='Q' %then %start
+      !* int:q...we will try to go back to interrupted context
+      %if usercontext(45)#0 %then %start
+         printstring("INT:Q..cannot resume..program was suspended")
+         newline
+      %finish %else %start
+         printstring("returning from INT:Q")
+         newline
+         j = dsetstate(1, regmask2, usercontext)
+         %if j#0 %then %start
+            printstring("setstate failed")
+            write(j, 1)
+            newline
+         %finish
+      %finish
+   %finish
+   lnb = com36
+   %if shmon2#0 %then %start
+      printstring("about to resume:- lnb=".htos(lnb, 8))
+      newline
+   %finish
+   %stop %if lnb=0
+   *L_1,lnb
+   *LM_4,15,16(1);                       !restore regs
+   *BCR_15,15
+   ! End body of NDIAG
+
+!-------------------------------- INDIAG ---------------------------------------
+
+   %routine indiag(%integer gla, lnb, %integer %name newregs)
+
+! Prints diagnostics for one routine level of an IMP program.  Set NEWREGS to
+! point to previous stack frame if possible (else zero, to terminate diagnostics)
+!
+!
+! Layout of diagnostic tables
+!
+! The first half-word of the stack frame contains a displacement relative to
+! the start of SST of the  diagnostic tables for the block or routine being
+! executed.  A zero value means no diagnostics requested. (NB This may mean a
+! dummy first word in the SST).
+! The address of the SST for the current code segment is at GLA+20 bytes (this
+! word points to the x'C2C2C2C2' word in the SST-area of the object file).
+!
+! Form of the diagnostic tables:-
+!    For each routine/block there is a routine/block record of 20+N bytes, where
+! N is the number by which the routine-identifier including length-byte exceeds
+! four bytes. (Blocks have a null identifier).
+!    Following the routine/block record are IMP-variable records, each comprising
+! one word of type-information followed by the identifier as an IMP string.
+! These variable-records are contiguous and are terminated by a -1 type-information
+! word.
+
+! The routine/block record is as follows:
+!
+! Bytes 0-1  =   line of rt/black heading in source prog
+!       2-3  =   line no posn (from LNB) ??
+!
+! bytes 4-5  =   ??
+!       6-7  =   pointer (relative to the SST for the module) of the routine/block
+!                record for the enclosing block (or zero if none)
+! Word 2     =   display posn (from LNB)<<16 ! rt type info
+! Word 3     =   zero for blocks or string(<=11bytes) being the rt name.
+!                This will take words 4 and 5 if needed
+! Word 6     =   language dependent info . IMP on conditions etc
+!
+! Each variable entry consists of the variable word followed by
+! the variable name as a string. The word consists of
+! bits 2**31 to 2**20 type information (may be language dependent
+! Bit  2**19  =0 under LNB =1 in GLA
+! Bits 2**18 to 2**0 displacement from LNB(GLA) in bytes
+!
+! The environment (bytes 6-7 of the routine/block) is a pointer (relative to SST)
+! of the next outermost block or a pointer to global owns, external or common areas
+! A zero means no enclosing block. Word1=word3=0 is an IMP main program or
+! global owns for a module of external routines and will terminate the diagnostics.
+
+!      0    2    4    6    8...
+!     +----+----+----+----+----- - - ---------+
+!     | FBL|    |    |PREV|  locvars      -1  |  Inner routine or block
+!     +----+----+----+----+----- - - ---------+
+!                      |
+!       +--------------+
+!       |
+!       V     2    4    6    8...
+!       +----+----+----+----+----- - - ---------+
+!       | FBL|    |    |PREV|  locvars       -1 |  Outer begin or ext routine
+!       +----+----+----+----+----- - - ---------+
+!                        |
+!          +-------------+
+!          |
+!          V     2    4    6    8...
+!          +----+----+----+----+----- - - ---------+
+!          |zero|    |    |zero|  locvars       -1 |  Environmental level
+!          +----+----+----+----+----- - - ---------+
+!
+!  FBL       = "from-block line", i.e. starting line-number of this routine/block
+!
+!  PREV      = "previous block" i.e. pointer to diag tables for enclosing (textual) block
+!
+!  locvars   = Diag tables for variables local to this level.
+!
+!  -1          ends the records for the variables of this level.
+
+      %routine %spec print locals(%integer locenv)
+      %routine %spec print var(%integer type, prec, nam, form, vaddr)
+      %routine %spec pscalar(%integer adata)
+      %routine %spec parr(%integer adata, asize)
+      %integer sst ptr, dtable, fline, fbline, btype, prev blk, old btype, old fbline
+      %string (11) name
+
+! The scheme of things here is as follows.
+! CYCLE
+!     Have we done all dynamic levels?  EXIT if so.
+!     (This test and this cycle are in routine NDIAG)
+!     CYCLE
+!         (The contents of this cycle comprise routine INDIAG)
+!         Print diagnostics for current level.
+!         Go to next textual level. If the previous block was a begin-block
+!         then diagnose this level, too
+!     REPEAT
+! REPEAT
+
+! In the diagnostic tables, FromBlockLINE (FBLINE) and PREVBLK indicate whether
+! the current diagtable is for
+!      Global owns (Environmental block)             FBLINE=0   PREVBLK=0   BTYPE=0
+!   or outer begin/ext routine/routine/inner begin   FBLINE>0   PREVBLK>0   BTYPE=0{begin} or >0{routine}
+
+      sstptr = byteinteger(lnb)<<8!byteinteger(lnb+1); ! Short(LNB)
+      fline = byteinteger(lnb+2)<<8!byteinteger(lnb+3); ! Short(LNB+2)
+      old btype = -1
+      %cycle
+         dtable = integer(gla+20)+sst ptr
+         %if dvalidate(dtable, 20, 0)#0 %start
+            printstring("DTABLE invalid")
+            newline
+            newregs = 0
+            %exit
+         %finish
+         fbline = byteinteger(dtable)<<8!byteinteger(dtable+1) {Short(DTABLE)}
+         btype = byteinteger(dtable+12) {name-length, hence blocktype}
+
+         %if btype>11 %start
+            printstring("Invalid symbol tables")
+            newline
+            newregs = 0
+            %return
+         %finish %else %start
+            prev blk = byteinteger(dtable+6)<<8!byteinteger(dtable+7)
+            name = string(dtable+12) {null if block}
+         %finish
+
+         %if fbline=0 %start
+            print locals(1) {Environmental block - global owns}
+            %exit {to next dynamic level}
+         %finish %else %if old btype>=0 %start
+            %if old btype=0 %start
+               ! Prev block was a begin-block, so do current level, too
+               fline = old fbline
+            %finish %else %exit {to next dynamic level}
+         %finish
+
+         printstring("Entered from line")
+         write(fline, 4)
+         printstring(" of")
+
+         %if btype=0 %then printstring(" block") %else print string(" routine/fn/map ".name)
+         printstring(" starting at line")
+         write(fbline, 4)
+         print locals(0)
+
+         ! Go to next textual level.  If this is the environmental block, then
+         ! we shall print the variables therein, else finished.
+         old fbline = fbline
+         old btype = btype
+         sst ptr = prev blk
+      %repeat
+      newline
+      newregs = nextlnb(lnb)
+      newregs = 0 %if newregs=lnb
+
+!-------------------------------- print locals --------------------------------
+
+      %routine print locals(%integer locenv)
+! Param is  zero  for locals,  one  for environmentals
+         %integer num, j, adata, save
+         num = 0
+         newline
+!*    %return %if gla<ssown_sscurbgla %and ssown_sscomreg(25)=0
+!* cannot do subsystem check to see if we are in subsystem
+         newline
+         adata = (dtable+btype+20)&(-4)
+         %if locenv#0 %start
+            %if integer(adata)<0 %then %return {silent for no environmental variables}
+            ! Have we printed these already?
+            j = 0
+            %while j<ecounter %cycle
+               %if environmentals printed(j)=adata %then %return {Yes: clear off}
+               j = j+1
+            %repeat
+            ! Add to array of ADATA's for which diags have been printed, to avoid
+            ! being tedious and printing the same several times.
+            %if ecounter<=maxe %start
+               environmentals printed(ecounter) = adata
+               ecounter = ecounter+1
+            %finish
+            printstring("Environmental")
+         %finish %else %start
+            %if integer(adata)<0 %then printstring("No l") %else printstring("L")
+            printstring("ocal")
+         %finish
+         printstring(" variables")
+         newlines(2)
+
+         ! First cycle through to ascertain the number of variables
+         save = adata
+         %while integer(adata)>=0 %cycle
+            num = num+1
+
+            ! Have a quick validate to terminate the loop.  This should only occur
+            ! for faulty diag tables, which "should not occur".  But they did.
+
+            %if dvalidate(adata, 8, 0)#0 %start
+               printstring("DIAG tables inaccessible ".htos(adata, 8))
+               newline
+               %exit
+            %finish
+
+            adata = (adata+8+byte integer(adata+4))&(-4)
+         %repeat
+
+         ! Now collect the pointers, sort and print
+         %begin
+            %integer j
+            %integer %array pt, x(0:num-1)
+            %routine %spec sort
+            adata = save
+            j = 0
+            %while j<num %cycle
+               pt(j) = adata
+               j = j+1
+               adata = (adata+8+byte integer(adata+4))&(-4)
+            %repeat
+            sort
+            %for j = 0, 1, num-1 %cycle
+               adata = pt(x(j))
+               %if integer(adata)>>28&3=0 %then pscalar(adata)
+            %repeat
+            %if arraysize>0 %start
+               %for j = 0, 1, num-1 %cycle
+                  adata = pt(x(j))
+                  %if integer(adata)>>28&3#0 %then parr(adata, arraysize)
+               %repeat
+            %finish
+
+!------------------------------------ sort ------------------------------------
+
+            %routine sort
+! DECLARE INTEGER ARRAY X, BOUNDS 0:NUM-1, IN CALLING ROUTINE
+               %integer i, j, hit, n
+               %for i = 0, 1, num-1 %cycle
+                  x(i) = i
+               %repeat
+               %for i = num-2, -1, 0 %cycle
+                  hit = 0
+                  %for n = 0, 1, i %cycle
+                     %if string(pt(x(n))+4)>string(pt(x(n+1))+4) %start
+                        j = x(n)
+                        x(n) = x(n+1)
+                        x(n+1) = j
+                        hit = 1
+                     %finish
+                  %repeat
+                  %if hit=0 %then %exit
+               %repeat
+            %end;                        ! of SORT
+         %end;                           ! begin-block
+      %end;                              ! of PRINT LOCALS
+
+!--------------------------------- PRINT VAR ---------------------------------
+
+      %routine print var(%integer type, prec, nam, form, vaddr)
+!***********************************************************************
+!*       output the next variable in the current block.                *
+!*       a variable entry in the tables is:-                           *
+!*       flag<<20!vbreg<<18!disp                                       *
+!*       where:-                                                       *
+!*         vbreg is variable's base register, disp is it's offset      *
+!*         and flags=nam<<6!prec<<3!type                               *
+!***********************************************************************
+         %integer len, v
+         %const %integer unassi=x'80808080'
+         %string (63) mess
+         %switch intv, realv(3:7)
+
+         %if nam#0 %start
+            %if type=0 %or type=5 %then vaddr = vaddr+4 {%name or %stringname}
+            ->invalid %if dvalidate(vaddr, 4, 0)#0
+            vaddr = integer(vaddr)
+            ->not ass %if vaddr=unassi
+         %finish
+         ->ill ent %if prec<3;           ! bits not implemented
+         ->invalid %if dvalidate(vaddr, 4, 0)#0
+         %if prec>=5 %or type=3 %then v = integer(vaddr)
+
+         %if type=1 %then ->intv(prec)
+         %if type=2 %then ->realv(prec)
+         %if type=3 %then len = 16 %and ->rec
+         %if type=5 %then ->str
+
+intv(4):                                 ! 16 bit integer
+         v = byteinteger(vaddr)<<8!byteinteger(vaddr+1)
+         !v=shortinteger(vaddr)
+         mess = itos(v)
+         mess = "x'".strhex(v)."' ".mess
+         ->omess
+
+intv(7):                                 ! 128 bit integer
+realv(3):                                ! 8 bit real
+realv(4):                                ! 16 bit real
+ill ent:                                 ! should not occurr
+         mess = "unknown type of variable"
+         ->omess
+
+intv(5):                                 ! 32 bit integer
+         ->not ass %if v=un assi
+         mess = itos(v)
+         mess = "x'".strhex(v)."' ".mess
+         ->omess
+
+intv(3):                                 ! 8 bit integer
+         write(byteinteger(vaddr), 1)
+         %return
+
+realv(5):                                ! 32 bit real
+         ->not ass %if v=un assi
+         print fl(real(vaddr), 7)
+         %return
+
+realv(6):                                ! 64 bit real
+         ->invalid %if dvalidate(vaddr, 8, 0)#0
+         ->not ass %if unassi=integer(vaddr)=integer(vaddr+4)
+         print fl(long real(vaddr), 14)
+         %return
+
+realv(7):                                ! 128 bit real
+         ->invalid %if dvalidate(vaddr, 16, 0)#0
+         ->not ass %if unassi=integer(vaddr)=integer(vaddr+4)
+         print fl(longreal(vaddr), 14)
+         %if form=0 %then %start
+            printstring(" (R'"); phex(integer(vaddr))
+            phex(integer(vaddr+4))
+            space; phex(integer(vaddr+8))
+            phex(integer(vaddr+12))
+            printstring("')")
+         %finish
+         %return
+
+intv(6):                                 ! 64 bit integer
+         len = 8
+rec:                                     ! record print 1st 4 words
+         ->not ass %if un assi=v
+         ->invalid %if dvalidate(vaddr, len, 0)#0
+         mess = "x'".strhex(v).strhex(integer(vaddr+4))
+         %if prec=7 %or type=3 %then %start
+            mess = mess." ".strhex(integer(vaddr+8)).strhex(integer(vaddr+12))
+         %finish
+         mess = mess."'"; ->omess
+str:     ->not ass %if byteinteger(vaddr+1)=unassi&255=byteinteger(vaddr)
+         ->toolong %if byteinteger(vaddr)>253
+         mess <- """".string(vaddr).""""
+         ->omess
+
+invalid:
+         mess = " invalid address ".strhex(vaddr)
+         ->omess
+too long:
+         mess = " too long ";            ! assume short strings
+         ->omess
+
+not ass:
+         mess = " not assigned"
+omess:
+         printstring(mess)
+      %end;                              ! of PRINT VAR
+!---------------------------------- PSCALAR ----------------------------------
+
+      %routine pscalar(%integer adata)
+!***********************************************************************
+!*       OUTPUT THE NEXT VARIABLE IN THE CURRENT BLOCK.                *
+!*       A VARIABLE ENTRY IN THE TABLES IS:-                           *
+!*       FLAG<<20!VBREG<<18!DISP                                       *
+!*       WHERE:-                                                       *
+!*         VBREG IS VARIABLE'S BASE REGISTER, DISP IS IT'S OFFSET      *
+!*         AND FLAGS=NAM<<6!PREC<<3!TYPE                               *
+!***********************************************************************
+         %integer i, k, vaddr, type, prec, nam
+         %string (11) lname
+         i = integer(adata)
+         k = i>>20
+         type = k&7
+         prec = k>>4&7
+         nam = k>>10&1
+         lname <- string(adata+4)."          "
+         print string(lname."=")
+         %if i&X'40000'=0 %then vaddr = lnb %else vaddr = gla
+         vaddr = vaddr+i&X'3FFFF'
+         print var(type, prec, nam, 1, vaddr)
+         newline
+      %end;                              ! of PSCALAR
+
+!------------------------------------ XDP --------------------------------------
+
+      %integer %fn xdp(%integer refaddr, vaddr, elsize); ! CHECK DUPS
+!***********************************************************************
+!*    CHECK IF VAR THE SAME AS PRINTED LAST TIME                       *
+!***********************************************************************
+         %integer i
+         %for i = 0, 1, elsize-1 %cycle
+            %if byteinteger(refaddr+i)#byteinteger(vaddr+i) %then %result = 0 {different}
+         %repeat
+         %result = 1 {same}
+      %end;                              ! of XDP
+
+!------------------------------------ DDV ------------------------------------
+
+      %routine ddv(%integer dvad, %integer %array %name lb, ub); ! decode dope vector.
+!***********************************************************************
+!*    WORK DOWN A DOPE VECTOR DESCRIBED BY WORD DESCRIPTOR DV AND      *
+!*    RETURN SIZE,DIMENSIONALITY AND SUBSCRIPT RANGES IN DATA           *
+!***********************************************************************
+         %integer i, nd
+         nd = integer(dvad)
+         lb(0) = nd; ub(0) = nd
+         %for i = 1, 1, nd %cycle
+            dvad = dvad+12;              ! Points to lb/ub/stride for current dimension
+            lb(i) = integer(dvad)
+            ub(i) = integer(dvad+4)
+         %repeat
+         ub(nd+1) = 0
+         lb(nd+1) = 0
+      %end;                              ! of DDV
+
+!------------------------------------ PARR ------------------------------------
+
+      %routine parr(%integer adata, asize)
+!***********************************************************************
+!*    PRINT THE FIRST ASIZE ELEMENTS OF THE ARRAY DEFINED BY VAR       *
+!*    ARRAYNAMES PRINTED ALSO AT PRESENT. UP TO COMPILERS TO AVOID THIS*
+!***********************************************************************
+         %integer i, j, k, type, prec, els, nd, vaddr, hdaddr, afirst, elsp, m1, refaddr, elsl, dupseen, dvad
+         %integer %array lbs, ubs, subs(0:13)
+         i = integer(adata)
+         k = i>>20
+         prec = k>>4&7
+         type = k&7
+         newline
+         printstring("Array ".string(adata+4))
+         %if i&X'40000'#0 %then vaddr = gla %else vaddr = lnb
+         hdaddr = vaddr+i&X'FFFF'
+         ! VALIDATE HEADER AND THE 2 DESCRIPTORS
+         %if dvalidate(hdaddr, 12, 0)#0 %then ->hinv
+         dvad = integer(hdaddr+8)
+         %if dvalidate(dvad, 16, 0)#0 %then ->hinv
+         ! Check the dope vector: length is 3 + (3 * No. of dimensions).
+         ! The number of dimensions must be greater than zero and not greater than 12
+         nd = integer(dvad)
+         %unless 0<nd<=12 %then ->hinv
+         afirst = integer(hdaddr+4)
+         ddv(dvad, lbs, ubs);            ! decode dope vector.
+         %if dvalidate(afirst, 16, 0)#0 %then ->hinv
+         ! ELS = ELement Size
+         %if type<3 {integer or real} %then els = 1<<(prec-3) %else %start
+            ! record, string
+            i = dvad+12;                 ! points to lb/ub/stride for first dimension
+            els = integer(i+12*(nd-1)+8)
+         %finish
+
+         ! Print out and check bound pair list
+         print symbol('(')
+         j = 0
+         %for i = 1, 1, nd %cycle
+            subs(i) = lbs(i);            ! SET UP SUBS TO FIRST EL
+            write(lbs(i), 1)
+            print symbol(':')
+            write(ubs(i), 1)
+            print symbol(',') %unless i=nd
+            j = 1 %if lbs(i)>ubs(i)
+         %repeat
+         print symbol(')')
+         newline
+         %if j#0 %then printstring("Bound pairs invalid") %and %return
+
+         ! Work out how many elements to print on a line
+         %if type=5 %then elsp = 1 %else %if els<=4 %then elsp = 6 %else elsp = 4
+
+         %cycle {through all the columns}
+            ! Print column header except for 1-dimensional arrays
+            %if nd>1 %then %start
+               print string("
+Column (*,")
+               %for i = 2, 1, nd %cycle
+                  write(subs(i), 1)
+                  print symbol(',') %unless i=nd
+               %repeat
+               print symbol(')')
+            %finish
+
+            ! Compute the address of first element of the column
+            k = 0; m1 = 1; i = 1
+            %while i<=nd %cycle
+               k = k+m1*(subs(i)-lbs(i))
+               m1 = m1*(ubs(i)-lbs(i)+1)
+               i = i+1
+            %repeat
+            vaddr = afirst+k*els
+            refaddr = 0;                 ! ADDR OF LAST ACTUALLY PRINTED
+            dupseen = 0; elsl = 99;      ! FORCE FIRST EL ONTO NEW LINE
+
+            ! Cycle down the column and print the elements. sequences of repeated
+            ! elements are replaced by "(Rpt)". at the start of each line the
+            ! current value of the first subscript is printed followed by a right parenthesis
+
+            %for i = lbs(1), 1, ubs(1) %cycle
+               %if refaddr#0 %then %start; ! CHK LAST PRINTED IN THIS COL
+                  k = xdp(refaddr, vaddr, els); ! CHECK DUPS
+                  %if k#0 %then %start
+                     print string("(RPT)") %if dupseen=0
+                     dupseen = dupseen+1
+                     ->skip
+                  %finish
+               %finish
+
+               ! Start a new line and print subscript value if needed
+               %if dupseen#0 %or elsl>=elsp %start
+                  newline; write(i, 3); print string(")")
+                  dupseen = 0; elsl = 0
+               %finish
+               space
+               print var(type, prec, 0, 0, vaddr)
+               elsl = elsl+1
+               refaddr = vaddr
+skip:
+               vaddr = vaddr+els
+               asize = asize-1
+               %exit %if asize<0
+            %repeat {UNTIL COLUMN FINISHED}
+            newline
+            %exit %if asize<=0 %or nd=1
+
+            ! Update second subscript to next column check for and deal with overflow
+            ! into next or further cloumns
+            i = 2; subs(1) = lbs(1)
+            %cycle
+               subs(i) = subs(i)+1
+               %exit %unless subs(i)>ubs(i)
+               subs(i) = lbs(i);         ! RESET TO LOWER BOUND
+               i = i+1
+            %repeat
+            %exit %if i>nd;              ! ALL DONE
+         %repeat;                        ! FOR FURTHER COLUMNS
+         %return
+hinv:
+         printstring(" has invalid header
+")
+      %end;                              ! of PARR
+   %end;                                 ! of INDIAG
+%end;                                    ! of NDIAG
+
+!----------------------------------- ermess -----------------------------------
+
+%routine ermess(%integer n)
+   %const %string (32) %array fmess(1:maxfaults)= %c
+{ 1}  "real overflow",
+{ 2}  "real underflow",
+{ 3}  "integer overflow",
+{ 4}  "decimal overflow",
+{ 5}  "zero divide",
+{ 6}  "surprise",
+{ 7}  "surprise",
+{ 8}  "surprise",
+{ 9}  "addressing exception",
+{10}  "privilege",
+{11}  "specification exception",
+{12}  "segtable format",
+{13}  "operation exception",
+{14}  "data exception",
+{15}  "emualtion fault",
+{16}  "surprise",
+{17}  "illegal system call",
+{18}  "excess instructions",
+{19}  "disc read failure",
+{20}  "change block size",
+{21}  "ocp/store error",
+{22}  "illegal out",
+{23}  "local controller fault",
+{24}  "virtual store error",
+{25}  "INT Q",
+{26}  "off stack top",
+{27}  "illegal cycle",
+{28}  "illegal exponent",
+{29}  "array inside out",
+{30}  "capacity exceeded",
+{31}  "array bound fault",
+{32}  "resolution fault",
+{33}  "unassigned variable",
+{34}  "switch label not set"
+
+   %string (255) mess
+   %return %if n<=0
+   %if 0<n<=maxfaults %then mess = fmess(n) %else mess = "unknown fault:-".htos(n, 8)." (".itos(n).")"
+!*    printstring(mess.snl)
+   opout("diagnostics entered:-".mess)
+%end;                                    ! ermess
+
+!-------------------------------- VALIDATE GLA --------------------------------
+
+%integer %fn validate gla(%integer address)
+!  Result   =   1 if OK (standard format)
+!               0   if not
+!              -1   if not, but first five words are accessible (to dump)
+   %if validate(address, 64, readac)=0 %then %result = 0
+   %if address&7#0 %or validate(integer(address+8), 1, writeac)=0 %or validate(integer(address+12), 1, readac)=0 %or %c
+      byteinteger(address+16)>10 %then %result = -1
+   %result = 1 {OK}
+%end {validate gla}
+
+!---------------------------------- assdump ----------------------------------
+
+!* %routine assdump(%integer pcount, lnb, flag)
+!*    %integer i
+!*    newline
+!*    printstring("PC = ".strhex(pcount))
+!*    newline
+!*    printstring("registers:")
+!*    newline
+!*    dump(lnb, lnb+96, 0)
+!*    newline
+!*    printstring("code")
+!*    newline
+!*    dump(pcount-64, pcount+64, 0)
+!*    %return %if flag=0
+!*    newline
+!*    printstring("gla")
+!*    newline
+!*    i = integer(lnb+56)
+!*    dump(i, i+128, 0)
+!* %end {ASSDUMP}
+
+!------------------------------------ dump ------------------------------------
+
+
+!----------------------------------- TRANS -----------------------------------
+
+%routine trans(%integer %name fault, event, subevent)
+!***********************************************************************
+!*       TRANSLATE FAULT TO EVENT & VICE VERSA                         *
+!***********************************************************************
+   %const %byte %integer %array ftoe(1:maxfaults)= %c
+      x'12',0,x'11',0,x'13',0(21),x'51',x'55',x'56',x'61',x'62',x'71',x'81',x'82'
+   %integer k, j
+   %if fault=0 %then %start;             ! EVENT-SUBEVENT GIVEN
+      j = event<<4+subevent
+      %return %if j=0;                   ! %monitor
+      %for k = maxfaults, -1, 1 %cycle
+         %if j=ftoe(k) %then fault = k %and %return
+      %repeat
+   %finish %else %start
+      %if 1<=fault<=maxfaults %start
+         k = ftoe(fault)
+         event = k>>4; subevent = k&15
+      %finish
+   %finish
+%end {TRANS}
+
+!* %integer %fn next context
+!* !******************************************************************************
+!* ! entered in director context (2) to determine which context to go to to deal
+!* ! with this contingency
+!* !******************************************************************************
+!*    %integer flag
+!*    printstring("next context entered.
+!* ")
+!*    %if uinf_class=66 %start;             ! text message. ignore
+!*       %result = this context
+!*    %finish
+!*
+!*    %if uinf_class=64 %or uinf_class=17{?} %start;             !out of time
+!*       flag = dsetit(1000*7200);          !2 hours
+!*       dirmess("Dsetit", flag) {%if flag#0}
+!*       %result = this context
+!*    %finish
+!*
+!*    %if uinf_class=65 %start;             ! single char ints
+!*       %if 'A'#uinf_subclass#'Q' %start;  ! ignore all but Q and A
+!*          opout(" INT:".tostring(uinf_subclass)." ?".snl)
+!*          %result = this context
+!*       %finish
+!*    %finish
+!* !
+!*    %if this context=3 %start
+!*       opout("failed in context 3, class=".itos(uinf_class).", subclass=".itos(uinf_subclass))
+!*       ! we're going to escape to context 1. first reset the screwed context3 state
+!*       ! as at 'start' below
+!*       flag = dset state(3, vbagr414p1, context3)
+!*       dir mess("D set state ", flag) %unless flag=ok
+!*       ! if that failed, the next entry to 3 will be haywire
+!*       ! however, proceed
+!*       ! now reset context 1 to its 'unwound' state
+!*       %if com36=0 %then %stop
+!*       ! we haven't even got initialised yet! that stop in context 2 will probably
+!*       ! screw up the works, but there's nothing else to do.
+!*       move(48, com36+16, addr(context1(6)))
+!*       context1(1) = context1(17);        ! pc=GR15
+!*       context1(44) = 0;                  ! uninhibited
+!*       flag = dset state(1, vbagr414p1, context1)
+!*       %if flag#ok %start
+!*          dir mess("D set state ", flag)
+!*          %stop;                          ! nowhere to go
+!*       %finish
+!*       ! so context 1 reset ok. go there
+!*       %result = 1
+!*    %finish
+!*    %result = 3;                          ! go to ndiag
+!* %end;                                    ! next context
+!
+!
+%routine context3 entry
+!******************************************************************************
+! entered by context switch as a result of 'next context' result
+! entered through the top first time only, therafter just before 'repeat' below
+!******************************************************************************
+   %integer %array %name c
+   %integer %array %format caf(0:47)
+   %integer flag, class
+loop:
+   printstring("context3 entered class:")
+   write(uinf_class, 1)
+   printstring(" subclass:")
+   write(uinf_subclass, 1)
+   newline
+   %if uinf_context=1 %then c == array(uinf_acontext1, caf) %else c == array(uinf_acontext3, caf)
+   class = uinf_class
+   %if class=66 %then %start
+      !text message..ignore
+      ->resume
+   %finish
+   %if class=64 %or class=17 %then %start
+      !time exceeded
+      flag = dsetit(1000*7200);          !2 hours
+      ->resume
+   %finish
+   %if class=65 %then %start
+      !single character ints
+      ->resume %unless uinf_subclass='A' %or uinf_subclass='Q'
+   %finish
+!*    ndiag(uinf_subclass, 0 {not reqd}, 10, class)
+   move(48<<2, uinf_acontext1, addr(usercontext(0))); !save user context
+   flag = dsetstate(1, regmask1, diagscontext); !switch to diags context
+resume:
+   flag = d go to context(1);            !back to user mode..or diags
+   ! entered here following next failure
+   ->loop
+%end;                                    ! context3
+!
+!
+%routine connect create(%string (11) file, %integer size, conmode, createmode, %integer %name caddr)
+   %integer seg, gap, flag, da
+   %record %format fhf(%integer end, start, size, type, free hole, datetime, anon link, version)
+   %record (fhf) %name file header
+   seg = 0; gap = 0
+   caddr = 0
+   flag = ddisconnect(myname, file, myfsys, 1)
+   flag = ddestroy(myname, file, "", myfsys, 0)
+   flag = dcreate(myname, file, myfsys, (size+1023)>>10, createmode, da)
+   %if 0#flag#already exists %start
+      printstring("Dcreate ".myname.".".file." fails ".derrs(flag).snl)
+      %return
+   %finish
+   flag = dconnect(myname, file, myfsys, conmode, seg, gap)
+   %if seg=0 %start
+      printstring("Dconnect ".myname.".".file." fails ".derrs(flag).snl)
+      %return
+   %finish
+   caddr = seg<<seg shift
+   file header == record(caddr)
+   file header_end = file header size
+   file header_start = file header size
+   file header_size = (size+epage size-1)&(-epage size)
+%end;                                    !of connect create
+!
+%routine shdiag
+   %integer i, r11, my11
+   printstring("class:")
+   write(uinf_class, 1)
+   printstring(" subclass:")
+   write(uinf_subclass, 1)
+   printstring("    pc:")
+   phex(usercontext(1))
+   newline
+   printstring("regs:")
+   %cycle i = 0, 1, 15
+      phex(usercontext(2+i))
+      space
+      newline %if i&3=3
+   %repeat
+   newline
+   r11 = usercontext(2+11)
+   *st_11,my11
+   %if (r11!!my11)>>segshift#0 %then %return; !go to ndiag
+   printstring("failed in diagnostics")
+   newline
+   *l_1,com36
+   *LM_4,15,16(1);                       !restore regs
+   *BCR_15,15
+%end
+!
+%integer %fn select context
+   !determine context in which to handle exception
+   %result = 3
+%end
+!
+%external %routine start
+! called by director
+
+
+
+   %if exec="SPOOLR" %start
+     %externalroutinespec define(%integer strm, size, %string (15) q)
+     %externalroutinespec control( %c
+        %integer max fsys, queues, qconad, remotes, rconad, streams,
+        sconad, qnconad,snconad,rnconad, link list conad)
+     %externalroutinespec read spool config( %c
+        %string (6) iu, ou, %integer ifs, ofs,
+        %string (11) if, of,
+        %integername qs, qconad, rmts, rconad, strms, sconad, 
+        %integername qnconad,snconad,rnconad, link list conad)
+     %constinteger maxfsys = 99
+     %constinteger jrnl = 0
+     %conststring (11) config file = "CFILE"
+     %string (31) filename
+     %string (11) file
+     %string (6) user
+     %integerarray dsfiia(0:31)
+     %integer  queues, remotes, streams, qconad, rconad,
+      sconad, stconad, cstreams, ftp table conad,qnconad,snconad,rnconad, link list conad
+   %finish
+   %if exec="FTRANS" %start
+     %externalroutinespec print log(%integer stream, q)
+     %externalroutinespec control(%integer database conad, tablefile conad,LINES)
+     %externalroutinespec connect cfile(%string(6) iu, ou, %string(11) if, of, tf, %integer ifs, ofs,
+      %integername database conad, tablefile coNAD,LINES)
+     %string(31) filename
+     %string(11) file
+     %string(6) user
+     %conststring(11) config file = "CFILE"
+     %conststring(11) table file = "TFILE"
+     %constinteger jrnl = 0
+     %integer database conad,tablefile conad,LINES
+     %integerarray dsfiia(0:31)
+   %finish
+
+   %if exec="mailer" %start
+      %const %integer rtable entry size= 160
+      %const %integer max recipients= 512
+      %const %integer rtable size=max recipients*rtable entry size+file header size
+      %integer rtable conad
+       %external %routine %spec send and define(%integer strm, size, %string (15) q)
+      %external %routine %spec control(%integer rtable conad)
+   %finish
+
+   %if exec="volums" %start
+     %externalroutinespec control(%integer max users,ntapedrives)
+     %constinteger comseg=31
+     %recordformat comf(%integer ocptype, slipl, tops, sepgs,
+         ndiscs, nsldevs, dlvnaddr, ditaddr,
+         sldevtabad, steer int, dirsite, dcodeda,
+         exsuplvn, tojday, date0, date1,
+         date2, time0, time1, time2,
+         pagesize, users, cattad, servaad,
+         nocps, itint, ration, trans,
+         %longinteger kmon, %integer supvsn, secsfrmn,
+         secstocd, sync1dest, sync2dest, asyncdest,
+         maxprocs, kinstrs, elaphead, commsreca,
+         storeaad, procaad, tslice, feps,
+         maxcbt, performad, end)
+     %record(comf)%name com
+   %finish
+
+   %integer caddr, pc3, flag
+   this context = 1
+
+   my name = uinf_user;                  !extract info from director record
+   my fsys = uinf_fsys
+   my service number = uinf_sync1 dest
+   oper no = uinf_start cnsl
+
+! now set up context 3 for contingencies
+! it has a stack of its own
+   connect create("CONTEXT3STK", x'c000', r!w, zerod, caddr)
+   %if caddr=0 %start
+      opout("Failed to create context 3 stack.")
+      %stop
+   %finish
+
+   *bas_1,<context1>
+
+   ->context3
+context3:
+! this looks a bit strange but I think we need to enter on a simple jump
+! in order to pick up everything correctly
+!* this context = 3
+   context3 entry
+
+context1:
+!get here with PC for context3 call in GR1
+!*    *using_1
+   *st_1,pc3
+   *l_1,context3
+   *stm_4,14,24(1)
+!*    *drop_1
+   context3(1) = pc3;                    ! psw1
+   context3(13) = caddr;                 ! overwrite GR11 with new stack base
+   context3(44) = 1;                     ! async inhibited
+   context3(45) = 0;                     !not susp
+   flag = dsetstate(3, regmask1, context3)
+   dir mess("D set state ", flag) %and %stop %unless flag=ok
+!*    flag = dnominate trap(next context)
+!*    dir mess("Dnominate trap ", flag) %and %stop %unless flag=ok
+   *bas_1,<lab2>
+   ->lab2a;                              !saves not used message
+lab2a:
+   !context 1..perform diagnostics..ndiag does not return here
+   shdiag
+   ndiag(uinf_subclass, 0, 10, uinf_class)
+   %stop
+!
+lab2:
+   *st_1,pc3
+   *l_1,diagscontext
+   *stm_4,14,24(1)
+   diagscontext(1) = pc3;                !pc..at lab2a
+   diagscontext(13) = caddr+x'4000';     !stack..after context 3 stack
+   diagscontext(44) = 0;                 !async enabled
+   diagscontext(45) = 0;                 !no susp
+!
+   flag = dnominatetrap(select context)
+   flag = dasyncinh(0);                  ! let them in
+
+   *st_11,diagsbase;                     !base address for diagnostics
+
+   %if exec="SPOOLR" %start
+     define(1,64,".JOURNAL")
+     filename = ""
+     flag = dsfi(my name,my fsys,2,0,filename, dsfiia)
+     dirmess("GET CONFIG FROM INDEX FAILS ",flag) %c
+        %if flag # 0
+     %unless filename -> user.(":").file %start
+        user = ""
+        file = ""
+     %finish
+     read spool config(user,myname,-1,myfsys,file,config file,
+        queues,qconad,remotes,rconad,streams,sconad,
+        qnconad,snconad,rnconad, link list conad)
+     control(max fsys,queues,qconad,remotes,rconad,streams,sconad,
+         qnconad,snconad,rnconad, link list conad) %if qconad # 0 %and sconad # 0
+   %finish
+
+   %if exec="FTRANS" %start
+     print log(1,jrnl)
+     filename = ""
+     flag = dsfi(my name,my fsys,2,0,filename,dsfiia)
+     dir mess("GET CONFIG FROM INDEX FAILS ",flag) %c
+        %if flag # 0
+     %unless filename -> user.(":").file %start
+        user = ""
+        file = ""
+     %finish
+     connect cfile(user, myname, file, config file, table file, -1, my fsys, database conad, tablefile conad,LINES)
+     control(database conad,tablefile conad,LINES)
+   %finish
+   %if exec="mailer" %start
+      send and define(1, 64, "JOURNAL")
+      connect create("RTABLE", rtable size, r!w, zerod!tempfi, rtable conad)
+      %if rtable conad#0 %then control(rtable conad) %else printstring("MAILER not started".snl)
+   %finish
+   %if exec="volums" %start
+     com==record(com seg<<seg shift)
+     control(com_maxprocs,10)
+   %finish
+
+
+! only return from that if ndiag has been entered in context 3 and has done
+! 'go to context 1' very early in initialisation
+   this context = 1
+   %stop;                                !if a return is made
+%end;                                    ! start
+!*
+!*
+%end %of %file

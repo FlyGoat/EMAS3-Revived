@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Jiaxun Yang <jiaxun.yang@flygoat.com>
+
+# CHOPSUPE IPL and EMAS supervisor/Director bootstrap.
+ARCHLVL ESA/390
+# CHOPSUPE requires a pre-2000 two-digit year (2026 becomes 1988).
+# Need to be fixed in source code
+YROFFSET -38
+MAINSIZE 256
+NUMCPU 1
+CNSLPORT 127.0.0.1:3271
+0150 3380 chop.3380
+0001 3270
+0002 3270
+0003 3270
+0004 3270
+# Archived FD80 is subchannel 5 (X'00010005').
+0155 3380 emas0.3380
+# A second filesystem lets the archived Director start an FCHECK worker.
+0156 3380 emas1.3380
+# confignass assigns LP0 subchannel X'3D'. Keep the unused slots allocated
+# so the printer lands there; these terminals have no connected clients.
+1007-103C 3270
+103D 1403 operator-printer.txt
+# M60 through M63, present with no tapes mounted.
+103E-1041 3420 *

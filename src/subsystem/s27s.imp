@@ -1,0 +1,684 @@
+! S27 Newfileop
+%endoflist
+%include "SUBARC:SSOWNF3"
+%list
+!***********************************************************************
+!*                                                                     *
+!*                           Record formats                            *
+!*                                                                     *
+!***********************************************************************
+!
+%record %format dahf(%integer dataend, datastart, size, filetype, date, time, format, records)
+%record %format rf(%integer conad, filetype, datastart, dataend)
+!
+!***********************************************************************
+!*                                                                     *
+!*                              Constants                              *
+!*                                                                     *
+!***********************************************************************
+!
+%constant %integer em=25
+%const %integer ssfformat= 1
+%constant %integer fortranindefault=5
+%constant %integer fortranoutdefault=6
+
+! %constinteger Stream MAXREC= 160
+! Stream MAXREC is set to the longest record that Fortran is expected to handle if a unit is connected to a character file
+!
+!***********************************************************************
+!*                                                                     *
+!*                     %system Routine/fn/map spec                     *
+!*                                                                     *
+!***********************************************************************
+!
+%externalroutinespec printline %alias "s#printline"(%string(255)s)
+%externalroutinespec setiodefault %alias "s#setiodefault" (%integer def,
+   chan, dummy)
+%external %routine %spec printfd %alias "s#printfd"(%integer afd, mode)
+%external %string %fn %spec itos %alias "S#ITOS"(%integer i)
+%external %routine %spec monparams %alias "S#MONPARAMS"(%string (255) s)
+%external %routine %spec connect %alias "s#oldconnect"(%string (255) s, %integer a, m, p, %record (rf) %name r,
+   %integer %name f)
+%external %routine %spec outfile %alias "s#outfile"(%string (255) file, %integer size, hole, prot,
+   %integer %name adr, flag)
+%external %integer %fn %spec currentll %alias "s#currentll"
+%external %integer %fn %spec close %alias "S#CLOSE"(%integer afd)
+%external %integer %fn %spec fdmap %alias "S#FDMAP"(%integer chan)
+%external %integer %fn %spec iocp %alias "S#IOCP"(%integer ep, parm)
+%external %integer %fn %spec newmtfileop %alias "S#NEWMTFILEOP"(%integer afd, act)
+%external %integer %fn %spec open %alias "S#OPEN"(%integer afd, mode)
+%external %routine %spec changeaccess %alias "S#CHANGEACCESS"(%string (255) file, %integer mode, %integer %name flag)
+%external %routine %spec extend %alias "S#EXTEND"(%record (fdf) %name f, %integer %name flag)
+%external %routine %spec trim %alias "s#trim"(%string (255) file, %c
+   %integer %name flag)
+%external %routine %spec magio %alias "S#MAGIO"(%integer afd, op, %integer %name flag)
+!
+!NOTE:
+!  In theory, only one buffer is required for input and output
+!     since Fortran handles a complete record at a time. However
+!     the distinction between input and output is maintained for
+!     clarity.
+!  The output buffer allows for format effector conversion for
+!     units connected to .OUT or for files defined as containing
+!     format effectors.
+
+!
+%integer %fn optheader(%integer blocksize)
+!CALCULATES THE OPTIMUM FILE HEADER SIZE FOR A DATA
+!FILE WITH A GIVEN BLOCK SIZE
+   %if blocksize<=4096 %then %start
+      {Test if Record length is a multiple of 4096 (page size)}
+      %if blocksize&(blocksize-1)=0 %and blocksize>=32 %then %result = blocksize
+      {Label Header Size used is the record length so}
+      {long as it is a factor of 4096 and is also at}
+      {least as large as the minimum header size}
+   %finish %else %start
+      %if blocksize&4095=0 %then %result = 4096
+      {Header size=4096 if 4096 is a multiple of the record length}
+   %finish
+   %result = 32;                         !in all other cases
+%end;                                    !of OPT HEADER
+!
+!-----------------------------------------------------------------------
+!
+
+
+%external %integer %fn fortrandf %alias "S#FORTRANDF"(%integer dsnum, numblocks, blksize, asvardescad)
+!***********************************************************************
+!*                                                                     *
+!* Called by FORTRAN statement DEFINE FILE. If channel is open ignore  *
+!* call. Otherwise try to  connect the file, first write, then read.   *
+!* If it does not exist create a new one taking size from              *
+!* NUMBLOCKS*BLKSIZE. If it does exist check that BLKSIZE agrees with  *
+!* file and that NUMBLOCKS is not greater than in file. Extract info   *
+!* about associated variable and store in file descriptor.             *
+!*                                                                     *
+!***********************************************************************
+!
+!Modified  6/December/82
+!
+!If ASVARDESCAD is zero then FORTRANDF will have been
+!   called from NEW FILE OP to open a file for direct
+!  -access for FORTRAN77. The file/channel will have
+!   been connected via a DEFINE command with the third
+!   parameter set to 'D'.
+!
+!
+!Modified  30/November/84
+!
+!  If the field F_F77STATUS=4 {ie. STATUS=READ} then the
+!  file is connected in read only mode and the valid actions
+!  allowed are set to read/seek.
+
+%record (fdf) %name f
+%record (dahf) %name h
+%record (rf) rr
+%integer flag, afd, size, headr
+%record (conff) %name cur
+
+   %if monitoring possible=yes %and ssown_ssnote&8#0 %then monparams(">jrjrjrjr")
+   %if-1<=dsnum<=0 %then flag = 164 %and ->fout;  !INVALID CHAN
+   afd = fdmap(dsnum)
+   %if afd=0 %then flag = 151 %and ->fout;  !NOT DEFINED
+   f == record(afd)
+   %if f_status#0 %then flag = 0 %and ->fout;  !ALREADY OPEN - IGNORE CALL
+   %if f_accessroute=10 %then flag = 294 %and ->fout;  !ILLEGAL USE OF .NULL
+   f_modeofuse = 13 {FORTRAN DA}
+   %if f_f77status=4 {Read Only } %then ->connect for reading {only}
+   f_validaction = 67 {Read/Write/Find}
+
+   connect(f_iden, 3, 0, 4{perm}, rr, flag)
+   %if flag=218 %start;                  !FILE DOES NOT EXIST
+
+      %if asvardescad=0 %then %start
+         {   Extract Record and File Sizes for a FORTRAN77 Open}
+         blksize = f_maxrec
+         numblocks = (f_maxsize-32)//blksize
+      %finish
+
+      headr = optheader(blksize);        !GET OPT FILE HEADER SIZE
+      size = headr+(blksize*numblocks)
+      outfile(f_iden, size, 0, 0, rr_conad, flag)
+      %if flag#0 %then ->fout
+      h == record(rr_conad)
+      h_dataend = size
+      h_datastart = headr
+      h_filetype = ssdatafiletype
+      h_format = (blksize<<16)!ssfformat;  !FIXED FORMAT
+      h_records = numblocks
+      ->opened
+
+   %finish %else %start;                 !FAILED TO CONNECT WRITE
+
+      %if flag#0 %start
+connect for reading:
+         connect(f_iden, 0, 0, 4{perm}, rr, flag)
+         %if flag#0 %then ->fout
+         f_validaction = 65;             !READ AND SEEK ONLY
+      %finish
+   %finish
+
+   h == record(rr_conad)
+   %if asvardescad=0 %then %start;       ! (FORTRAN77 specific)
+      blksize = h_format>>16
+      numblocks = (h_data end-h_data start)//blksize
+   %finish
+   %if (h_dataend-h_datastart)<(numblocks*blksize) %or h_filetype#ssdatafiletype %or h_format&x'FF'#ssfformat %then %c
+      %result = 179 {INVALID FILE FOR DA}
+   %if h_format>>16#blksize %then %result = 180;  !WRONG RECORD LENGTH FOR DA
+
+opened:
+   f_conad = rr_conad
+   f_datastart = h_datastart;            !HEADER MIGHT NOT BE 32 BYTES
+   f_rectype = 1;                        !FIXED
+   f_maxsize = h_records
+   f_maxrec = blksize
+   f_minrec = blksize
+   f_recsize = blksize
+   f_status = 3
+   f_link = currentll;                   !FDLEVEL - TO CAUSE AUTO CLOSE
+   f_curstate = 1
+   f_darecnum = 1;                       !ASSUME STARTS AT BLOCK 1
+   cur==record(ssown_conf(ssown_confpos))
+   cur_opens=cur_opens+1
+
+fout:
+   ! %if flag#0 %then ssown_ssfname = itos(dsnum)
+   %if monitoring possible=yes %and ssown_ssnote&8#0 %then monparams("<jrjrjrjr*".itos(flag))
+   %result = flag
+%end;                                    !OF FORTRANDF
+
+!-----------------------------------------------------------------------
+
+
+
+%external %integer %fn newfileop %alias "S#NEWFILEOP"(%integer dsnum, action, type, %integer %name afd)
+
+!   Action   =   1   read
+!                2   write
+!                4   rewind
+!                8   backspace
+!               16   endfile
+!               32   close
+!               64   find
+
+%integer %fn %spec special action
+%constant %byte %integer %array simple valid action(0:7)= %c
+ 0, x'73', x'7D', x'76', x'71', x'7D', 0, 0
+%record (dahf) %name head
+%record (fdf) %name f
+%integer i, j, k, flag, darecnum
+
+   %if monitoring possible=yes %and ssown_ssnote&x'20000'#0 %then monparams(">jrjrjr")
+   darecnum = afd;                       !PASSED FOR FORTRAN WRITE DA CALLS
+   %if-1<=dsnum<0 %then flag = 164 {invalid channel} %and ->nout
+
+look:
+   i = fdmap(dsnum)
+   %if i=0 %then %start
+      %if dsnum=fortran in default %then dsnum = ssown_indefault %and ->look
+      %if dsnum=fortran out default %then dsnum = ssown_outdefault %and ->look
+      flag = 151;                        !CHANNEL NOT DEFINED
+      ->nout
+   %finish
+
+!   printfd(i, 1) %if ssown_ssnote&4>0
+   f == record(i)
+   %if f_accessroute=1 %then dsnum = ssown_indefault %and ->look;  !MAPPED ONTO PRIMARY INPUT
+   %if f_accessroute=2 %then dsnum = ssown_outdefault %and ->look;  !MAPPED ONTO PRIMARY OUTPUT
+   afd = i
+   ssown_current fd = i
+   %if f_accessroute=5 %then flag = newmtfileop(afd, action) %and ->nout;  !MAGNETIC TAPE FILE
+   %if f_rectype=1 %then ssown_irgap = 0 %else ssown_irgap = 2;  !INTER-RECORD GAP
+
+   j = f_cur state
+   %unless 0<=j<=7 %then flag = 1008 %and ->nout;  ! CORRUPT DESCRIPTOR
+   %if f_access route=6 %then dsnum = f_asvar %and ->look
+
+   %if action&f_valid action=0 %and f_status#0 %then %start
+      !Invalid action and already OPEN
+      ! INVALID I/O OP
+      %if action=2 %or action=16 %start;  !WRITE or ENDFILE
+
+         !*****         %if f_f77status=4 {Read Only} %then %result=162 {No Write Permission}
+         changeaccess(f_iden, 3, flag);  !CHANGE TO WRITE MODE
+         %if flag#0 %then flag = 162 %and ->nout;  !FAILURE
+         f_validaction = f_validaction!2;  !PUT IN WRITE BIT
+         head == record(f_conad)
+         f_end = f_conad+head_size
+      %finish %else flag = 171 %and ->nout;  !SOME OTHER INVALID ACTION
+   %finish
+
+   %if action&simple valid action(j)=0 %then %start
+      ! INVALID OR DETAILED PROCESSING
+      k = special action
+      %if k>0 %then flag = k %and ->nout
+      %if k<0 %then flag = 0 %and ->nout
+   %finish
+
+   %if action=1 %then %start;            ! READ
+      f_cur state = 2
+      flag = 0
+      ->nout
+   %finish
+
+   %if action=2 %then %start;            !WRITE
+
+      !*EMAS  ENSURE THAT F_AREC=ADDRESS OF OUTPUT BUFFER
+      !*EMAS              F_MAXREC=MAX RECORD SIZE
+      !*EMAS              F_REC TYPE=1 OR 2  (F OR V)
+      %if f_modeofuse=1 %start;          !STREAM OUTPUT
+
+         f_arec = addr(ssown_stoutbuff(1))
+         %if f_dsnum=ssown_outdefault %or f_flags&16=16 %then f_maxrec = stream maxrec+1 %else f_maxrec = stream maxrec
+
+      %finish %else %if f_modeofuse=2 %start;  !SEQUENTIAL
+         %while f_cur+f_maxrec+ssown_irgap>f_end %cycle
+            extend(f, flag)
+            %if flag#0 %then flag = 169 %and ->nout;  !OUTPUT EXCEEDED
+         %repeat
+         f_arec = f_cur+ssown_irgap;     !READY FOR DATA TO BE STUFFED IN
+      %finish %else %start;              !FORTRAN DIRECT ACCESS
+         %if type=8 %then flag = 119 %and ->nout;  ! F77 SEQ/DA CONFLICT.
+         f_arec = f_conad+f_datastart+f_recsize*(darecnum-1)
+      %finish
+
+      f_curstate = 3
+      flag = 0
+      ->nout
+   %finish
+
+   %if action=4 %then %start;            !REWIND
+      !ACTION HERE IS AS FOLLOWS:
+      !IF FILE OPEN FOR READING THEN RESET F_CUR AND F_CURREC
+      !IF FILE OPEN FOR WRITING THEN CLOSE IT
+      %if f_validaction&2=0 %start;      !OPEN FOR READING
+         %if f_conad#0 %start
+            f_cur = f_conad+integer(f_conad+4)
+            f_currec = f_cur
+            f_curstate = 4
+            f_transfers = 0;             !IN CASE WRITE DONE LATER
+         %finish
+      %finish %else flag = close(afd);   !IF OPEN FOR WRITING CLOSE IT
+      flag = 0
+      ->nout
+   %finish
+
+   %if action=8 %start;                  !BACKSPACE
+      %if f_modeofuse=1 %start;          !CHAR FILE -LOOK BACK
+         %if f_cur<=f_datastart+1 %then f_cur = f_datastart %and flag = 0 %and ->nout
+         !AT BEGINNING OF FILE
+         %for i = f_cur-2, -1, f_datastart %cycle;  !LOOKBACK
+            %if byteinteger(i)=nl %then i = i+1 %and %exit;  !START OF LAST RECORD
+         %repeat
+         f_cur = i
+         f_currec = i
+         flag = 0
+         ->nout
+      %finish
+      !DATA FILE
+      %if ssown_irgap=0 %then %start
+         f_cur = f_cur-f_recsize
+      %finish %else %start
+         %if f_lastrec=0 %then flag = 268 %and ->nout;  !DOUBLE BACKSPACE NOT ALLOWED
+         f_cur = f_lastrec
+         f_lastrec = 0;                  !TO PREVENT DOUBLE BACKSPACE
+      %finish
+      f_transfers = f_transfers-1
+      flag = 0
+      ->nout
+   %finish
+
+   %if action=16 %then %start;           !ENDFILE
+
+      !*EMAS  SET 'END OF DATA' TO CURRENT PTR
+      f_cur state = 6
+      flag = 0
+      ->nout
+   %finish
+
+   %if action=32 %then %start;           ! CLOSE
+      i = close(afd)
+      %if i>0 %then flag = i %else flag = 0
+      ->nout
+   %finish
+
+   %if action=64 %then %start;           ! FIND
+      flag = 0
+      ->nout
+   %finish
+
+   flag = 1013;                          ! INVALID ACTION REQUESTED
+nout:
+   ! %if flag>0 %then ssown_ssfname = itos(dsnum)
+   %if monitoring possible=yes %and ssown_ssnote&x'20000'#0 %then monparams("<jr* flag=".itos(flag))
+   %result = flag
+
+
+%integer %fn special action
+%integer i, j, flag, state
+%switch s(0:7)
+   flag = 0
+   state = f_curstate
+   ->s(state)
+
+!******  CLOSED
+s(0):%if action=4 %or action=8 %then flag = -1 %and ->sout
+   !IGNORE REWIND AND BACKSPACE IF CLOSED
+   %if (action=2 %or action=16) %and f_modeofuse<12 %then j = 2 %else j = 1
+   ! SQ WRITE ELSE SQ READ OR DA
+   %if f_modeofuse=0 %then f_modeofuse = 2
+   !FORCE DATA TYPE IF NOT SET
+   %if type=7 %then flag = 301 %and ->sout;  ! FORTRANG - Chan not open
+   %if type=9 %then %start
+      ! FORTRAN77 DA access request
+      %if 13#f_modeofuse#3 %then flag = 119 %and ->sout;  ! Conflicting access
+      flag = fortrandf(dsnum, 0, 0, 0)
+      ->sout
+   %finish
+   i = open(ssown_current fd, j)
+   %if f_rectype=1 %then ssown_irgap = 0 %else ssown_irgap = 2
+   %if i<=0 %start
+      f_lastrec = f_cur;                 !FOR BACKSPACE
+      f_cur state = 1
+      ->sout
+   %finish
+   flag = i
+   ->sout
+
+!******  AFTER OPEN
+s(1):flag = -1;                          ! NO ACTION REQUIRED FOR
+   ->sout
+   ! REWIND/BACKSPACE
+
+!****** AFTER READ
+s(2):
+   ->sout
+
+!******   AFTER WRITE
+s(3):%if f_modeofuse<12 %then %start
+      %if action=8 %start;               !BACKSPACE
+         head == record(f_conad)
+         head_size = f_cursize
+         head_dataend = f_cur-f_conad
+         head_records = f_transfers
+         f_validaction = f_validaction&x'FD';  !REMOVE WRITE VALID BIT
+         ! TO AVOID LOOSING LAST RECORD IF NEXT ACTION IS REWIND OR CLOSE
+         f_curstate = 2
+         trim(f_iden,flag)
+         changeaccess(f_iden,1,flag); !change to read
+         ->sout
+      %finish
+      flag = 156;                        !READ AFTER WRITE ERROR
+      ->sout
+   %finish %else ->sout
+
+!******  AFTER REWIND
+s(4):%if action=4 %or action=8 %then ->sout
+
+!****** AFTER BACKSPACE
+s(5):%if action=2 %then %start
+
+!*EMAS  SET 'END OF DATA' TO CURRENT PTR
+   %finish
+   ->sout
+
+!******  AFTER ENDFILE
+s(6):%if action=1 %then flag = 156 %and ->sout
+   !READ AFTER WRITE
+   %if action=2 %then flag = 157 %and ->sout
+   !WRITE AFTER END FILE
+   %if action=4 %then ->sout
+   !NORMAL REWIND PROCESSING
+   %if action=8 %then %start
+      ! AFTER BACKSPACE
+      f_cur state = 3;                   ! IN WRITE MODE AFTER LAST RECORD
+      flag = -1
+      ->sout
+   %finish
+   %if action=16 %then flag = -1 %and ->sout
+   ! IGNORE MULTIPLE ENDFILE
+   flag = 1013;                          ! INVALID ACTION
+   ->sout
+
+!******  AFTER END OF FILE DETECTED ON READ
+s(7):%if action=1 %then flag = 153 %and ->sout
+   !REPEAT END OF FILE CONDITION
+   %if action=2 %then ->s(2)
+   !TO SET WRITE MODE
+   %if action=8 %then f_curstate = 2 %and flag = -1 %and ->sout
+   !BACKSPACE - JUST SKIPS BACK OVER IMAGINARY END OF FILE
+   %if action=16 %then flag = -1 %and ->sout;  !ENDFILE ALREADY
+   flag = 0
+sout:
+   %result = flag
+%end;                                    ! SPECIAL ACTION
+%end;                                    !NEWFILEOP
+
+!-----------------------------------------------------------------------
+
+
+
+%external %integer %fn inrec %alias "S#INREC"
+%record (fdf) %name f
+%integer flag, cist
+%byte %integer next
+%integer len;                            !a savearea
+%integer cur pos;                        !       for descriptors and the STD instruction
+
+   {LEN,CUR POS are currently used for character input from}
+   {            a file or alien data in background JCL     }
+
+   %if ssown_ssnote&x'20000'>0 %then monparams(">") %and printfd(ssown_currentfd, 1)
+
+   f == record(ssown_current fd)
+   %if f_accessroute=5 {mag tape} %then magio(ssown_currentfd, 2, flag) %else %start
+
+      %if f_accessroute=10 {.NULL} %or f_curstate=7 %then flag = 153 {input ended} %else %start
+
+         flag = 0
+         !*EMAS  SET F_AREC=ADDRESS OF NEXT RECORD
+         !*EMAS      F_RECSIZE=LENGTH OF RECORD
+         !*EMAS      %result=153 FOR END OF FILE
+%cycle
+
+         %if f_modeofuse=1 %start;       !STREAM
+            %if (f_accessroute=8 {%and f_dsnum#-90}) %or f_accessroute=11 %start
+               !READING FROM CHARACTERFILE OR ALIEN DATA
+               !This code used for files, including control file in obey
+               !and also control file in batch (f_dsnum=-90)
+               !Previous to 12-Jan-87, ".TT" code was used for control
+               !file in batch, but this did not correctly deal with
+               !input ended.   SH. 12-Jan-87.
+               cur pos = f_cur
+               len = f_end-cur pos
+               %unless len>0 %then ->report 153
+
+               %if cur pos\=f_cur rec %then %start
+
+                  ! First find the end of the current record
+
+                  ! Look for next NL
+                  %while len>0 %and byteinteger(cur pos)#nl %cycle
+                     cur pos = cur pos+1
+                     len = len-1
+                  %repeat
+
+                  ! Skip over newline if one found
+                  %if byteinteger(cur pos)=nl %then cur pos = cur pos+1 %and len = len-1
+
+                  %if len=0 %then ->report 153
+               %finish
+
+               ! Note: CUR POS points to the start of the required record
+               !     LEN is undefined  (K.Yarwood does not see why LEN is undefind)
+               !     DR  contains a descriptor from the required record to the end of the file
+
+               f_arec = cur pos
+
+               ! Look for the end of the required record
+
+%if byteinteger(cur pos) = 27 %and ssown_fourdots = 2 %start
+   set io default(0, -90, 0)
+   f_accessroute = 9
+   f_dsnum = -90
+   ssown_fourdots = 1
+   %continue
+%finish
+               %while len>0 %and byteinteger(cur pos)#nl %cycle
+                  cur pos = cur pos+1
+                  len = len-1
+               %repeat
+               {if no NL is found then CUR POS should equal F_END    }
+               {if a  NL is found then CUR POS should point to the NL}
+
+
+               ! Update the File Definition Table
+
+               f_recsize = cur pos-f_arec
+               cur pos = cur pos+1 %unless cur pos>=f_end
+               {unless no NL was found}
+               f_cur rec = cur pos
+               f_cur = cur pos
+
+            %finish {character file or alien data} %else %start
+
+               !NOT FILE INPUT SO MUST USE FULL CHARACTER INPUT ROUTE PROTEM
+               cist = ssown_sscomreg(22)
+               selectinput(f_dsnum)
+               !     SKIPSYMBOL %while INPOS # 0 ; !SKIP REST OF CURRENT RECORD
+               f_arec = addr(ssown_stinbuff(1))
+               f_recsize = 0
+
+               ! In the case of finding EM in console input, we must discard it
+               ! and we cannot do this by SKIPSYMBOL because we would get a
+               ! SIGNAL.  We therefore do a READCH into a dummy variable.
+
+               %if nextch=em %then readch(flag) %and selectinput(cist) %and ->flag153 {EOF}
+               %cycle
+                  %exit %if f_recsize=stream maxrec
+                  next = nextch
+                  %if next=em %or next=10 %then %start
+                     %if next=10 %then skipsymbol %else readch(flag) %and ->flag153
+                     %exit
+                  %finish %else %start
+                     f_recsize = f_recsize+1
+                     ssown_stinbuff(f_recsize) = next
+                     skipsymbol
+                  %finish
+               %repeat
+            %finish {full character input route pro tem}
+
+         %finish {stream} %else %if f_modeofuse=2 %start;  !SEQUENTIAL
+
+            %if f_cur>=f_end %then f_curstate = 7 %and ->flag153;  !INPUT ENDED
+            %if ssown_irgap#0 %start;    !V FORMAT
+               f_recsize = (byteinteger(f_cur)<<8)!byteinteger(f_cur+1)-ssown_irgap;  !TO AVOID ALIGNMENT PROBLEMS
+            %finish
+            f_arec = f_cur+ssown_irgap
+            f_lastrec = f_cur;           !FOR BACKSPACE
+            f_cur = f_arec+f_recsize
+            f_transfers = f_transfers+1;  !MUST KEEP COUNT IN CASE WRITE DONE LATER
+         %finish %else %start;           !FORTRAN DIRECT ACCESS
+            f_arec = f_conad+f_datastart+f_recsize*(f_darecnum-1)
+            f_darecnum = f_darecnum+1;   !NOW POINTS TO NEXT RECORD
+         %finish
+%exit
+%repeat
+
+      %finish {not .NULL or input ended}
+   %finish {not mag tape}
+
+   ->out
+
+report 153:
+   f_currec = cur pos
+   f_cur = cur pos
+flag153:
+   flag = 153
+
+out:
+printfd(ssown_currentfd, 1) %if ssown_ssnote & x'20000' > 0
+   %if ssown_ssnote&x'20000'>0 %then monparams("<*".itos(flag))
+   %result = flag
+%end;                                    ! INREC
+
+!-----------------------------------------------------------------------
+
+
+
+%external %integer %fn outrec %alias "S#OUTREC"(%integer len)
+%record (fdf) %name f
+%integer cost, fe, flag, asvar, dr0, dr1
+
+   %if ssown_ssnote&x'20000'#0 %then monparams(">jr")
+   f == record(ssown_current fd)
+
+   !*EMAS  A RECORD OF LENGTH LEN IS IN THE BUFFER AT F_AREC
+   !*EMAS  AFTER DISPOSING OF THE RECORD ENSURE THAT F_AREC IS SET FOR
+   !*EMAS  THE NEXT OUTPUT RECORD
+   !*EMAS  %result=169 IF THE OUTPUT FILE IS FULL
+
+   flag = 0
+   %if f_accessroute=5 %start;           !MAGNETIC TAPE OUTPUT
+
+      f_recsize = len
+      magio(ssown_currentfd, 3, flag)
+
+   %finish %else %if f_accessroute#10 {No action for .NULL} %start
+
+      %if f_modeofuse=1 %start;          !STREAM OUTPUT
+         cost = ssown_sscomreg(23)
+         selectoutput(f_dsnum)
+
+         ! First deal with format EFFECTOR. CURRENTLY A NEWLINE IS PUT OUT AT THE END OF EACH
+         ! RECORD. ACTION ONLY REQUIRED FOR '0' ADD ANOTHER NEWLINE AND '1' NEWPAGE.
+         %while len>1 %and ssown_stoutbuff(len)=' ' %cycle
+            len = len-1
+         %repeat;                        !REMOVE TRAILING SPACES MUST LEAVE AT LEAST ONE FOR NEWLINES WITHIN FORMATS
+         ssown_stoutbuff(len+1) = nl
+
+         %if f_dsnum=ssown_outdefault %or f_flags&16=16 %start
+            !INTERPRET FE CHAS
+            fe = ssown_stoutbuff(1)
+            %if fe='0' %then newline
+            %if fe='1' %then newpage
+            %if fe='+' %then flag = iocp(24, 13);  !OVERWRITE LAST CHAR WITH RETURN
+            dr0 = len;                   !LENGTH OF TRANSFER
+            dr1 = addr(ssown_stoutbuff(2));  !ADDRESS OF FIRST BYTE TO BE SENT
+         %finish %else %start;           !STRAIGHT TO FILE - DON'T INTERPRET FE
+            dr0 = len+1;                 !MUST INCLUDE NEWLINE
+            dr1 = addr(ssown_stoutbuff(1))
+         %finish
+
+         flag = iocp(19, addr(dr0));     !PUT WHOLE RECORD
+         selectoutput(cost)
+      %finish %else %if f_modeofuse=2 %start;  !SEQUENTIAL OUTPUT
+         %if ssown_irgap#0 %start;       !PUT IN RECORD LENGTH
+            len = len+ssown_irgap;       !RECORD LENGTH INCLUDES SSOWN_IRGAP
+            byteinteger(f_cur) <- len>>8
+            byteinteger(f_cur+1) = len&255
+         %finish
+         f_lastrec = f_cur;              !FOR BACKSPACE
+         f_cur = f_cur+len;              !SSOWN_IRGAP ALREADY ADDED IN TO LEN ABOVE
+         f_transfers = f_transfers+1
+         %while f_cur+f_maxrec+ssown_irgap>f_end %cycle
+      flag = 169 %and -> orout %if f_cursize >= f_maxsize
+            extend(f, flag)
+            %if flag#0 %then flag = 169 {OUTPUT EXCEEDED} %and ->orout
+         %repeat
+         f_arec = f_cur+ssown_irgap
+      %finish %else %start;              !FORTRAN DIRECT ACCESS
+         f_arec = f_arec+f_recsize
+         f_darecnum = f_darecnum+1
+      %finish
+   %finish {not mag tape and not .NULL}
+
+orout:
+   %if ssown_ssnote&x'20000'#0 %then monparams("<jr*".itos(flag))
+   %result = flag
+%end;                                    ! OUTREC
+
+!-----------------------------------------------------------------------
+
+%endoffile

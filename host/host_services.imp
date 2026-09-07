@@ -1,0 +1,187 @@
+! SPDX-License-Identifier: MIT
+! Copyright (c) 2026 Jiaxun Yang <jiaxun.yang@flygoat.com>
+
+%externalintegerfn change context
+  ! Advisory page-access accounting hint; host Unix owns its paging policy.
+  %result=0
+%end
+%externalbyteintegermap host comregmap(%integer index)
+%record(statef)%name s
+  %if index<0 %or index>60 %then index=0
+  s==state;%result==byteinteger(addr(s_comregs(index)))
+%end
+%externalroutine host set work limits(%integer initial,maximum)
+%record(statef)%name s
+  %signal 1 %if initial<32 %or maximum<32 %or maximum>X'7FFFF000'
+  s==state;s_worksize=initial;s_maxsize=maximum
+%end
+%externalintegerfn host uinfi(%integer entry)
+%record(statef)%name s
+  %result=0 %unless 1<=entry<=47
+  %signal 9,3,entry %unless entry=28
+  s==state
+  %result=s_worksize %if s_worksize<s_maxsize
+  %result=s_maxsize
+%end
+%externalroutine host setreturncode(%integer code)
+%record(statef)%name s
+  s==state;s_comregs(24)=code
+%end
+%externalstring(255)%fn host itos(%integer value)
+%longinteger n
+%integer digit
+%string(255) text
+  n=value;text=""
+  %if n<0 %then n=-n
+  %cycle
+    digit=n-n//10*10;text=tostring(digit+'0').text;n=n//10
+    %exit %if n=0
+  %repeat
+  %if value<0 %then text="-".text
+  %result=text
+%end
+%externalroutine host uctranslate(%byteintegername data,%integer length)
+%integer i,c
+  %return %if length<=0
+  %signal 1,5 %if addr(data)=0
+  %for i=0,1,length-1 %cycle
+    c=byteinteger(addr(data)+i)
+    %if 'a'<=c<='z' %then byteinteger(addr(data)+i)=c-32
+  %repeat
+%end
+%externalroutine host iocp(%integer operation,%byteintegername raw)
+%longinteger argument
+%integer i,count
+  argument=addr(raw)
+  %if operation=3 %or operation=5 %then printsymbol(argument&255) %and %return
+  %if operation=7 %or operation=15 %start
+    %signal 1,5 %if argument=0
+    printstring(string(argument));%return
+  %finish
+  %if operation=17 %start
+    count=(argument>>8)&255
+    %for i=1,1,count %cycle
+      printsymbol(argument&255)
+    %repeat
+    %return
+  %finish
+  %signal 9,3,operation
+%end
+%externalroutine host move(%integer length,%byteintegername source,destination)
+%externalroutinespec unix move(%byteintegername destination,source,%integer length)
+  %return %if length<=0
+  %signal 1,5 %if addr(source)=0 %or addr(destination)=0
+  unix move(destination,source,length)
+%end
+%externalroutine host movebytes(%integer length,%byteintegername source,%integer sourceoffset,%byteintegername destination,%integer destinationoffset)
+  %return %if length<=0
+  host move(length,byteinteger(addr(source)+sourceoffset),byteinteger(addr(destination)+destinationoffset))
+%end
+%externalroutine host fill(%integer length,%byteintegername data,%integer filler)
+%integer i
+  %return %if length<=0
+  %signal 1,5 %if addr(data)=0
+  %for i=0,1,length-1 %cycle
+    byteinteger(addr(data)+i)=filler&255
+  %repeat
+%end
+%externalroutine host define(%string(255) value)
+%externalintegerfnspec bind stream(%integer channel,%string(255) name)
+%string(255) prefix,name
+%integer n,i,c
+  %signal 9,3 %unless value->prefix.(",").name
+  %if length(prefix)>=2 %and folded(substring(prefix,1,2))="st" %then prefix=substring(prefix,3,length(prefix))
+  %signal 9,3 %if prefix="" %or valid name(name)=0
+  n=0
+  %for i=1,1,length(prefix) %cycle
+    c=charno(prefix,i);%signal 9,3 %unless '0'<=c<='9'
+    n=n*10+c-'0';%signal 9,3 %if n>255
+  %repeat
+  %signal 9,3 %if n=0
+  %signal 9,2,n %if bind stream(n,name)#0
+%end
+%externalroutine host define channel(%integer channel,%string(255) name,%integername afd,flag)
+%externalintegerfnspec bind stream(%integer channel,%string(255) name)
+  afd=0;flag=223;%return %unless 1<=channel<=255
+  flag=bind stream(channel,name);%if flag=0 %then afd=channel
+%end
+%externalroutine host command(%string(255) command,parameters,%integername flag)
+  flag=unix error("EINVAL");%return %if valid name(command)=0
+  %if folded(command)="define" %then host define(parameters) %and flag=0 %and %return
+  flag=unix error("ENOSYS")
+%end
+%longintegerfn timestamp
+%longinteger n
+%string(255) value
+  %result=unix timestamp %if unix environment("SOURCE_DATE_EPOCH",byteinteger(addr(value)))=0
+  %signal 9,3 %if unix parse integer(value,10,n)#0 %or n<0
+  %result=n
+%end
+%externalstring(255)%fn host date
+%string(255) value
+  %signal 9,3 %if unix clock("%d/%m/%y",timestamp,byteinteger(addr(value)))#0
+  %result=value
+%end
+%externalbyteintegermap host datecell
+%record(statef)%name s
+  s==state;s_date=host date;%result==byteinteger(addr(s_date))
+%end
+%externalstring(255)%fn host time
+%string(255) value
+  %signal 9,3 %if unix clock("%H:%M:%S",timestamp,byteinteger(addr(value)))#0
+  %result=value
+%end
+%externalintegerfn host outstream
+%externalintegerfnspec output channel
+  %result=output channel
+%end
+%externalintegerfn host currentpackeddt
+%longinteger n
+%integer packed
+  n=timestamp;%signal 9,3 %if n<0 %or n>X'7FFFFFFF'
+  packed<-n!X'80000000';%result=packed
+%end
+%externalroutine host setfname(%string(255) name)
+%record(statef)%name s
+  s==state;s_filename=name
+%end
+%integerfn environment integer(%string(255) key,%integername value)
+%string(255) text
+%longinteger number
+  %result=0 %if unix environment(key,byteinteger(addr(text)))=0
+  %result=unix error("EINVAL") %if unix parse integer(text,0,number)#0 %or number<0 %or number>X'7FFFFFFF'
+  value=number;%result=0
+%end
+%externalintegerfn host begin
+%record(rootf)%name r
+%record(statef)%name s
+%longinteger p
+%integer error,options
+  r==root;%result=unix error("EBUSY") %if r_active#0
+  p=new state;%result=unix error("ENOMEM") %if p=0
+  s==record(p);options=0
+  error=environment integer("EMAS_WORK_BYTES",s_worksize)
+  %if error=0 %then error=environment integer("EMAS_MAX_FILE_BYTES",s_maxsize)
+  %if error=0 %then error=environment integer("EMAS_COMPILER_OPTIONS",options)
+  %if error=0 %and (s_worksize<32 %or s_maxsize<32 %or s_maxsize>X'7FFFF000') %then error=unix error("EINVAL")
+  %if error#0 %then unix free(byteinteger(p)) %and %result=error
+  s_comregs(27)=options;r_active=p;%result=0
+%end
+%externalintegerfn host end
+%record(rootf)%name r
+%record(statef)%name s
+%record(filef)%name f
+%integer flag,channel
+  r==root;%result=unix error("EINVAL") %if r_active=0
+  s==state
+  %while s_files#0 %cycle
+    f==record(s_files);host disconnect(f_name,flag)
+    %result=flag %if flag#0
+  %repeat
+  host freesourceareas;host clear source aliases;host clear parameters
+  clear items(s_metadata)
+  %for channel=128,1,s_nextroute-1 %cycle
+    selectoutput(channel);closeoutput
+  %repeat
+  unix free(byteinteger(r_active));r_active=0;%result=0
+%end

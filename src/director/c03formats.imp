@@ -1,0 +1,1245 @@
+!TITLE Record Formats
+!
+!-----------------------------------------------------------------------
+! Subject:  EMAS 3 Protection
+! From:     P.Stephens @ RCO      18 Sep 84  16:10:02 bst
+! To:       emasteam
+!
+!       Here follows a note about protection on the Amdahl system. PLease read it
+!       and report any flaws to PDS ASAP.
+!
+!
+!                Protection in EMAS3
+!                ___________________
+!
+!      Apart from a single write protect bit in the segment tables all
+! protection on IBM architecture is provided by keys on the store. Each
+! store page has associated a 4 bit key (0-15) an each program has a
+! similar key in its PSW. Writes to store are only permitted if the key in
+! the PSW matches the key on the store or if the key in the pSW is 0. One
+! extra bit associated with the page is available to extend key protection
+! to read accesses.
+!
+!      EMAS3 has the system in segments 0-63 as there is no public address
+! space. Careful use of the keys is needed to allow sharing and give
+! reasonable protection to the system. The scheme may cause some
+! inconvenience to Director and Comms controller since these may have to
+! alter their PSW before writing to certain pages. Fortunately there is a
+! suitable privileged instruction to do this!
+! 
+!       My plan is thus:-
+! 
+!      1) Director to maintain the one bit in the segment table for users
+!      read only segments as a vestigial remnant of acr levels.
+! 
+!      2) All users pages read or write to be set with key X'F' and no
+!      additional read protection. Supervisor can thus read users pages.
+! 
+!      3) Director and user to run with key F in the psw but Directors
+!      writable area for NNTs and Indexes to be in the last 15 segments.
+!      Director removes these but changing control register 1 before
+!      exiting to his user. On being called from user Director makes a
+!      special Monitor call to Local controller to obtain Priv and his 15
+!      segments. All such calls will be checked for a valid PC from known
+!      Director code area.
+! 
+!      4) All free list pages to be set with key 7 and read protection
+!      THese pages are inaccessible to everyone.
+! 
+!      5) All Supervisor and Local controller pages to be set with key 1
+!      and read protection. This to include page 0. The sole exception is
+!      that part ot the Local controller stack shared with Director (for
+!      CBT SST and ACNT records) . THis will have key 1 but no read
+!      protection so Director (and Users!) can read it. To update these
+!      tables Director must use his privilege to change his PSW key to
+!      zero for the minimum duration of the write.
+! 
+!      6) Keys to be set for get epage in P-P3 and not subsequently
+!      altered. Peripheral transfers normally to be unprotected except for
+!      Comms controller who (PDS thinks) can specify ACR 15 for input on
+!      behalf of users unless chaining control information.
+!
+!-----------------------------------------------------------------------
+!
+!
+
+!
+! This is the latest information on the use of Segments for EMAS3.
+! Segments 0-63 correspond roughly to Public in EMAS2
+! Segments 64-255 are the equivalent to Local in Emas2
+! Segments 241-255 vanish from the Segment table when User is running
+! but re-appear when Director is entered.
+!
+!     Seg 0                             address page 0 and used for
+!                                       the zero page (page 1) and
+!                                       writing to real addresses (page 2)
+!     Segs 2-3                          Free
+!     Seg 4                             Supervisor code
+!     Segs 5-7                          free (for testing on 24 bit machines
+!                                       these contain overflow portions of code)
+!     Seg 8                             Supervisor Gla
+!     Seg 9                             Supervisor stack
+!     Segs 10-11                        Free
+!     Segs 12-15                        Reserved for SSP
+!     Segs 16-19                        Fress
+!     Seg 20                            Parameter (parm) table
+!     Seg 21                            Active Memory table
+!     Seg 22                            AMTDD Table
+!     Seg 23                            Store table
+!     Segs 24-29                        Free
+!     Seg 30                            Main Printer Buffer
+!     Seg 31                            The COM Segment (ex public 48)
+!     Segs 32-63                        Reserved for real->Virtual Mapping
+!
+!     Seg 64                            Local Controller STack (incorporating
+!                                       4 contexts[ssn+1s] and the DIRCSEG
+!                                       formerly local 10)
+!                                       and SEGMENT table !!!
+!     Seg 65                            Director stack
+!     Seg 66                            Signal Stack
+!     Seg 67                            Director Code
+!     Seg 68                            uinf seg
+!     Seg 75                            Subsytem code etc
+!     Seg 511                           Director's 'owns'
+!     Seg 497-511                       For Director indexes & tables
+!
+!-----------------------------------------------------------------------
+!
+!
+! This chapter contains the record formats used by Director. Where
+! appropriate, the fields are described.    The record formats are
+! given in alphabetical order. There are also the following constants:
+!
+%constinteger YES = 1
+%constinteger NO = 0
+%constinteger AMDAHL = 369
+%constinteger XA = 371
+!
+%CONSTINTEGER TARGET = xa
+!
+! For 370:
+!
+!     - Subclass has a different interpretation in contingencies
+!
+!     - Replace HALFintegers by SHORTintegers, which are signed
+!
+!     - There are no long integers
+!
+!     - Use General regs 0-3 for workspace,
+!       11 is stack top - 8 byte aligned
+!       12 is head of code
+!       13 GLA
+!
+!
+!
+!
+%constinteger IMP = YES  { ie no machine code ! }
+!
+!
+%if TARGET = 370 %start
+      %constinteger SEC SHIFT = 16
+      %constinteger SEG SHIFT = 16
+%finish
+!
+%if TARGET = XA %or TARGET = AMDAHL %start
+      %constinteger SEC SHIFT = 17
+      %constinteger SEG SHIFT = 20
+%finish
+!
+      %constinteger OWN SEG = {255}511
+      %constinteger CBTLEN={499}  {380} 480;               ! LENGTH OF CBT TABLE
+      %constinteger TOP VM SEG = OWN SEG
+      %constinteger NOT ALLOC MASK = X'0000C000';       ! SST entry used but CBT not allocated mask
+      %constinteger NOT ALLOC = X'00008000';            ! Bits in NOT ALLOC MASK have to have this value if CBT is not allocated
+      %constinteger CBT NOT AVAILABLE = X'00008000';    ! i.e. seg not connected OR no CBT allocated
+      %constinteger NEWCOPY SEG = X'00002000';          ! Bit marker in SST entry for newcopy block
+      %constinteger DENDSST = X'FFFFFFFF';              ! SST entry not used marker
+      %constinteger CBT NEW BLOCK = 128
+      %constinteger CBT READ ONLY = 64
+      %constinteger CBT ACTIVE = 32
+      %constinteger CBT CONTINUATION = 8
+      %constinteger CBT SEQUENTIAL = 4
+      %constinteger CBT MULTIPLE = 2
+
+      %constinteger LC STK SEG = 3
+      %constinteger STACK SEG = 65
+      %constinteger SIG SEG = 66
+      %constinteger CODE SEG = 67
+      %constinteger UINF SEG = ownseg-1  { write mode }
+      %constinteger uuinf seg = 68  { read mode only }
+      %constinteger LOG SEG = ownseg - 17
+      %constinteger SITE SEG = ownseg - 18
+      %constinteger HOT TOP SEG = ownseg - 19
+      %constinteger MSG SEG = ownseg - 20
+      %constinteger BASEFILE SEG = 75
+      %constinteger GLA SEG = 76
+      %constinteger LO D SEG = ownseg-15
+      %constinteger HI D SEG = ownseg-2
+      %constinteger COM SEG = 31
+      ! Segment range in  which we are prepared to allow non-allocation of CBT entries
+      %constinteger LO CBTDEALSEG = GLA SEG+1, HI CBTDEALSEG = MSG SEG -1
+      %constinteger lo vss seg = 9
+      %constinteger hi vss seg = 15
+      %conststringname DATE = COM SEG << SEG SHIFT + X'3B'
+      %conststringname TIME = COM SEG << SEG SHIFT + X'47'
+      %constinteger VOLUMS SITE = X'400'
+      %constinteger SPOOLR SITE = X'480'
+      %constinteger MAILER SITE = X'500'
+      %constinteger FTRANS SITE = X'580'
+      %constinteger SUBSYS SITE = X'600'
+      %constinteger STUDEN SITE = X'600'
+!
+!
+!
+%if target = amdahl %start
+      %constinteger psw0mask = x'08003f00'
+%finish
+!
+%if target = xa %start
+      %constinteger psw0mask = x'00003f00'
+%finish
+!
+!
+!
+      %constinteger LOUSEG = 68
+!
+%constinteger SEC MASK = (1 << SEC SHIFT) - 1    { some or all of these could }
+%constinteger SEC P SHIFT = SEC SHIFT - 12     { go into UINF for use by utilities }
+%constinteger SEC PGS = 1 << SEC P SHIFT
+%constinteger SECS PER SEG = 1 << (SEG SHIFT - SEC SHIFT)
+%constinteger SEG P SHIFT = SEG SHIFT - 12
+%constinteger SEG MASK = (1 << SEG SHIFT) - 1
+%constinteger SEG PGS = 1 << SEG P SHIFT
+!
+%constinteger ISEPCHL = '{';  %conststring(1) ISEPL = "{"
+%constinteger ISEPCHR = '}';  %conststring(1) ISEPR = "}"
+%constinteger USEPCH  = ':';  %conststring(1) USEP  = ":"
+%constinteger GSEPCH  = '.';  %conststring(1) GSEP  = "."
+!
+!     ie the format of a file name is:
+!
+!        user {index} : group . group . file
+!
+%constinteger monitork = 64
+%constinteger monitor top = 9000
+%conststring(8)monitor file = "#MONITOR"
+
+%constinteger CODE AD = CODE SEG << SEGSHIFT
+%constinteger DIRCOM KEY = 5
+%constinteger DIRCOMSIZE = 120
+%constinteger EPAGE = 4096  { bytes }
+%constinteger E = 500  { 'base' for second set of error flags }
+%constinteger FDSIZE = 32
+%constinteger FEP IO BUFF SIZE = 2048;  ! bytes in each control buffer
+
+%constinteger maxproc = 299  { ie range is 0 : 299 }
+%constinteger MAX LINE = 132
+%constinteger MAXTCPNAME = 23    {TCP-name length}
+%constinteger PDSIZE = 9
+!
+%constinteger TOPCONENT = 185
+%constinteger TOP FE NO = 8, LO FE NO = 1
+%constinteger TOPLOG = 5
+%constinteger TOP OPEN = {30}  90
+!
+!
+%constinteger ration mask = 1023
+%constinteger pre empt shift = 10
+%constinteger scarcity shift = 20
+%constinteger ABORT = 5
+%constinteger AFTER = 2
+%constinteger ASYNC TYPE = 3
+%constinteger BATCH = 2; ! reason for STARTP
+%constinteger CLODACT = 8
+%constinteger CLOSG = 2
+%constinteger CONNECT STREAM DACT = X'370001'
+%constinteger DAP INS PER SEC = 3300000
+%constinteger DATKEY = 4; ! SYSAD
+%constinteger DEFAULT BMAX = 1
+%constinteger DEFAULT IMAX = 1
+%constinteger DEFAULT TMAX = 1
+%constinteger DELAYED EOT DACT = 15
+%constinteger DIRDACT = 5; ! special director async messages
+%constinteger DIR RW APF = X'22'
+%constinteger DIR WRITE APF = X'2F'
+%constinteger DISABLE STREAM DACT = X'370004'
+%constinteger DISCONNECT STREAM DACT = X'370005'
+%constinteger DT = 1; ! DATE and TIME required in PRINTSTRING
+%constinteger ENABLE STREAM DACT = X'370002';!START TRANSFER ON COMMUNICATIONS STREAM
+%constinteger ENDLIST = 255
+%constinteger sendlist = x'3fff'
+%constinteger ERCC = 1
+%constinteger EVERY = 1
+%constinteger EX = 5
+%constinteger FEP ACTIVITY ADDON = 12
+!
+%constinteger FEP INPUT CONNECT = 52
+%constinteger FEP INPUT CONNECT REPLY = 53
+%constinteger FEP INPUT DISABLE = 57
+%constinteger FEP INPUT DISABLE REPLY = 58
+%constinteger FEP INPUT DISCONNECT REPLY = 60
+%constinteger FEP INPUT ENABLE REPLY = 55
+%constinteger FEP INPUT MESS = 50
+%constinteger FEP OUTPUT CONNECT REPLY = 54
+%constinteger FEP OUTPUT DISABLE REPLY = 59
+%constinteger FEP OUTPUT DISCONNECT REPLY = 61
+%constinteger FEP OUTPUT ENABLE REPLY = 56
+%constinteger FEP OUTPUT REPLY MESS = 51
+%constinteger FORK = 5
+%constinteger INTDACT = 1; ! INT: messages from supervisor
+%constinteger INTER = 0; ! reason for STARTP
+%constinteger INVI = X'80308030'
+%constinteger KENT = 0
+%constinteger LEAVE = 8
+%constinteger LOG = 2; ! route PRINTSTRING to MAINLOG
+%constinteger MAXM1 = 3
+%constinteger NEWSTART = 4
+%constinteger NULDACT = 6
+%constinteger OK = 0
+%constinteger OPENG = 1
+%constinteger OPERC = 1; ! reason for STARTP
+%constinteger OPER WIDTH = 39  { max reasonable line length }
+%constinteger OPTYPE = X'8000000'
+%constinteger PON AND CONTINUE = 6
+%constinteger PON AND SUSPEND = 7
+%constinteger PRIVAT = 32
+%constinteger REC SEP = 30
+%constinteger RESDACT = 2
+%constinteger SIG LOOP STOP = 5
+%constinteger SITE = ERCC
+%constinteger SYNC1 TYPE = 1
+%constinteger TCP CLOSED = 16
+%constinteger TCP INITG = 8
+%constinteger TCP PENDG = 4
+%constinteger TOP AS ACT = 15
+%constinteger TOP EI = 22
+%constinteger TOPENT = 3
+%constinteger TXTDACT = 3; ! text messages in file, P1 = start/finish
+%constinteger UHIDACT = 4  {uninhibit async msgs}
+%constinteger USEDACT = 7
+%constinteger WR = 3
+%constinteger WRTOF = 4; ! route PRINTSTRING to private log file
+%constinteger BITKEY = 0
+%constinteger DIRLOG KB = 128
+%constinteger DLOG = 8; ! route PRINTSTRING to DIRLOG
+%constinteger LOGKB=64; ! Kbytes for logfiles
+%constinteger NNTKEY = 1; ! SYSAD
+%constinteger UNAVA = 1; ! CODES
+%constinteger VIOLAT = 64; ! CODES
+%constinteger WRSH = 11
+%constinteger ZEROEEP3 = X'03000051'
+%constinteger ZEROTEMPEEP3 = X'03000055'
+%constinteger ZEROVTEMPEEP3 = X'0300005B'
+%constinteger BADKEY = 6; ! SYSAD
+%constinteger CHERSH = 16; ! CODES
+%constinteger OLDGE = 4; !CODES2
+%constinteger TEMPFS = 12
+%constinteger TOPLOST = 80
+%constinteger W = B'00000010';          !Write permission
+%constinteger COM36=X'00100004'
+%constinteger CLEAR=255,NULL=0,SCREEN2=2,SCREEN SWITCH=1
+%constinteger LINES PER PAGE=24
+%constinteger GROUPFULLFLAG=5,SYSFULLFLAG=101,ADDEDFLAG=100
+%constinteger AMBIFLAG=31,NOFREEFLAG=70,NOTINLISTFLAG=50
+%constinteger TOPUG=7,ENDL=-1
+%constinteger PROCRESET=1,ADDTO=2,INCRE=4,RESETN=8,OLDSCREEN=16
+%constinteger REMOVE=32,DISPLAY=64,CHECKN=128,SIDECHAIN=512
+%constinteger ALLOW IC INTS = X'FFFFF7FF'
+%constinteger ALLOW STACK = X'3000'
+%constinteger COMMS = 16; ! CODES2
+%constinteger DDTSTATES = X'3F0'; ! ie states 4 - 9 valid
+%constinteger DEFAULT MAXFILE = 1024; ! 1megabyte
+%constinteger DEFAULT MAXKB = X'8000'; ! 32 megabytes
+%constinteger GRACE KIC = 3072; ! i.e. 3million instructions
+%constinteger GRACE MILLI = 1024  { milliseconds for Amdahl }
+%constinteger INH IC INTS = X'800'; ! bit 20
+%constinteger NO ARCH = 128
+%constinteger NOT SLAVED = 1
+%constinteger OFFER = 2; ! CODES
+%constinteger PRIVBIT = X'00040000'
+%constinteger READ ACR = 5
+%constinteger RESERVED = 1
+%constinteger STACK = 64; ! CODES2
+%constinteger STREAM CONTROL MESSAGE = X'370007'
+%constinteger TEMPFI = 4; ! CODES
+%constinteger TOP I VALUE = 5
+%constinteger TOP J VALUE = 512
+%constinteger USER STOPS DACT = 67
+%constinteger VEC128 = X'38000000'
+%constinteger VTEMPF = 8; ! CODES
+%constinteger WRCONN = 1; ! CODES2
+%constinteger WSALLOW = 8; ! CODES2
+!
+%CONSTSTRING(5)%ARRAY LM(0:2)="FREE", "READY", "MAIN"
+!
+%constintegerARRAY WARN AT(0:3) = 16, 6, 3, 2; ! MINS TO GO
+!
+%CONSTSTRING(1) SNL="
+"
+%constinteger TOPEXEC = 7
+! The order of these things MATTERS.  Values coded into routines in XOP.
+%CONSTSTRING(6)%ARRAY EXEC(2 : TOPEXEC) = "VOLUMS", "SPOOLR",
+            "MAILER", "FTRANS", "INFORM", "PADOUT"
+
+%constintegerarray msgkb(0:topexec) = 4, 0, 16, 16, 16, 128, 16, 16
+
+%constinteger normal = 0
+%constinteger info = 1
+%CONSTBYTEINTEGERARRAY  IN CONTROL STREAM(normal : info) = 8, 0
+!
+%CONSTBYTEINTEGERARRAY OUT CONTROL STREAM(normal : info) = 9, 1
+!
+!
+!
+         %RECORDFORMAT %C
+   ACF(%INTEGER MILLISECS, APTRNS, LLIMIT { milliseconds }, SPARE)
+      %RECORDFORMAT %C
+CBTF(%INTEGER DA, %BYTE AMTX0, AMTX1, LENGTH, FLAGS)
+               {      FLAGS are set as follows                 }
+               {    128 set for 'new block'                    }
+               {     64 set for 'read only'                    }
+               {     32 set for 'active'                       }
+               {      8 set for 'continuation'                 }
+               {      4 set for 'advisory sequential'          }
+               {      2 set for 'multiple use'                 }
+!
+!
+!<AFDF
+!
+!
+      %recordformat %c
+AFDF(%string(11)NAME, %integer TSN,
+      %shortinteger PGS, DATE, LAST RESTORE,
+      %byteinteger S0, S1, COUNT, EEP, PHEAD, TYPE,
+      %shortinteger PREFIX, CHAP)
+!
+!
+! This the format of a file descriptor in archive index
+!
+      %constrecord(AFDF)%arrayformat %c
+AFDSF (1:32768)
+!
+!
+      %recordformat %c
+AGRPF(%string(11)NAME, %shortinteger PREFIX, COUNT)
+!
+!
+      %constrecord(AGRPF)%arrayformat %c
+AGRPSF(1 : 32767)
+!
+! This is the format of the record array
+!>
+!
+!
+!
+      %recordformat %c
+AINFF(%string(11)NAME, %integer NKB, %string(8)DATE, %string(6)TAPE,
+      %shortinteger PREFIX, CHAP,
+      %byteinteger EEP, PHEAD, SPARE, COUNT)
+!
+!
+!
+      %recordformat %c
+APDF(%string(6)NAME, %byteinteger PERM, LINK)
+!
+!
+!
+%constrecord(APDF)%arrayformat APDSF(1 : 4096)
+!
+!
+!
+      %constbyteintegerarrayformat %c
+BIFT(0 : 8191)
+!
+!
+!
+!<BRQF
+      %RECORDFORMAT %C
+BRQF(%INTEGER DEST,SRCE,IDENT,%BYTEINTEGER FSYS,
+      %STRING(11) SPOOLRFILE,%STRING(6) SPARE)
+!>
+!
+!
+!
+!<COMF
+!
+! This is the Supervisor Communications Record Format
+      %recordformat %C
+COMF(%integer OCPTYPE, SLIPL, TOPS, SEPGS,
+      NDISCS, NSLDEVS, DLVNADDR, DITADDR,
+      SLDEVTABAD, STEER INT, DIRSITE, DCODEDA,
+      exSUPLVN, TOJDAY, DATE0, DATE1,
+      DATE2, TIME0, TIME1, TIME2,
+      PAGESIZE, USERS, CATTAD, SERVAAD,
+      NOCPS, ITINT, RATION, TRANS,
+      %longinteger KMON, %integer SUPVSN, SECSFRMN,
+      SECSTOCD, SYNC1DEST, SYNC2DEST, ASYNCDEST,
+      MAXPROCS, KINSTRS, ELAPHEAD, COMMSRECA,
+      STOREAAD, PROCAAD, TSLICE, FEPS,
+      maxcbt,performad,curproc,inptr,
+      outptr,parm asla,kernelqa,runq1a,
+      runq2a,channelt,proc pictad,schannelq,
+      cpuid,s0,s1,s2,
+      end)
+   %constrecord(COMF)%name COM = 31 << SEG SHIFT
+!>
+!
+!
+!
+!<CTF
+      %recordformat %c
+CTF(%string(31)FULL, %byteinteger FSYS, FLAGS, %shortinteger PREFIX,
+   FDX, seg, gap)
+!
+!     Bits in flags are:
+! 2**0 connected in R
+!    1              W
+!    2              E
+!    3 connected shared
+!    4
+!    5
+!    6
+!    7 do not disconnect etc
+!>
+!
+!
+!
+!<DDTF
+!
+! The Disc Device Table Format, described in EMAS 2900 Supervisor
+! Note 18.
+!
+      %recordformat %C
+DDTF(%integer ser, mnemonic, cuu, alt cuu,
+      ccwa, csw1, csw2, stick,
+      id, timeout, ua size, ua ad,
+      sense1, sense2, sense3, sense4,
+      sense5, sense6, stats1, stats2,
+      stats3, stats4,      { end of common data }
+{ DEVIO : } (%integer trtabad, sensedatad %or %c
+{ DISC  : } %integer propaddr, state, concount, repsno,
+      %shortinteger sbase, base, %integer dlvn,
+      %string(6)label, %byteinteger mech, qstate, prio, bsp1, bsp2,
+      %integer lqlink, uqlink, curcyl, sema, trlink))
+!
+%constbyteintegerarrayformat DLVNAF(0:99)
+!>
+!
+!
+!
+!<DIRCOM
+! On the IPL disc, the first X'900 pages are not covered by the 'BITMAP'
+! this means that as many bits (=288 bytes) may be used for other
+! purposes.  All discs have X'140 bits (40 bytes) available. The
+! remaining 248 bytes are described by this format. The address of the
+! record is given by SYSAD(DIRCOMKEY, -1).
+!
+!
+      %recordformat %c
+DIRCOMF(%integer DIRLOG SEMA, FEP SEMA,
+{..8}      %integer i0, i1, i2, i3, i4, i5,
+{.20}      %integer SUBSYS  SITE COUNT, %string(19)DEFAULT SUBSYS)
+{.78}
+!
+!     integer(1) is CLAIM Q LIMIT
+!             2     INTER
+!             3     LO BATCH 0
+!             4     HI BATCH 0
+!             5     LO BATCH 1
+!             6     HI BATCH 1
+!>
+!
+!
+!
+!<DISCDATAF
+!
+      %recordformat %c
+DISCDATAF(%integer START, BITSIZE, NNTSTART, NNTSIZE,
+      NNTTOP, NNTHASH, INDEXSTART, FILESTART,
+      END)
+!
+! This format is used in the procedure FBASE2 to return a record giving
+! addresses and lengths of the various parts of the disc.
+!
+! START indicates whether an IPL disc or not, value X40 or X800
+!
+! BITSIZE size of the bitmap, X1000, X2000 or X5000
+!
+! NNTSTART where the NNT starts
+!
+! NNTSIZE the size of the name-number table, X1000, X2000 or X4000
+!
+! NNTTOP the NNT is a record array declared 0:n, this is n: 340, 681 or 1364
+!
+! NNTHASH the largest prime less than NNTTOP, 331, 677 or 1361
+!
+! INDEXSTART the total number of pages used for bitmaps and NNTs
+!
+! FILESTART the number of pages used for bitmaps, NNTs and indexes
+!
+! END the highest numbered page
+!>
+!
+!
+!
+      %RECORDFORMAT %C
+DISPLAYF(%INTEGER PREVLNB, LK0, LK1, PLT0, PLT1, CLASS, SUBCLASS)
+      %RECORDFORMAT %C
+DRF(%INTEGER DR0, DR1)
+!
+!
+!
+!<FDF
+!
+      %recordformat %c
+FDF(%string(11)NAME, %integer SD,
+      %shortinteger PGS, usecount,
+      %byteinteger CODES, CODES2, DAYNO, sp2,
+         OWNP, EEP, PHEAD, ARCH,
+         CCT, SSBYTE, %shortinteger PREFIX)
+!
+! This the format of a file descriptor in an online file index
+!
+!
+!
+!
+! Note:
+!
+!    CODES     CODES2
+!  1 unava     wrconn
+!  2 offer
+!  4 temp      oldgen
+!  8 vtemp     wsallow
+! 16 chersh    comms ???
+! 32 privat    disc ???
+! 64 violat    stack ???
+!128 noarch    dead ???
+!
+!
+                    !
+      %constrecord(FDF)%arrayformat %c
+FDSF (1:32768)
+!>
+!
+!
+!
+!<FF
+      %recordformat %c
+FF    (%integer SDSTART, PDSTART, FDSTART, SEMA,
+      RESERVE1, RESERVE2, SEMANO, RESTORES,
+      %string(6)OWNER, %byteinteger SIZE, %string(11)NAME,
+      %byteinteger b3, FIPHEAD, b2, EEP,
+      %integer FILES, MAXFILE, MAXKB, CHERFILES,
+      CHERKB, TOTKB, TEMPKB, CHKSUM,
+      FILES0, FILES1, AFILES, ATOTKB,
+      ASEMA,
+      %byteinteger ATTRIBUTES, DAY42, fsys, b1,
+      %shortinteger tempfiles)
+!       only 20 more bytes spare
+! PDSTART etc    Add to FINDAD to get addr of array
+! FILES Number of usable files, ie not 'oldgens'
+!>
+!
+!
+!
+!<FHDRF
+      %RECORDFORMAT %C
+FHDRF(%INTEGER NEXTFREEBYTE,TXTRELST,MAXBYTES,THREE, %C
+      SEMA,DATE,NEXTCYCLIC,READ TO)
+!>
+!<FINFOF
+      %RECORDFORMAT %C
+FINFOF(%INTEGER NKB, RUP, EEP, APF, USE, ARCH, FSYS, CONSEG,
+      CCT, CODES, %BYTEINTEGER SP1, DAYNO, SP2, CODES2, %INTEGER SSBYTE,
+      %STRING(6)OFFER)
+
+            { if NKB = 0, the record refers to a group }
+!>
+!<PROPF
+      %RECORDFORMAT %C
+PROPF(%INTEGER TRACKS, CYLS, PPERTRK, BLKSIZE %C
+      , TOTPAGES, RQBLKSIZE, LBLKSIZE, ALISTSIZE, KEYLEN,  %C
+      SECTINDX)
+!>
+!<GETINDEXF
+      %RECORDFORMAT %C
+GETINDEXF(%STRING(19)NAME, %BYTEINTEGER KB, SP, %SHORTINTEGER INDNO)
+      %RECORDFORMAT %C
+USERINDEXF(%STRING(11)NAME, %INTEGER FSYS)
+!>
+!<HF
+      %recordformat %c
+HF   (%string(6)OWNER, %byteinteger MARK,
+  {8} %integer SPARE1, MSGSEMA,
+ {10} SPARE2, SPARE3, INUTS, SPARE6,
+ {20} %byteinteger ACR, DIRVSN, spare8, PASSFAILS,
+ {24} IMAX, BMAX, TMAX, STKSECS,
+ {28} IUSE, BUSE, ISESSM, GPFSYS,
+ {2C} FSYS, SB0, SB1, TYPE,
+ {30} %integer TOP, DWSPK, BWSPK, sigmon,
+ {40} TRYING, SPARE7, IPTRNS, BPTRNS,
+ {50} IMSECS, BMSECS, NKBIN, NKBOUT,
+ {60} MAIL COUNT, CONNECTT, DIRMON, LASTLOGON,
+ {70} LAST NON INT START, TELL REJ, DWSPDT, BWSPDT,
+ {80} twspk, twspdt,
+ {88} %longinteger TWSP, DWSP, BWSP,
+ {A0} %string(6)GPHOLDR,
+ {A7} %string(31)SURNAME, DELIVERY,
+ {E7} %string(18)BATCHSS, BASEFILE, RULE1, TESTSS,
+{133} %string(11)LOGFILE, MAIN,
+{14B} %string(15)DEFAULTLP,
+{15B} %string(63)DATA,
+{19B} %string(6)SUPERVISOR,
+{1A2} %string(15)GATEWAY ACCESS ID,
+{1B2} %string(31)control file)
+!>
+!
+!
+      %constshortintegerarrayformat %c
+HIFT(0 : 8191)
+      %recordformat %c
+HOTTOPF(%string(19)INDEX, %byteinteger FSYS, SPARE, %shortinteger PT)
+!
+!
+      %constrecord(HOTTOPF)%arrayformat %c
+HOTTOPFS(0 : 1023)
+!
+!
+!
+      %constintegerarrayformat %c
+IFT(0 : 8191)
+!
+!
+!
+      %recordformat %c
+IOSTATF(%integer IAD, %string(15)INTMESS, %integer INBUFLEN, OUTBUFLEN,
+      INSTREAM, OUTSTREAM, SPARE)
+!
+!
+!
+      %RECORDFORMAT %C
+KYFF(%STRING(11)NAME, %INTEGER A,B,C,D,E)
+!
+!
+!
+!<Logfile formats
+                                 {Kent TCP names have max 15 chars).
+      %recordformat %c
+FEP DETAILF(%integer INPUT STREAM, OUTPUT STREAM,
+      IN BUFF DISC ADDR, OUT BUFF DISC ADDR,
+      IN BUFF DISC BLK LIM, OUT BUFF DISC BLK LIM,
+      IN BUFF CON ADDR, OUT BUFF CON ADDR,
+      IN BUFF OFFSET, OUT BUFF OFFSET, IN BUFF LENGTH, OUT BUFF LENGTH,
+      INPUT CURSOR, OUTPUT CURSOR)
+!
+      %recordformat %c
+FEPF(%record(FEP DETAILF)%array FEP DETAILS(normal : info), %integer AVAILABLE)
+!
+      %recordformat %c
+LF(%string(11)NAME, %integer FSYS, DISC ADDR, STATE)
+!
+      %recordformat %C
+PROCDATF(%string(6)USER, %string(MAXTCPNAME)TCPNAME, %byteinteger LOGKEY,
+{32}  %byteinteger INVOC, PROTOCOL, NODENO, FSYS,
+{36}  %integer LOGSNO,
+{40}  %byteinteger SITE, REASON, CONSOLE1, CONSOLE2,
+{44} %integer ID,
+{48}  %shortinteger  SPROCESS, SBLNK,
+{52} %integer PREV WARN, SESSEND,
+{60} %byteinteger GETMODE, PREEMPT,
+{62} %shortinteger SLINK)
+!
+%constrecord(PROCDATF)%arrayformat PROCLF(0 : maxproc)
+!
+      %recordformat %c
+LOGF HDF(%integer LOGMAPST,
+      %shortinteger SFREEHD,SLIVEHD,SXBACKHD,SPARE,
+      %integer FES FOUND,
+      %byteintegerarray FE USECOUNT(LO FE NO:TOP FE NO),
+      %record(LF)%array LOGS(0:TOPLOG),
+      %record(FEPF)%array FEPS(LO FE NO:TOP FE NO),
+      %record(PROCDATF)%array PROCLIST(0:maxproc),
+      %integer LEND)
+!
+      %recordformat %c
+TMODEF(%byte FLAG0, FLAG1, FLAG2, FLAG3,
+{.04}  %byteinteger PROMPTCHAR, ENDCHAR,
+{.06}  %bytearray BREAKBIT1(0:3) {%or %halfintegerarray BREAKBIT2(0:1))} ,
+{.0A}  %byteinteger PADS, RPTBUF, LINELIMIT, PAGELENG,
+{.0E}  %byteintegerARRAY TABVEC(0:7),
+{.16}  %byteinteger CR, ESC, DEL, CAN,
+{.1A}  %byteinteger FLAGS, INTERNAL STATE, LEADIN1, LEADIN2, XLO, XHI)
+{.20}
+      %recordformat %c
+lostf(%string(8)date, time, %string(19)fileindex, %string(255)file,
+      %byteinteger codes2, codes, cherished)
+!
+%constinteger lostflen = 300
+!
+!
+!
+!
+      %recordformat %c
+MAGF(%string(7)TSN, %integer SNO)
+!
+!
+!
+!<NNF
+      %recordformat %c
+NNF(%string(6)NAME, %byteinteger KB, TAG, MARKER, %shortinteger INDNO)
+!>
+!
+!
+!
+      %recordformat %c
+OBJF(%integer NEXTFREEBYTE, CODERELST, GLARELST, LDRELST)
+!
+!
+!
+      %recordformat %c
+OINFF(%string(11)NAME, %integer SP12, NKB, %byteinteger ARCH, CODES,
+      CCT, OWNP, EEP, USE, CODES2, SSBYTE, FLAGS, PHEAD, DAYNO, GROUP)
+!
+            { if PHEAD is non zero, this record has been permitted }
+            { to one or more users                                 }
+            { if GROUP is non zero, this record refers to a group  }
+!
+!
+!
+!<OPENF
+      %recordformat %c
+OPENF(%string(MAXTCPNAME)NAME, %integer DATA)
+!>
+!
+!
+!
+!<PARMF
+!
+! The standard format for system messages
+      %recordformat %c
+PARMF(%integer DEST, SRCE,
+      (%integer P1, P2, P3, P4, P5, P6 %or %string(23)S))
+!>
+!
+!
+!
+!<PDF
+      %recordformat %c
+PDF  (%string(6)NAME, %byteinteger bp, bl)  { use top 4 bits of perm for more link }
+!
+!
+%constrecord(PDF)%arrayformat PDSF(1:4096)
+!>
+!
+!
+!
+      %RECORDFORMAT %C
+POPERF(%INTEGER DEST,SRCE,%BYTEINTEGER LINE,POS,ZERO,%STRING(20)TEXT)
+!
+!
+!
+      %RECORDFORMAT %C
+CONTEXTF((%INTEGER PSW0, PSW1, %INTEGERARRAY GR(0:15),
+      %INTEGERARRAY FR(0:7), %INTEGERARRAY CR(0:15),
+      %INTEGER TIMER0, TIMER1, ASYNC INHIB, SUSP,
+      %SHORTINTEGER PE CODE, ILEN, %INTEGER LAST VSPARM) %orc
+      %integerarray regs(0:47))
+%constinteger CONTEXTL=192
+!
+!
+!
+!
+      %recordformat %c
+SCTHDRF(%integer HORIZ VECTOR BOUND, SCTRELST, IDENS ARRAY RELST,
+      DT STAMP, %string(15)FIXUP DATE, %integer ENDF)
+!
+!
+!
+      %RECORDFORMAT %C
+SCTIF(%INTEGER DR0, DR1); ! horizontal, I-vector, format
+      %RECORDFORMAT %C
+SCTJF(%INTEGER TYPE, ACR, DRDR0, DRDR1); ! vertical, J-vector, format
+!
+!
+!
+!<SDF
+!     %recordformat SDF(13-bit LINK, 19-bit DA)
+%constintegerarrayformat SDSF(1:8191)
+!>
+!
+!
+!
+!
+!<SECUREF
+      %recordformat %c
+SECUREF(%integer BYTES, INDEXKB,
+      %byteinteger MARK, %string(6)OWNER, %string(11)FILE INDEX NAME,
+      %longinteger DWSP, BWSP,
+      %integer DWSPK, BWSPK, TRYING, LAST LOG ON,
+         LAST NON INT START, TELLREJ, DWSPDT, BWSPDT,
+         RESTORES, MAXFILE, MAXKB, SIZE,
+      %string(6)GPHOLDR, %string(31)SURNAME, DELIVERY,
+      %string(18)BATCHSS, BASEFILE, rule1,
+      %string(11)LOGFILE, %string(15)DEFAULT LP,
+      %string(63)DATA, %string(6)SUPERVISOR,
+      %string(15)GATEWAY ACCESS ID,
+      %byteinteger imax, bmax, tmax, attributes,
+      %longinteger twsp, %integer twspk, twspdt,
+      %string(31)controlfile,
+      %byteinteger end)
+!>
+!
+      %RECORDFORMAT %C
+SIGOUTPF(%INTEGER DEST, SRCE, P1, P2, P3, P4, P5, P6, ERRTYPE, CONTEXT, SSNAD, SUSP)
+!
+!
+!
+!<SPOOF
+      %RECORDFORMAT %C
+SPOOF(%INTEGER VSN,FSYS,%STRING(6) USER,SPARE1,
+      %INTEGER IDENT,KINSTRS,%STRING(31)JOBDOCFILE, %STRING(15)JOBNAME,
+      %INTEGER PRIORITY, DECKS, DRIVES, OUTPUTLIMIT, DAPSECS,
+      %INTEGER OUT, %STRING(15)OUTNAME,
+      %INTEGER DAPNO)
+      %RECORDFORMAT %C
+SPOOF2(%INTEGER VSN,FSYS,%STRING(6) USER,SPARE1,
+      %INTEGER IDENT,KINSTRS,%STRING(31)JOBDOCFILE, %STRING(31)JOBNAME,
+      %INTEGER PRIORITY, DECKS, DRIVES, OUTPUTLIMIT, spare2,
+      %INTEGER OUT, %STRING(31)OUTNAME)
+! OUT: 0, 1 to a device
+!      2, 3 to a file
+!      4  to be destroyed
+! OUTNAME name of queue or file
+!>
+!
+!       Segment table entry:
+!
+               { on XA the word is used as:                  }
+               {    bit 0 = 0                                }
+               {        1-25 page table origin               }
+               {        26   invalid bit, set when not in use}
+               {        27   common bit                      }
+               {        28-31 page table length,             }
+               {              number of half sections - 1 !! }
+               { on 370 and AMDAHL:                          }
+               {    bits 0-3 page table length               }
+               {              pages on 370, half secs on AMD.}
+               {        4-7  zero                            }
+               {        8-28 page table origin               }
+               {        29   protected                       }
+               {        30   common                          }
+               {        31   invalid                         }
+!
+!
+!
+      %RECORDFORMAT %C
+UGF(%STRING(6)U, %INTEGER SUBLINK, LINK, MAX, N)
+!
+!
+!
+!<UINFF
+      %recordformat %c
+UINFF (%string(6)USER, %string(31)JOBDOCFILE, %byteinteger CONTEXT,
+{.28}  %integer MARK, FSYS,
+{.30}  PROCNO, ISUFF, REASON, BATCHID,
+{.40}  SESS LIMIT, INT COUNT, I2, STARTCNSL,
+{.50}  AIOSTAT, SCT DATE, SYNC1 DEST, SYNC2 DEST,
+{.60}  ASYNC DEST, AACCT REC, I3,
+{.6C}  %string(15)JOBNAME,
+{.7C}  %string(31)BASEFILE,
+{.9C}  %byteinteger b1, b2, b3, top exec,
+{.A0}  %integer ITADDR0, ITADDR1, ITADDR2, ITADDR3,
+{.B0}  ITADDR4, STREAM ID, i4, SCARCITY,
+{.C0}  PREEMPTAT, %string(11)SPOOLRFILE,
+{.D0}  %integer FUNDS, SESSLEN, PRIORITY, DECKS,
+{.E0}  DRIVES, PART CLOSE,
+{.E8}  %record(TMODEF)TMODES,
+{108}  %integer PSLOT,
+{10C}  %string(63)ITADDR,
+{14C}  %integerarray FCLOSING(0:3), %integer CLO FES,
+{160}  %integer OUTPUT LIMIT, ACONTEXT1, ACONTEXT3, ACONTEXT4,
+{170}  %integer OUT, %string(15)OUTNAME,
+{184}  %integer HISEG,
+{188}  %string(31)FORK,
+{1A8}  %integer INSTREAM, OUTSTREAM,
+{1B0}  %integer DIRVSN, I8, SCT BLOCK AD,
+       %integer PROTOCOL,
+       %byteinteger ISEPCHL, ISEPCHR, USEPCH, GSEPCH,
+       %string(1)ISEPL, ISEPR, USEP, GSEP,
+            { thus a simple filename has the form:                      }
+            {    user USEP file                                         }
+            { while a complex one has the form:                         }
+            {    user ISEPL index ISEPR USEP group GSEP group GSEP file }
+      %integer CLASS, SUBCLASS,
+      %string (31) jobname31, outname31,
+      %integer WO BASE, {Subsystem uses this to implement Customised Subsysteem}
+      %string (63) full user,
+      %integer last logon, last nonint start,
+      %integer WO PTR1, WO PTR2, UEND)
+!
+!
+!
+%constrecord(UINFF)%name UINF = UINF SEG << SEG SHIFT
+!>
+!
+!
+!
+!<LCFORM
+%constinteger LSTLEN=ownseg+1;               ! LOCAL SEGMENT TABLE LENGTH
+%constinteger OUTPLEN=48
+!
+%constinteger LCONTN=5;                 ! NO OF LOCAL CONTEXTS
+!
+!
+!
+%recordformat LCFORM(%integerarray SEGTABLE(0:LSTLEN-1),
+      (%integerarray LCPTABLE(0:15) %OR %shortarray LCHPTABLE(0:31)),
+      %integer CURCONTEXT,PROCNO,SEMAHELD,PROCBITS,
+      %record(CONTEXTF)%array CONTEXT(0:LCONTN-1),
+      %record(SIGOUTPF)%array OUTP(1 : LCONTN-1),
+      %record(ACF) ACCTS,
+      %record(IOSTATF) IOSTAT,
+      %record(CBTF)%array CBT(0:CBTLEN-1),
+      %shortarray SST(0:LSTLEN-1),
+      %integer END)
+!
+%constinteger LCTABLESAD = LCSTKSEG << SEGSHIFT
+%constinteger CURCONTEXTAD = LCTABLESAD + 4*LSTLEN + 64
+%constinteger CONTEXTAD = CURCONTEXTAD + 16
+%constinteger OUTPAD = CONTEXTAD + LCONTN*CONTEXTL
+%constinteger ACCTSAD = OUTPAD + OUTPLEN * (LCONTN-1)
+%constinteger IOSTATAD = ACCTSAD + 16
+%constinteger CBTAD = IOSTATAD + 40
+%constinteger SSTAD = CBTAD+8*CBTLEN
+!
+!
+!
+%constrecord(LCFORM)%name LCTABLES = LCTABLESAD
+%constintegerarrayname SEGMENT TABLE = LCTABLESAD
+%constintegername CURCONTEXT = CURCONTEXTAD
+%constrecord(CONTEXTF)%arrayname CONTEXT = CONTEXTAD
+%constrecord(SIGOUTPF)%arrayname OUTP = OUTPAD - OUTPLEN
+%constrecord(ACF)%name ACCTS = ACCTSAD
+%constrecord(IOSTATF)%name IOSTAT = IOSTATAD
+%constrecord(CBTF)%arrayname CBTA = CBTAD
+%constshortintegerarrayname SST = SSTAD
+!>
+!
+!
+!
+!<DIROWNF
+!
+!
+!
+      %recordformat %c
+DIROWNF(%integerarray I(0 : 7),   { used for param passing, see INTO }
+      %string(255)%array S(0 : 3),
+      %integer ALLOC DSEG N,
+         AQD,
+         ASL,  { -2 }
+         ASYNC INHIB,  { 100 }
+         AUTO DAY,
+         AUTO END,
+         AUTO FAD,
+         AUTO INHIBIT,
+         AUTO NORMAL,
+         AUTO PREV,
+         AUTO PROCEED FROM,
+         AUTO START,
+         AUTO STATE,
+         BATCH PROCESSES,
+         BATCH STREAMS,
+         BLKSI,
+         CBT1,
+         CBT2,
+         CBTASLO,  { its a letter O }
+         CBTOP,
+         CLO FES,
+         CLO FSYS,
+         CLO NODES,
+         CLOSE TIME,  { -1 }
+         cpuid,  { set to 'A', 'B' or 'C' }
+         CURIUSERS,
+         D CALLERS ACR,
+         D CALLERS PSR,
+         DDVSN,
+         DEFAULT SESSLEN,
+         DEFAULT SS ACR,  {10}
+         DINSTRS,
+         DIRFLAG,
+         DIRFN,
+         DIRLEVEL,
+         DIRLOGAD,
+         DIRMON,
+         DIRSITE,
+         DMODE N,  { number of calls in rapid succession }
+         DMODE PREV,  { time of previous call or zero }
+         DSTOPS,
+         DTRYING,  {-1}
+         EOT MSG ID,
+         exec process, { set to 1 for an executive process }
+         FACILITY A,
+         FCHECK PROCS,
+         FES CLOSED,
+         FES FOUNDI,
+         FILE1AD,
+         FILE1 SIZE,
+         FIND NNT SAVES,
+         FIND NNT TIMES,
+         FSYS WARN,
+         GOT SEMA,
+         HEAD,  { ENDL }
+         HISEG,  { the highest available to users }
+         HOT TOP A,
+         HOT TOP ADR,
+         HOT TOP N,
+         IN BUF A,
+         IN BUF LEN,
+         INCREASING,
+         INITIAL DELAY,  { initialised to -1, may be set to 0 by D/CLOSEUSERS }
+                         { or D/OPENUSERS.  If still -1 after the}
+                         { executives have been started at IPL, }
+                         { it is set to 2 and subsequently decremented }
+                         { at each regular clock tick (minute) PR(29). }
+                         { When it does get to zero, the service is }
+                         { opened and the autofile connected.      }
+         INVOC,
+         IUPDATE INIT,
+         JOURNL DEST,
+         LINE NO,
+         LOG ACTION,
+         LOGLINK INITIALISED,
+         LOG NO,
+         LOSTARAD,
+         LOSTFILE COUNT,
+         MAIN LP,  { 1 }
+         MAPAD,
+         MAXIUSERS,
+         MONITORAD,
+         NEWPAGE CDEX,
+         NEWPAGE STATE,
+         NODES CLOSED,
+         OPEN FEP INIT,
+         OUT BUF A,
+         OUT BUF LEN,
+         OWNIND,
+         PAGEMON,
+         PENDG CLO FES,
+         PENDG CLO FSYS,
+         PENDG CLO NODES,
+         PFACTOR,
+         PREFIX,
+         PREV FRMN,
+         PREV MINS TO GO,
+         PRINTER DEST,
+         PRINT ON,
+         PROC1LNB,
+         PROCESS,
+         PROCFSYS,
+         READY FILES,
+         REASON,
+         SAINDAD,
+         SCTIAD,
+         SEARCHENT,  { 2 }
+         SEMADDRHELD,
+         SEMANOHELD,
+         SESSION PENCE,
+         SFINDAD,
+         SFSYS,
+         SIGMON,
+         SIGNAL IN,
+         SIGNAL LOOP COUNT,
+         SIGNAL LOST COUNT,
+         SIGNAL NEXT,
+         SIGNAL TIME,  { remember time to avoid looping }
+         SRCE ID,  { 5000 }
+         SRES,
+         STOP LOGFILE,
+         SUPLVN S START,
+         SUPPRESS EXEC STOP,
+         SUPPRESS NL,
+         SYMBOL COUNT,
+         TAPES CLAIMED,
+         TIMES CHECKED,
+         TIMES ENTERED,
+         USE COUNTS,
+         VSERR,
+         WORKBASE,
+         XOPER ACT,
+         XOPER CONUSE,
+         XOPER FSYS,
+         XOPER MSTATE,
+         XOPER TYPE,
+         xop owns mapped,
+      %integername FES FOUND,
+      %integerarray alloc from here(0:3),
+      %shortinteger SXBACKHDI,  { ENDLIST }
+         SFREEHDI,  {1}
+         SLIVEHDI,  {0}
+      %shortintegername SXBACK HD,
+         SFREE HD,
+         SLIVE HD,
+      %string(31)AUTOFILE,  { "AUTOFILE" }
+      %string(6)AUTOUSER,  { "MANAGR" }
+      %string(31)DELIV,  { "Machine Room" }
+      %string(15)LAST DAP STATE,
+      %string(MAXLINE + 1)LOG LINE,
+      %string(23)LOUTP STATE,
+      %string(6)PASSU,
+      %string(6)PASSW,
+      %string(42)PROCESS1 PROM,
+      %string(6)PROCUSER,
+      %string(63)SEMAHOLDER,
+      %string(19)SINDEX,
+      %string(3)TAG,  { invocation as string }
+      %string(15)VSN,
+      %string(41)XOPER FILE,
+      %string(255)XOPER MSG,
+      %string(41)XOPER USER,
+      %byteinteger IPL FSYS,
+      %byteintegerarrayname FE USE COUNT,
+      %byteintegerarray DEF HOT TOP(0 : 383),  { ie 16*24 }
+      %byteintegerarray FE USE CTI(LO FE NO : TOP FE NO),
+      %byteintegerarray CPOINT(0 : ownseg),
+      %byteintegerarray STATE SET(3:4),
+      %record(MAGF)%array CLAIMED(0 : TOPENT),
+      %integerarray FSYS USE COUNT(0 : 99),
+      %record(DRF)%array DRS LOCKED(0 : 2),
+      %record(FEPF)%arrayname FEPS,
+      %record(HOT TOPF)%arrayname HOT TOP,
+      %record(FDF)LAST FD,
+      %record(LOGFHDF)%name LOGH,
+      %record(LF)%arrayname LOGS,
+      %record(PARMF)LOUTP,
+      %record(CONTEXTF)NEWCONTEXT,
+      %record(OPENF)%array OPENS(0 : TOP OPEN),
+      %record(ACF)PREVA,
+      %record(PROCDATF)%arrayname PROCLIST,
+      %record(PARMF)SAVE DIROUTP,
+      %record(SIGOUTPF)%array SIGNAL AMS(0 : 3),
+      %record(UGF)%array UG(0 : TOPUG),
+      %integerarray DIRFNS(1 : 16),
+      %integerarray ENABLED(0 : 1),
+      %integerarray ENVIRON(0:15),  { to save the environment of ONTRAP routine }
+      %integerarray ENVIRON0(0:15),
+      %integerarray FCLOSING(0 : 3),
+      %integerarray OPSTAT(0 : 3),
+      %integerarray PENDG FCLOSING(0 : 3),
+      %integerarray PR SRCE(0 : 10),
+      %integerarray SEGUSE(LO D SEG : HI D SEG),  { -2 * 16 }
+      %string(11)%array TEMPLATE(1 : 16),
+      %record(CTF)%array CONLIST(0 : TOPCONENT),
+      %string(63)info alert,
+%integer END OF DIROWNF)
+!
+%constinteger D AD = OWN SEG << SEG SHIFT
+%constintegerarrayname I = D AD
+%conststring(255)%arrayname S = D AD + 32
+!
+!
+%constrecord(DIROWNF)%name D = OWN SEG << SEG SHIFT
+!>
+!
+!---------------end-of-included-file-------------------------------------
+!
+%list

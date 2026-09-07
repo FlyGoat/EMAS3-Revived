@@ -1,0 +1,1145 @@
+%INCLUDE "ercc07:ibmsup_comf370"
+!
+%INCLUDE "ercc07:ibmsup_page0f"
+!
+%RECORDFORMAT PARMF((%INTEGER DEST,SRCE %ORSHORT DSNO,DACT,SSNO,SACT),(%INTEGER P1,P2,P3,P4,
+   P5,P6 %ORSTRING (23) TEXT))
+!
+%CONSTINTEGER SLEN=63;                  ! string length in RT calls
+%EXTERNALROUTINESPEC DISPLAY TEXT(%INTEGER V,L,P, %STRING (41) TEXT)
+%EXTERNALROUTINESPEC DPON(%RECORD (PARMF) %NAME P, %INTEGER DELAY)
+%EXTERNALINTEGERFNSPEC STOI(%STRINGNAME S)
+%EXTERNALROUTINESPEC PKMONREC(%STRING (23) S, %RECORD (PARMF) %NAME P)
+%EXTERNALROUTINESPEC PON(%RECORD (PARMF) %NAME P)
+%EXTERNALROUTINESPEC MONITOR(%STRING (SLEN) S)
+%EXTERNALROUTINESPEC OPMESS(%STRING (SLEN) S)
+%EXTERNALROUTINESPEC OPMESS3(%STRING (SLEN) S)
+%EXTERNALROUTINESPEC INHIBIT(%INTEGER SERVICE)
+%EXTERNALROUTINESPEC UNINHIBIT(%INTEGER SERVICE)
+%EXTERNALROUTINESPEC DUMPTABLE(%INTEGER T,A,L)
+%EXTERNALINTEGERFNSPEC REALISE(%INTEGER VIRTAD)
+%EXTERNALINTEGERFNSPEC RTV(%INTEGER RAD)
+%EXTERNALSTRINGFNSPEC STRHEX(%INTEGER N)
+%EXTERNALSTRINGFNSPEC HTOS(%INTEGER N,P)
+%EXTERNALSTRINGFNSPEC STRINT(%INTEGER I)
+      %IF MONLEVEL&256#0 %START
+      %EXTERNALROUTINESPEC TRACER(%STRING (63) S)
+      %FINISH
+%if multiocp=yes %then %Start
+      %externalroutinespec semaloop(%integername sema)
+%finish
+%EXTERNALLONGINTEGERSPEC KMON
+!
+%CONSTLONGINTEGER DISAWAIT=PSW0!x'2000000000000'
+%OWNLONGINTEGER PSW
+%CONSTINTEGER UNASSIGNED=x'80808080'
+%CONSTINTEGER RESIDENT=LOCSN0
+%CONSTINTEGER LAST PROC=MAXPROCS-1
+!
+%ROUTINE KTIME(%INTEGERNAME H,M,S, %INTEGER DAYSECS)
+      M=DAYSECS//60
+      H=M//60
+      S=DAYSECS-DAYSECS//60*60
+      M=M-H*60
+%END
+!
+!------------------------------------------------------------------------
+!
+%ROUTINE KDATE(%INTEGERNAME D,M,Y, %INTEGER K)
+%INTEGER W
+      K=K+693902;                       ! days since caesars bday
+      W=4*K-1
+      Y=W//146097
+      K=W-146097*Y
+      D=K//4
+      K=(4*D+3)//1461
+      D=4*D+3-1461*K
+      D=(D+4)//4
+      M=(5*D-3)//153
+      D=5*D-3-153*M
+      D=(D+5)//5
+      Y=K
+      %IF M<10 %THEN M=M+3 %ELSE M=M-9 %AND Y=Y+1
+%END
+!
+!------------------------------------------------------------------------
+!
+%INTEGERFN KDAY(%INTEGER D,M,Y)
+      %IF M>2 %THEN M=M-3 %ELSE M=M+9 %AND Y=Y-1
+      %RESULT=1461*Y//4+(153*M+2)//5+D+58
+%END
+!
+!------------------------------------------------------------------------
+!
+%ROUTINE SETAD(%INTEGER VALUE,AD)
+%INTEGER I,J
+      I=VALUE-VALUE//100*100
+      J=I//10
+      J=J<<8
+      J=J+(I-I//10*10)
+      J=J+x'3030'
+      *l_1,ad
+      *ic_0,j+2; *stc_0,0(1)
+      *ic_0,j+3; *stc_0,1(1)
+%END
+!
+!------------------------------------------------------------------------
+!
+%EXTERNALROUTINE UPDATE TIME
+%INTEGER D,M,Y,HR,MIN,SEC,JDAY,DAYSECS,AD,RTC1,RTC2
+%CONSTINTEGER TTOTSECS=x'f424'*2,HTSECSIN24HRS=86400//2
+%IF XA=YES %THEN %START
+   %CONSTINTEGER UPFREQ = 10
+   %OWNINTEGER UPCOUNT = 0
+%FINISH
+      *stck_rtc1
+      SEC=TTOTSECS
+      *l_2,rtc1; *l_3,rtc2;
+      *srdl_2,16; *l_4,sec
+      *dr_2,4;                          ! to seconds//2
+      *st_3,rtc1
+      JDAY=RTC1//HTSECSIN24HRS
+      DAYSECS=(RTC1-JDAY*HTSECSIN24HRS)*2
+      %IF 0<COM_SECSTOCD<x'7fffffff' %START
+         COM_SECSTOCD=COM_SECSTOCD+COM_SECSFRMN-DAYSECS
+         %IF COM_SECSTOCD<1 %THEN COM_SECSTOCD=1
+      %FINISH
+      COM_SECSFRMN=DAYSECS
+      KTIME(HR,MIN,SEC,DAYSECS)
+      AD=ADDR(COM_DATE1)
+      SETAD(HR,AD+12)
+      SETAD(MIN,AD+15)
+      SETAD(SEC,AD+18)
+      %IF XA=999 %THEN %START;          ! under VM need to reduce freqency of oper updates
+         UPCOUNT = UPCOUNT + 1
+         %IF UPCOUNT >= UPFREQ %THEN %START
+            UPCOUNT = 0
+            DISPLAY TEXT(0,0,32,STRING(AD+11))
+         %FINISH
+      %ELSE
+         DISPLAY TEXT(0,0,32,STRING(AD+11))
+      %FINISH
+      %IF JDAY#COM_TOJDAY %START;       ! passed midnight amend date
+         %IF 1<COM_SECSTOCD<x'7fffffff' %THEN COM_SECSTOCD=COM_SECSTOCD-86400
+         KDATE(D,M,Y,JDAY)
+         COM_TOJDAY=JDAY
+         SETAD(D,AD)
+         SETAD(M,AD+3)
+         SETAD(Y,AD+6)
+         DISPLAY TEXT(0,0,22,STRING(AD-1))
+      %FINISH
+%END
+!
+!------------------------------------------------------------------------
+!
+%EXTERNALLONGINTEGERFN CLOCK
+      *stck_psw
+      %RESULT=PSW
+%END
+!
+%EXTERNALROUTINE MOVE(%INTEGER LEN,FROM,TO)
+      %RETURNIF LEN<=0
+      *l_0,to; *l_1,len
+      *l_2,from; *lr_3,1
+      *mvcl_0,2
+      *basr_15,0; *using_15
+      *bc_14,<end>; *drop_15
+      MONITOR("Move - destructive overlap!")
+END:  %RETURN
+%END
+!
+!------------------------------------------------------------------------
+!
+%EXTERNALROUTINE ITOE(%INTEGER AD,LEN)
+%INTEGER I
+      %RETURNIF LEN<=0
+      I=COM_TRANS
+      *l_1,len; *l_2,ad; *l_3,i
+      *la_0,256
+      *basr_15,0
+      *using_15
+      *clr_1,0; *bc_4,<lt256>
+      *tr_0(256,2),0(3)
+      *alr_2,0; *slr_1,0
+      *bcr_15,15
+LT256:*ltr_1,1; *bc_8,<end>
+      *bctr_1,0; *ex_1,<tr>
+END:  %RETURN
+TR:   *tr_0(0,2),0(3)
+      *drop_15
+%END
+!
+!------------------------------------------------------------------------
+!
+%EXTERNALROUTINE ETOI(%INTEGER AD,LEN)
+%INTEGER I
+      %RETURNIF LEN<=0
+      I=COM_TRANS+256
+      *l_1,len; *l_2,ad; *l_3,i
+      *la_0,256
+      *basr_15,0
+      *using_15
+      *clr_1,0; *bc_4,<lt256>
+      *tr_0(256,2),0(3)
+      *alr_2,0; *slr_1,0
+      *bcr_15,15
+LT256:*ltr_1,1; *bc_8,<end>
+      *bctr_1,0; *ex_1,<tr>
+END:  %RETURN
+TR:   *tr_0(0,2),0(3)
+      *drop_15
+%END
+!
+!------------------------------------------------------------------------
+!
+%ROUTINE RESPOND(%INTEGER SRCE, %STRING (SLEN) TXT)
+%RECORD (PARMF) PP
+      PP_SRCE=0
+      PP_DEST=SRCE<<16!7;               ! 7 is a conventional dact
+      PP_TEXT<-TXT
+      PON(PP)
+%END;                                   ! of respond
+!
+%CONSTLONGINTEGER LONE=x'0000000000000001'
+!
+!
+! This array routes the operator messages of the form <letter>
+! THe top bit is set to recieve the fep up messages
+!
+%constintegerarray execact('A':'V')=0(2),x'60014'{C for CALLER},
+                                      x'80010014'{D for DIRECT},0,
+                                      x'80050014' {F for FTRANS},
+                                      0(2),x'70014'{I for INFORM},0(3),
+                                      x'40014'{M for MAILER},
+                                      0(2),x'80090014' {P for PADOUT},
+                                      0(2),x'80030014'{S for SPOOLR},
+                                      0(2),x'20014' {V for VOLUMS};
+%CONSTINTEGER MESSACT=x'5'
+%EXTERNALROUTINE PARSE COM(%INTEGER SRCE, %STRINGNAME S)
+!***********************************************************************
+!*    Transcribe a command to a PON message and PON it                 *
+!***********************************************************************
+%INTEGERFNSPEC TAPEPLACE(%INTEGERNAME A,B, %STRINGNAME S, %INTEGER F)
+%INTEGERFNSPEC DISCPLACE(%INTEGERNAME A,B, %STRINGNAME S, %INTEGER F)
+%INTEGERFNSPEC GET MNEM(%STRINGNAME S)
+%ROUTINESPEC CP COMMAND(%INTEGER SRCE,%STRING(80) S)
+%RECORD %FORMAT PROCF(%STRING (6) USER, %BYTE %INTEGER INCAR,CATEGORY,P4TOP4,RUNQ,ACTIVE,
+      %short spare,EPA, %INTEGER LSTAD,%short EPN, LAMTX, %INTEGER STACK,STATUS)
+%RECORD (PROCF) %ARRAY %FORMAT PROCAF(0:MAXPROCS)
+%RECORD (PROCF) %ARRAY %NAME PROCA
+%RECORD (PROCF) %NAME PROC
+%OWNINTEGER SRCESERV=0
+%CONSTINTEGER LIMIT=35,BMREP=x'3d0000'
+%CONSTBYTEINTEGERARRAY PARAMS(1:LIMIT)= %C
+         2,1,0,0,
+         0,1,0,0,
+         0,0,0,1,
+         2,0,1,1,
+         1,2,0,0,
+         0,0,0,0,
+         0,0,0,1,
+         1,0,0,0,
+         0,0,0
+
+%CONSTSTRING (8) %ARRAY COMMAND(1:LIMIT)= %C
+         "PON ","SRCE ","PLOT ","PLOD ",
+         "STARTD","FEPUP ","OPER ","DDUMP ",
+         "DCLEAR ","DUMP ","PRIME ","FEPDOWN ",
+         "KMON ","UNPLOT ","INH ","UNINH ",
+         "DIRVSN ","DT ","XDUMP ","REP ",
+         "RTOCP","SPARE","SHOW ","DEVIO ",
+         "P ","B ","F ","SCREENS ",
+         "SCURSOR ","TRACE ","CP ","ADDPATH ",
+         "REMPATH ","ACCEPT ","DISCARD "
+
+%CONSTSTRING (3) %ARRAY DOW(0:6)="MON","TUE","WED","THU","FRI","SAT","SUN"
+%CONSTINTEGER SECSIN24HRS=86400
+%SWITCH SWT(1:LIMIT)
+%RECORD (PARMF) PP
+%INTEGERARRAY DATA(1:6)
+%INTEGER I,J,K,AD,REALA,SV,PROCNO,WORK,SSNO,OP,D,M,Y,HR,MIN
+%OWNLONGINTEGER L
+%STRING (100) PRE,P,Q
+%CONSTSTRING (7) DPASS="D/PASS "
+%CONSTSTRING (16) DPASS MSG="D/PASS (no echo)"
+%CONSTINTEGER PLEN=4
+!
+      %RETURNIF LENGTH(S)=0
+!
+      PP=0
+      SSNO=SRCE>>16
+      %IF SSNO=x'32' %START;            ! compute prefixed line for operlog
+                                        ! called from an OPER
+         OP=3<<24!m'OP0'!SRCE>>8&7
+         PRE=STRING(ADDR(OP))." ".S
+         PROCNO=0
+      %FINISHELSESTART;                 ! called from process
+         PROCNO=(SSNO-RESIDENT)&LAST PROC
+         PRE=STRINT(PROCNO)
+         PRE=" ".PRE %IF PROCNO<10
+         PRE=PRE."/ ".S
+      %FINISH
+      LENGTH(PRE)=SLEN %IF LENGTH(PRE)>SLEN
+!
+      %IF S->Q.("0/").P %AND Q="" %THEN S=P
+      OP=SRCE>>8&7
+      I=LENGTH(S)-1
+      J=ADDR(S)+1
+      K=COM_TRANS+512
+      *basr_15,0
+      *using_15
+      *l_1,i; *l_2,j; *l_3,k
+      *ex_1,<tr>
+      ->GO
+TR:   *tr_0(0,2),0(3)
+      *drop_15
+GO:
+!
+      %FOR SV=1,1,LIMIT %CYCLE
+         ->FOUND %IF S->Q.(COMMAND(SV)).P %AND Q=""
+      %REPEAT
+      P=S
+      LENGTH(P)=LENGTH(DPASS)
+      %IF P=DPASS %START;               ! keep D/PASS parms from prying eyes
+         LENGTH(PRE)=PLEN
+         PRE=PRE.DPASS MSG
+         %IF PROCNO>0 %START;           ! identify caller
+            PROCA==ARRAY(COM_PROCAAD,PROCAF)
+            PROC==PROCA(PROCNO)
+            PRE=PRE." from ".PROC_USER
+         %FINISH
+      %FINISH
+      OPMESS3(PRE)
+      %FOR I=2,1,5 %CYCLE
+         %IF LENGTH(S)>=I %AND CHARNO(S,I)='/' %THEN ->TEXTIN
+      %REPEAT
+ERR:
+      S<-"????".S
+      LENGTH(S)=SLEN %IF LENGTH(S)>SLEN
+      RESPOND(SSNO,S)
+      %RETURN
+!
+FOUND:
+      %UNLESS 24<=SV<=27 %THEN OPMESS3(PRE);  ! not p,b or f
+      J=PARAMS(SV)
+      K=1
+      %WHILE K<=J %CYCLE
+         DATA(K)=STOI(P)
+         ->ERR %IF DATA(K)=UNASSIGNED
+         K=K+1
+      %REPEAT
+      PP_DEST=x'240000';                ! usually bulk mover
+      PP_SRCE=BMREP!(SRCE>>16)
+      ->SWT(SV)
+TEXTIN:                                 ! operator to user process
+      S->P.("/").Q
+      %IF LENGTH(Q)>23 %THEN ->ERR
+      %if length(p)=1 %and "A"<=p<="V" %Start
+         k=charno(p,1)
+         j=execact(k)
+         %if j#0 %then PP_DEST=J<<1>>1+COM_SYNC1DEST<<16 %and ->ON
+      %finish
+      K=STOI(P); %IF K<=0 %THEN ->ERR
+!
+      K=K<<16!MESSACT;                  ! DACT = 5 for opmess in
+      PP_DEST=K+COM_ASYNCDEST<<16
+!
+ON:   PP_SRCE=SRCE
+      LENGTH(Q)=LENGTH(Q)-1 %WHILE LENGTH(Q)>0 %AND CHARNO(Q,LENGTH(Q))=' '
+      PP_TEXT=Q
+      ->POUT
+!
+SWT(1):                                 ! PON (variable params)
+      PP_DEST=DATA(1)<<16!DATA(2)
+      %FOR K=0,1,5 %CYCLE
+         I=STOI(P)
+         %IF I=x'80808080' %AND P#"" %AND CHARNO(P,1)='"' %AND P->("""").Q.("""").P %START
+            STRING(ADDR(PP_P1)+4*K)=Q
+            K=K+LENGTH(Q)//4
+         %FINISHELSE INTEGER(ADDR(PP_P1)+4*K)=I
+      %REPEAT
+      %IF SRCESERV=0 %THEN PP_SRCE=SRCE %ELSE PP_SRCE=SRCESERV
+POUT:
+      PKMONREC(STRING(ADDR(COM_TIME0)+3)." Command",PP)
+      PON(PP)
+      %RETURN
+!
+SWT(2):                                 ! SRCE = srce serv for pon
+      SRCESERV=DATA(1)
+      %RETURN
+!
+SWT(3):                                 ! PLOT t f d pge npages
+      ->ERR %UNLESS TAPEPLACE(PP_P2,PP_P3,P,1)=0
+      ->ERR %UNLESS DISCPLACE(PP_P4,PP_P5,P,1)=0
+      I=STOI(P)
+      ->ERR %UNLESS I>0
+      PP_P1=x'04020000'+I
+      PP_P6=m'PLOT'
+      ->POUT
+!
+SWT(4):                                 ! PLOD fd fp td tp np
+      ->ERR %UNLESS DISCPLACE(PP_P2,PP_P3,P,1)=0
+      ->ERR %UNLESS DISCPLACE(PP_P4,PP_P5,P,1)=0
+      I=STOI(P)
+      ->ERR %UNLESS I>0
+      PP_P1=x'02020000'+I
+      PP_P6=m'PLOD'
+      ->POUT
+!
+SWT(5):                                 ! STARTD restart "DIRECT" process
+      PP_DEST=x'30011'
+      PP_SRCE=0
+      ->POUT
+!
+SWT(6):                                 ! FEPUP n
+      I=DATA(1)
+      ->ERR %UNLESS 0<=I<=9 %AND COM_FEPS&(x'10000'<<I)#0
+      Q=TOSTRING(I+'0')
+      PP_SRCE=SRCE
+      PP_DEST=x'390009';                ! allocate FEP in FE adaptr
+      PP_P1=I
+      DPON(PP,1)
+      PP_TEXT="CONNECTFE ".Q
+      %for j='A',1,'V' %cycle
+          %if execact(j)<0 %then PP_DEST=execact(j)<<1>>1+COM_SYNC1DEST<<16 %c
+         %and DPON(PP,6)
+      %repeat
+      %RETURN
+!
+SWT(7):                                 ! OPER <text>
+      PP_DEST=x'320015'!SRCE&x'ff00'
+      ->DEVTEXT
+!
+SWT(8):                                 ! DDUMP discaddr
+      PP_P1=x'01050001'
+      PP_P6=m'DDMP'
+      ->ERR %UNLESS DISCPLACE(PP_P2,PP_P3,P,1)=0
+      PP_P4=0
+      PP_P5=0
+      ->POUT
+!
+SWT(9):                                 ! DCLEAR discaddr
+      PP_P1=x'05020001'
+      PP_P6=m'DCLR'
+      ->ERR %UNLESS DISCPLACE(PP_P4,PP_P5,P,1)=0
+      PP_P2=0
+      PP_P3=0
+      ->POUT
+!
+SWT(10):                                ! DUMP t d pages
+      ->ERR %UNLESS TAPEPLACE(PP_P4,PP_P5,P,0)=0
+      ->ERR %UNLESS DISCPLACE(PP_P2,PP_P3,P,0)=0
+      I=STOI(P)
+      ->ERR %UNLESS I>0
+      PP_P1=x'02040000'+I
+      PP_P6=m'DUMP'
+      ->POUT
+!
+SWT(11):                                ! PRIME t d npages
+      ->ERR %UNLESS TAPEPLACE(PP_P2,PP_P3,P,0)=0
+      ->ERR %UNLESS DISCPLACE(PP_P4,PP_P5,P,0)=0
+      I=STOI(P)
+      ->ERR %UNLESS I>0
+      PP_P1=x'04020000'+I
+      PP_P6=m'PRME'
+      ->POUT
+!
+SWT(12):                                ! FEDOWN n
+      I=DATA(1)
+      ->ERR %UNLESS 0<=I<=9 %AND COM_FEPS&(x'10000'<<I)#0
+      Q=TOSTRING(I+'0')
+      PP_SRCE=SRCE
+      PP_DEST=x'39000b';                ! FE adaptor deallocate
+      PP_P1=I;                          ! FEP i
+      PON(PP)
+      %RETURN
+!
+SWT(13):                                ! KMON serv onoff
+      %IF MONLEVEL&2#0 %START
+         I=DATA(1)
+         J=DATA(2)
+         ->ERR %UNLESS 0<=J<=1
+         L=LONE<<I
+         KMON=KMON&(L!!x'ffffffffffffffff')
+         %IF J=1 %THEN KMON=KMON!L
+      %FINISH
+      %RETURN
+!
+SWT(14):                                ! UNPLOT discaddr tapeaddr pages
+      ->ERR %UNLESS DISCPLACE(PP_P2,PP_P3,P,1)=0
+      ->ERR %UNLESS TAPEPLACE(PP_P4,PP_P5,P,1)=0
+      I=STOI(P)
+      ->ERR %UNLESS I>0
+      PP_P1=x'02040000'+I
+      PP_P6=m'PLOT'
+      ->POUT
+!
+SWT(15):                                ! INHIBIT
+      INHIBIT(DATA(1))
+      %RETURN
+!
+SWT(16):                                ! UNINHIBIT
+      UNINHIBIT(DATA(1))
+      %RETURN
+!
+SWT(17):                                ! DIRVSN
+      COM_DIRSITE=x'200'+(DATA(1)&3)*128
+      %RETURN
+!
+SWT(18):                                ! DT date time
+      WORK=DATA(1);                     ! date
+      I=WORK//100
+      Y=WORK-I*100;                     ! year
+      D=I//100;                         ! day
+      M=I-D*100;                        ! month
+      ->ERR %UNLESS 1<=D<=31 %AND 1<=M<=12 %AND Y>=84
+      %IF M>2 %THEN M=M-3 %ELSE M=M+9 %AND Y=Y-1
+      J=1461*Y//4+(153*M+2)//5+D+58
+      ->ERR %UNLESS P->(DOW(J-J//7*7)).Q
+      WORK=DATA(2);                     ! time
+      HR=WORK//100;                     ! hours
+      MIN=WORK-HR*100;                  ! minutes
+      ->ERR %UNLESS 0<=HR<=23 %AND 0<=MIN<60
+      L=LENGTHENI(J)*SECSIN24HRS
+      L=(L+60*(60*HR+MIN))*1000000;     ! microsecs since 1/1/1900
+      L=L<<12;                          ! TOD units
+      *basr_15,0; *using_15
+      *sck_l; *bc_8,<sok>; *drop_15
+      RESPOND(SSNO,"TOD clock not enabled")
+      %RETURN
+SOK:  *sckc_l;                          ! clock comparator aussi
+      %RETURN
+!
+SWT(20):                                ! REP at with
+      %IF LENGTH(P)>1 %AND CHARNO(P,1)='R' %START
+         CHARNO(P,1)='X'
+         REALA=1
+      %FINISHELSE REALA=0
+      AD=STOI(P)
+      ->ERR %IF AD=UNASSIGNED
+      %IF REALA=0 %START
+         *l_1,ad; *lra_0,0(1); *bc_7,<err>
+      %FINISHELSE AD=RTV(AD)
+      *ipk_0; *st_2,k; *spka_0;         ! key 0
+      I=STOI(P)
+      J=INTEGER(AD); INTEGER(AD)=I
+      RESPOND(SSNO,STRHEX(I)." reps ".STRHEX(J))
+      *l_2,k; *spka_0(2)
+      %UNLESS REALA=0 %THEN I=RTV(-1)
+      %RETURN
+!
+SWT(21):                                ! RTOCP - return to VM/CP
+      -> NOTVM %UNLESS COM_OCPTYPE>>24=X'FF'
+      *basr_15,0
+      *using_15
+      *la_0,<ret>; *st_0,i
+      PSW=DISAWAIT!I
+      *lpsw_psw
+RET:
+      *drop_15
+      %RETURN
+!
+SWT(22):                                ! spare
+      %RETURN
+!
+SWT(19):                                ! XDUMP addr len
+SWT(23):                                ! SHOW addr len
+      %IF LENGTH(P)>1 %AND CHARNO(P,1)='R' %START
+         CHARNO(P,1)='X'
+         REALA=1
+      %FINISHELSE REALA=0
+      AD=STOI(P)
+      ->ERR %IF AD=UNASSIGNED
+      J=STOI(P)
+      %IF J<0 %THEN J=8
+      %IF REALA=0 %START
+         K=AD+J
+         *l_1,ad; *lra_0,0(1); *bc_7,<err>
+         *l_1,k; *lra_0,0(1); *bc_7,<err>
+         I=AD
+      %FINISHELSESTART
+         K=AD&4095
+         I=RTV(AD&(-4096))+K
+         %IF K+J>4096 %THEN J=4096-K
+      %FINISH
+      *ipk_0; *st_2,work; *spka_0;      ! key 0
+      %IF SV=19 %START;                 ! XDUMP
+         DUMPTABLE(32,I,J)
+      %ELSE
+         %CYCLE
+            Q=HTOS(AD,4)." ".HTOS(INTEGER(I),8)
+            Q=Q." ".HTOS(INTEGER(I+4),8) %IF J>=8
+            RESPOND(SSNO,Q)
+            I=I+8; J=J-8
+            %EXITIF J<=0
+         %REPEAT
+      %FINISH
+      *l_2,work; *spka_0(2)
+      %UNLESS REALA=0 %THEN I=RTV(-1)
+      %RETURN
+!
+SWT(24):                                ! DEVIO <text>
+      PP_DEST=x'300001'
+DEVTEXT:                                ! OPER <text> joins here
+      ->ERR %IF LENGTH(P)>23
+      PP_SRCE=SRCE
+      PP_TEXT=P
+      ->POUT
+!
+SWT(25):                                ! P picture screen
+      I=STOI(P)
+      %IF I=UNASSIGNED %START;          ! not numeric
+         P->(" ").P %WHILE P#"" %AND CHARNO(P,1)=' '
+         %UNLESS P->Q.(" ").P %START
+            Q=P
+            P=""
+         %FINISH
+         PP_P1=-1
+         STRING(ADDR(PP_P3))=Q
+      %FINISHELSE PP_P1=I
+      I=STOI(P)
+      %IF I=UNASSIGNED %THEN I=0
+      PP_P2=I
+      PP_DEST=SRCE>>8<<8!19;            ! show picture
+      PP_SRCE=0
+      ->POUT
+!
+SWT(26):                                ! B (page back) screen
+      PP_P1=-1
+      ->PGBF
+SWT(27):                                ! F (page forward) screen
+      PP_P1=1
+PGBF:
+      I=STOI(P)
+      %IF I=UNASSIGNED %THEN I=0
+      PP_P2=I
+      PP_DEST=SRCE>>8<<8!18;            ! page forward/back
+      PP_SRCE=0
+      ->POUT
+!
+SWT(28):                                ! SCREENS n
+      ->ERR %UNLESS 2<=DATA(1)<=4
+      PP_DEST=x'32000c'
+      PP_P1=-1
+      PP_P2=40
+      PP_P3=0
+      PON(PP);                          ! top vcursor to 40/40
+      %IF DATA(1)=3 %START
+         PP_P1=11
+         PON(PP);                       ! hcursor to 11/11
+         DATA(1)=-1
+         PP_P2=80
+         PP_P3=1;                       ! bottom vcursor to 80/0
+      %FINISHELSESTART
+         PP_P1=-1
+         PP_P2=40
+         PP_P3=1
+         PON(PP);                       ! bottom vcursor to 40/40
+         %IF DATA(1)=2 %THEN DATA(1)=21 %ELSE DATA(1)=11
+      %FINISH
+SWT(29):                                ! SCURSOR n
+      PP_DEST=x'32000c'
+      PP_P1=DATA(1)
+      ->POUT
+SWT(30):                                ! TRACE <text>
+      %IF MONLEVEL&256#0 %THEN %Start
+         TRACER(P)
+         %RETURN
+      %FINISH %ELSE ->ERR
+!
+SWT(31):                                ! CP <VM/CP command>
+      -> NOTVM %UNLESS COM_OCPTYPE>>24=X'FF'
+      CP COMMAND(SSNO,P)
+      %RETURN
+!
+SWT(32):                                ! ADDPATH dev route
+      PP_P3=0
+      ->ARPATH
+SWT(33):                                ! REMPATH dev route
+      PP_P3=1
+ARPATH:
+      PP_DEST=X'20000B'
+      ->ERR %UNLESS P->P.(" ").Q %AND LENGTH(P)=4
+      PP_P1=INTEGER(ADDR(P)+1)
+      PP_P2=STOI(Q)
+      ->ERR %IF PP_P2=UNASSIGNED
+      ->POUT
+!
+SWT(34):                               ! ACCEPT dev
+      PP_P2=0
+      ->ADDEV
+SWT(35):                               ! DISCARD dev
+      PP_P2=1
+ADDEV:
+      PP_DEST=X'20000C'
+      ->ERR %UNLESS LENGTH(P)=4
+      PP_P1=INTEGER(ADDR(P)+1)
+      ->POUT
+!
+NOTVM:
+      RESPOND(SSNO,"VM/CP not active!")
+      %RETURN
+!
+%ROUTINE CP COMMAND(%INTEGER SRCE,%STRING(80) S)
+!***********************************************************************
+!*     Calls VM/CP to execute a CP command.                            *
+!*     Communication with CP is done via the DIAGNOSE instruction.     *
+!***********************************************************************
+%INTEGER AD,LEN
+!
+LEN = LENGTH(S)
+AD = ADDR(S) + 1
+ITOE(AD,LEN)
+AD = REALISE(AD)
+*L     _1,AD
+*L     _2,LEN
+*PUT   _X'8312'; *PUT   _X'0008';       ! DIAGNOSE 1,2,8 - call CP to execute command
+RESPOND(SRCE,"OK")
+%END;   ! OF CP COMMAND
+!
+%INTEGERFN GET MNEM(%STRINGNAME S)
+%INTEGER I,J
+%STRING (15) P
+      J=0
+      P=""
+      %IF S->P.(" ").S %AND LENGTH(P)=4 %THEN STRING(ADDR(I)+3)=P
+      %RESULT=J
+%END
+!
+%INTEGERFN DISCPLACE(%INTEGERNAME A,B, %STRINGNAME S, %INTEGER FLAG)
+%INTEGER I,J,K
+%STRING (63) P
+      I=STOI(S)
+      B=0; K=0
+      %IF I>=0 %THEN %START
+         P = HTOS(I,2)
+         A = (M'FD00' & X'FFFF0000')!(CHARNO(P,1)<<8)!CHARNO(P,2)
+         -> PAGE
+      %FINISH
+AGN:
+      %RESULT=1 %UNLESS S->P.(" ").S
+      ->AGN %IF P=""
+      %RESULT=1 %UNLESS LENGTH(P)=6
+      %FOR I=0,1,5 %CYCLE
+         BYTEINTEGER(ADDR(J)+I)=CHARNO(P,I+1)
+      %REPEAT
+      A=J; B=K
+PAGE:
+      %IF FLAG#0 %START
+         I=STOI(S)
+         %IF I<0 %OR I>x'ffff' %THENRESULT=1
+         B=B&x'ffff0000'+I
+      %FINISH
+      %RESULT=0
+%END
+!
+%INTEGERFN TAPEPLACE(%INTEGERNAME A,B, %STRINGNAME S, %INTEGER FLAG)
+%INTEGER I,J,K
+%STRING (63) P
+      I=STOI(S); B=1; K=1
+      %IF I>=0 %THEN A=x'0031006e'+I %AND ->CHAP
+AGN:
+      %RESULT=1 %UNLESS S->P.(" ").S
+      ->AGN %IF P=""
+      %RESULT=1 %UNLESS LENGTH(P)=6
+      STRING(ADDR(J))=P
+      A=J; B=K
+CHAP:
+      %IF FLAG#0 %START
+         I=STOI(S)
+         %IF I<0 %THENRESULT=1
+         B=B&x'ffffff00'+I&255
+      %FINISH
+      %RESULT=0
+%END
+%END
+!
+!------------------------------------------------------------------------
+!
+%EXTERNALROUTINE BMREP(%RECORD (PARMF) %NAME P)
+!***********************************************************************
+!*    Translates responses from bulk mover into                        *
+!*    text form before passing them back to                            *
+!*    the original caller (on DACT 1)                                  *
+!***********************************************************************
+%STRING (23) TXT
+      %IF P_P1=0 %THEN TXT="Load OK" %ELSE TXT="Load fails ".STRHEX(P_P1)
+      RESPOND(P_DEST,TXT)
+%END;                                   ! of BMREP
+!------------------------------------------------------------------------
+%EXTERNALROUTINE COMREP(%RECORD (PARMF) %NAME P)
+!***********************************************************************
+!*    Translates the error response from de allocate tape in bulk      *
+!*    mover and logs it                                                *
+!***********************************************************************
+                                        ! Reply from de-allocate tape in move
+      %UNLESS P_P2=0 %THEN OPMESS("Dealloc fails:".STRING(ADDR(P_P3)))
+%END;                                   ! of comrep
+!
+!
+!
+%INCLUDE "ercc07:ibmsup_dtform1s"
+%EXTERNALROUTINE BMOVE(%RECORD (PARMF) %NAME P)
+!***********************************************************************
+!*       Called on service 36 to transfers groups of pages between     *
+!*       fast devices. Replies are on service 37.                      *
+!*       Fast device types are:-                                       *
+!*       dev=1 pagedev  (specified as service & page )                 *
+!*       dev=2 discfile (specified as [mnemonic or lvn] & page)        *
+!*       dev=3 archtape (specified as service(preposnd by VOLUMS))     *
+!*       dev=4 tape     (specified as string(6)lab,byte chap no)       *
+!*       dev=5 funny    (reads give zero page,writes in hex to lp)     *
+!*       dev=6 sink       (throws away input for tape checking)        *
+!*                                                                     *
+!*       Can handle up to four moves at a time. Each move uses         *
+!*       one buffer and apart from clears only has one transfer        *
+!*       outstanding at any one time time.                             *
+!*       Failure flags (returned in P_P1) are as follows (at least     *
+!*       for moves to/from disc):                                      *
+!*                                                                     *
+!*       P_P1 = RW<<24  !  FAIL<<16  !  RELPAGE                        *
+!*                                                                     *
+!*       where  RW = 1  means a READ failed                            *
+!*                   2  means a WRITE failed.                          *
+!*              FAIL = flag from PDISC:                                *
+!*                         1 = transferred with errors (i.e. cyclic    *
+!*                             check fails)                            *
+!*                         2 = request rejected                        *
+!*                         3 = transfer not effected (e.g. flagged     *
+!*                             track encountered)                      *
+!*          and RELPAGE = relative page no of failing page, counting   *
+!*                        first page of request as one.                *
+!***********************************************************************
+%INTEGERFNSPEC CHECK(%INTEGERNAME MNEM,PAGE, %INTEGER RTYEP)
+%CONSTINTEGER MAXSTREAMS=8
+%RECORDFORMAT BME(%INTEGER DEST,SRCE,STEP,COUNT,FDEV,TODEV,L,FDINF1,FDINF2,TODINF1,TODINF2,
+   IDENT,CORE,READ,CDEX,UFAIL,WTRANS,FVL1,FVL2,TVL1,TVL2)
+%OWNRECORD (BME) %ARRAY BMS(1:MAXSTREAMS)
+%RECORD (BME) %NAME BM
+%OWNINTEGER MASK=0,BMSEMA=-1
+%CONSTINTEGER TAPE POSN=9, FILE POSN=8, WRITE=2, READ PAGE=1
+%CONSTINTEGER WRITETM=10, MAX TRANS=16, REWIND=17, BACK READ=6
+%CONSTINTEGER REQSNO=X'240000', PRIVSNO=X'250000', MAXMASK= %C
+      (-2)!!X'FFFFFFFF'<<(MAXSTREAMS+1),
+      GETPAGE=X'50000', RETURNPAGE=X'60000',
+      CLAIM TAPE=X'31000C', RELEASE TAPE=X'310007', COMREP= %C
+      X'3E0001', ZEROEPAGEAD=X'00001000', PDISCSNO=X'210000'
+%INTEGER I,INDEX,PAGE,FILE,SNO,FAIL,SaveP1
+%SWITCH STEP(1:12)
+!
+      %IF MONLEVEL&2#0 %AND KMON>>(P_DSNO)&1#0 %THEN PKMONREC("MOVE: ",P)
+      %IF P_DSNO=PRIVSNO>>16 %START;    !NAME MNEM,PAGEREPLY
+         INDEX=P_DEST&255
+         %IF 1<<INDEX&MASK=0 %THENSTART;  ! THIS SLOT NOT IN USE!
+            PKMONREC("MOVE REJECTS :",P)
+            %RETURN
+         %FINISH
+         BM==BMS(INDEX)
+         FAIL=P_P2
+         Savep1=P_P1
+         ->STEP(BM_STEP)
+      %FINISH
+!
+! THIS IS THE ENTRY FOR A NEW REQUEST
+!
+      %IF MULTIOCP=YES %THENSTART
+         SEMALOOP(BMSEMA)
+      %FINISH
+      %CYCLE INDEX=1,1,MAXSTREAMS
+         %IF MASK&1<<INDEX=0 %THENEXIT
+      %REPEAT
+      BM==BMS(INDEX)
+      MASK=MASK!1<<INDEX
+      %IF MASK=MAXMASK %THEN INHIBIT(REQSNO>>16);  ! ALL BUFFERS IN USE
+      %IF MULTIOCP=YES %THEN BMSEMA=-1
+      BM_DEST=P_DEST
+      BM_SRCE=P_SRCE
+      BM_FDEV=P_P1>>24
+      BM_TODEV=P_P1>>16&255
+      BM_READ=READ PAGE
+      %IF P_P1&X'8000'#0 %THEN BM_READ=BACK READ
+      BM_L=P_P1&X'7FFF'
+      BM_FDINF1=P_P2
+      BM_FDINF2=P_P3
+      BM_TODINF1=P_P4
+      BM_TODINF2=P_P5
+      BM_IDENT=P_P6
+      BM_COUNT=0; BM_STEP=0
+      BM_UFAIL=0; BM_FVL1=0; BM_FVL2=0
+      BM_WTRANS=0; BM_TVL1=0; BM_TVL2=0
+      %IF BM_L=0 %OR BM_TODEV=1 %THEN ->REQFAIL;  ! MOVE 0 PAGES DISALLOWED
+      %IF BM_FDEV=1 %AND BM_L>32 %THEN BM_FDEV=2;  ! 32 max for amem entry
+                                        ! larger moves must go via a buffer
+      %IF 1<=BM_FDEV<=2 %AND CHECK(BM_FDINF1,BM_FDINF2,READPAGE)#0 %THEN ->REQFAIL
+      %IF BM_TODEV=2 %AND CHECK(BM_TODINF1,BM_TODINF2,WRITE)#0 %THEN ->REQFAIL
+      %IF BM_TODEV=3 %AND (BM_TODINF2>2 %OR BM_TODINF2<0) %THEN ->REQFAIL
+                                        ! 0,1,OR 2 TMARKS ONLY ALLOWED
+!
+! PON A CHECK BLOCKS ACTIVE TO ACTIVEMEM. TEMPORARY TO FIND BUG
+!
+!      %IF BM_TODEV=2 %START
+!         P_DEST=X'00080006'
+!         %CYCLE   I=0,1,BM_L-1
+!            P_P1=BM_TODINF2+I
+!            PON(P)
+!         %REPEAT
+!      %FINISH
+STEP0:BM_STEP=0
+      %IF BM_FDEV>=5 %START
+         BM_CDEX=0
+         BM_CORE=ZEROEPAGEAD
+         ->CORE GOT
+      %FINISH
+      %IF BM_FDEV=1 %START
+         P_DEST=x'80001';               ! get amtx
+         P_P1=M'BMGA'
+         P_P2=BM_FDINF2
+         P_P3=BM_L-1
+      %ELSE
+         P_DEST=GETPAGE;                ! REQUEST ONE (EXTENDED) PAGE
+         P_P3=x'10';                    ! key 1
+      %FINISH
+PONIT:P_SRCE=PRIVSNO!INDEX
+      BM_STEP=BM_STEP+1
+      PON(P)
+      %RETURN
+STEP(1):                                ! CORE PAGE FROM CORE ALLOT
+      %IF BM_FDEV=1 %START;             ! reply from active mem
+         %IF P_P2<=0 %THEN BM_FDEV=2 %AND ->STEP0;  ! failed to get active mem
+                                        ! normally should be no problem geting active mem
+                                        ! However when using diagnostic aids(ddump etc)
+                                        ! There  can be length or mode checks
+         BM_CDEX=P_P2
+         BM_CORE=0
+         BM_FDINF1=x'40009';            ! page in with track fetches
+         BM_FDINF2=BM_CDEX<<16
+      %ELSE
+         BM_CDEX=P_P2;                  ! CORE INDEX NO(FOR RETURNING)
+         BM_CORE=P_P4
+      %FINISH
+CORE GOT:                               ! BY HOOK OR BY CROOK
+      ->FDEVPOSD %UNLESS BM_FDEV=4;     ! UNLESS A MAG TAPE
+!
+! CODE HERE TO CLAIM THE INPUT TAPE AND PUT ITS SERVICE NO IN INF1
+!
+      %IF BM_FDINF1>>24#0 %START;       ! TAPE LABEL NOT SERVICE NO
+         P_DEST=CLAIM TAPE
+         P_P2=X'00040001';              ! TAPE FOR READING
+         P_P3=BM_FDINF1; P_P4=BM_FDINF2; P_P6=0
+         BM_FVL1=BM_FDINF1; BM_FVL2=BM_FDINF2;  ! REMEMBER FOR RELEASE
+         BM_STEP=1; ->PONIT
+STEP(2):                                ! REPLY FROM CLAIM TAPE
+         %IF P_P2#0 %THEN ->POSFAIL
+         BM_FDINF1=P_P3;                ! SERVICE NO FOR TAPE
+         BM_FDINF2=BM_FDINF2&255;       ! CHAPTER NO OF FILE
+      %FINISH
+      SNO=BM_FDINF1
+      BM_STEP=2
+      FILE=BM_FDINF2&255
+TAPEPOS:                                ! TAPE POSITION TO 'FILE'
+      P_DEST=SNO
+      P_P1=FILE;                        ! IDENT FOR LATER
+      P_P2=REWIND
+      ->PONIT;                          ! SKIP BACK TO BT
+STEP(3):                                ! FROM TAPE AT BT
+STEP(6):                                ! TO TAPE AT BT
+      ->POSFAIL %UNLESS FAIL=4 %OR FAIL=0
+      P_DEST=P_SRCE
+      P_P2=P_P1<<16!1<<8!TAPE POSN
+      ->PONIT;                          ! SKIP FORWARD N FILES
+STEP(4):                                ! FROMTAPE AT RIGHT FILE
+      ->POSFAIL %UNLESS FAIL=0
+!
+! THIS BULK MOVER MOVES TAPE CHAPTERS ONLY
+!
+FDEVPOSD:
+      ->POSCOMPLETE %UNLESS BM_TODEV=4;  ! OPUT TAPE NEEDS POSITIONING
+!
+! CODE HERE TO CLAIM THE OUTPUT TAPE
+!
+      %IF BM_TODINF1>>24#0 %START;      ! TAPE GIVEN AS LABEL NOT SNO
+         P_DEST=CLAIM TAPE
+         P_P2=X'00040002';              ! TAPE FOR WRITING
+         P_P3=BM_TODINF1; P_P4=BM_TODINF2; P_P6=0
+         BM_TVL1=BM_TODINF1; BM_TVL2=BM_TODINF2
+         BM_STEP=4; ->PONIT
+STEP(5):                                ! REPLY FROM CLAIM OUTPUT TAPE
+         %IF P_P2#0 %THEN ->POSFAIL
+         BM_TODINF1=P_P3
+         BM_TODINF2=BM_TODINF2&255;     ! CHAPTER NO
+      %FINISH
+      SNO=BM_TODINF1
+      FILE=BM_TODINF2&255
+      BM_STEP=5
+      ->TAPEPOS
+STEP(7):                                ! BOTH DEVICES POSITONED
+      ->POSFAIL %UNLESS FAIL=0
+POSCOMPLETE:
+READ PG:
+      BM_COUNT=BM_COUNT+1
+      %IF BM_FDEV=1 %START
+         P_DEST=BM_FDINF1
+         BM_FDINF1=x'40001';            ! normal pagein for all but 1st block
+         P_P1=BM_FDINF2+(BM_COUNT-1)
+         P_P2=BM_COUNT;                 ! id field for pageturn
+         P_P3=0;                        ! key
+         BM_STEP=7
+         ->PONIT
+      %FINISH
+      %IF BM_FDEV<5 %THENSTART;         ! NOT FROM A ZERO PAGE
+         P_DEST=BM_FDINF1
+         P_P3=BM_CORE
+         %IF BM_FDEV=3 %OR BM_FDEV=4 %THENSTART
+            P_P2=PAGESIZE<<16!BM_READ
+         %FINISHELSESTART
+            P_P2=BM_FDINF2-1+BM_COUNT
+         %FINISH
+         BM_STEP=7
+         P_P1=BM_COUNT
+         P_P6=0
+         ->PONIT
+      %FINISHELSE FAIL=0
+STEP(8):                                ! PAGE READ
+      %IF BM_FDEV=1 %THEN FAIL=P_P3 %AND BM_CORE=P_P2
+      ->READ FAIL %UNLESS FAIL=0
+      %IF BM_TODEV<5 %THENSTART
+         %CYCLE
+            P_DEST=BM_TODINF1
+            P_SRCE=PRIVSNO!INDEX
+            BM_STEP=8
+            P_P3=BM_CORE
+            %IF BM_TODEV=4 %OR BM_TODEV=3 %THENSTART
+               P_P2=PAGESIZE<<16!WRITE
+            %FINISHELSESTART
+               P_P2=BM_TODINF2-1+BM_COUNT
+            %FINISH
+            P_P1=BM_COUNT
+            P_P6=0
+            PON(P)
+            BM_STEP=9
+            BM_WTRANS=BM_WTRANS+1
+            %RETURNIF BM_FDEV<5 %OR BM_WTRANS>=MAX TRANS %OR BM_COUNT>=BM_L
+            BM_COUNT=BM_COUNT+1
+         %REPEAT
+      %FINISHELSESTART
+         BM_WTRANS=BM_WTRANS+1
+         %IF BM_TODEV=5 %START
+            I=BM_CORE
+            I=RTV(I) %IF VA MODE=YES
+            DUMPTABLE(34,I,PAGESIZE)
+            I=RTV(-1) %IF VA MODE=YES
+         %FINISH
+      %FINISH
+STEP(9):                                ! PAGE WRITTEN
+      BM_WTRANS=BM_WTRANS-1
+      %IF BM_FDEV=1 %THENSTART
+         P_DEST=x'40002';               ! page out
+         P_P1=BM_FDINF2-1+BM_COUNT
+         P_P2=1;                        ! recapturable
+         P_SRCE=PRIVSNO!INDEX
+         PON(P)
+      %FINISH
+      ->WRITEFAIL %UNLESS FAIL=0
+      ->READ PG %IF BM_COUNT<BM_L %AND BM_UFAIL=0
+      %RETURNUNLESS BM_WTRANS=0
+!
+STEP(10):                               !FIRST TM WRITE
+      ->TMFAIL %UNLESS FAIL=0
+      P_DEST=BM_TODINF1
+      P_P1=M'BMTM'
+      P_P2=WRITE TM
+      %IF BM_TODEV=3 %AND BM_TODINF2#0 %START;  ! ARCH TAPE NEEDS TM?
+         BM_STEP=BM_STEP+2-BM_TODINF2;  ! ONE OR TWO TMS
+         ->PONIT
+      %FINISH
+      ->PONIT %IF BM_TODEV=4
+STEP(11):                               !BOTH TMS WRITTEN
+      ->TMFAIL %UNLESS FAIL=0
+WAYOUT:                                 !DEALLOCATE CORE
+      %RETURNUNLESS BM_WTRANS=0
+      P_DEST=RETURN PAGE
+      %IF BM_FDEV=1 %THEN P_DEST=x'80002';  ! return amtx
+      P_SRCE=0;                         ! REPLY NOT WANTED
+      P_P3=0
+      P_P2=BM_CDEX
+      PON(P) %UNLESS BM_FDEV>=5;        ! RETURN CORE
+      P_DEST=RELEASE TAPE
+      P_SRCE=COMREP
+      %IF BM_FDEV=4 %AND BM_FVL1#0 %START
+         P_P2=X'00040000'!BM_FDINF1&X'FFFF'
+         P_P3=BM_FVL1; P_P4=BM_FVL2; P_P5=1
+         PON(P);                        ! RELEASE FROM TAPE
+      %FINISH
+      %IF BM_TODEV=4 %AND BM_TVL1#0 %START
+         P_P2=X'00040000'!BM_TODINF1&X'FFFF'
+         P_P3=BM_TVL1; P_P4=BM_TVL2; P_P5=1
+         PON(P);                        ! RELEASE OUTPUT TAPE
+      %FINISH
+REPLY:                                  !SET UP REPLY
+      P_DEST=BM_SRCE
+      P_SRCE=REQSNO
+      P_P1=BM_UFAIL
+      P_P2=BM_IDENT
+      PON(P);                           !REPLY TO REQUEST
+      %IF MULTIOCP=YES %THENSTART
+         SEMALOOP(BMSEMA)
+      %FINISH
+      %IF MASK=MAXMASK %THEN UNINHIBIT(REQSNO>>16)
+      MASK=MASK!!1<<INDEX
+      %IF MULTIOCP=YES %THEN BMSEMA=-1
+      %RETURN
+REQFAIL:                                ! FAULT WITH REQUEST
+      BM_UFAIL=-2
+      ->REPLY
+POSFAIL:                                ! UNABLE TO POS TAPE
+      BM_UFAIL=-3
+      ->WAYOUT
+TMFAIL:                                 ! TAPE MARK DID NOT WRITE!
+      ->ETWONTM %IF FAIL=4
+      BM_UFAIL=-4 %IF BM_UFAIL=0
+      ->WAYOUT
+ETWONTM:                                ! END OF TAPE WARNING
+      BM_UFAIL=-5
+      ->WAYOUT
+!
+! The format of the failure flags given below is described in comment at
+! the head of this routine.
+!
+READFAIL:                               ! UNABLE TO READ
+      %IF BM_FDEV=1 %THENSTART
+         P_DEST=x'40002';               ! page out
+         P_P1=BM_FDINF2-1+BM_COUNT
+         P_P2=1;                        ! recapturable
+         P_SRCE=PRIVSNO!INDEX
+         PON(P)
+      %FINISH
+      %IF BM_UFAIL=0 %THEN BM_UFAIL=READPAGE<<24!SaveP1!FAIL<<16
+      ->WAYOUT
+WRITEFAIL:                              ! UNABLE TO WRITE PAGE
+      %IF BM_UFAIL=0 %THEN BM_UFAIL=WRITE<<24!SaveP1!FAIL<<16
+      ->WAYOUT
+!
+%INTEGERFN CHECK(%INTEGERNAME MNEM,PAGE, %INTEGER RTYPE)
+%RECORD (DTFORM) %NAME DDT
+%INTEGER I,L,V1,V2
+      L=6; V1=MNEM; V2=PAGE
+      %FOR I=0,1,COM_NDISCS-1 %CYCLE
+         DDT==RECORD(INTEGER(COM_DITADDR+4*I))
+         %IF 4<=DDT_STATE<=7 %START
+            %IF (DDT_MNEMONIC=MNEM %OR MNEM=DDT_DLVN) %START
+               MNEM=PDISCSNO!RTYPE
+               PAGE=PAGE&x'ffffff'!DDT_DLVN<<24
+               %RESULT=0
+            %FINISH
+            %IF STRING(ADDR(L)+3)=DDT_LABEL %START
+               MNEM=PDISCSNO!RTYPE
+               PAGE=PAGE&x'ffff'!DDT_DLVN<<24
+               %RESULT=0
+            %FINISH
+         %FINISH
+      %REPEAT
+      %RESULT=1
+%END
+!
+%END
+%ENDOFFILE

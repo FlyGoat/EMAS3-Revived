@@ -1,0 +1,11 @@
+! SPDX-License-Identifier: MIT
+! Copyright (c) 2026 Jiaxun Yang <jiaxun.yang@flygoat.com>
+
+! Host EMAS adapters;
+%external %routine host phex(%integer value)
+  print string(htos(value,8))
+%end
+%externalstring(255)%fn host htos(%integer value,places)
+  %result=htos(value,places)
+%end
+%end %of %file

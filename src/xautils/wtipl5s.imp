@@ -1,0 +1,824 @@
+%constantstring(23) vsn = "WTIPL vsn 5e, 11-Sep-86"
+!***********************************************************************
+!*
+!*     Program to write an IBM IPL tape containing an EMAS-3 system
+!*
+!*         EMAS 2900 version by R.D. Eager   University of Kent
+!*
+!***********************************************************************
+!
+! Layout of disc sites for EMAS-3:
+!
+!       Start            Size              Usage
+!       =====            ====              =====
+!
+!        X0              X40               CHOPSUPE (version for IPL)
+!        X40             X40               First supervisor site
+!        X80             X40               Second supervisor site
+!        XC0             X40               Third supervisor site
+!        X100            X40               CHOPSUPE setup site
+!        X140            X40               Fourth supervisor site
+!        X180            X40               Fifth supervisor site
+!        X1C0            X40               Sixth supervisor site
+!        X200            X80               Director site (version 0)
+!        X280            X80               Director site (version 1)
+!        X300            X80               Director site (version 2)
+!        X380            X80               Director site (version 3)
+!        X400            X80               VOLUMS basefile
+!        X480            X80               SPOOLR basefile
+!        X500            X80               MAILER basefile
+!        X580            X80               FTRANS basefile
+!        X600            X100              Subsystem basefile
+!
+!
+!***********************************************************************
+!*
+!*          Constants
+!*
+!***********************************************************************
+!
+%constantinteger no = 0, yes = 1
+%constantinteger xa = yes;              ! Set to 'yes' for XA version
+!
+%constantinteger cherished = x'10';     ! In 'codes' byte
+%constantbyteinteger cr = 13;           ! Character code
+%constantinteger epagesize = 4096
+%constantinteger gats size = 160;       ! Size of 'gatsf' record
+%constantinteger tfh gats base = 280;   ! Offset of 'gatsa' array in 'hpf'
+%constantinteger max gats = (epagesize-tfh gats base)//gats size
+                                         ! Max number of 'gats' entries for
+                                         ! which there is space in 'hpf'
+%constantinteger listchan = 80;         ! Channel for listing file
+%constantinteger maxsyspages = x'700';  ! Max size of system image
+%constantinteger tapechan = 1
+%constantinteger xtra = 3
+!
+!
+!***********************************************************************
+!*
+!*          Record formats
+!*
+!***********************************************************************
+!
+%recordformat fdf(%integer link,dsnum,%byteinteger status,accessroute,
+                  valid action,cur state,mode of use,mode,file org,
+                  dev code,rec type,flags,lm,rm,%integer asvar,arec,
+                  recsize,minrec,maxrec,maxsize,lastrec,conad,currec,
+                  cur,end,transfers,darecnum,cursize,datastart,
+                  %string(31) iden,%integer keydesc0,keydesc1,
+                  recsizedesc0,recsizedesc1,%byteinteger f77flag,
+                  f77form,f77access,f77status,%integer f77recl,f77nrec,
+                  idaddr,%byteinteger f77blank,f77ufd,spare1,spare2)
+%recordformat fp(%string(6) user,%byteinteger perm)
+%recordformat fpf(%integer bytes returned,ownp,eep,spare,
+                  %record(fp)%array indiv prms(1:16))
+%recordformat gatsf(%string(11) name,%byteinteger codes,
+                    %record(fpf) perms)
+%recordformat frf(%integer conad,filetype,datastart,datend,size,rup,
+                  eep,mode,users,arch,%string(6) tran,%string(8) date,
+                  time,%integer count,spare1,spare2)
+%recordformat hf(%integer dataend,datastart,filesize,filetype,sum,
+                 datetime,
+                 (%integer spare1,spare2 %or %c     { Character file }
+                 %integer format,records %or %c     { Data file }
+                 %integer adir,count %or %c         { Pdfile }
+                 %integer pstart,spare3 %or %c      { Old directory file }
+                 %integer spare4,controlmode %or %c { Background control file }
+                 %integer lda,ofm))                 { Object file }
+%recordformat hpf(%string(6) tapename,username,%string(15) filename,
+                  %string(8) date,time,type,%byteinteger spare0,
+                  spare1,spare2,%integer chapter,epages,fsys,perms,
+                  ownp,eep,arch,codes,ssbyte,cct,check pages,groups,spare4,
+                  records,%string(6) offered to,
+                  %record(fp)%array permlist(1:16),%string(7) emas vsn,
+                  %string(13) file index,
+                  %record(gatsf)%array gatsa(1:max gats))
+%recordformat rf(%integer conad,filetype,datastart,dataend)
+!
+!
+!***********************************************************************
+!*
+!*          Subsystem references
+!*
+!***********************************************************************
+!
+%externalroutinespec connect %alias "S#CONNECT"(%string(31) file,
+                             %integer mode,hole,prot,
+                             %record(rf)%name r,%integername flag)
+%externalstringfunctionspec date
+%externalroutinespec define %alias "S#DEFINE"(%integer chan,%string(31) iden,
+                          %integername afd,flag)
+%externalroutinespec disconnect %alias "S#DISCONNECT"(%string(31) file,
+                        %integername flag)
+%externalstringfunctionspec failuremessage %alias "S#FAILUREMESSAGE"(%integer mess)
+%externalroutinespec fill %alias "S#FILL"(%integer length,from,filler)
+%externalroutinespec finfo %alias "S#FINFO"(%string(31) file,%integer mode,
+                         %record(frf)%name fr,%integername flag)
+%externalintegerfunctionspec instream
+%externalintegerfunctionspec iocp %alias "S#IOCP"(%integer ep,parm)
+%externalstringfunctionspec itos %alias "S#ITOS"(%integer n)
+%externalintegermapspec mapssfd %alias "S#MAPSSFD"(%integer dsnum)
+%externalroutinespec move %alias "S#MOVE"(%integer length,from,to)
+%externalintegerfunctionspec outpos
+%externalintegerfunctionspec outstream
+%externalintegerfunctionspec parmap %alias "S#PARMAP"
+%externalroutinespec prompt(%string(255) s)
+%externalroutinespec setfname %alias "S#SETFNAME"(%string(63) s)
+%externalroutinespec setpar %alias "S#SETPAR"(%string(255) s)
+%externalroutinespec set return code(%integer i)
+%externalstringfunctionspec spar %alias "S#SPAR"(%integer n)
+%externalstringfunctionspec time
+%externalroutinespec uctranslate %alias "S#UCTRANSLATE"(%integer ad,len)
+%externalstringfunctionspec uinfs(%integer entry)
+!
+!
+!***********************************************************************
+!*
+!*          References to magnetic tape utility routines
+!*
+!***********************************************************************
+!
+%externalroutinespec askmag(%integer channel,%string(7) vol,
+                            %integername flag)
+%externalroutinespec skipmag(%integer channel,n)
+%externalroutinespec unloadmag(%integer channel)
+%externalroutinespec writemag(%integer channel,ad,len,%integername flag)
+%externalroutinespec writetmmag(%integer chan,%integername flag)
+!
+!
+!***********************************************************************
+!*
+!*          Own variables
+!*
+!***********************************************************************
+!
+%owninteger blocks = 0;                 ! Count of blocks written (including tape marks)
+%owninteger syspages = 0;               ! Count of pages written in system image
+!
+%if xa = yes %then %start
+%constantinteger ccwlen = 1024
+%ownintegerarray ipl rec(0:5) = %c
+{x0000}  x'00080000',x'00002280',          { PSW, EC mode, start at TIPL code }
+{x0008}  x'02002000',x'60001000',          { CCW/TIPL block to x2000          }
+{x0010}  x'08002000',x'00000000'           { transfer-in-channel to x2000     }
+%ownintegerarray ccws(1:ccwlen) = %c
+{x2000}  x'3f000000',x'60000001',          { skip over tape mark              }
+{x2008}  x'02001000',x'70001000',          { read and skip disk IPL block     }
+{x2010}  x'02001000',x'00001000',          { read disk CCW/entry block        }
+{x2018}  0(154),                           { space for page read CCWs, etc    }
+{x2280}  x'41c00228',         { la    12,x'228'     * set up base address     }
+{x2284}  x'89c00004',         { sll   12,4          * generates x2280         }
+{x2288}  x'581000b8',         { l     1,184(0)      * get IPL subsystem ID    }
+{x228c}  x'41200008',         { la    2,8           * make EC mode PSW        }
+{x2290}  x'89200010',         { sll   2,16          * generates x80000        }
+{x2294}  x'41300018',         { la    3,x'18'       * make entry address      }
+{x2298}  x'89300008',         { sll   3,8           * generates x1800         }
+{x229c}  x'90230078',         { stm   2,3,120(0)    * set I/O interrupt addr  }
+{x22a0}  x'4120c110',         { la    2,schib       * get SCHIB address       }
+{x22a4}  x'b2342000',         { stsch 0(2)          * get subchannel info     }
+{x22a8}  x'58320004',         { l     3,4(2)        * get enable bit          }
+{x22ac}  x'5630c10c',         { o     3,=x'00800000'* set enable bit          }
+{x22b0}  x'50320004',         { st    3,4(2)        * put back in SCHIB       }
+{x22b4}  x'b2322000',         { msch  0(2)          * enable subchannel       }
+{x22b8}  x'b766c144',         { lctl  6,6,cr6       * allow interrupts        }
+{x22bc}  x'4120c100',         { la    2,orb         * get ORB address         }
+{x22c0}  x'b2332000',         { ssch  0(2)          * start subchannel        }
+{x22c4}  x'8200c148',         { lpsw  wpsw          * wait for interrupt      }
+{x22c8}  0(46),               { *** padding and patch area ***                }
+{x2380}  x'00000000',         { ORB interruption parameter - not used         }
+{x2384}  x'0000ff00',         { ORB flags - all LPM bits set                  }
+{x2388}  x'00002018',         { ORB CCW address - chain to read CHOPSUPE      }
+{x238c}  x'00800000',         { literal - enable bit for SCHIB                }
+{x2390}  0(13),               { SCHIB                                         }
+{x23c4}  x'ff000000',         { CR6 - allow interrupts                        }
+{x23c8}  x'020a0000',         { PSW word 0 - EC mode, allow I/O ints, wait    }
+{x23cc}  x'00000000',         { PSW word 1 - not relevant when waiting        }
+{x23d0}  0(780)               { padding for rest of page                      }
+%else
+%ownintegerarray ipl rec(0:5) = %c
+{x0000}  x'00080000',x'00001800',          { PSW, EC mode }
+{x0008}  x'02002000',x'60001000',          { CCW block to x2000 }
+{x0010}  x'08002000',x'00000000'           { transfer-in-channel to x2000 }
+%constantinteger ccwlen = 136
+%ownintegerarray ccws(1:ccwlen) = %c
+{x2000}  x'3f000000',x'60000001',          { skip over TM }
+{x2008}  x'02001000',x'70001000',          { read & skip data IPL block }
+{x2010}  x'02001000',x'40001000',          { CCWs & entry code }
+{x2018}  x'02008000',x'40001000',          { CHOPSUPE page 1 }
+{x2020}  0(*)                              { ..pages 2 - 64.. }
+%finish
+%ownbyteintegerarray zero(1:epagesize) = 0(*)
+!
+!
+!***********************************************************************
+!*
+!*          Service routines
+!*
+!***********************************************************************
+!
+%routine clearstream(%integer chan)
+! Clears  out  a  channel  definition, but does not give an error if the
+! channel was not defined.
+%record(fdf)%name f
+!
+%if mapssfd(chan) # 0 %then %start
+   f == record(mapssfd(chan))
+   %if f_status = 0 %then %start
+      mapssfd(chan) = 0
+      f_dsnum = 0;                      ! Mark descriptor as free
+   %finish
+%finish
+%end;   ! of clearstream
+!
+!-----------------------------------------------------------------------
+!
+%routine closestream(%integer chan)
+! Private version of 'closestream'.  Does  not  give  an  error  if  the
+! operation fails.
+%integer flag
+!
+%return %unless instream # chan # outstream
+flag = iocp(16,chan)
+%end;   ! of closestream
+!
+!-----------------------------------------------------------------------
+!
+%routine fixuser(%stringname s,%integer sep)
+! Ensures  that  a  default user name is attached to the filename 's' if
+! one is not present. 'sep' is the separator ('.' or ':').
+%if length(s) < 8 %or charno(s,7) # sep %then %start
+   s <- uinfs(1).tostring(sep).s
+%finish
+%end;   ! of fixuser
+!
+!-----------------------------------------------------------------------
+!
+%routine readline(%stringname s)
+%integer c
+!
+s = ""
+%cycle
+   %cycle
+      readsymbol(c)
+      %exit %if c = nl
+      s <- s.tostring(c)
+   %repeat
+   %while length(s) > 0 %and charno(s,length(s)) = ' ' %cycle
+      length(s) = length(s) - 1
+   %repeat
+   %exit %unless s = ""
+%repeat
+uctranslate(addr(s)+1,length(s))
+%end;   ! of readline
+!
+!-----------------------------------------------------------------------
+!
+%routine warn(%string(255) s)
+! Outputs a warning message to the listing file and to .OUT.
+%integer i
+!
+%for i = 0,1,1 %cycle
+   printstring(s)
+   newline
+   selectoutput(0)
+%repeat
+selectoutput(listchan)
+%end;   ! of warn
+!
+!-----------------------------------------------------------------------
+!
+%integerfunction write site(%record(rf)%name rr,%integer maxpages)
+! Writes  one  site  to  the tape, using the file described by 'rr'. The
+! site is padded to 'maxpages' by writing zero pages.
+%integer i,flag,len,ptr,pages,conad,extra
+!
+conad = rr_conad
+%if rr_datastart = epagesize %then %start
+   conad = conad + epagesize
+   extra = 0
+%else
+   extra = 32
+%finish
+ptr = conad
+pages = (rr_dataend - rr_datastart + extra + epagesize - 1)//epagesize
+!
+%for i = 1,1,maxpages %cycle
+   len = epagesize
+   writemag(tapechan,ptr,len,flag)
+   -> err %if flag # 0
+   blocks = blocks + 1
+   %if i < pages %then ptr = ptr + epagesize %else ptr = addr(zero(1))
+%repeat
+!
+syspages = syspages + maxpages
+!
+err:
+!
+%result = flag
+%end;   ! of write site
+!
+!-----------------------------------------------------------------------
+!
+%integerfunction write zeros(%integer pages)
+! Writes 'pages' zero pages to the tape.
+%integer i,len,flag
+!
+%for i = 1,1,pages %cycle
+   len = epagesize
+   writemag(tapechan,addr(zero(1)),len,flag)
+   -> err %if flag # 0
+   blocks = blocks + 1
+%repeat
+!
+syspages = syspages + pages
+!
+err:
+!
+%result = flag
+%end;   ! of write zeros
+!
+!
+!***********************************************************************
+!*
+!*          W T I P L
+!*
+!***********************************************************************
+!
+%externalroutine wtipl(%string(255) parms)
+%integer flag,flag2,i,ptr,tape claimed,totpages,afd,pd,conad,epages,remainder
+%integer chapter,ad,nbytes,groupn
+%string(6) tape,user,outuser
+%string(31) file,listing
+%string(127) outname,output,work,line
+%string(11)%array groups(1:max gats)
+%record(frf) fr
+%record(rf) rr
+%record(gatsf)%name g
+%record(hf)%name h
+%record(hpf)%name hp
+%byteintegerarray buf(1:epagesize)
+!
+printstring(vsn); newline
+!
+ad = addr(buf(1))
+hp == record(ad)
+tape claimed = no
+!
+setpar(parms)
+%if parmap > 3 %then %start
+   flag = 263;                          ! Wrong number of parameters
+   -> err
+%finish
+!
+tape <- spar(1)
+%if tape = "" %then %start
+   prompt("Tape name: ")
+   readline(tape)
+%finish
+%if length(tape) # 6 %then %start
+   setfname(tape)
+   flag = 202;                          ! Invalid parameter
+   -> err
+%finish
+askmag(tapechan,tape."*",flag)
+%if flag # 0 %then %start
+   setfname("Failed to claim tape")
+   flag = 233;                          ! General error
+   -> err
+%finish
+tape claimed = yes
+!
+listing <- spar(2)
+listing = "T#LIST" %if listing = ""
+define(listchan,listing,afd,flag)
+-> err %if flag # 0
+selectoutput(listchan)
+newlines(3)
+spaces(9)
+printstring("EMAS/370 IPL/transfer tape ".tape." written on ".date." at ".time)
+newline
+spaces(9)
+printstring("=================================================================")
+newlines(2)
+printstring("  Chapter     Pages         Source file                       Destination file")
+printch(cr)
+printstring("  _______     _____         ______ ____                       ________________")
+newlines(2)
+!
+skipmag(tapechan,1);                    ! Skip over VOL1 label
+blocks = 1
+!
+! Write the 24 byte IPL record
+!
+writemag(tapechan,addr(ipl rec(0)),24,flag)
+-> werr %if flag # 0
+blocks = blocks + 1
+!
+! Set up and write the CCW/TIPL block
+!
+ptr = x'8000'
+%for i = 0,2,63*2 %cycle;               ! 64 blocks
+   ccws(i+7) = x'02000000'!ptr
+   ccws(i+8) = x'40001000'
+   ptr = ptr + epagesize
+   %if xa = no %then %start
+      ptr = x'21000' %if ptr = x'20000';! Gap for VM IPL simulator
+   %finish
+%repeat
+ccws(i+9) = x'07000000';                ! Rewind
+ccws(i+10) = x'20000001'
+writemag(tapechan,addr(ccws(1)),ccwlen*4,flag)
+-> werr %if flag # 0
+blocks = blocks + 1
+!
+! Signal the start of the system image by writing a tape mark
+!
+writetmmag(tapechan,flag)
+-> werr %if flag # 0
+blocks = blocks + 1
+!
+! Write the CHOPSUPE file (X40 pages)
+!
+prompt("CHOPSUPE file: ")
+readline(file)
+-> endsys %if file = ".END"
+%if file = "*" %then %start
+   flag = write zeros(x'40')
+%else
+   connect(file,1,0,0,rr,flag)
+   -> err %if flag # 0
+   flag = write site(rr,x'40')
+   disconnect(file,flag2)
+%finish
+-> werr %if flag # 0
+!
+! Write the first Supervisor site (X40 pages)
+!
+prompt("Sup file (X40): ")
+readline(file)
+-> endsys %if file = ".END"
+%if file = "*" %then %start
+   flag = write zeros(x'40')
+%else
+   connect(file,1,0,0,rr,flag)
+   -> err %if flag # 0
+   flag = write site(rr,x'40')
+   disconnect(file,flag2)
+%finish
+-> werr %if flag # 0
+!
+! Write the second Supervisor site (X40 pages)
+!
+prompt("Sup file (X80): ")
+readline(file)
+-> endsys %if file = ".END"
+%if file = "*" %then %start
+   flag = write zeros(x'40')
+%else
+   connect(file,1,0,0,rr,flag)
+   -> err %if flag # 0
+   flag = write site(rr,x'40')
+   disconnect(file,flag2)
+%finish
+-> werr %if flag # 0
+!
+! Write dummy areas to all other Supervisor sites
+!
+flag = write zeros(x'40'*5)
+-> werr %if flag # 0
+!
+! Write the first Director site (X80 pages)
+!
+prompt("Director (vsn 0): ")
+readline(file)
+-> endsys %if file = ".END"
+%if file = "*" %then %start
+   flag = write zeros(x'80')
+%else
+   connect(file,1,0,0,rr,flag)
+   -> err %if flag # 0
+   flag = write site(rr,x'80')
+   disconnect(file,flag2)
+%finish
+-> werr %if flag # 0
+!
+! Write the second Director site (X80 pages)
+!
+prompt("Director (vsn 1): ")
+readline(file)
+-> endsys %if file = ".END"
+%if file = "*" %then %start
+   flag = write zeros(x'80')
+%else
+   connect(file,1,0,0,rr,flag)
+   -> err %if flag # 0
+   flag = write site(rr,x'80')
+   disconnect(file,flag2)
+%finish
+-> werr %if flag # 0
+!
+! Write the third Director site (X80 pages)
+!
+prompt("Director (vsn 2): ")
+readline(file)
+-> endsys %if file = ".END"
+%if file = "*" %then %start
+   flag = write zeros(x'80')
+%else
+   connect(file,1,0,0,rr,flag)
+   -> err %if flag # 0
+   flag = write site(rr,x'80')
+   disconnect(file,flag2)
+%finish
+-> werr %if flag # 0
+!
+! Write the fourth Director site (X80 pages)
+!
+prompt("Director (vsn 3): ")
+readline(file)
+-> endsys %if file = ".END"
+%if file = "*" %then %start
+   flag = write zeros(x'80')
+%else
+   connect(file,1,0,0,rr,flag)
+   -> err %if flag # 0
+   flag = write site(rr,x'80')
+   disconnect(file,flag2)
+%finish
+-> werr %if flag # 0
+!
+! Write the VOLUMS basefile (X80 pages)
+!
+prompt("VOLUMS file: ")
+readline(file)
+-> endsys %if file = ".END"
+%if file = "*" %then %start
+   flag = write zeros(x'80')
+%else
+   connect(file,1,0,0,rr,flag)
+   -> err %if flag # 0
+   flag = write site(rr,x'80')
+   disconnect(file,flag2)
+%finish
+-> werr %if flag # 0
+!
+! Write the SPOOLR basefile (X80 pages)
+!
+prompt("SPOOLR file: ")
+readline(file)
+-> endsys %if file = ".END"
+%if file = "*" %then %start
+   flag = write zeros(x'80')
+%else
+   connect(file,1,0,0,rr,flag)
+   -> err %if flag # 0
+   flag = write site(rr,x'80')
+   disconnect(file,flag2)
+%finish
+-> werr %if flag # 0
+!
+! Write the MAILER basefile (X80 pages)
+!
+prompt("MAILER file: ")
+readline(file)
+-> endsys %if file = ".END"
+%if file = "*" %then %start
+   flag = write zeros(x'80')
+%else
+   connect(file,1,0,0,rr,flag)
+   -> err %if flag # 0
+   flag = write site(rr,x'80')
+   disconnect(file,flag2)
+%finish
+-> werr %if flag # 0
+!
+! Write the FTRANS basefile (X80 pages)
+!
+prompt("FTRANS file: ")
+readline(file)
+-> endsys %if file = ".END"
+%if file = "*" %then %start
+   flag = write zeros(x'80')
+%else
+   connect(file,1,0,0,rr,flag)
+   -> err %if flag # 0
+   flag = write site(rr,x'80')
+   disconnect(file,flag2)
+%finish
+-> werr %if flag # 0
+!
+! Write the Subsystem basefile (X100 pages)
+!
+prompt("Subsys file: ")
+readline(file)
+-> endsys %if file = ".END"
+%if file = "*" %then %start
+   flag = write zeros(x'100')
+%else
+   connect(file,1,0,0,rr,flag)
+   -> err %if flag # 0
+   flag = write site(rr,x'100')
+   disconnect(file,flag2)
+%finish
+-> werr %if flag # 0
+!
+! Pad out the system image if necessary
+!
+endsys:
+!
+%if syspages # maxsyspages %then %start
+   flag = write zeros(maxsyspages-syspages)
+   -> werr %if flag # 0
+%finish
+!
+! Signal the end of the system image by writing a tape mark
+!
+writetmmag(tapechan,flag)
+-> werr %if flag # 0
+blocks = blocks + 1
+!
+! Update the log file
+!
+chapter = 1
+write(chapter,6)
+spaces(6)
+write(syspages,4)
+spaces(10)
+printstring("****************** System image ******************")
+newline
+!
+totpages = syspages;                    ! So far
+!
+! Write any requested files onto the tape in standard EMAS-3 TRANSFER format
+!
+prompt("User file: ")
+%cycle
+   readline(line)
+   %exit %if line = ".END"
+   %if charno(line,length(line)) = ')' %then %start
+      length(line) = length(line) - 1
+      %unless line -> file.("(").output %then %start
+         line = line.")"
+         warn("Warning - Invalid format line - ".line)
+         %continue
+      %finish
+      fixuser(output,':')
+   %else
+      file = line
+      output = line
+      fixuser(output,'.')
+      charno(output,7) = ':'
+   %finish
+   %if output -> user.(":").line.("_").work %then %start
+                                        ! Remove any pdfile name
+      output = user.":".work
+   %finish
+   fixuser(file,'.')
+   %if file -> line.("_") %then %start
+      pd = yes
+   %else
+      line = file
+      pd = no
+   %finish
+   finfo(line,1,fr,flag)
+   %if flag = 0 %then %start
+      connect(file,1,0,0,rr,flag)
+   %finish
+   %if flag # 0 %then %start
+      warn("Warning -".failuremessage(flag))
+      %continue
+   %finish
+   conad = rr_conad
+   h == record(conad)
+   epages = (h_dataend+epagesize-1)//epagesize
+   remainder = h_dataend - (epages-1)*epagesize
+                                        ! Length of information in last epage
+   !
+   ! Set up header page
+   !
+   groupn = 0
+   chapter = chapter + 1
+   line = output
+   outuser = substring(output,1,6)
+   output = substring(output,8,length(output))
+   %while output -> work.(".").outname %cycle
+      %if groupn = max gats %then %start
+         warn("Warning - too many groups in ".line)
+         %exit
+      %finish
+      groupn = groupn + 1
+      groups(groupn) = work
+      output = outname
+   %repeat
+   outname = output
+   !
+   fill(epagesize,ad,0);                ! Clear page
+   hp_tapename = tape
+   hp_username = outuser
+   hp_filename = outname
+   hp_date = date
+   hp_time = time
+   hp_type = "TRANSFER"
+   hp_chapter = chapter
+   hp_epages = epages
+   hp_fsys = -1
+   hp_perms = 1;                        ! Permissions are included
+   hp_ownp = fr_rup;                    ! Take from input file
+   hp_eep = fr_eep;                     ! Take from input file
+   hp_arch = fr_arch
+   hp_codes = cherished
+   hp_ssbyte = 0
+   hp_cct = 0
+   hp_check pages = 0
+   hp_groups = groupn
+   %for i = 1,1,groupn %cycle
+      g == hp_gatsa(i)
+      g_name = groups(i)
+      g_codes = cherished
+      g_perms_ownp = 7
+      g_perms_eep = 5
+      g_perms_bytes returned = 16
+   %repeat
+   hp_records = 0
+   hp_offered to = ""
+   hp_emas vsn = "EMAS3"
+   hp_file index = ""
+   !
+   ! Write the header page
+   !
+   writemag(tapechan,ad,epagesize,flag)
+   -> werr %if flag # 0
+   blocks = blocks + 1
+   !
+   ! Write the file itself
+   !
+   %for i = 1,1,epages %cycle
+      %if i = epages %and remainder # 0 %and pd = yes %then %start
+         nbytes = remainder;            ! Last and incomplete page of pdfile member
+         fill(epagesize,ad,0);          ! Clear buffer page
+      %finish %else nbytes = epagesize
+      move(nbytes,conad+epagesize*(i-1),ad)
+      writemag(tapechan,ad,epagesize,flag)
+      -> werr %if flag # 0
+      blocks = blocks + 1
+   %repeat
+   !
+   ! Write a tapemark to terminate the file
+   !
+   writetmmag(tapechan,flag)
+   -> werr %if flag # 0
+   blocks = blocks + 1
+   !
+   write(chapter,6)
+   spaces(6)
+   write(epages,4)
+   spaces(10)
+   printstring(file)
+   spaces(62-outpos)
+   printstring(outuser.":")
+   printstring(groups(i).".") %for i = 1,1,groupn
+   printstring(output)
+   newline
+   disconnect(file,flag2)
+   totpages = totpages + epages + 1;    ! Allow for header page
+%repeat
+!
+! Write a tapemark to terminate the tape
+!
+writetmmag(tapechan,flag)
+-> werr %if flag # 0
+blocks = blocks + 1
+!
+unloadmag(tapechan)
+!
+newlines(2)
+%for i = 0,1,1 %cycle
+   printstring("Total pages: ".itos(totpages))
+   newline
+   selectoutput(0)
+%repeat
+printstring("EMAS-3 IPL/transfer tape written OK")
+newline
+closestream(listchan)
+clearstream(listchan)
+set return code(0)
+%return
+!
+werr:
+!
+setfname("Tape write error after ".itos(blocks)." blocks")
+flag = 233;                             ! General error
+!
+err:
+!
+unloadmag(tapechan) %if tape claimed = yes
+selectoutput(0)
+closestream(listchan)
+clearstream(listchan)
+newline
+printstring("WTIPL fails -".failuremessage(flag))
+set return code(flag)
+%stop
+%end;   ! of WTIPL
+%endoffile
+

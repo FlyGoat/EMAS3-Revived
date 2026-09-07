@@ -1,0 +1,80 @@
+
+{ Instruction formats }
+
+%constinteger RR    = 1, RRE  = 2, RS = 3, RX  = 4,
+              SPROP = 5,  SI  = 6, SS = 7, SSE = 8
+
+
+%constinteger InsForm = X'F',
+              SSVar   = X'30'
+
+%constintegerarray Props(0:255) = 0,
+ {  1}        0,           0,           0,          RR,          RR,
+ {  6}       RR,          RR,          RR,          RR,          RR,
+ {  B}       RR,          RR,          RR,          RR,          RR,
+ { 10}       RR,          RR,          RR,          RR,          RR,
+ { 15}       RR,          RR,          RR,          RR,          RR,
+ { 1A}       RR,          RR,          RR,          RR,          RR,
+ { 1F}       RR,          RR,          RR,          RR,          RR,
+ { 24}       RR,          RR,          RR,          RR,          RR,
+ { 29}       RR,          RR,          RR,          RR,          RR,
+ { 2E}       RR,          RR,          RR,          RR,          RR,
+ { 33}       RR,          RR,          RR,          RR,          RR,
+ { 38}       RR,          RR,          RR,          RR,          RR,
+ { 3D}       RR,          RR,          RR,          RX,          RX,
+ { 42}       RX,          RX,          RX,          RX,          RX,
+ { 47}       RX,          RX,          RX,          RX,          RX,
+ { 4C}       RX,          RX,          RX,          RX,          RX,
+ { 51}        0,           0,           0,          RX,          RX,
+ { 56}       RX,          RX,          RX,          RX,          RX,
+ { 5B}       RX,          RX,          RX,          RX,          RX,
+ { 60}       RX,           0,           0,           0,           0,
+ { 65}        0,           0,          RX,          RX,          RX,
+ { 6A}       RX,          RX,          RX,          RX,          RX,
+ { 6F}       RX,          RX,           0,           0,           0,
+ { 74}        0,           0,           0,           0,          RX,
+ { 79}       RX,          RX,          RX,          RX,          RX,
+ { 7E}       RX,          RX,       SPROP,           0,       SPROP,
+ { 83}        0,           0,           0,          RS,          RS,
+ { 88}       RS,          RS,          RS,          RS,          RS,
+ { 8D}       RS,          RS,          RS,          RS,          SI,
+ { 92}       SI,       SPROP,          SI,          SI,          SI,
+ { 97}       SI,          RS,          RS,           0,           0,
+ { 9C}        0,           0,           0,           0,           0,
+ { A1}        0,           0,           0,           0,           0,
+ { A6}        0,           0,           0,           0,           0,
+ { AB}        0,          SI,          SI,          RS,          SI,
+ { B0}        0,          RX,           0,           0,           0,
+ { B5}        0,          RS,          RS,           0,           0,
+ { BA}       RS,          RS,           0,          RS,          RS,
+ { BF}       RS,           0,           0,           0,           0,
+ { C4}        0,           0,           0,           0,           0,
+ { C9}        0,           0,           0,           0,           0,
+ { CE}        0,           0,           0,          SS,          SS,
+ { D3}       SS,          SS,          SS,          SS,          SS,
+ { D8}        0,          SS,          SS,          SS,          SS,
+ { DD}       SS,          SS,          SS,           0,           0,
+ { E2}        0,           0,           0,           0,           0,
+ { E7}        0,           0,           0,           0,           0,
+ { EC}        0,           0,           0,           0,          SS,
+ { F1}       SS,          SS,          SS,           0,           0,
+ { F6}        0,           0,          SS,          SS,          SS,
+ { FB}       SS,          SS,          SS,           0,           0
+
+
+%constintegerarray EXPROPS(0:60) =
+{ 00}          0,           0,       SPROP,      SPROP,       SPROP,
+{ 05}      SPROP,       SPROP,       SPROP,      SPROP,       SPROP,
+{ 0A}      SPROP,       SPROP,           0,      SPROP,           0,
+{ 0F}          0,       SPROP,       SPROP,      SPROP,       SPROP,
+{ 14}          0,           0,           0,          0,       SPROP,
+{ 19}      SPROP,           0,           0,          0,           0,
+{ 1E}          0,           0,           0,        RRE,         RRE,
+{ 23}        RRE,         RRE,         RRE,        RRE,         RRE,
+{ 28}        RRE,         RRE,         RRE,        RRE,         RRE,
+{ 2D}        RRE,           0,           0,      SPROP,       SPROP,
+{ 32}      SPROP,       SPROP,       SPROP,      SPROP,       SPROP,
+{ 37}      SPROP,       SPROP,       SPROP,      SPROP,       SPROP,
+{ 3C}      SPROP
+%endoffile
+

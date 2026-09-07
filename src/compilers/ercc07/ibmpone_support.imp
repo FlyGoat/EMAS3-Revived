@@ -1,0 +1,159 @@
+%CONSTSTRING(5)%ARRAY QCODES(0:235)="",
+{START OF 10 ONE REGISTER (UCNOPS) INSTRUCTIONS}
+      "SPM"{=X'04'},"SVC"{=X'0A'},"IPM"{=X'B222'},"IAC"{=X'B224'},
+      "SSAR"{=X'B225'},"EPAR"{=X'B226'},"ESAR"{=X'B227'},"USING"{=X'FF01'},
+      "DROP"{=X'FF02'},""{=0},
+{START OF 66 RR AND RRE (UCUB) INSTRUCTIONS}
+      "BALR"{=X'05'},"BCTR"{=X'06'},"BCR"{=X'07'},"SSK"{=X'08'},
+      "ISK"{=X'09'},"BSM"{=X'0B'},"BASSM"{=X'0C'},"BASR"{=X'0D'},
+      "MVCL"{=X'0E'},"CLCL"{=X'0F'},"LPR"{=X'10'},"LNR"{=X'11'},
+      "LTR"{=X'12'},"LCR"{=X'13'},"NR"{=X'14'},"CLR"{=X'15'},
+      "OR"{=X'16'},"XR"{=X'17'},"LR"{=X'18'},"CR"{=X'19'},
+      "AR"{=X'1A'},"SR"{=X'1B'},"MR"{=X'1C'},"DR"{=X'1D'},
+      "ALR"{=X'1E'},"SLR"{=X'1F'},"LPDR"{=X'20'},"LNDR"{=X'21'},
+      "LTDR"{=X'22'},"LCDR"{=X'23'},"HDR"{=X'24'},"LRDR"{=X'25'},
+      "MXR"{=X'26'},"MXDR"{=X'27'},"LDR"{=X'28'},"CDR"{=X'29'},
+      "ADR"{=X'2A'},"SDR"{=X'2B'},"MDR"{=X'2C'},"DDR"{=X'2D'},
+      "AWR"{=X'2E'},"SWR"{=X'2F'},"LPER"{=X'30'},"LNER"{=X'31'},
+      "LTER"{=X'32'},"LCER"{=X'33'},"HER"{=X'34'},"LRER"{=X'35'},
+      "AXR"{=X'36'},"SXR"{=X'37'},"LER"{=X'38'},"CER"{=X'39'},
+      "AER"{=X'3A'},"SER"{=X'3B'},"MER"{=X'3C'},"DER"{=X'3D'},
+      "AUR"{=X'3E'},"SUR"{=X'3F'},"IPTE"{=X'B221'},"IVSK"{=X'B223'},
+      "PT"{=X'B228'},"ISKE"{=X'B229'},"RRBE"{=X'B22A'},"SSKE"{=X'B22B'},
+      "TB"{=X'B22C'},"DXR"{=X'B22D'},
+{START OF 56 RX (UCSB) INSTRUCTIONS}
+      "STH"{=X'40'},"LA"{=X'41'},"STC"{=X'42'},"IC"{=X'43'},
+      "EX"{=X'44'},"BCT"{=X'46'},"BC"{=X'47'},"LH"{=X'48'},
+      "CH"{=X'49'},"AH"{=X'4A'},"SH"{=X'4B'},"MH"{=X'4C'},
+      "BAS"{=X'4D'},"CVD"{=X'4E'},"CVB"{=X'4F'},"ST"{=X'50'},
+      "N"{=X'54'},"CL"{=X'55'},"O"{=X'56'},"X"{=X'57'},
+      "L"{=X'58'},"C"{=X'59'},"A"{=X'5A'},"S"{=X'5B'},
+      "M"{=X'5C'},"D"{=X'5D'},"AL"{=X'5E'},"SL"{=X'5F'},
+      "STD"{=X'60'},"MXD"{=X'67'},"LD"{=X'68'},"CD"{=X'69'},
+      "AD"{=X'6A'},"SD"{=X'6B'},"MD"{=X'6C'},"DD"{=X'6D'},
+      "AW"{=X'6E'},"SW"{=X'6F'},"STE"{=X'70'},"LE"{=X'78'},
+      "CE"{=X'79'},"AE"{=X'7A'},"SE"{=X'7B'},"ME"{=X'7C'},
+      "DE"{=X'7D'},"AU"{=X'7E'},"SU"{=X'7F'},"LRA"{=X'B1'},
+      "SRL"{=X'88'},"SLL"{=X'89'},"SRA"{=X'8A'},"SLA"{=X'8B'},
+      "SRDL"{=X'8C'},"SLDL"{=X'8D'},"SRDA"{=X'8E'},"SLDA"{=X'8F'},
+{START OF 13 RS (UCW) INSTRUCTIONS}
+      "BXH"{=X'86'},"BXLE"{=X'87'},"STM"{=X'90'},"LM"{=X'98'},
+      "TRACE"{=X'99'},"SIGP"{=X'AE'},"STCTL"{=X'B6'},"LCTL"{=X'B7'},
+      "CS"{=X'BA'},"CDS"{=X'BB'},"CLM"{=X'BD'},"STCM"{=X'BE'},
+      "ICM"{=X'BF'},
+{START OF 52 SI AND S (UCUBUB) INSTRUCTIONS }
+      "TM"{=X'91'},"MVI"{=X'92'},"NI"{=X'94'},"CLI"{=X'95'},
+      "OI"{=X'96'},"XI"{=X'97'},"STNSM"{=X'AC'},"STOSM"{=X'AD'},
+      "MC"{=X'AF'},"SSM"{=X'80'},"LPSW"{=X'82'},"TS"{=X'93'},
+      "SIO"{=X'9C00'},"SIOF"{=X'9C01'},"RIO"{=X'9C02'},"TIO"{=X'9D00'},
+      "HIO"{=X'9E00'},"HDV"{=X'9E01'},"TCH"{=X'9F00'},"STIDP"{=X'B202'},
+      "STIDC"{=X'B203'},"SCK"{=X'B204'},"STCK"{=X'B205'},"SCKC"{=X'B206'},
+      "STCKC"{=X'B207'},"SPT"{=X'B208'},"STPT"{=X'B209'},"SPKA"{=X'B20A'},
+      "IPK"{=X'B20B'},"PTLB"{=X'B20D'},"SPX"{=X'B210'},"STPX"{=X'B211'},
+      "STAP"{=X'B212'},"RRB"{=X'B213'},"SIE"{=X'B214'},"PC"{=X'B218'},
+      "SAC"{=X'B219'},"CSCH"{=X'B230'},"HSCH"{=X'B231'},"MSCH"{=X'B232'},
+      "SSCH"{=X'B233'},"STSCH"{=X'B234'},"TSCH"{=X'B235'},"TPI"{=X'B236'},
+      "SAL"{=X'B237'},"RSCH"{=X'B238'},"STCRW"{=X'B239'},"STCPS"{=X'B23A'},
+      "RCHP"{=X'B23B'},"SCHM"{=X'B23C'},"PPG"{=X'B2F0'},"PSU"{=X'B2F1'},
+{START OF 25 SS(ALL FORMS) AND SSE INSTRUCTIONS (UCUBW)}
+      "MVC"{=X'D2'},"MVZ"{=X'D3'},"NC"{=X'D4'},"CLC"{=X'D5'},
+      "OC"{=X'D6'},"XC"{=X'D7'},"MVCK"{=X'D9'},"MVCP"{=X'DA'},
+      "MVCS"{=X'DB'},"TR"{=X'DC'},"TRT"{=X'DD'},"ED"{=X'DE'},
+      "EDMK"{=X'DF'},"LASP"{=X'E500'},"TPROT"{=X'E501'},"SRP"{=X'F0'},
+      "MVO"{=X'F1'},"PACK"{=X'F2'},"UNPK"{=X'F3'},"ZAP"{=X'F8'},
+      "CP"{=X'F9'},"AP"{=X'FA'},"SP"{=X'FB'},"MP"{=X'FC'},
+      "DP"{=X'FD'},
+{START OF 8 JUMP (UCJUMP) INSTRUCTIONS}
+      "LA"{=X'41'},"EX"{=X'44'},"BAL"{=X'45'},"BCT"{=X'46'},
+      "BC"{=X'47'},"BAS"{=X'4D'},"BXH"{=X'86'},"BXLE"{=X'87'},""{=X'0'}(*);
+%CONSTHALFINTEGERARRAY OPC(0:235)=0,
+{START OF 10 ONE REGISTER (UCNOPS) INSTRUCTIONS}
+      X'04',X'0A',X'B222',X'B224',
+      X'B225',X'B226',X'B227',X'FF01',
+      X'FF02',0,
+{START OF 66 RR AND RRE (UCUB) INSTRUCTIONS}
+      X'05',X'06',X'07',X'08',
+      X'09',X'0B',X'0C',X'0D',
+      X'0E',X'0F',X'10',X'11',
+      X'12',X'13',X'14',X'15',
+      X'16',X'17',X'18',X'19',
+      X'1A',X'1B',X'1C',X'1D',
+      X'1E',X'1F',X'20',X'21',
+      X'22',X'23',X'24',X'25',
+      X'26',X'27',X'28',X'29',
+      X'2A',X'2B',X'2C',X'2D',
+      X'2E',X'2F',X'30',X'31',
+      X'32',X'33',X'34',X'35',
+      X'36',X'37',X'38',X'39',
+      X'3A',X'3B',X'3C',X'3D',
+      X'3E',X'3F',X'B221',X'B223',
+      X'B228',X'B229',X'B22A',X'B22B',
+      X'B22C',X'B22D',
+{START OF 56 RX (UCSB) INSTRUCTIONS}
+      X'40',X'41',X'42',X'43',
+      X'44',X'46',X'47',X'48',
+      X'49',X'4A',X'4B',X'4C',
+      X'4D',X'4E',X'4F',X'50',
+      X'54',X'55',X'56',X'57',
+      X'58',X'59',X'5A',X'5B',
+      X'5C',X'5D',X'5E',X'5F',
+      X'60',X'67',X'68',X'69',
+      X'6A',X'6B',X'6C',X'6D',
+      X'6E',X'6F',X'70',X'78',
+      X'79',X'7A',X'7B',X'7C',
+      X'7D',X'7E',X'7F',X'B1',
+      X'88',X'89',X'8A',X'8B',
+      X'8C',X'8D',X'8E',X'8F',
+{START OF 13 RS (UCW) INSTRUCTIONS}
+      X'86',X'87',X'90',X'98',
+      X'99',X'AE',X'B6',X'B7',
+      X'BA',X'BB',X'BD',X'BE',
+      X'BF',
+{START OF 52 SI AND S (UCUBUB) INSTRUCTIONS }
+      X'91',X'92',X'94',X'95',
+      X'96',X'97',X'AC',X'AD',
+      X'AF',X'80',X'82',X'93',
+      X'9C00',X'9C01',X'9C02',X'9D00',
+      X'9E00',X'9E01',X'9F00',X'B202',
+      X'B203',X'B204',X'B205',X'B206',
+      X'B207',X'B208',X'B209',X'B20A',
+      X'B20B',X'B20D',X'B210',X'B211',
+      X'B212',X'B213',X'B214',X'B218',
+      X'B219',X'B230',X'B231',X'B232',
+      X'B233',X'B234',X'B235',X'B236',
+      X'B237',X'B238',X'B239',X'B23A',
+      X'B23B',X'B23C',X'B2F0',X'B2F1',
+{START OF 25 SS(ALL FORMS) AND SSE INSTRUCTIONS (UCUBW)}
+      X'D2',X'D3',X'D4',X'D5',
+      X'D6',X'D7',X'D9',X'DA',
+      X'DB',X'DC',X'DD',X'DE',
+      X'DF',X'E500',X'E501',X'F0',
+      X'F1',X'F2',X'F3',X'F8',
+      X'F9',X'FA',X'FB',X'FC',
+      X'FD',
+{START OF 8 JUMP (UCJUMP) INSTRUCTIONS}
+      X'41',X'44',X'45',X'46',
+      X'47',X'4D',X'86',X'87',X'0'(*);
+!
+%CONSTINTEGER FIRST UCUB=11
+%CONSTINTEGER FIRST UCSB=FIRST UCUB+66
+%CONSTINTEGER FIRST UCW=FIRST UCSB+56
+%CONSTINTEGER FIRST UCUBUB=FIRST UCW+13
+%CONSTINTEGER FIRST UCUBW=FIRST UCUBUB+52
+%CONSTINTEGER FIRST UCJUMP=FIRST UCUBW+25
+%CONSTINTEGER LASTUC=FIRST UCJUMP+8
+%CONSTINTEGER LRLPT=X'62'
+%CONSTINTEGER NO OF SNS=66
+                                        ! THE SPECIAL NAMES ARE HERE  TO ALLOW
+                                        ! DIFFERENCES OF PRECISION BETWEEN COMPILERS
+                                        ! ESPECIAL THE MAPS HALF&SHORT
+%CONSTHALFINTEGERARRAY TSNAME (0:NO OF SNS)=X'1000'(8),
+               X'1051',X'1000'(5),X'1051',X'1000'+LRLPT,
+               X'1051'(2),X'1000'+LRLPT,
+               X'1000'(2),X'52',X'51',LRLPT,X'1000'+LRLPT(7),
+               X'1000',X'31',X'51',X'1000'+LRLPT(2),X'31',X'1000',
+                X'4051',LRLPT,X'1000'(2),X'35',X'1000',X'1035',
+                X'31',X'35',X'1035',X'33',0,X'1051',X'51',X'4052',X'51',
+                X'61',X'72',X'61',X'72',X'51',LRLPT,X'1051',X'51',
+               X'1000',LRLPT,X'1061'(2),X'41';
+! %END OF FILE IBMPONEAS IBM TARGET DEPENDENT TABLES

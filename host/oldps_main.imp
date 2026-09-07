@@ -1,0 +1,9 @@
+! SPDX-License-Identifier: MIT
+! Copyright (c) 2026 Jiaxun Yang <jiaxun.yang@flygoat.com>
+
+%externalroutinespec OLDPS(%string(63) Parameters)
+%externalroutinespec DEFINE(%string(63) Definition)
+%begin
+  DEFINE("ST99,diagnostics.txt")
+  OLDPS("grammar.dat,tables.imp,listing.txt")
+%endofprogram

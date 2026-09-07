@@ -1,0 +1,161 @@
+!
+! Chenge for enter3
+!    1) Changes to storef for larger AMTs
+!
+%include "ercc07:ibmsup_comf370"
+%include "ercc07:ibmsup_page0f"
+!
+%recordformat parmf(%integer dest,srce,p1,p2,p3,p4,p5,p6)
+!
+%routine sos;                           ! flash 'SOS' on system console lights
+%longinteger loop ext psw,wait ext psw,sos timer
+%constlonginteger sec=x'00000000f4240000'; ! 1 second
+%constlonginteger hsec=sec>>1;             ! half second
+%constlonginteger qsec=sec>>2
+%constlonginteger wpsw=psw0!x'0106000000000000'
+%integer i,count
+   sos timer=-1
+   *sckc_sos timer;                     ! maximum
+   *basr_15,0; *using_15
+   *la_0,<loopint>; *st_0,i; *la_0,<waitint>; *st_0,count; *drop_15
+   loop ext psw=psw0!i
+   wait ext psw=psw0!count
+   page0_ext new psw=loop ext psw
+   count=3
+s: sos timer=sec
+   *spt_sos timer
+   *stosm_i,1;                          ! allow external ints.
+   %cycle; %repeat
+o: sos timer=qsec
+   *spt_sos timer
+   *stosm_i,1
+   %cycle; %repeat
+loop int:
+   count=count-1
+   page0_ext new psw=wait ext psw
+   *spt_hsec
+   *lpsw_wpsw
+wait int:
+   page0_ext new psw=loop ext psw
+   %if count=0 %start;                  ! flip
+      count=3
+      %if sos timer=sec %then ->o %else ->s
+   %finish
+   %if sos timer=sec %then ->s %else ->o
+%end
+!
+%routine restart
+%externalroutinespec pdisc(%record(parmf)%name p)
+%routinespec accept disc ints
+%recordformat amtf(%integer da,%shortinteger ddp,users,link,
+      %byteinteger len,outs)
+%recordformat servaaf(%integer p,l)
+%recordformat storef(%shortinteger flags,users, %integer link,
+      %shortinteger blink,flink)
+%if xa=no %start
+      %constinteger maxamtak=32
+%else
+      %constinteger maxamtak=maxprocs//2
+%finish
+%constinteger amtflen=12
+%constrecord(amtf)%arrayname amta=amtaseg<<sshift+((maxamtak//64+1)*64-amtflen)
+%constrecord(servaaf)%arrayname serva=servaad
+%constrecord(storef)%arrayname store=store0ad
+%record(storef)%name st
+%record(parmf) p
+%integer i,amtx,epx,poffed,ponned,storex
+      accept disc ints;                 ! pageturn replies to outstanding ints.
+      poffed=0; ponned=0
+      %for storex=1,1,com_sepgs %cycle; ! writeout updated pages
+         st==store(storex)
+         %if st_users>0 %and st_flags&8#0 %start; ! written to
+            st_flags=st_flags&x'fff7';  ! unset
+            amtx=st_blink
+            epx=st_flink
+            p_dest=x'210002';           ! pdisc write
+            p_srce=x'80040005';         ! reply to pageturn writeout
+            p_p1=m'dump'
+            p_p2=amta(amtx)_da+epx
+            p_p3=storex*pagesize
+            pdisc(p)
+            ponned=ponned+1
+            %if ponned&15=0 %then accept disc ints
+         %finish
+      %repeat
+      %for i=1,1,100 %cycle;            ! await replies
+         accept disc ints
+         %exit %if poffed>=ponned
+      %repeat
+      sos;                              ! ad nauseum
+!
+      %routine accept disc ints
+         %externalroutinespec disc(%record(parmf)%name p)
+         %externalroutinespec suppoff(%record(servaaf)%name serv,%record(parmf)%name p)
+         %integerfnspec pint
+         %record(parmf) p
+         %integer i
+         %cycle
+            i=pint;                     ! take I/O int.
+            %exit %if i=0
+            p_p1=i;                     ! cuu
+            i=byteinteger(com_steer int+i)
+            %continue %unless i<128;    ! ignore unless disc slot
+            p_p4=i
+            p_dest=3
+            p_p2=page0_csw1
+            p_p3=page0_csw2
+            disc(p)
+         %repeat
+         %while serva(4)_p&x'ffffff'#0 %cycle;  ! page turn replies
+            suppoff(serva(4),p)
+            %if p_p1=m'dump' %then poffed=poffed+1
+         %repeat
+!
+         %integerfn pint
+            %integer i
+            *basr_15,0; *using_15
+            *la_0,<ioint>; *st_0,i; *drop_15
+            page0_io new psw=psw0!i
+            *stosm_i,2;                 ! allow I/O ints.
+            %for i=1,1,com_inspersec*3 %cycle;   ! 3*7 insts. = 20 msecs approx
+            %repeat
+            *stnsm_i,x'fd';             ! mask I/O ints.
+            %result=0
+         ioint:
+            %result=page0_io addr
+         %end
+      %end
+%end
+!
+!
+%externalroutine enter
+%externalroutinespec move(%integer l,f,t)
+%externalroutinespec sup01
+%constinteger rpswa=x'228';             ! restart PSW addr
+%constinteger rca=x'230';               ! restart context address
+%constinteger rcodea=x'244';            ! restart initial code address
+%constinteger gccra=x'2c0';             ! GC CRs address
+%constintegerarray rcode(0:3)=%c
+      x'b70b0000'!gccra,                { lctl_0,1,gccra
+      x'98ae0000'!rca,                  { lm_10,14,rca
+      x'82000000'!rpswa,                { lpsw_rpswa   
+      0
+%integer i
+!
+   *basr_1,0; *using_1;                 ! set up restart PSWs
+   *la_2,<rstart>; *st_2,i; *drop_1
+   page0_restart new psw=rcodea;        ! initial 'till context restored
+   longinteger(rpswa)=psw0!i;           ! eventual
+   *stm_10,14,560 {rca};                ! my context
+   move(16,addr(rcode(0)),580 {rca+20});! initial code
+!
+   sup01;                               ! enter main supervisor
+!
+rstart:                                 ! restart entry (GRs 10-14 only set up)
+   restart;                             ! should not return
+   *la_0,238 {EE}; *st_0,2116(0)
+   *lpsw_2112
+!
+%end
+!
+%endoffile

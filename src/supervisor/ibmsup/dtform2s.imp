@@ -1,0 +1,14 @@
+!
+!     EMAS 370 - Device table entry format
+!
+%recordformat dtform(%integer iserv,mnemonic,cuu,alt cuu,ccwa,csw1,csw2,
+      stick,id,timeout,ua size,ua ad,
+      sense1,sense2,sense3,sense4,sense5,sense6,
+      stats1,stats2,stats3,stats4,
+      { end of common data }
+{ DEVIO : } (%integer trtabad,sensedatad,sdsema,repsn,CCWVA,KEY %or %c
+{ DISC  : } %integer propaddr,state,concount,repsno,base,dlvn,
+            %string(6)label,%byteinteger mech,qstate,prio,slot,bsp2,
+            %integer lqlink,uqlink,curcyl,sema,trlink))
+!
+%endoffile

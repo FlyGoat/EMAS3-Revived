@@ -1,0 +1,2820 @@
+! S22 Mag tape routines
+%endoflist
+%include "subarc:ssownf3"
+%list
+
+! 1 jun 87
+! failure in 'mag' routines now gives a signalevent 12,1 instead of monitorstop
+! allowing for possible tidy up by calling prog.
+! fix in magio at read fixed to allow for a short final block and hence record
+! 22 jan 86
+! fix in 'open tape' for mode=either, and holding a 'hold' across a release
+! for a mode change
+! 6-aug-85
+! revisited for Amdahl
+!
+! 2-MAR-83:
+!     'TAPE ALREADY CLAIMED' INCLUDED AS ERROR 23
+!     AND CHECKED FOR AFTER 'OPEN TAPE' IN 'CHECK TAPE'
+!     VOL1 INCLUDED WITH EOF1 IN LOCATE T(9/10) TO INDICATE EOT RATHER THAN
+!     EMPTY FILE. THIS CATERS FOR EMPTY TAPES.
+!     CC==NOT SET ON ENTRY TO MAGIO, TO MAKE THE TEST AT SOPEND: SIMPLE
+!     FLAG<1 FOLLOWING 'OPEN TAPE' IN 'CHECK TAPE' (IE ALREADY ALLOCATED)
+!     DROPS THROUGH TO SET UP CF_CHANNEL AND CC CORRECTLY BEFORE RETURNING
+!     WITH FLAG=0.
+!     'OPERATION' INCLUDED IN FAILURE MESS IN MAGIO, AND %MONITOR REMOVED.
+! 24-FEB-83: CDM
+!     Service routines:-
+!        OPEN TAPE - _term flag set=yes as default
+!        LOCATE - extra check at t(3) and t(4) for first skip ok.
+!                 fix for t(8)
+!                 t(9) and t(10), flag=4 only forward. -4 return removed.
+!        SKIP BLOCKS - fix for _block no when 0 or 4.
+
+!     Magio:-
+!        check for channel ptr=0 on entry, to cater for close after failure
+!        during open before channel allocation.
+!        OPEN TAPE FILE - null dsn disallowed for write and write-mod in sl mode
+!                         EOT in physical mode prepositioning for write OK.
+!                         _term flag=NO delayed until all opening complete.
+!                         fix for type(11),  TSFO+100.
+!        CHECK TAPE - flag=73 now 90 for 'too many tapes'.
+!                     cf_channel allocated before possible tsfo+10 return to
+!                     ensure we deallocate on a subsequebt close.
+!                     checking for _init fsn redone. TSFO+1 only if invalid
+!                     header successfully read. flag 1 or 4 allowed tpo proceed.
+!        FIND FILE - physical mode does skip block look-ahead after locate, to
+!                    catch EOT. locate beyond EOT gives TSFO+16 insetad of EOF.
+!        VALIDATE FOR READ/WRITE - _term flag not set.
+!
+!     Support routines:-
+!        flags 2 and 3 for catastrophe.
+!        advise to change from MT to MAG routines.
+!
+
+!**********************************************************************
+
+!            MAG  TAPE INTERFACE ROUTINES 1ST JUNE
+
+!**********************************************************************
+
+!     1. service routines.
+!     2. HLL interface routines.
+!     3. Support routines. MT and MAG.
+!     4. DEFINEMT and FORTRAN interface.
+!
+
+!  THE MAIN PURPOSE OF IMPLEMENTING HLL AND UTILITY TAPE ACCESS
+!  FACILITIES TOGETHER IS TO COORDINATE THE REQUESTS TO DIRECTOR
+!  FOR TAPE TRANSFERS.  THE DIRECTOR FACILITIES USED ARE THE
+!  'DMAG CLAIM' AND 'DMAGIO' INTERFACES.  ALL CALLS ON THESE
+!  DIRECTOR ROUTINES FROM THE HLL AND UTILITY INTERFACES ARE
+!  ROUTED THROUGH A COMMON SET OF ROUTINES, THE 'TAPE SERVICE
+!  ROUTINES'
+
+!  THESE 'TAPE SERVICE ROUTINES' PERFORM VERY LITTLE CHECKING
+!  OF THEIR OWN BUT ASSUME THAT MOST OF THE NECESSARY VALIDATION
+!  OF PARAMETERS ETC HAS BEEN CARRIED OUT AT A HIGHER LEVEL SINCE
+!  THE DEGREE OF CHECKING IS NOT NECESSARILY THE SAME FOR HLL AND
+!  UTILITY ACCESS.  THESE ROUTINES PROVIDE TAPE HANDLING
+!  PRIMITIVES THAT ARE FUNCTIONALLY VERY SIMILAR TO THE 'MAG'
+!  ROUTINES.
+
+!?2 removal of all lines beginiing '!?' turns this into SUBARC:S22.S
+!?2 TO ASSIST WITH DIAGNOSING FAULTS IN THIS CODE, SOME TRACING
+!?2 AND DIAGNOSTIC CODE HAS BEEN INCLUDED.  MOST OF THE STATEMENTS
+!?2 INVOLVED IN THIS HAVE BEEN MARKED WITH THE SEQUENCE OF CHARACTERS
+!?2 !?N WHERE N TAKES VARIOUS VALUES.  THIS IS TO ENABLE THE STRIPPING
+!?2 OUT OF VARIOUS CATEGORIES OF DIAGNOSTIC CODE WHEN THEY ARE
+!?2 NOT REQUIRED.  THE CATEGORIES INDICATED BY THE VARIOUS
+!?2 VALUES OF N ARE LOOSELY DEFINED AS:
+!?2 
+!?2      1  TEMPORARY DIAGS FOR CHASING ERRORS
+!?2      2  GENERALLY REQUIRED BY OTHER CATEGORIES
+!?2      3  CHANNEL ALLOCATION AND USE
+!?2      4  RECORD I/O TRACING
+!?2      5  UNEXPECTED RESULTS FROM CALLS ON DIRECTOR INTERFACES
+!?2
+
+!**********************************************************************
+
+!               REQUIRED DIRECTOR INTERFACE ROUTINES
+
+!**********************************************************************
+
+%externalintegerfnspec dmag claim(%stringname tsn,%integername sno,req,mode)
+%externalintegerfnspec dmag io(%integername reply,control,len,type,sno,adr)
+!  The various values that can be returned by DMAGIO in the REPLY FLAG
+!  parameter should be interpreted as follows:
+!  FLAG = 0: Request completed sucessfully,  For read check requests
+!      CONTROL will hold the number of retries.
+!  FLAG = 1: Thsi means one of the following:
+!    Parity failure on read after 15 retries
+!    * Read-after-write failure after 6 write retries
+!    * Unmasked long block condition on read and in this case
+!      CONTROL will bew set to 2 and LEN will contain the transfered length
+!      which will inevitably be the requested length.
+!    * Unmasked short block condition on read in which case
+!      CONTROL will be set to 1 and LEN will contain the transfered
+!      length which will be the length of the short block.
+!  FLAG = 2: This has to be interpreted in conjuction with the value
+!      opf the CONTROL parameter:
+!    CONTROL = 8: Deck already busy, possibly due to some
+!       badly behaved private chain etc.
+!    CONTROL = 4: Service number not found due to tape not having been
+!        claimed or tape not on deck etc.
+!    CONTROL = 2: Deck not claimed or previously gone off line and
+!        been remounted.
+!    CONTROL = 1: Bad parameters.
+!  FLAG = 3: Disaster - lost the tape or lost position on the tape, eg.
+!   * Deck has been RESET or has failed mechanically.
+!   * SKIP or REWIND has failed
+!   * Requested transfer has failed and position on the tape has been lost.
+!  FLAG = 4:  Unexpected BT, ET, tape mark or double tape mark.
+!
+%externalintegerfnspec dsfi(%stringname user,%integername fsys,type,set, %c
+                            %stringname s,%integerarrayname ia)
+!
+!**********************************************************************
+
+!              REQUIRED SUBSYSTEM ROUTINES
+
+!**********************************************************************
+
+%externalroutinespec outfile %alias "S#OUTFILE" (%string(255) file,
+  %integer size,hole,prot,%integername conad,flag)
+%externalroutinespec disconnect %alias "S#DISCONNECT"(%string(255)  nfile, %integername flag)
+%externalroutinespec destroy %alias "S#DESTROY"(%string(255)  nfile, %integername flag)
+%externalstringfnspec next temp %alias "S#NEXTTEMP"
+%externalintegerfunctionspec uinfi %alias "S#UINFI"(%integer entry)
+%externalstringfnspec uinfs %alias "S#UINFS" (%integer n)
+%externalroutinespec move %alias "S#MOVE"(%integer nlength,nfrom,nto)
+%externalroutinespec itoe %alias "S#ITOE"(%integer nad,nl)
+%externalroutinespec etoi %alias "S#ETOI"(%integer nad,nl)
+%externalroutinespec fill %alias "S#FILL"(%integer nlength,nfrom,nfiller)
+%externalstringfnspec itos %alias "S#ITOS"(%integer i)
+%externalintegerfunctionspec open %alias "S#OPEN"(%integer afd,mode)
+
+!**********************************************************************
+
+!                        CONSTANTS
+
+!**********************************************************************
+
+%constinteger ul = 1,sl = 2     ;!  TYPES OF LABEL PROCESSING
+%constinteger behind = 1    ;! (  PERMISABLE VALUES
+%constinteger at = 2        ;! (  FOR THE CF_RELPOS
+%constinteger ahead = 3     ;! (  PARAMETER
+%constinteger eof = 153
+%constinteger maxint = x'7FFFFFFF'
+%constinteger minint = x'80000000'
+%constinteger tape permit = x'00008000'
+%constinteger tsfo = 2000       ;!  TAPE SYSTEM FAULT NUMBER ORIGIN
+%constinteger max fault count = 10 ;!  MAX CONSECUTIVE FAULTS
+%constinteger rtfudge = 100   ;!  FUDGE FACTOR TO ALLOW FOR RED TAPE
+                             !  IN BUFFERS
+%constinteger buffsod = 200   ;!  OFFSET TO START OF DATA IN BUFFERS
+!
+%constbyteintegerarray format map(1:3,1:4) = 2,4,1,3,5,0,0,6,0,0,7,0
+!  The table 'format map' is used to derive an internal quantity 'data format'
+!  from the information that can be found in a tape label.  The two 
+!  quantities from such labels that are involved are the record type and 
+!  block attribute fields and encoded representations of these values
+!  are held in the 'rectype' and 'blocking' fields of the file descriptor
+!  records.  These quantities are interpreted as follows:
+!   'rectype'  1 => fixed, 2 => variable, 3 => undefined
+!   'blocking' 1 => unblocked, 2 => blocked, 3 => spanned, 4 => blocked and spanned
+!
+!  The 'data format' quantity derived from the 'rectype' and 'blocking'
+!  via the 'format map' array are defined as follows:
+!
+!   1  undefined                      U
+!   2  fixed unblocked                F
+!   3  fixed blocked                  FB
+!   4  varaible unblocked             V
+!   5  variable blocked               VB
+!   6  variable spanned unblocked     VS
+!   7  variable blocked spanned       VBS
+
+%constinteger mindf = 1,    %c
+                maxdf = 7   ;!  LIMITS OF DATA formatS TYPES
+%constbyteintegerarray rsmod (1:7) = 0,0,0,0,1,1,1
+%constbyteintegerarray bsmod (1:7) = 1,1,1,1,1,0,2
+%conststring(1)%array recfm char(1:7) = "F","V","U"," ","B","S","R"
+%conststring(4) bfn base = "T#MT"
+%conststring(17) nulldsn = "?????????????????"
+%constintegerarray tsfault(0:4) = 0,tsfo+11,tsfo+12,tsfo+13,eof
+%conststring(28)%array errmess (1:23) = %c
+{ 1}   "Invalid tape format         ",
+{ 2}   "File header error           ",
+{ 3}   "Label number error          ",
+{ 4}   "File name error             ",
+{ 5}   "Failed to create buffer     ",
+{ 6}   "Record format incorrect     ",
+{ 7}   "Tape request refused by oper",
+{ 8}   "Failed to write label       ",
+{ 9}   "Failed to position tape     ",
+{10}   "Physical end of tape        ",
+{11}   "I/O error                   ",
+{12}   "Invalid tape operation      ",
+{13}   "Irrecoverable failure       ",
+{14}   "Max tape channels exceeded  ",
+{15}   "Tape already in use         ",
+{16}   "Logical end of tape         ",
+{17}   "Invalid format or blocking  ",
+{18}   "Record too long             ",
+{19}   "Invalid unlabelled  access  ",
+{20}   "Failed to write tape mark   ",
+{21}   "Missing/misplaced tape mark ",
+{22}   "Too many tapes requested    ",
+{23}   "Tape already claimed        "
+
+!**********************************************************************
+
+!    DECLARATIONS CONNECTED WITH PROCESSING IBM STANDARD TAPE LABELS
+
+!**********************************************************************
+
+!  THE RECORD formatS BELOW ARE TAKEN FROM THE IBM PUBLICATION
+!  'OS/VS TAPE LABELS', REF GC26-3795-3.
+
+!  THE CONST ARRAYS DESCRIBE THE THE STRING ELEMENTS IN EACH RECORD,
+!  THE ZEROTH ELEMENT BEING THE NUMBER OF SUCH STRINGS AND EACH
+!  SUBSEQUENT ELEMENT GIVING THE LENGTH OF EACH STRING.
+!    THESE ITEMS ARE USED MAINLY IN THE ROUTINES 'DECODE LABEL'
+!  AND 'ENCODE LABEL'
+
+%recordformat ibm vol1 format (    %c
+    %string( 4) id,
+    %string( 6) volser,
+    %string(31) resa,
+    %string(10) owner,
+    %string(29) resb)
+%constbyteintegerarray ibm vol1 field (0:5) =   %c
+      5,4,6,31,10,29
+
+%recordformat ibm file1 format (   %c
+    %string( 4) id,
+    %string(17) file name,
+    %string( 6) file ser num,
+    %string( 4) vol seq num,
+    %string( 4) file seq num,
+    %string( 4) generation,
+    %string( 2) version,
+    %string( 6) create date,
+    %string( 6) expiry date,
+    %string( 1) security,
+    %string( 6) block count,
+    %string(13) sys code,
+    %string( 7) resa)
+%constbyteintegerarray ibm file1 field (0:13) = %c
+      13,4,17,6,4,4,4,2,6,6,1,6,13,7
+
+%recordformat ibm file2 format (       %c
+    %string( 4) id,
+    %string( 1) record format,
+    %string( 5) block length,
+    %string( 5) record length,
+    %string( 1) density,
+    %string( 1) volume switch,
+    %string(17) job id,
+    %string( 2) rec tec,
+    %string( 1) control chars,
+    %string( 1) resa,
+    %string( 1) block attribute,
+    %string( 3) resb,
+    %string( 5) tape deck id,
+    %string(33) resc)
+%constbyteintegerarray ibm file2 field (0:14) = %c
+      14,4,1,5,5,1,1,17,2,1,1,1,3,5,33
+
+
+!**********************************************************************
+
+!                    GLOBAL  DECLARATIONS
+
+!**********************************************************************
+
+%recordformat buffer header (       %c
+      %record(ibm file1 format) label1 ,
+       %record(ibm file2 format) label2 )
+
+
+!**********************************************************************
+
+!           MISCELLANEOUS DECLARATIONS FOR INTERNAL USE
+
+!**********************************************************************
+
+%routinespec skiptmmag (%integer channel,n)
+%routinespec skip blocks (%integer channel,%integername blocks,flag)
+%routinespec skip tapemarks (%integer channel,%integername marks,flag)
+%routinespec rewind tape (%integer channel,control,%integername flag)
+%routinespec read block (%integer channel,address,%integername len,flag)
+
+
+
+
+
+!**********************************************************************
+
+!             formatTING AND CONVERSION ROUTINES
+
+!**********************************************************************
+
+
+%routine plant integer (%integer value,address)
+move(4,addr(value),address)
+%return
+%end
+
+%integerfn short int(%integer address)
+%result = (byteinteger(address)<<8) + byteinteger(address + 1)
+%end      ;!  OF SHORT INT
+
+%string(20)%fn strof (%integer n,l)
+%integer x,a
+%string(20) s
+s = ""
+%if n < 0 %then a = yes %and n = n*(-1) %else a = no
+
+%while n > 0 %cycle
+    x = n
+    n = n//10
+    s = tostring(((x-n*10)+48)).s
+%repeat
+s = "0".s %while length(s) < l 
+%if a = yes %then s = "-".s
+%result = s
+%end       ;!  OF STROF
+
+%string(255)%fn blanks (%integer n)
+%string(255) s
+length(s) = n
+fill(n,addr(s)+1,32)
+%result = s
+%end       ;!  OF BLANKS
+
+%string(255)%fn zeros (%integer n)
+%string(255) s
+length(s) = n
+fill(n,addr(s)+1,0)
+%result = s
+%end      ;!  OF ZEROS
+
+%integerfn intof (%string(20) num)
+%integer i,x,a
+%string(20) left
+%while (num->left.(" ").num %and left="") %cycle
+%repeat
+%if length(num)=0 %thenresult=0
+a = addr(num)
+x = 0
+%for i = 1, 1, length(num) %cycle
+    x = (x*10) +byteinteger(a+i) - '0'
+%repeat
+%result = x
+%end         ;!  OF INTOF
+
+%string(5)%fn ibmdate
+%constintegerarray dinm(1:12) = %c
+    0,31,59,90,120,151,181,212,243,273,304,334
+%integer y,m,d,x
+%string(8) dd
+dd = date
+y = intof(substring(dd,7,8))
+m=intof(substring(dd,4,5))
+d=intof(substring(dd,1,2))
+d=d+dinm(m)
+x = y//4
+%if m > 2 %and y = x*4 %then d = d + 1   ;!  LEAP YEAR
+%result = strof(y,2).strof(d,3)
+%end      ;!  OF IBMDATE
+
+
+!**********************************************************************
+
+!                       ENCODE  LABEL
+
+!**********************************************************************
+
+!  THIS ROUTINE HAS THE CONVERSE EFFECT TO THAT OF 'DECODE LABEL'
+!  SEE COMMECNTS UNDER 'DECODE LABEL' FOR DETAILS
+
+%routine encode label (%stringname label,
+                       %byteintegerarrayname field,
+                       %integer record address)
+
+%integer pointer,i,raddr
+raddr = record address - 1    ;!  I STARTS FROM 1
+pointer = 0  ;  label = ""
+%for i = 1,1,field(0) %cycle
+    label = label.string(raddr + pointer + i)
+    pointer = pointer + field (i)
+%repeat
+itoe(addr(label) + 1,length(label))
+%return
+%end         ;!  OF ENCODE LABEL
+
+
+!***********************************************************************
+
+!                            DECODE  LABEL
+
+!**********************************************************************
+
+!  THIS ROUTINE IS USED TO DECODE THE FIELDS OF A TAPE LABEL INTO
+!  FIELDS OF AN IMP RECORD.  IT EXTRACTS THE FIELDS FROM A STRING
+!  OF EBCDIC CHARACTERS ('LABEL') AND INSERTS THEM INTO STRING
+!  ELEMENTS OF A RECORD (AFTER TRANSLATION TO ISO).  THE ARRAY
+!  'FIELD' SPECIFIES THE FIELDS, ITS ZEROTH ELEMENT BEING THE
+!  NUMBER OF FIELDS AND THE SUBSEQUENT ELEMENTS GIVING THE 
+!  LENGTHS OF THE FIELDS.
+
+%routine decode label (%string(255) label,
+                      %byteintegerarrayname field,
+                       %integer record addr)
+%integer pointer,i,raddr
+
+pointer = 1
+raddr = record addr - 2  ;!  ADJUSTED BECAUSE POINTER AND I
+                          !  START FROM 1.
+etoi(addr(label) + 1,length(label))
+%for i = 1,1,field(0) %cycle
+    string(raddr + pointer + i) =        %c
+      substring(label,pointer,pointer + field(i) - 1)
+    pointer = pointer + field(i)
+%repeat
+%end       ;!  OF DECODE LABEL
+
+
+!<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+!                 TAPE   SERVICE  ROUTINES
+
+!<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+!*********************************************************************
+
+!                          HOLD  STATUS
+
+!**********************************************************************
+
+%byteintegerfn hold status (%string(6) tape)
+%integer i
+%while length(tape)<6 %cycle
+   tape=tape." "; !added SH 11-Jun-90
+%repeat
+%for i = min tape channel,1,max tape channel %cycle
+    %if ssown_held tape(i) = tape %then %result = yes
+%repeat
+%result = no
+%end     ;!  OF HOLD STATUS
+
+!**********************************************************************
+
+!                            CLOSE  TAPE
+
+!**********************************************************************
+
+
+%routine close tape (%integer channel,%integername flag)
+   flag = 0
+   %if hold status(ssown_tc(channel)_tsn) = no %then %start
+      flag = dmag claim(ssown_tc(channel)_tsn,ssown_tc(channel)_sno,1,1) ;!  RELEASE TAPE
+      ssown_tc(channel)_tsn = ""
+   %finish
+   ssown_tc(channel)_use = 0      ;!NOT ALLOCATED FOR ANY TYPE OF USE
+%end            ;!  OF CLOSE TAPE
+
+
+!**************************************************************************
+
+!                     CLEAR  TAPES
+
+!**************************************************************************
+
+%routine clear tapes (%integer use mask)
+%integer channel,flag
+
+%for channel = min tape channel,1,max tape channel %cycle
+    %if ssown_tc(channel)_use & use mask > 0 %then close tape(channel,flag)
+%repeat
+%return
+%end       ;!  OF CLEAR TAPES
+
+!**********************************************************************
+
+!                    HOLDVOL
+
+!**********************************************************************
+
+%externalroutine holdvol  %alias "S#HOLDVOL"(%string(6) tape,%integername f)
+
+%integer i,j
+
+tape = tape." " %while length(tape) < 6 
+j = -1
+%for i = max tape channel,-1,min tape channel %cycle
+    %if ssown_held tape(i) = tape %then f = 1 %and %return
+    %if ssown_held tape(i) = "" %then j = i
+%repeat
+%if j = -1 %then f = 2 %else f = 0 %and ssown_held tape (j) = tape
+%return
+%end    ;!  OF HOLDVOL
+
+
+!**********************************************************************
+
+!                      RELEASEVOL
+
+!**********************************************************************
+
+%externalroutine releasevol %alias "s#releasevol" (%string(6) tape,%integername flag)
+!
+!  First check to clear any entry in 'held tape'.
+!  Then find the channel allocated to this tape and if the tape is not in use,
+!  close it.
+!  Since the 'held tape' array adn the tape channel array 'ct' are not held
+!  in the same order, and in fact are independant of each other, the scanning
+!  of these arrays must be done in the order below to ensure that the 'close tape'
+!  routine does not find any antry in the 'held atpe' array corresponding
+!  to teh tape in question
+!
+%integer j, k, junk
+%string(6)w
+
+%while length(tape)<6 %cycle
+   tape=tape." "; !added SH, 11-Jun-90
+%repeat
+
+flag = 1  { not held }
+%for j = min tape channel,1,max tape channel %cycle
+   %if ssown_held tape(j) # "" %and (tape = ".ALL" %or ssown_held tape(j) = tape) %start
+      w = ssown_held tape(j)
+      ssown_held tape(j) = ""
+      flag = 0  { found }
+      %for k = min tape channel,1,max tape channel %cycle
+         %if ssown_tc(k)_tsn = w %start
+            close tape(k, junk) %if ssown_tc(k)_use = 0
+            %exit
+         %finish
+      %repeat
+      %exit %unless tape = ".ALL"
+   %finish
+%repeat
+%end; !  OF RELEASEVOL
+
+
+!**********************************************************************
+
+!                    OPEN  TAPE
+
+!**********************************************************************
+
+!  INPUT TO THIS ROUTINE IS A REQUEST FOR A LOGICAL CHANNEL TO BE
+!  ALLOCATED TO A TAPE.  THE CHANNEL CONCERNED IS ONE OF THE 
+!  RECORD ELEMENTS OF THE GLOBAL RECORD ARRAY `TC`.  THE 
+!  LIST OF CHANNELS IS SEARCHED TO SEE IF THE TAPE HAS A CHANNEL
+!  ALREDY ALLOCATED TO IT AND IF SO, THE CHANNEL IS CHECKED TO SEE
+!  IF IT IS OK TO BE USED.  IF NOT THE NEXT AVAILABLE
+!  CHANNEL IS ALLOCATED TO THE TAPE AND THE TAPE IS `CLAIMED`
+!  VIA A CALL ON DIRECTOR.  THE VARIOUS FIELDS OF THE
+!  ALLOCATED CHANNEL ARE INITIALISED.
+
+
+%routine open tape (%string(6) tsn,%integer mode,
+                          %integername channel,flag)
+%integer i,mark,sno
+
+find chan:
+flag = 0  ;  channel = -1  ;  mark = -1
+%for i = max tape channel,-1,min tape channel %cycle
+    %if ssown_tc(i)_tsn = "" %then mark = i
+    %if ssown_tc(i)_tsn = tsn %then channel = i
+%repeat
+
+%unless channel = -1 %then %start
+    !  tape channel already allocated to this tape
+    %if ssown_tc(channel)_use > 0 %then flag = tsfo + 15 %c
+      %and %return
+    %if ssown_tc(channel)_mode # mode # 3 %then %start; ! not the current mode or 'either'
+        ! we need to release and close it. is it currently held?
+        mark=0
+        %for i=min tape channel,1,max tape channel %cycle
+          %if ssown_held tape(i)=tsn %then mark=1 %andexit
+        %repeat
+        releasevol(tsn,flag)
+        ! and re'hold' it if it was held
+        %if mark>0 %then holdvol(tsn,i)
+        -> find chan
+    %finish
+    flag = -1
+%finish %else %start
+    !  CHANNEL = -1, IE. TAPE NOT ALREADY ALLOCATED
+    !  NEED TO ALLOCATE A NEW CHANNEL AND CLAIM THE TAPE
+    %if mark = -1 %then flag = tsfo + 14 %and %return
+    channel = mark
+    flag = dmag claim(tsn,sno,0,mode)
+    %if flag # 0 %then %return
+    ssown_tc(channel)_tsn         = tsn
+    ssown_tc(channel)_sno         = sno
+    ssown_tc(channel)_use         = 0
+    ssown_tc(channel)_tm count    = -1
+    ssown_tc(channel)_et flag     = no
+    ssown_tc(channel)_mode        = mode
+    ssown_tc(channel)_block no    = 0
+    ssown_tc(channel)_xfers       = 0
+    ssown_tc(channel)_term flag=yes
+%finish
+%return
+%end           ;!  OF OPEN TAPE
+
+!**********************************************************************
+
+!                          LOCATE  TAPE
+
+!**********************************************************************
+
+%routine locate tape (%integer     channel,type,
+                              %integername num,flag)
+!
+!  This routine provides a generalised service for positioning tapes
+!  whether they are IBM standard labelled or unlabelled.  The moves
+!  that can be requested can be either relative to the current position
+!  of the tape or to an absolute position.  The moves can be in
+!  terms of blocks, tape marks, physical files or IBM standard
+!  labelled files, either forwards or backwards.  The type of
+!  move and the units involved is specified via the TYPE parameter and
+!  the number of units involved and the direction of the move are
+!  specified via the NUM parameter.
+!    It was intended that th8s routine would replace all the SKIP
+!  BLOCK, SKIP TAPE MARKS type of routines but this has not yet
+!  come about for no other reason than lack of time.
+!    The TYPE parameter can take the following values
+!
+!    1  Block move - absolute
+!                    position before nth block. n<=1 => before 1st.
+!    2  Block move - relative
+!                    pass n blocks.
+!    3  Tape mark move - absolute
+!                        position after nth TM. n<=0 => BT.
+!    4  Tape mark move - relative
+!                        pass n TMs fore or aft. n=0 => position before next
+!                        forward, ie unwind file.
+!    5  Not used
+!    6  Not used
+!    7  Physical file move - absolute
+!                            position after (n-1)th TM. n<= 1 => BT.
+!    8  Physical file move - relative
+!                            position before 1st block of nth file up or down
+!                            from current. n=0 => before 1st block of current.
+!    9  IBM file move - absolute
+!                       position before HDR1 of nth logical file. <=0 => after
+!                       volume label.
+!    10 IBM file move - relative
+!                       position before HDR1 of nth logical file up or down from
+!                       current. Current is anywhere in HDRs, data or EOFs.
+!                        n=0 => before HDR1 of current. Target<=1 => after
+!                        volume label.
+!
+%integer x,n,tm count,tm skip count,reqd file
+%integer len,direction,count
+%byteintegerarray lbuff (0:80)
+%stringname id
+%record(tapechannel f)%name cc 
+%switch t(1:10)
+cc == ssown_tc(channel)
+count = num
+-> t(type)
+
+t(1):   !  ABSOLUTE BLOCK MOVE
+        %if count < 2 %then count = 0 %and -> t(8)
+        count = count - cc_block no - 1
+t(2):   !  RELATIVE BLOCK MOVE
+        %unless count = 0 %then skip blocks(channel,count,flag)
+        %return
+
+t(3):   !  ABSOLUTE TAPE MARK MOVE
+        %if count < 1 %then  %start
+            !  MOVE TO BT REQUESTED
+            rewind tape (channel,0,flag)
+            %return
+        %finish
+        count = count - cc_tm count
+        %if count < 1 %then count = count - 1
+        x = count
+        skip tape marks (channel,x,flag)
+        %if flag=0 %and count < 1 %then %start
+            !  WAS MOVING BACKWARDS DOWN TAPE
+            x = 1
+           skip tape marks(channel,x,flag)
+        %finish
+        %return
+t(4):   !  RELATIVE TAPE MARK MOVE
+        x = count
+        %if count = 0 %then x = 1
+        skip tape marks (channel,x,flag)
+        %if count = 0 = flag %then %start
+            x = -1
+            skip tape marks (channel,x,flag)
+        %finish
+        %return
+t(5):   !    NOT USED
+t(6):   !    NOT USED
+        %return
+t(7):      !  MOVE TO ABSOLUTE PHYSICAL FILE
+        count = count - 1
+        -> t(3)
+        !
+t(8):    !  SKIP N PHYSICAL FILES
+        %if count > 0 %then x = count %else x = count - 1
+        locate tape (channel,4,x,flag)
+        %unless count > 0             %c
+        %then x = 1 %and skip tape marks (channel,x,flag)
+        %return
+
+
+!<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+!   FLAG VALUES CONNECTED WITH FILE LOCATION
+!      -2 => LOGICAL END OF TAPE(DTM after EOF label)
+!      -3 => PHYSICAL END OF TAPE(DTM after EOV label)
+!      -1 => FAILED TO POSITION, PROBALLY LOST THE PLACE
+
+!<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+t(9):   !  ABSOLUTE IBM FILE MOVE
+        reqd file = count
+        -> file pos
+
+t(10):   !  RELATIVE IBM FILE MOVE
+        reqd file = count + ((cc_tm count//3) + 1)
+
+file pos:
+!  POSITION TAPE AT HDR1 FOR REQUIRED FILE
+
+%if cc_tm count < 0 %then %start
+    ! PREVIOUSLY LOST PLACE ON THE TAPE, MUST NOW TRY TO
+    ! FIND OUT WHERE WE ARE
+    rewind tape (channel,0,flag)
+    %if flag > 0 %then -> badposs
+%finish
+! NOTE THAT THE 'TM COUNT' FIELD OF THE TAPE CHANNEL RECORD IS
+! SET TO ZERO ONLY BY THE 'REWIND TAPE' ROUTINE
+
+tm count = ((reqd file - 1) * 3)
+
+%if tm count <= 0 %then %start
+    !  FIRST FILE ON TAPE REQUIRED
+    rewind tape (channel,0,flag)
+    %if flag # 0 %then -> badposs
+    n = 1
+    skip blocks (channel,n,flag)     ;!  SKIP VOL1 LABEL
+    %if flag > 0 %then -> badposs
+%finish %else %start
+    !  SOME FILE OTHER THAN THE FIRST ON THE TAPE REQUIRED
+    %cycle
+        tm skip count = tm count - cc_tm count
+        %if tm skip count < 1 %then %start
+            !  A SKIP COUNT OF ZERO IMPLIES THAT THE TAPE IS 
+            !  POSITIONED AFTER THE REQUIRED TAPE MARK
+            !  BUT BEFORE THE NEXT, IMPLYING A BACKWARDS MOVE.  A
+            !  SKIP COUNT OF LESS THAN ZERO IMPLIES A BACKWARDS MOVE A
+            !  ALSO.  FOR BOTH CASES IT IS SIMPLER TO SKIP BACKWARDS
+            !  OVER THE REQUIRED TAPE MARK AND THEN FORWARDS OVER
+            !  IT AGAIN, SOMETHING THAT IS ACHIEVED BY THE TEST 
+            !  IMMEDIATLY FOLLOWING THE CALL ON SKIP TAPE MARKS.
+            direction = -1
+            tm skip count = tm skip count - 1
+        %finish %else direction = 1
+        skip tape marks(channel,tm skip count,flag)
+        %if flag = 0 %then %start
+            %if direction = 1 %then %exit
+            !  IF DIRECTION = -1 IT WILL BE NECESSARY TO SKIP
+            !  FORWARDS OVER THE REQUIRED TAPE MARK.  THIS
+            !  WILL HAPPEN AUTOMATICALLY ON REPEATING THE CYCLE AGAIN
+        %finish %else %start
+            %if flag # 4 %then -> badposs
+            !
+            ! flag=4 means logical EOT or empty file going forward (not
+            ! reverse, as supervisor does not check for adjacent TMs in reverse)
+            ! It should never mean BT since we check for count<=0 above.
+            !
+            ! so is it EOT or empty? We are sitting beteween the two TMs.
+            !
+            %if direction=-1 %then ->badposs; ! must have lost the place.
+            n = -1                               
+            skip tape marks (channel,n,flag)     
+            -> badposs %unless flag = 0          
+            n = -1                               
+            skip blocks (channel,n,flag)         
+            -> badposs %unless flag = 0          
+            !
+            len = 80                                     ;!( GET
+            read block(channel,addr(lbuff(1)),len,flag)  ;!( IDENTIFIER
+            -> badposs %unless flag = 0 %and len = 80    ;!( FIELD
+            id == string(addr(lbuff(0)))                 ;!( FROM
+            length(id) = 4                               ;!( LABEL
+            !
+            %if id = e"EOF2" %or id=e"VOL1" %then flag = -2 %and %return 
+            %if id = e"EOV2" %then flag = -3 %and %return 
+            %unless id = e"HDR2" %then -> badposs
+            !
+            !  LAST BLOCK WAS A HDR2 LABEL, HENCE WE HAVE AN EMPTY FILE
+            n=1
+            skip tape marks (channel,n,flag)
+            %return %unless flag = 0
+            n = 1
+            skip tape marks (channel,n,flag)
+            %return %unless flag = 0
+        %finish
+    %repeat
+%finish
+%return
+
+badposs:
+!    FAILED TO POSITION TAPE AT REQUESTED POSITION
+flag = -1
+cc_tmcount = -1
+
+%return
+
+%end        ;!  OF LOCATE TAPE
+
+!**********************************************************************
+
+!                    UNWIND  TAPE
+
+!**********************************************************************
+
+!  %ROUTINE UNWIND TAPE (%INTEGER CHANNEL,%INTEGERNAME FLAG)
+!  ????? NOTE THAT THIS ROUTINE CANNOT BE BROUGHT INTO USE
+!  ????? UNTIL THE RETURN VALUE FROM DMAGIO CAN BE TRUSTED
+!  %INTEGER LEN
+
+!  LEN = MAXINT
+!  SKIP TAPE MARKS (CHANNEL,LEN,FLAG)
+!  %UNLESS FLAG = 0 %OR FLAG = 4  %C
+!  %THEN ssown_TC(CHANNEL)_TM COUNT = -1    %C
+!  %ELSE ssown_TC(CHANNEL)_TM COUNT = ssown_TC(CHANNEL)_TM COUNT + LEN
+!  %RETURN
+!  %END        ;!  OF UNWIND TAPE
+
+!**********************************************************************
+
+!                REWIND  TAPE
+
+!************************************************************************
+
+%routine rewind tape (%integer channel,control,%integername flag)
+%integer x,len
+len = 0 ;
+flag = dmagio(x,control,len,6,ssown_tc(channel)_sno,0)
+%if flag = 0 %then flag = x
+%if flag = 0 %start
+    ssown_tc(channel)_tm count = 0
+    ssown_tc(channel)_et flag = no
+    ssown_tc(channel)_block no = 0
+%finish %else ssown_tc(channel)_tm count = -2 
+     ! -2 INDICATES THAT WE'VE LOST THE PLACE AND WITHOUT MUCH HOPE 
+     !OF RECOVERY
+%return
+%end           ;!  OF REWIND TAPE
+
+
+
+!**********************************************************************
+
+!                  REVERSE  READ  BLOCK
+
+!**********************************************************************
+
+!  THIS ROUTINE PERFORMS THE SAME FUNCTION AS THE 'READ BLOCK'
+!  ROUTINE BUT ATTEMPTS TO READ THE REQUIRED BLOCK BACKWARDS,
+!  IE. IT TRIES TO READ THE PREVIOUS BLOCK.
+
+!  WILL TRY TO IMPLEMENT THIS VIA A PROPER BACKWARDS READ CALL
+!  ON DMAGIO ASAP.
+
+%routine reverse read block (%integer channel,address,
+                             %integername len,flag)
+%integer x
+x = -1
+skip blocks (channel,x,flag)
+%if flag # 0 %then %return
+read block (channel,address,len,flag)
+%if flag # 0 %then %return
+x = -1
+skip blocks (channel,x,flag)
+%return
+%end          ;!  OF REVERSE READ BLOCK
+
+!**********************************************************************
+
+!                      WRITE TAPE MARK
+
+!**********************************************************************
+
+%routine write tape mark (%integer channel,%integername flag)
+
+!  THIS ROUTINE SIMPLY WRITES A TAPE MARK ONTO THE TAPE SPECIFIED
+!  VIA 'CHANNEL' AT THE CURRENT POSITION OF THE TAPE.  NO CHECKS
+!  ARE MADE HERE AND IT IS ASSUMED THAT THE CHANNEL IS VALID AND
+!  THAT WRITING TAPE MARKS IS A VALID THING TO DO.
+!  A FLAG OF 4 FROM 'DMAGIO' INDICATES THAT THE WRITE HAS TAKEN PLACE
+!  PAST THE 'PHYSICAL END OF TAPE' MARKER, A VALID THING TO DO.
+!  HOWEVER THE 'ET' FLAG IN THE CURRENT CHANNEL IS SET AND IS
+!  CHECKED ON SUBSEQUENT ENTRIES TO 'MAGIO'
+
+%integer x,control,len
+control = 0  ;  len = 0
+flag = dmagio (x,control,len,10,ssown_tc(channel)_sno,0)
+%if flag = 0 %then flag = x
+%if flag = 4 %then ssown_tc(channel)_et flag = yes %and flag = 0
+%if flag = 0 %then %start
+    ssown_tc(channel)_xfers = ssown_tc(channel)_xfers + 1
+    ssown_tc(channel)_tm count = ssown_tc(channel)_tm count + 1
+    ssown_tc(channel)_block no = 0
+%finish
+%return
+%end        ;!  OF WRITE TAPE MARK
+
+!**********************************************************************
+
+!                   SKIP  TAPE  MARKS
+
+!**********************************************************************
+
+%routine skip tape marks (%integer channel,%integername marks,flag)
+%integer x,control,direction
+control = 1
+%if marks < 0 %then direction = -1 %else direction = 1
+flag = dmagio(x,control,marks,9,ssown_tc(channel)_sno,0)
+%if flag = 0 %then flag = x
+%if flag = 0 %or flag = 4 %then %start
+    ssown_tc(channel)_tm count = ssown_tc(channel)_tm count + (marks * direction)
+    ssown_tc(channel)_block no = 0
+%finish %else ssown_tc(channel)_tm count = -1  ;!  LOST THE PLACE
+%return
+%end         ;!  OF SKIP TAPE MARKS
+
+!**********************************************************************
+
+!                        SKIP  BLOCKS
+
+!**********************************************************************
+
+%routine skip blocks (%integer channel,%integername blocks,flag)
+
+!  IF A TAPE MARK IS ENCOUNTERED WHILE SKIPPING BLOCKS, THE TAPE IS
+!  LEFT POSITIONED BEFORE THE TAPE MARK, THIS BEING PART OF
+!  THE FUNCTION OF 'DMAGIO'
+
+%integer x,control,direction
+control = 0
+%if blocks < 0 %then direction = -1 %else direction = 1
+flag = dmagio(x,control,blocks,8,ssown_tc(channel)_sno,0)
+%if flag = 0 %then flag = x
+%if flag = 0 %or flag=4 %then %c
+  ssown_tc(channel)_block no = ssown_tc(channel)_block no + blocks*direction %elsec
+  ssown_tc(channel)_block no = -1
+%return
+%end     ;!  OF SKIP BLOCKS
+
+
+!**********************************************************************
+
+!                            WRITE  BLOCK
+
+!**********************************************************************
+
+%routine write block(%integer channel,address,len,%integername flag)
+
+!  SEE COMMENTS UNDER 'WRITE TAPE MARK'
+
+%integer x,control
+control = 0
+flag = dmagio(x,control,len,2,ssown_tc(channel)_sno,address)
+%if flag = 0 %then flag = x
+%if flag = 4 %then ssown_tc(channel)_et flag = yes %and flag = 0
+%if flag = 0 %then %start
+    ssown_tc(channel)_term flag = no
+    ssown_tc(channel)_xfers = ssown_tc(channel)_xfers + 1
+    ssown_tc(channel)_block no = ssown_tc(channel)_block no + 1
+%finish
+%return
+%end          ;!  OF WRITE BLOCK
+
+!**********************************************************************
+
+!                     READ  BLOCK
+
+!************************************************************************
+
+%routine read block (%integer channel,address,%integername len,flag)
+
+!  THIS ROUTINE ATTEMPTS TO READ A BLOCK FROM THE TAPE SPECIFIED VIA
+!  'CHANNEL'.  AN AREA IS PROVIDED BY THE CALLER AND IF THIS IS
+!  INSUFFICIENT FOR THE TRANSFER, A LONG BLOCK INDICATION IS
+!  RETURNED.  IF A TAPE MARK IS ENCOUNTERED, THE TAPE IS LEFT
+!  POSITIONED BEFORE THE TAPE MARK AND AN INDICATION IS RETURNED.
+
+%integer control,x,a
+control = 4    ;!  IGNORE SHORT BLOCKS
+%if address = 0 %then a = 4 %else a = 1
+!   ADDRESS = 0 => READ CHECK => 4
+!   1 => READ WITH DATA TRANSFER, IE. A REAL READ
+flag = dmagio(x,control,len,a,ssown_tc(channel)_sno,address)
+%if flag = 0 %then %start
+    !  CALL ON DIRECTOR ACCEPTED OK.
+    flag = x
+    %if flag < 2 %then %start
+        !  CALL ON DIRECTOR EXECUTED AND AN ATTEMPT
+        !  HAS BEEN MADE TO READ A BLOCK WHICH WAS
+        !  SUCCESSFUL OR FAILED WITH AN I/O ERROR.
+        !  IN EITHER CASE THE TAPE IS LEFT POSITIONED
+        !  AFTER THE BLOCK IN QUESTION.
+        ssown_tc(channel)_xfers = ssown_tc(channel)_xfers + 1
+        ssown_tc(channel)_block no = ssown_tc(channel)_block no + 1
+    %finish
+%finish
+%return
+%end        ;!  OF READ BLOCK
+
+!>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+!         END OF TAPE SERVICE ROUTINES
+
+!>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+
+!**********************************************************************
+
+!  >> MAGIO << - MAIN CONTROL ROUTINE FOR HLL TAPE ACCESS
+
+!**********************************************************************
+
+%externalroutine magio %alias "S#MAGIO" (%integer fd addr,operation,
+                      %integername flag)
+
+!  THE VALUES OF THE OPERATION PARAMETER ARE AS FOLLOWS:
+
+!  1   PREPARE FOR WRITE
+!  2   READ A RECORD
+!  3   WRITE A RECORD
+!  4   REWIND FILE
+!  5   BACKSPACE ONE RECORD
+!  6   ENDFILE (TERMINATE FILE ON TAPE)
+!  7   CLOSE FILE
+!  8   CLOSE FILE AND TAPE
+!  9   OPEN FILE FOR READ
+!  10  OPEN NEW FILE FOR WRITE
+!  11  OPEN FILE FOR APPENDING (MOD WRITE)
+!  12  CLEAR ALL TAPES ALLOCATED FOR UTILITY USE
+
+
+%routinespec init desc fields
+%routinespec find preceding tape record
+%integerfnspec preceding length
+%routinespec open tape file
+%routinespec rewind file
+%routinespec process eob
+%routinespec write labels
+%routinespec endfile (%integer closing)
+%routinespec close file
+
+%integer recptr,reclen,sod,eod,recrtl,blkrtl
+%integer limit,blockmod
+%integer rc,n,x,blksize,shiftlen,len,ptr,seglen,channel ptr
+%integer spanbits
+%record(fdf)%name cf   ;!  CURRENT FILE
+%record(tape channel f)%name cc   ;!  CURRENT CHANNEL
+%record(tape channel f) not set;   ! dummy
+%record(buffer header)%name header 
+%switch op (1:12)
+%switch r,w(mindf:maxdf)
+%switch s(0:3)      ;!  FOR HANDLING THE DIFFERENT SPANNING
+                      !  CONDITIONS
+
+%if operation = 12 %then %start
+    !  MUST CHECK FOR OP = 12 BEFORE MAPPING CF RECORD
+    !  BECAUSE FD ADDR NOT NECESSARILY VALID FOR OP = 12
+    clear tapes(2)
+    flag = 0
+    %return
+%finish
+
+cf == record(fd addr)    ;!  MAP SUPPLIED RECORD ONTO RECORD format
+cc==not set
+
+!  THE FOLLOWING VARIABLES ARE HELD LOCALLY BECAUSE OF THE VERY
+!  FREQUENT ACCESS MADE TO THEM IN THE CODE, ESPECIALLY AS ONLY
+!  THREE OF THEM HAVE TO BE COPIED BACK INTO THE CF RECORD AT
+!  EXIT FROM MAGIO.  NOTE THAT ALL CALLS TO MAGIO EXIT VIA
+!  THE LABEL SOPEND WHERE THE RECPTR, RECLEN AND EOD FIELDS
+!  ARE COPIED BACK INTO CF.
+recptr = cf_recptr      ;!  65
+reclen = cf_reclen      ;!  37
+sod    = cf_sod         ;!  42
+eod    = cf_eod         ;!  48
+recrtl = cf_recrtl      ;!  28
+blkrtl = cf_blkrtl      ;!  37
+
+%unless operation > 8 %then %start
+    !  If 'operation' implies an already opened file then
+    !  map the appropriate internal logical "channel" (element from the
+    !  'tc' array) onto 'cc'.
+    channel ptr = cf_channel
+    %if channel ptr=0 %start; ! no channel allocated
+     ! we must have got part way through an open, but not far enough to
+     ! have allocated a channel, eg null dsn where inappropriate, too many
+     ! channels. This can only be SS close after the failure. There is nothing
+     ! to do.
+     %if operation=7 %or operation=8 %thenreturn
+     ! not a close?
+     %monitor
+     %return
+   %finish
+    cc == ssown_tc(channel ptr)
+    %if cc_et flag = yes %then %start
+        !  For all operations other than opening files and closing
+        !  files, check against continuing to process past
+       !  the ET marker.
+        %if operation <= 5 %then flag = tsfo + 10 %and -> sopend
+    %finish
+%finish
+
+flag = 0
+-> op(operation)
+
+op(9):                                  !  OPEN FOR READ
+op(10):                                 !  OPEN FOR NEW WRITE
+op(11):                                 !  OPEN FOR MOD WRITE
+open tape file
+-> sopend
+
+op(1): !  PREPARE FOR WRITE    PREPARE FOR WRITE    PREPARE FOR WRITE
+
+! ??????? MUST CHECK FOR THIS CALL WHEN AT END OF BUFFER
+
+!  The basic task for this section is to position the 'arec' pointer
+!  to where the 'magio' caller should put his next output record.  This is
+!  achieved by deriving the value of this pointer from the 'recptr'
+!  variable which in general on entry to 'magio', points
+!  to the next record to be processed.
+!
+%if cf_blocking > 2 %and cf_relpos = ahead  %then %start
+    !  For all formats other than spanned, the contents of the buffer
+    !  reflect exactly what has been read from a tape.  For spanned formats
+    !  the process of concatenating multiple record segments destroys the structure
+    !  of the blocks as read from tape because of the removal of the
+    !  inter-segment "red tape".  Thus when there is the possibility
+    !  of a READ-BACKSPACE-WRITE sequence occurring, which implies the 
+    !  the necessity of backing up the tape, it must be
+    !  remembered that in order to re-establish the structure of the block
+    !  in which the record to be overwritten starts, that block must be
+    !  re-read from the tape since its internal structure is likely to have
+    !  been lost by previous processing.
+    !  In the case of a spanned record being overwritten that spanned
+    !  several blocks, it is necessary to back up the tape examining each
+    !  block until the block containing the start of the record to be overwritten
+    !  is found (this is done by the routine 'find preceding tape record').
+    !  Because of the necessity to re-establish the structure of this block
+    !  before writing the next record, all this preliminary
+    !  work cannot be left until later as is the case with the other data formats
+    !  where the much simpler analogous work is done by 'process eob'.
+    !  Preparing the buffer to receive the next record and re-positioning the
+    !  tape must be done immediatly which is why this code is included here.
+    !
+    n = -1
+    skip blocks (channel ptr,n,flag)
+    %if flag > 0 %then -> sopend
+    cf_relpos = behind
+    %if recptr < cf_blockptr %then %start
+        ! THE RECORD CURRENTLY INDICATED BY 'RECPTR' SPANNED TWO
+        ! OR MORE BLOCKS ON THE TAPE
+        find preceding tape record
+        %if flag > 0 %then -> sopend
+    %finish %else %start
+        ! RECORD POINTED AT BY 'RECPTR' IS CONTAINED ENTIRELY WITHIN
+        ! ONE BLOCK ON THE TAPE, IE THE BLOCK AT
+        ! THE TAPE'S CURRENT POSITION, HAVING ALREADY SKIPPED BACK
+        !  ONE BLOCK.
+        !  NOW HAVE TO MOVE THE CURRENT RECORD (OR SEGMENT) BACK
+        !  TO THE START OF DATA POSITION.
+        len = eod - cf_blockptr
+        %if len > 0 %then %start
+            move(len,cf_blockptr,sod + blkrtl)
+            ! ????? IF BLOCKPTR>EOD MAY HAVE TO RE-READ BLOCK
+            ! SINCE IN THE RECONSTRUCTION OF A SPANNED RECORD THE
+            ! SDW IS STRIPPED OUT AND THERE IS NO WAY OF
+            ! RELIABLY RECONSTRUCTING IT.
+            recptr = recptr - len
+            eod = sod + blkrtl + len
+        %finish
+    %finish
+%finish
+cf_arec = recptr + recrtl
+-> sopend
+
+op(2):  !  READ  READ  READ  READ  READ  READ  READ  READ  READ  READ
+
+!  BUFFER CONTROL
+
+! BUFFER CONTROL IS MANAGED BY MANIPULATION OF THE FOLLOWING
+! PARAMETERS IN THE FILE DESCRIPTOR ('CF') FOR THE 'CURRENT FILE'.
+
+!  SOD     START OF DATA - DOESN'T CHANGE
+!  EOD     END OF DATA - UPDATED AS BLOCKS ARE READ INTO BUFFER.
+!          USED AS CHECK TO DETECT END OF DATA ON READ.
+!  RECPTR  RECORD POINTER.  ON ENTRY, POINTS TO THE RECORD TO BE
+!          MANIPULATED BY THIS CALL OR TO EOD IF NEW BLOCK NEEDS
+!          READING.  ON EXIT IT POINTS TO THE POSITION OF THE NEXT
+!          RECORD TO BE TRANSFERED OR TO EOD IF THE CURRENTLY READ
+!          RECORD WAS THE LAST (OR ONLY) RECORD IN THE BLOCK
+!  RECLEN  RECORD LENGTH.  ON ENTRY, UNDEFINED FOR THE PURPOSES OF 
+!          READING EXCEPT FOR 'UNDEFINED'.  ON EXIT IT HOLDS THE 
+!          LENGTH OF THE RECORD JUST 'READ'.  SEE NOTE UNDER
+!          R(1): FOR EXPLANATION OF EXCEPTION FOR 'U' format.
+!  AREC    ON ENTRY, UNDEFINED.  ON EXIT POINTS TO THE DATA PORTION
+!           OF THE RECORD JUST 'READ'.
+!  RECSIZE ON ENTRY, UNDEFINED.  ON EXIT THIS HOLDS THE LENGTH OF 
+!          THE DATA PORTION OF THE RECORD JUST 'READ'.
+
+%if recptr >= eod %then %start
+    !  PREVIOUS RECORD READ WAS LAST IN BUFFER, IE IN CURRENT BLOCK.
+    !  CHECK TO SEE IF WRITE OUT FLAG SET.  IF IT IS THEN THIS
+    !  BLOCK HAS BEEN WRITTEN TO AND REACHING THE END OF DATA
+    !  IMPLIES END OF FILE.
+    !  this also implies that there is a need to write out the buffer
+    !  but since this will be cleared out by 'close file' whenn
+    !  when an explicit close file call is made on 'magio' it
+    !  is quite OK to jump to sopend at this point.
+    %if cf_bwf = yes %then flag = eof %and ->sopend
+    %if cf_relpos = behind %then %start
+        ! THIS IMPLIES THAT THE TAPE IS POSITIONED AT THE START
+        ! OF THE BLOCK WHICH IS ALREADY IN THE BUFFER.  HENCE
+        ! HAVE TO SKIP ONE BLOCK TO AVOID AN INCORRECT
+        ! RE-READ OF THE BLOCK.
+        !  THE ABOVE SITUATION WOULD OCCURR AFTER USING
+        !  THE 'REVERSE READ BLOCK' INTERFACE
+        n = 1
+        skip blocks (channel ptr,n,flag)
+        %if flag > 0 %then -> sopend
+    %finish
+    !  MUST NOW TRY TO READ IN THE REQUIRED BLOCK
+    blksize = cf_block length   ;! LIMIT READ TO MAXIMUM BLOCK LENGTH
+    read block (channel ptr,sod,blksize,flag)
+    %if flag # 0 %then %start
+        %if flag = 4 %then cf_recsize = 0 %and flag = eof
+        ! RECSIZE MUST BE SET TO ZERO FOR READLSQ 
+        -> sopend
+    %finish
+    !  MANAGED TO READ IN A NEW BLOCK
+    cf_blockptr = sod
+    cf_bwf = no  ;!  NO RECORDS WRITTEN TO THIS BLOCK
+    cf_relpos = ahead
+    %if cf_data format > 3 %then blksize = short int(sod)
+    eod = sod + blksize
+    recptr = sod + blkrtl
+%finish %else blksize = 0           ;!  SEE NOTE UNDER R(1):
+
+!  NOW SWITCH TO DATA format SPECIFIC CODE
+
+-> r(cf_data format)
+r(1): !  UNDEFINED - JUST HAVE TO SET LENGTH IN 'RECLEN'
+      !  NOTE THAT IN ORDER TO BE ABLE TO MAKE USE OF THE
+      !  DATA IN THE BUFFER FOR SINGLE RECORD BACKSPACING IN 
+      !  UNDEFINED format FILES, THE LENGTH OF THE PREVIOUS RECORD
+      !  MUST BE REMEMBERED.  THIS IS WHY 'BLKSIZE' IS SET TO ZERO
+      !  IF A BLOCK HAS NOT BEEN READ IN BECAUSE IN THE CASE OF
+      !  'U' format FILES, THIS CAN ONLY HAPPEN IF THE
+      !  PREVIOUS OPERATION WAS A SINGLE BACKSPACE: OTHERWISE
+      !  A BLOCK IS ALWAYS READ IN.  THUS THE CHECK ON BLOCKSIZE
+      !  BEING GREATER THAN ZERO PRESERVES THE VALUE IN RECLEN
+      !  AND THE BUFFER CONTENTS ARE PASSED ON AGAIN WITH THE
+      !  CORRECT LENGTH TO THE MAGIO CALLER.
+      %if blksize > 0 %then reclen  = blksize
+      cf_recsize = reclen
+      recptr  = eod
+      !  'CF_AREC'  REMAINS UNCHANGED
+      -> srend
+r(2): ! FIXED UNBLOCKED
+r(3): ! FIXED BLOCKED - JUST MOVE RECORD ADDRESS ALONG BUFFER
+      !  RECLEN REMAINS CONSTANT
+      ! except when there is a short final block and hence record
+      cf_arec   = recptr
+      recptr = recptr + reclen
+      %if recptr>eod %then cf_recsize=eod-cf_arec;  ! the short case
+      -> srend
+r(4): !  VARIABLE UNBLOCKED
+r(5): !  VARAIBLE BLOCKED
+      !  EACH RECORD HAS A RECORD DESCRIPTOR WORD (RDW)
+      !  PRECEDING IT, THE FIRST TWO BYTES OF WHICH CONTAINS THE RECORD
+      !  LENGTH.
+      x = shortint(recptr)
+      %if x = 0 %then %start
+          ! NULL RECORD OR PADDING FOR SHORT BLOCK.  BOTH IMPLY
+          ! END OF DATA IN THIS BLOCK.
+          eod = recptr  ;!  FORCE END OF BLOCK
+          -> op(2)
+      %finish %else reclen = x
+      cf_arec    = recptr + recrtl          ;!(  REAL DATA STARTS
+      cf_recsize = reclen - recrtl          ;!(  BEYOND RDW
+      recptr  = recptr + reclen
+      -> srend
+r(6): !  VARIABLE SPANNED UNBLOCKED ?
+r(7): !  VARIABLE BLOCKED SPANNED
+      -> s((byteinteger(recptr + 2))&x'03')
+      !
+s(0): !  THIS SEGMENT IS A COMPLETE RECORD ON ITS OWN AND
+      !  CAN BE TREATED AS AN ORDINARY VARIABLE RECORD
+      -> r(5)
+s(2): !  LAST SEGMENT OF A MULTISEGMENT RECORD
+s(3): !  INTERMEDIATE SEGMENT OF A MULTISEGMENT RECORD
+      !  SHOULD NEVER GET THIS CONDITION HERE, HENCE FAULT
+      flag = tsfo + 6  ;!  INCORRECT RECPRD format
+      -> srend
+s(1): !  FIRST SEGMENT OF A MULTI SEGMENT RECORD WHICH, BY
+      !  DEFINITION MUST BE THE LAST SEGMENT IN THIS BLOCK.  NOW
+      !  HAVE TO READ IN NEW BLOCKS UNTIL THE END OF THIS RECORD
+      !  IS FOUND.
+      !  FIRST CHECK TO SEE IF THIS SEGMENT IS AT THE BEGINING OF
+      !  THE BUFFER OR NOT.  IF NOT, THEN MOVE IT TO THE START
+      !  POSITION, REMEMBERING TO ALLOW SPACE AT THE BEGINING
+      !  FOR WHERE THE BDW WOULD BE INSERTED SHOULD
+      !  THE BUFFER SUBSEQUENTLY HAVE TO BE WRITTEN OUT.
+
+      !
+      reclen = shortint(recptr)
+      %if recptr > sod + blkrtl %then %start
+          !  SEGMENT NOT AT START OF DATA, MUST MOVE IT BACK
+          move(reclen,recptr,sod + blkrtl)
+          recptr = sod + blkrtl
+          eod    = recptr + reclen
+      %finish   ;!  OF MOVING RECORD TO START OF DATA
+      !  MUST NOW READ IN SUCCESSIVE BLOCKS UNTIL THE END OF
+      !  THE CURRENT RECORD IS FOUND.  EACH BLOCK WITH ITS RED TAPE
+      !  IS READ INTO THE BUFFER AT A POSITION AT THE END OF THE 
+      !  RECORD SO FAR RECONSTRUCTED.  THE RELEVANT INFORMATION IS
+      !  EXTRACTED FROM THE RED TAPE AND THEN THE DATA PORTION OF
+      !  SEGMENT (PLUS ANY FURTHER DATA IN THE BLOCK) IS MOVED
+      !  DOWN THE BUFFER TO BE ADJACENT TO THE EXISTING PART OF
+      !  THE RECORD.
+      %cycle
+          !  READ BLOCK INTO BUFFER STARTING AT 'EOD'
+          blksize = cf_block length  ;! LIMIT READ TO MAX BLOCK LENGTH
+          %if reclen + blksize > cc_buffer length %then -> srend
+          !  THIS LAST CHECK PREVENTS RUNNING OFF THE END OF THE
+          !  BUFFER WITH AN UNEXPECTEDLY LONG SPANNED RECORD.
+          !  THE CHECKS AT SOPEND SHOULD FAULT 'RECORD TOO LONG'
+          read block(channel ptr,eod,blksize,flag)
+          %if flag # 0 %then %start
+              %if flag = 4 %then flag = tsfo + 6
+              !  6 => INCORRECT RECORD format
+              -> srend
+          %finish
+          blksize   = shortint(eod)
+          !  NOW GET LENGTH OF DATA PORTION OF SEGMENT
+          seglen    = short int(eod + blkrtl) - recrtl
+          spanbits  = (byteinteger(eod + 6))&x'03'
+          !  MOVE CURRENT SEGMENT PLUS ANY OTHER DATA
+          move(blksize - (blkrtl + recrtl),eod + blkrtl + recrtl,eod)
+          cf_blockptr = eod
+          eod      = eod + blksize - (blkrtl + recrtl)
+          reclen   = reclen + seglen
+          %if reclen > cf_maxrec %then flag = tsfo + 6 %and -> srend
+          %if spanbits = 2 %then %exit   ;!  LAST SEGMENT FOUND
+      %repeat
+      !  MUST NOW INSERT A RDW FOR THE RECONSTRUCTED RECORD IN CASE
+      !  THIS CURRENT READ IS FOLLOWED BY 'BACKSPACE - READ' SEQUENCE
+      !  WHEN THE READ CODE WILL EXPECT TO FIND THE TRUE LENGTH OF
+      !  RECORD IN THE RDW.  REMEMBER RECLEN SET TO 0 AFTER BACKSPACE
+      plant integer (reclen << 16,recptr)    ;!  INSERT RDW
+      cf_arec    = recptr + recrtl     ;! (  REAL USER DATA STARTS
+      cf_recsize = reclen - recrtl     ;! (  BEYOND THE RDW
+      recptr  = recptr + reclen
+      -> srend
+
+srend:
+          %if reclen > cf_maxrec %then flag = tsfo + 18    ;!  RECORD TOO LONG
+         -> sopend
+
+op(3):  !  WRITE  WRITE  WRITE  WRITE  WRITE  WRITE  WRITE  WRITE
+
+!  THE HLL I/O ROUTINES WILL HAVE JUST PUT A RECORD INTO THE
+!  BUFFER AT THE ADDRESS 'CF_AREC_, THIS ADDRESS HAVING BEEN SET UP
+!  ON THE PREVIOUS CALL ON THIS CODE.  THE LENGTH OF THE DATA
+!  WILL BE IN 'CF_RECSIZE'.
+
+!  BUFFER CONTROL
+!  
+!  BUFFER CONTROL IS MANAGED BY THE FOLLOWING FIELDS IN THE FILE
+!  DESCRIPTOR FOR THE CURRENT FILE ('CF')
+
+!  SOD     AS FOR READ
+!  EOD     END OF DATA.  ON ENTRY THE CONTENTS ARE UNDEFINED.  ON
+!          EXIT THIS POINTS TO THE FIRST FREE BYTE AFTER THE END
+!          OF THE CURRENTLY WRITTEN RECORD OR TO SOD+BLKRTL
+!          EMPTYING THE BUFFER.
+!  RECPTR  ON ENTRY, THIS POINTS TO THE POSITION OF THE
+!          RECORD TO BE MANIPULATED BY THE CURRENT CALL ON THIS
+!          CODE.  ON EXIT THIS POINTS TO THE FIRST FREE BYTE
+!          AFTER THE RECORD JUST 'WRITTEN'
+!  RECLEN  ON ENTRY, UNDEFINED.  ON EXIT THIS CONTAINS THE LENGTH
+!          OF THE RECORD JUST 'WRITTEN'.
+!  AREC    ON ENTRY, UNDEFINED.  ON EXIT THIS POINTS TO THE
+!          POSITION TO BE OCCUPIED BY THE DATA PORTION OF THE 
+!          NEXT RECORD TO BE WRITTEN INTO THE BUFFER
+!  RECSIZE ON ENTRY THIS CONTAINS THE LENGTH OF THE RECORD JUST
+!          WRITTEN INTO THE BUFFER.  ON EXIT, UNDEFINED
+
+cf_bwf    = yes                    ;!  MARK BUFFER AS WRITTEN TO
+reclen = cf_recsize + recrtl
+eod    = recptr + reclen
+-> w(cf_data format)
+
+w(1): !  UNDEFINED.  THESE RECORDS ALWAYS OCCUPY THE BEGINING
+      !  OF THE BUFFER AREA AND ARE ALWAYS WRITTEN FROM THERE. 
+      !  HENCE THER IS NO NEED TO ALTER THE 'RECPTR', ONLY THE 
+      !  'RECLEN' AND THEN WRITE OUT THE BLOCK.  THERE IS OF COURSE
+      !  NO BDW OR RDW.
+w(2): ! FIXED UNBLOCKED - WILL TREAT JUST THE SAME AS 'U'
+      process eob
+      %if flag > 0 %then ->swend
+      ! EOD SET BY 'PROCESS EOB'
+      ! RECPTR AND AREC STAY UNCHANGED POINTING AT SOD
+      -> swend
+      !
+w(3): ! FIXED BLOCKED
+      %if eod - sod >= cf_block length %then process eob
+      %if flag > 0 %then -> swend
+      !  EOD WILL BE RESET BY 'PROCESS EOB' AS NECESSARY
+      recptr = eod
+      cf_arec   = recptr
+      -> swend
+w(4): ! VARIABLE UNBLOCKED
+      plant integer(reclen<<16,sod+4)  ;!  SET RDW
+      !  BLOCK DESCRIPTOR WORD (BDW) SET BY 'PROCESS EOB'
+      process eob
+      %if flag > 0 %then -> swend
+      !  EOD RESET BY 'PROCESS EOB'
+      ! AREC AND RECPTR REMAIN UNCHANGED
+      -> swend
+w(5): ! VARIABLE BLOCKED
+      plant integer(reclen<<16,recptr)  ;!  SET RDW
+      blksize   = eod - sod
+      %if blksize >= cf_block length - (cf_minrec+recrtl) %then %start
+          !  HAVE SUFFICIENT DATA TO FILL BLOCK OR THE NEXT
+          !  WRITE IS SURE TO OVERFLOW THE CURRENT BLOCK
+          %if blksize > cf_block length %then %start
+              ! CURRENT CONTENTS OF BUFFER LONGER THAN
+              ! 'BLOCK LENGTH'. MUST SHORTEN CONTENTS TO END OF
+              ! PREVIOUS RECORD.
+              ! AT THIS POINT THE RECORD JUST ADDED TO THE
+              !  BUFFER IS COMPLETELY DEFINED BY 'RECPTR' AND 'RECLEN'.
+              ! HENCE IT IS SAFE TO DO AN APPARENT TRUNCATION OF 
+              ! THE BUFFER FOR THE BENEFIT OF 'PROCESS EOB' AND PICK
+              ! UP THE "ABANDONED" RECORD LATER.
+              eod = eod - reclen
+              shift len = reclen
+          %finish %else shift len = 0
+          !  BDW SET BY 'PROCESS EOB'
+          process eob
+          %if flag > 0 %then -> swend
+          %if shift len > 0 %then %start
+              ! AFTER SHORTENING CONTENTS OF BUFFER, MUST MOVE
+              ! DANGLING DATA TO START OF DATA POSITION BUT 
+              ! ALLOWING FOR BDW.
+              move(shift len,recptr,sod + blkrtl)
+              cf_bwf = yes    ;! VALID DATA STILL IN BUFFER
+          %finish
+          eod = sod + blkrtl + shift len
+      %finish
+      recptr = eod              
+      cf_arec   = recptr + recrtl
+      ! ????????? OF DOUBTFULL USE RECLEN = 0
+      -> swend
+
+w(6): ! VARIABLE SPANNED UNBLOCKED
+w(7): ! VARIABLE SPANNED BLOCKED
+      %if cf_data format = 6 %then limit = recrtl + blkrtl  %c
+      %else limit = cf_block length - blkrtl - 1  ;! ???????
+      %if eod - sod > limit %then %start
+          ! HAVE SUFFICIENT DATA IN BUFFER TO WRITE OUT A BLOCK.  BEING
+          ! SPANNED RECORDS, MAY HAVE ENOUGH DATA FOR SEVERAL BLOCKS
+          ptr = sod
+          blockmod = 0   ;! INDICATES FIRST BLOCK SPANNED BY RECORD
+          %while eod - ptr > limit %cycle
+              %if eod - ptr < cf_block length    %c
+              %then blksize = eod - ptr     %c
+              %else blksize = cf_block length
+              plant integer(blksize<<16,ptr)     ;!  SET BDW
+              !  NOW WORK OUT SPANNING BITS
+              !  THE POSSIBLE SPANNING BIT SETTINGS FOR EACH
+              !  SEGMENT ARE AS FOLLOWS
+              !    0  ONLY SEGMENT   )  FIRST
+              !    1  FIRST          )  BLOCK
+              !    2  LAST              (  SECOND AND
+              !    3  INTERMEDIATE      (  SUBSEQUENT BLOCKS
+              !  IF END OF RECORD FALLS WITHIN THIS BLOCK, THE
+              !  BOTTOM BIT OF 'SPANBITS' MUST BE ZERO.  OTHERWISE
+              !  MORE OF THE SPANNED RECORD IS TO FOLLOW IN
+              !  FURTHER SEGMENTS AND THE BOTTOM BIT MUST BE SET.
+              %if ptr + blksize = eod %then spanbits = blockmod %c
+              %else spanbits = blockmod + 1
+              seglen = ptr + blksize - recptr
+              plant integer((seglen<<16)!(spanbits<<8),recptr)
+              %if blksize < 18 %then %start
+                  ! MUST PAD TO 18 BYTES WITH ZEROS
+                  fill(18-blksize,eod,0)
+                  blksize = 18
+              %finish
+              write block (channel ptr,ptr,blksize,flag)
+              %if flag # 0 %then -> swend
+              blockmod = 2
+                !  MOVE 'PTR' UP BUFFER BUT ALLOW SPACE
+                !  FOR BDW AND RDW FOR NEXT BLOCK
+              ptr = ptr + blksize - (blkrtl + recrtl)
+              recptr = ptr + blkrtl
+          %repeat
+          %if recptr < eod - recrtl %then %start
+              !VBS FILE WITH A PART RECORD LEFT OVER IN THE BUFFER, IE.
+              !  A LAST SEGMENT
+              !  MUST MOVE THIS TO THE START OF DATA (+ BLKRTL FOR BDW)
+              len = eod - ptr - (blkrtl + recrtl)
+              move(len,ptr + blkrtl + recrtl,sod + blkrtl + recrtl)
+              plant integer(((len + recrtl)<<16)!x'0200',sod + blkrtl)
+              eod = sod + len + blkrtl + recrtl
+          %finish %else %start
+              !  EMPTY BUFFER
+              eod = sod + blkrtl
+          %finish
+      %finish %else %start
+          !  NOT ENOUGH DATA TO FILL BLOCK - SET RDW FOR THIS
+          !  RECORD
+          plant integer(reclen<<16,recptr)
+      %finish  ;!  OF BIT FOR WRITING OUT BLOCKS
+      recptr = eod
+      cf_arec   = recptr + recrtl
+      ! ??????? OF DOUBTFULL USE RECLEN = 0
+      -> swend
+      !
+swend:  !  END OF SWITCH FOR WRITING
+        -> sopend
+
+op(4):                                       !  REWIND
+      rewind file
+      -> sopend
+
+op(5):                                       !  BACKSPACE
+      %if cf_blocking = 1 %then %start
+          !  UNBLOCKED RECORDS, U,F OR V
+          %if recptr > sod + blkrtl %then %start
+              !  VALID DATA IN BUFFER AND NOT GOING TO BACKSPACE OFF
+              !  THE BEGINING OF THE BUFFER.  SINCE ALL UNBLOCKED
+              !  RECORDS START AT THE 'START OF DATA' POSITION
+              !  ONLY NEED TO POINT RECPTR AT SOD
+              recptr = sod + blkrtl
+          %finish %else %start
+              !  BACKSPACING OFF THE START OF DATA.  THIS 
+              !  IMPLIES SECOND OR SUBSEQUENT BACKSPACE AFTER A READ
+              !  OR ANY BACKSPACE AFTER A WRITE.
+              !  SINCE ALL UNBLOCKED WRITES ARE ACTED UPON
+              !  IMMEDIATELY, NO NEED TO CALL 'PROCESS EOB'.
+              eod = sod + blkrtl   ;! NO CHANGE AFTER A WRITE
+                                          ! BUT WILL FORCE A READ SHOULD
+                                            ! A READ FOLLOW.
+              !  NOW MUST BACK UP THE TAPE THE CORRECT NUMBER OF BLOCKS
+              !  IF THE 'RELPOS' = AHEAD, TWO BLOCKS ARE IMPLIED
+              %if cf_relpos = ahead %then n = -2 %else n = -1
+              skip blocks (channel ptr,n,flag)
+              cf_relpos = at
+          %finish
+          -> bend
+      %finish
+      !
+      %if cf_blocking = 2 %then %start                                        
+          !  BLOCKED RECORDS IE. FB OR VB
+          %if recptr <= sod + blkrtl %then %start
+              !  BACKSPACING OFF START OF DATA BLOCK - MUST CHECK
+              !  END OF BLOCK CONDITION
+              !  AT THIS POINT MUST WORK OUT WHETHER TO
+              !  BACK UP THE TAPE ONE OR TWO BLOCKS, AND THIS DECISION
+              !  MUST BE MADE BEFORE CALLING 'PROCESS EOB' WHICH CHANGES
+              !  THE FLAGS AND POINTERS.  NORMALLY, AFTER 'PROCESS EOB'
+              !  HAS BEEN CALLED, THE TAPE WOULD BE BACKED UP TWO
+              !  BLOCKS.  ONLY IN THE PARTICULAR SITUATIONS WHERE
+              !  A PRECEDING WRITE CAUSED A BLOCK TO BE WRITTEN
+              !  AND THE BUFFER EMPTIED OR AFTER A CALL ON 'ENDFILE' 
+              ! WOULD THE TAPE BE REVERSED ONLY ONE BLOCK.  THIS 
+              !  CONDITIUON IS INDICATED BY BOTH 'BWF' BEING 'NO'
+              !  AND RELPOS NOT BEING AHEAD.
+              !
+              %if cf_relpos = ahead %or cf_bwf = yes %then n = -2 %c
+                      %else n = -1
+              process eob
+              %if flag > 0 %then -> bend
+              !  NOW MUST BACK UP TAPE THE REQUIRED NO. OF BLOCKS
+              skip blocks (channel ptr,n,flag)
+              %if flag # 0 %then -> bend
+              !  NOW TRY TO READ THE 'PREVIOUS' BLOCK
+              blksize   = cf_block length
+              read block (channel ptr,sod,blksize,flag)
+              %if flag # 0 %then -> bend
+              cf_relpos = ahead
+              cf_bwf    = no
+              %if cf_data format = 5 %then blksize = short int(sod)
+              eod    = sod + blksize
+              recptr = eod
+          %finish     ;!  OF READING IN 'PRECEDING' BLOCK
+          %if reclen = 0 %then %start
+              !  A VB FILE - THE LAST OPER'N WAS A BACKSPACE OR WRITE
+              !  HAVE TO FIND THE LENGTH OF THE 'PRECEDING' RECORD
+              ptr = sod + blkrtl
+              %while ptr < recptr %cycle
+                  x = short int(ptr)
+                  %if x = 0 %then %exit
+                  len = x
+                  ptr = ptr + len
+              %repeat
+              reclen = len
+          %finish       ;!  OF FINDING LENGTH OF THE 'PRECEDING RECORD
+          recptr = recptr - reclen
+          %if cf_data format = 5 %then reclen = 0
+          -> bend
+      %finish     ;!  OF BACKSPACE FOR BLOCKED RECORDS
+
+      !  CAN ONLY REACH THIS POINT IF CF_BLOCKING > 2
+      !  BACKSPACE FOR SPANNED RECORDS
+      %if reclen = 0 %then reclen = preceding length
+      %if reclen = 0 %then %start
+          !  BACKSPACING OFF THE START OF THE DATA IN THE BUFFER
+          ! NOTE THAT EVEN FOR SPANNED RECORDS, AT THIS
+          !  POINT THERE CANNOT BE MORE THAN A BLOCK'S WORTH
+          !  OF DATA IN THE BUFFER BECAUSE OF THE WAY IN WHICH
+          !  THE 'WRITE' CODE ALWAYS WRITES OUT BLOCKS WHEN
+          !  WHEN THERE IS A BLOCK'S WORTH AVAILABLE.
+          !  SINCE THE 'PREPARE FOR WRITE' CODE ALSO TAKES
+          !  CARE OF AWKWARD BACKSPACE-WRITE SITUATIONS, THE
+          !  'PROCESS EOB' ROUTINE CAN BE USED HERE.
+          process eob
+          %if flag > 0 %then -> bend
+        %if cf_relpos = ahead %then %start   ;! ???????
+          ! ??????? %IF CF_BCF = YES %THEN %START   ;!  ????????
+              !  CONTENTS OF THE BUFFER CORRESPOND TO EARLIER BLOCKS
+              !  ON THE TAPE
+              %if recptr < cf_blockptr %then %start
+                  !  FIRST RECORD IN BUFFER SPANNED TWO OR MORE BLOCKS
+                  n = -1
+                  skip blocks(channel ptr,n,flag)
+                  %if flag > 0 %then -> bend
+              %finish
+              find preceding tape record  ;!  SHOULD FIND THE RECORD
+                                           !  CORRESPONDING TO THE
+                                           !  THE LAST RECORD PROCESSED
+              %if flag > 0 %then -> bend
+              x = preceding length  ;! TRY TO LOCATE PRECEDING RECORD
+                                     ! IN THE CURRENT BUFFER CONTENTS
+              %if x = 0 %then find preceding tape record %c
+              %else recptr = recptr - x
+          %finish %else find preceding tape record
+      %finish %else recptr = recptr - reclen
+      reclen = 0
+
+bend: !  END OF SWITCH CONTROLLING BACKSPACING
+      cf_arec = recptr + recrtl
+       -> sopend
+
+op(6):                                       !  ENDFILE
+      endfile (no)
+      -> sopend
+
+op(7):                                       !  CLOSE FILE
+op(8):                                      !  CLOSE FILE AND TAPE
+      close file
+      flag = 0
+      %if operation = 8 %then close tape(channel ptr,rc)
+      -> sopend
+
+sopend:
+      cf_recptr = recptr
+      cf_reclen = reclen
+      cf_eod    = eod
+      %if flag < 5 %then flag = tsfault(flag)
+      %unless flag = 0 %or flag = eof %then %start
+          !  FAILURE OF SOME SORT
+          select output(0)
+          newline
+          printstring("Mag tape processing failure   Chan Volume ")
+          printstring("Label Filename          Block    (Operation ".itos(operation).")")
+          newline
+          %if flag > tsfo %then %start
+              printstring(errmess(flag - tsfo))
+              spaces(2)
+          %finish %else %start
+              printstring("SYSTEM ERROR  ")
+              write(flag,4)  ;  spaces(11)
+          %finish
+          write(cf_dsnum,2)
+          spaces(2) ; printstring(cf_volume)
+          spaces(6-length(cf_volume))
+          write(cf_rel file num,4)
+          spaces(2) ; printstring(cf_dsn) 
+          spaces(17-length(cf_dsn))
+          %unless cc==not set %then write(cc_blockno,5)
+          ! SUBSYSTEM WILL ALWAYS CLOSE FILE AND TAPE AFTER ERROR
+          %signalevent 12,1
+      %finish
+      %return
+
+!  >>>>>>>>>>>>>>>>>>>>>>>>>>>> PRECEDING  LENGTH  <<<<<<<<<<<<<<<<<
+! 
+%integerfn preceding length
+
+!  THIS ROUTINE SCANS THAT PART OF THE CURRENT BUFFER WHICH PRECEDES
+!  'RECPTR' LOOKING FOR THE IMMEDIATLY PRECEDING RECORD START (IN
+!  THE CASE OF V OR VB FILES) OR THE IMMEDIATLY PRECEDING START
+!  OF RECORD SEGMENT (IN THE CASE OF SPANNED FILES)
+!  IT RETURNS THE LENGTH OF THE RECORD OR SEGMENT AS ITS RESULT.
+
+%integer ptr,len,x
+%byteinteger mask
+
+len = 0
+%if cf_blocking > 2 %then mask = x'02' %else mask = 0
+ptr = sod + blkrtl
+%while ptr < recptr %cycle
+    x = shortint(ptr)
+    %exit %if x = 0    ;!  NULL RECORD OR PADDING
+    %if byteinteger(ptr + 2) & mask = 0 %then len = x
+    ptr = ptr + x
+%repeat
+%result = len
+%end      ;!  OF PRECEDING LENGTH
+
+! >>>>>>>>>>>>>>>>>>>>  FIND PRECEDING TAPE RECORD <<<<<<<<<<<<<<<
+
+%routine find preceding tape record
+
+!  THIS ROUTINE READS BACKWARDS DOWN THE TAPE FROM ITS CURRENT
+!  POSITION, REVERSE READING BLOCKS INTO THE BUFFER AND
+!  SCANNING THEM FOR A RECORD START SEGMENT.  ON EXIT, THE 
+!  START SEGMENT NEAREST TO THE TAPE POSITION ON ENTRY WILL
+!  BE INDICATED BY 'RECPTR'.  IN SUMMARY, ON EXIT:
+!     * LATEST START SEGMENT POINTED AT BY 'RECPTR'
+!     * 'BCF' SET TO NO
+!     * TAPE POSITIONED BEFORE CORRESPONDING BLOCK ON TAPE
+
+recptr = eod   ;! TO TRIGGER FIRST ENTRY INTO FOLLOWING CYCLE
+cf_blockptr = sod
+%while recptr >= eod %cycle
+    blksize = cf_block length
+    reverse read block (channel ptr,sod,blksize,flag)
+    %if flag > 0 %then %return
+    eod = sod + shortint(sod)
+    recptr = eod   ;!  FOR PURPOSES OF CALLING 'PRECEDING LENGTH'
+    recptr = recptr - preceding length
+    ! THE PRECEDING STATEMENT MAKES SENSE IF IT IS REMEMBERED
+    ! THAT THE SEGMENT BEING SEARCHED FOR MUST BE, BY DEFINITION,
+    ! THE LAST SEGMENT IN A BLOCK.
+%repeat
+cf_relpos = behind
+%return
+%end     ;!  OF FIND PRECEDING TAPE RECORD
+
+
+
+
+!  >>>>>>>>>>>>>>>>>>>>>>>>>  PROCESS  EOB  <<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+%routine process eob
+!  THIS ROUTINE IS CALLED WHEN AN END OF BLOCK CONDITION IS
+!  REACHED IN A CONTEXT WHERE THE BLOCK MAY NEED WRITING OUT TO
+!  THE TAPE.  THE MAIN PURPOSE OF THIS ROUTINE IS TO CHECK THE
+!  THE RELATIVE POSITION OF THE TAPE WRT THE BIFFER CONTENTS,
+!  I.E. CHECK CF_RELPOS AND THEN WRITE OUT THE BLOCK
+
+%integer n,x
+
+%if cf_bwf = no %then %return      ;!  BUFFER NOT WRITTEN TO
+!  ALSO CHECK TO SEE IF ANY DATA IN BUFFER
+%unless eod > sod + blkrtl + recrtl %then %return
+%if cf_relpos = ahead %then %start
+    !  THE CURRENT BUFFER CONTENTS CORRESPOND TO THE LAST BLOCK
+    !  ON THE TAPE TO BE PROCESSED.  THEREFORE, HAVE TO BACK
+    !  UP THE TAPE ONE BLOCK BEFORE WRITING THE BLOCK.
+    !  THE ABOVE SITUATION COULD ARISE WHEN CALLING
+    !  A SEQUENCE SUCH AS READ-WRITE WITHOUT A CALL ON BACKSPACE
+    n = -1
+    skip blocks (channel ptr,n,flag)
+    %if flag = 4 %and cc_block no = 0 %then flag = 0
+    !  THE LAST LINE ABOVE IS A CHECK TO GUARD AGAINST A
+    !  FAILURE IN THE EVENT OF A WRITE AFTER REWIND SEQUENCE
+
+    %if flag > 0 %then %return
+%finish
+x = eod - sod      ;!  GET SIZE OF BLOCK TO BE WRITTEN
+%if cf_rectype = 2 %then %start
+    plant integer(x<<16,sod) ;! BDW FOR VAR
+    %if x < 18 %then %start
+        ! BLOCK SHORTER THAN 18 BYTES, MUST PAD WITH BINARY ZEROS
+        fill(18-x,eod,0)
+        x = 18
+    %finish
+%finish
+write block (channel ptr,sod,x,flag)
+%if flag > 0 %then %return
+cf_relpos = behind          ;! THESE THREE VARIABLES MUST BE SET IN
+! ??????CF_BWF = NO                 ;! A MUTUALLY CONSISTANT MANNER.  THE
+eod = sod + blkrtl  ;! CURRENT SETTINGS LEAVE THE BUFFER EMPTY
+!  CAN'T RESET RECPTR HERE - MUST BE DONE IN CONTEXT OF THE 
+!  CALL ON 'PROCESS EOB'.
+%return
+%end       ;!  OF PROCESS EOB
+
+!  >>>>>>>>>>>>>>>>>>>>  OPEN  TAPE  FILE  >>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+%routine open tape file
+%routinespec check tape (%integer writing)
+%routinespec find file
+%routinespec validate for read
+%routinespec validate for write
+%routinespec unwind file
+%routinespec create buffer
+%routinespec create labels
+%integer rc,len
+%string(80) buffer1,buffer2       ;!  BUFFERS FOR HANDLING LABELS
+%record(ibm file1 format) hdr1 
+%record(ibm file2 format) hdr2 
+%switch type (9:11)   ;!  FOR THE VARIOUS TYPES OF OPEN
+rc = 0
+
+%if cf_dsn = nulldsn %then %start
+    !  FILENAME NOT SUPPLIED - NOT A VALID THING TO DO IF
+    !  WRITING A FILE(NEW OR MOD) WITH STANDARD LABEL PROCESSING
+    %if (operation=10 %or operation=11) %and cf_lpmode=sl %c
+    %then flag = tsfo + 4 %and %return
+%finish %else %start
+    cf_dsn = cf_dsn." " %while length(cf_dsn) < 17 
+%finish
+!  'FLAG' SET TO ZERO IN 'MAGIO'
+-> type(operation)      ;!  PERFORM APPROPRIATE TYPE OF OPEN
+
+type(9):                 !  OPEN FOR READING
+check tape (operation)
+find file
+%if flag = tsfo + 100 %then flag = tsfo + 16
+validate for read
+create buffer
+init desc fields
+%return
+
+type(10):                 !  OPEN FOR WRITING NEW FILE
+%if cf_lpmode = ul %and cf_rel file num = 1 %then %start
+    !  NO WRITE ACCESS TO FIRST PHYSICAL FILE
+    flag = tsfo + 19
+    %return
+%finish
+check tape (operation)
+find file
+%if cf_lpmode = sl %then %start
+    !  THE ONLY ACCEPTABLE RESULT CODES FROM FIND FILE IN THIS CONTEXT
+    ! ARE:
+    !  0       FILE FOUND OK. AND THE INTENTION IS TO OVERWRITE IT WITH A
+    !          FILE OF THE SAME NAME
+    !  TSFO+100 A TAPE MARK WAS FOUND WHERE A "HDR1" WAS EXPECTED 
+    !          IMPLYING THAT THE FILE TO BE WRITTEN IS TO BE ADDED 
+    !          TO THE "END" OF THE TAPE
+    !  TSFO+4  AS FOR 0 BUT OVERWRITTING WITH A FILE OF A DIFFERENT NAME.
+    !
+    %if flag = 0 %or flag = tsfo + 4 %then %start
+        ! WILL HAVE READ A "HDR1" TO HAVE HAD THESE RESULTS FROM "FIND
+        ! FILE".  HAVE TO SKIP BACK OVER EXISTING "HDR1".
+        n = -1
+        flag = 0
+        skip blocks (channel ptr,n,flag)
+    %finish %else %start
+        %if flag = tsfo + 100 %then %start
+            ! NO HDR1 AT THE REQUIRED POSITION ON THE TAPE IMPLYING THAT
+            ! THE CURRENT FILE IS TO BE ADDED TO THE "END" OF THE TAPE.
+            ! SINCE THE 'FIND FILE' ROUTINE IS ALWAYS TRYING TO
+            ! READ A 'HDR1' LABEL, IT FOLLOWS THAT IF IT FAILS, THE TAPE
+    !        ! WILL ALWAYS BE IN THE CORRECT POSITION TO WRITE A NEW
+            ! 'HDR1'.  SO JUST SET FLAG TO ZERO.
+            flag = 0
+        %finish
+    %finish
+    validate for write
+    create labels
+    create buffer
+    write labels
+    %if flag = 0 %then write tape mark (channel ptr,flag)
+%finish %else %start
+    !  UNLABELLED PROCESSING
+    %if flag=tsfo+100 %then flag=0; ! found EOT. Thats OK.
+    validate for write
+    create buffer
+%finish
+init desc fields
+%if flag = 0 %then cc_blockno = 0 %and cc_term flag=no
+! we delay setting term flag till all opened OK, so that a close ENDFILE
+! doesnt fall over with no buffer.
+%return
+
+type(11):                      !  OPEN FOR MOD WRITING, IE. APPENDING
+check tape (operation)
+find file  ;!  IS THIS THE RIGHT TYPE OF LOCATE?
+          ;!  FOR SEVERAL MODS TO A LARGE FILE, THIS
+                ;!  WILL INVOLVE A LOT OF TAPE MOVBEMENT
+%if flag =tsfo+100 %then %start
+    !  HAVE TRIED TO FIND THE FILE TO WHICH TO 'MOD'
+    !  BUT HAVE FOUND END OF TAPE INSTEAD.  SO JUST CREATE
+    ! A NEW FILE AS THOUGH WRITING AA NEW FILE.
+    flag = 0
+    -> type(10)
+%finish
+validate for read
+unwind file
+validate for write
+create buffer
+init desc fields
+%if flag=0 %then cc_term flag=no
+%return     ;!  FROM OPEN MOD
+
+!>>>>>>>>>>>>>>>>>>>>>    CHECK TAPE    <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+%routine check tape (%integer open type)
+%integer mode,len
+%constinteger read open = 9    ;!  OPENING FOR READ
+%constinteger write open = 10    ;!  OPENING FOR WRITEING NEW FILE
+%constinteger append open = 11    ;!  OPENING FOR APPENDING
+%string(100) buffer   ;!  ALLOW FOR FUNNY LABELS
+%record(ibm vol1 format) vol label 
+%record(ibm file1 format) hdr1 
+
+%if flag > 0 %then %return
+!* cf_volume = " ".cf_volume %while length(cf_volume) < 6 
+cf_volume = cf_volume." " %while length(cf_volume)<6; !changed SH 11-Jun-90.
+%if cf_flags & x'40' > 0 %then mode = 2 %else mode = 1
+open tape(cf_volume,mode,channel ptr,flag)
+%if flag > 0 %then %start
+    %if flag = 90 %then flag = tsfo + 22 %c
+    %else %if flag = 104 %then flag = tsfo + 7 %c
+    %elseif flag=109 %then flag=tsfo+23
+    %return
+%finish
+cf_channel=channel ptr
+%if ssown_tc(channel ptr)_et flag = yes %then flag = tsfo + 10 %and %return
+cc == ssown_tc(channel ptr)
+cc_xfers = 0
+%if flag = -1 %then flag = 0 %and %return
+rewind tape(channel ptr,0,flag)
+%if flag > 0 %then %return
+%if cf_lpmode = ul %then %start
+    cc_init fsn = ""
+    %if open type = read open %then %return
+%finish %else %start
+%finish
+!  AT THIS STAGE THE TAPE IS BEING ALLOCATED FOR THE FIRST TIME
+!  AND IS BEING PROCESSED IN SL MODE OR WRITING IN UL MODE
+!  IN EITHER CASE MUST CHECK PRESENCE OF VOLUME LABEL
+len = 100    ;!  100 ALLOWS FOR FUNNY LABELS
+read block (channel ptr,addr(buffer)+1,len,flag) ;! READ VOL1
+%if flag # 0 %or len # 80 %then %start
+ct: 
+    close tape (channel ptr,flag)
+    flag = tsfo + 1
+    %return
+%finish
+length(buffer) = 80
+decode label(buffer,ibm vol1 field,addr(vol label))
+%if vol label_id # "VOL1" %then -> ct
+%if cf_lpmode = ul %then %start; ! this is already checked in OPEN TAPE FILE type(10) ???
+    !  WRITING TO TAPE IN UNLABELLED MODE.
+    !  IF WRITING TO FIRST PHYSICAL FILE, REJECT REQUEST
+    %if cf_rel file num =1 %then flag = tsfo + 19
+    %return
+%finish %else %start
+    !  STANDARD LABEL PROCESSING
+    %if open type = write open %and cf_rel file num = 1 %then %start
+        !  ABOUT TO WRITE FIRST FILE ON TAPE
+        cc_init fsn = "INIT"  ;!  MARK FOR CHECKING IN FIND FILE
+    %finish %else %start
+        !  CHECK FIRST HDR1 LABEL
+        len = 100
+        read block (channel ptr,addr(buffer)+1,len,flag) ;! READ HDR1
+        %if flag = 2 %or flag=3 %then %return; ! back to user directly
+        %if flag = 0 %start
+          %if len=80 %start
+            !  NOW DECODE HDR1 FOR FIRST FILE IN ORDER TO GET THE FILE
+            !  SEQUENCE NUMBER OF THE FIRST FILE WHICH NEED
+            !  NOT NECESSARILY BE 1.
+            length(buffer) = 80
+            decode label (buffer,ibm file1 field,addr(hdr1))
+            %if hdr1_id # "HDR1" %then -> ct
+            cc_init fsn = hdr1_file seq num
+          %finishelse -> ct;  ! wrong length
+        %finish %else %start;  ! flag=1 or 4
+          ! if its 1, then bypass the checking. The chap is interested in
+          ! his target file. assume init fsn=1 If its not, find file should
+          ! give a label number error which is slightly more meaningful than
+          ! the error from ct:
+          ! If the target file is 1, then find file may succeed in reading the
+          ! header. If not the user gets a more sensible message than from here.
+          ! if flag=4, then allow find file to give a sensible message.
+          cc_init fsn="0001"
+          flag=0
+        %finish
+    %finish
+    cc_xfers = 2    ;! FOR VOL1 & HDR1
+%finish
+cc_use = 1
+
+%end     ;!  OF CHECK TAPE
+
+!>>>>>>>>>>>>>>>>>>>>>>>>>>>    FIND FILE    <<<<<<<<<<<<<<<<<<<<<<<<<<
+
+%routine find file
+%constintegerarray errtab(-3:-1) = 16,16,9
+%integer len,loctype
+
+%if flag > 0 %then %return
+
+!  POSITION TAPE AT HDR1 FOR REQUIRED FILE
+
+%if cf_lpmode = ul %then loctype = 7 %else loctype = 9
+!  7 => MOVE TO ABSOLUTE PHYSICAL FILE
+!  9 => MOVE TO ABSOLUTE LABELED FILE
+locate tape (channel ptr,loctype,cf_rel file num,flag)
+%if cf_lpmode=ul %start; ! unlabelled
+  %if flag=0 %start;     ! ok so far. but maybe between final 2 TMs
+    ! do a skip fore and aft to find out
+    len=1
+    skip blocks(channel ptr,len,flag)
+    %if flag=0 %start;    ! not a TM
+      len=-1
+      skip blocks(channel ptr,len,flag);  ! skip back over it
+    %finishelseif flag=4 %start;  ! was a TM
+      flag=tsfo+100
+      ! supervisor has put us back between them
+    %finish
+    ! if skip fore fails other than 4, or skip back fails at all, leave the flag
+    ! for interpretation at sopend:
+    ! if skip back succeeded, then flag of 0 is correct
+  %finishelseif flag=4 %start;   ! tried to locate past EOT
+    flag=tsfo+16
+  %finish
+  ! anything else goes back as it stands
+  %return
+%finishelsestart;     ! sl
+  %if 0>flag>-4 %then flag=tsfo+errtab(flag)
+  %if flag>0 %thenreturn
+%finish
+! get here for successful sl locate only
+! SHOULD NOW BE IN POSITION TO READ HDR1 AND HDR2 OF REQUIRED FILE
+len = 80
+read block (channel ptr,addr(buffer1)+1,len,flag)  ;! READ HDR1
+%if flag = 4 %then flag = tsfo + 100   ;!  LOGICAL END OF TAPE
+%if flag > 0 %then %return
+%if len # 80 %then flag = tsfo + 2 %and %return
+!  2 => FILE HEADER ERROR
+length(buffer1) = 80
+decode label (buffer1,ibm file1 field,addr(hdr1))
+%if hdr1_id # "HDR1" %then flag = tsfo + 2 %and %return
+%if cc_init fsn = "INIT" %then %start
+    !  GOING TO WRITE TO FIRST FILE ON TAPE, SO JUST SET
+    !  THE SEQUENCE NO. FOR FIRST FILE TO ONE
+    cc_init fsn = "0001"
+%finish %else %start
+    %if cf_rel file num # intof(hdr1_file seq num) -   %c
+      intof(cc_init fsn) + 1 %then flag = tsfo + 3 %and %return
+    !  3 => LABEL NUMBER ERROR
+%finish
+%if cf_dsn = nulldsn %then %start
+    !  NO FILE NAME SUPPLIED VIA DEFINEMT - CAN INSERT FILE NAME
+    !  FROM TAPE LABEL SO LONG AS THIS OPEN IS NOT FOR A NEW FILE.
+    %if operation # 10 %then cf_dsn = hdr1_file name
+%finish %else %start
+    %if cf_dsn # hdr1_file name %then flag = tsfo + 4 %and %return
+    !  4 => FILE NAME ERROR
+%finish
+%return
+
+%end      ;!  OF FIND FILE
+
+!>>>>>>>>>>>>>>>>>>>>    VALIDATE FOR READ    <<<<<<<<<<<<<<<<<<<
+
+%routine validate for read
+%integer i,n
+%if flag > 0 %then %return
+!  SEEMS THAT WE HAVE THE RIGHT FILE - NOW EXTRACT THE FILE
+!  ATTRIBUTES FROM THE HDR2 LABEL IF USING STANDARD LABEL PROCESSING
+%if cf_lpmode = sl %then %start
+len = 80
+read block (channel ptr,addr(buffer2)+1,len,flag)   ;!  READ HDR2
+%if flag=4 %then flag=tsfo+1
+%if flag > 0 %then %return
+%if len # 80 %then flag = tsfo + 2 %and %return
+!  2 => FILE HEADER ERROR
+length(buffer2) = 80
+decode label (buffer2,ibm file2 field,addr(hdr2))
+%if hdr2_id # "HDR2" %then flag = tsfo + 2 %and %return
+%if hdr2_control chars = "A" %then cf_flags = cf_flags ! x'10'
+%if cf_rectype > 3 %or operation = 11 %then %start
+    ! RECTYPE <= 3 MEANS VALID INFO IN RECTYPE, IE. USER IS
+    ! OVERIDING (VIA DEFINEMT) THE FILE LABEL INFO.
+    ! OPERATION = 11 MEANS OPENING FOR MOD WRITE.
+    cf_block length = intof(hdr2_block length)
+    cf_maxrec = intof(hdr2_record length)
+    !  CHECK RECORD LENGTH FOR BENEFIT OF format U FILES ?
+    %if cf_maxrec = 0 %then cf_maxrec = cf_block length
+    cf_rectype = 255 ; cf_blocking = 255
+    %for i = 1,1,7 %cycle
+        %if hdr2_record format = recfm char(i) %then cf_rectype = i
+        %if hdr2_block attribute = recfm char(i) %then cf_blocking=i-3
+    %repeat
+%finish
+n = 1
+skip tape marks (channel ptr,n,flag)  ;! SKIP TO START OF DATA
+%finish     ;!  OF GETTING INFO FROM HDR2 LABEL
+%if cf_rectype = 255 %or cf_blocking = 255 %c
+   %then flag = tsfo + 17 %and %return
+cf_data format = format map (cf_rectype,cf_blocking)
+cf_flags = cf_flags ! x'20'   ;! SET EBCDIC BIT
+cf_relpos = at    ;!  CAN'T PUT IN INIT DESC FIELDS - CF REWIND FILE
+cc_block no = 0
+%return
+%end     ;!  OF VALIDATE FOR READ
+
+!>>>>>>>>>>>>>>>>>    VALIDATE FOR WRITE    <<<<<<<<<<<<<<<<<<<<
+
+%routine validate for write
+
+
+%if flag > 0 %then %return
+cf_data format = format map(cf_rectype,cf_blocking)
+cf_relpos = at  ;!  CAN'T PUT IN INIT DESC FIELDS - SEE REWIND FILE
+%return
+%end      ;!  OF VALIDATE FOR WRITE
+
+
+!>>>>>>>>>>>>>>>>>>>>>>>>>    CREATE BUFFER    <<<<<<<<<<<<<<<<<<<<<<<<<
+
+%routine create buffer
+%integer rc
+%if flag > 0 %then %return
+cc_buffer length =                 %c
+   cf_maxrec * rsmod(cf_data format) +     %c
+   cf_block length * bsmod(cf_data format) +     %c
+   buffsod + rtfudge
+cc_buffer file = nexttemp
+outfile(bfn base.cc_buffer file,cc_buffer length,cc_buffer length,
+     0,cf_sob,rc)
+%if rc # 0 %then flag = tsfo + 5 %and %return
+!  5 => FAILED TO CREATE BUFFER
+cf_eob = cf_sob + cc_buffer length
+header == record(cf_sob)
+header_label1 = hdr1
+header_label2 = hdr2
+%end        ;!  OF CREATE BUFFER
+
+
+!>>>>>>>>>>>>>>>>>>>>>>>>    CREATE LABELS    <<<<<<<<<<<<<<<<<<<<<<<<<
+
+%routine create labels
+
+%if flag > 0 %then %return
+
+hdr1_id                = "HDR1"
+hdr1_file name         = cf_dsn
+hdr1_file ser num      = cc_tsn
+hdr1_vol seq num       = "0001"
+hdr1_file seq num      = strof(cf_rel file num,4)
+hdr1_generation        = blanks(4)
+hdr1_version           = blanks(2)
+hdr1_create date       = " ".ibm date
+hdr1_expiry date       = " 00000"
+hdr1_security          = "0"
+hdr1_block count       = "000000"
+hdr1_syscode           = zeros(13)
+hdr1_resa              = blanks(7)
+
+
+hdr2_id                = "HDR2"
+hdr2_record format     = recfm char(cf_rectype)
+hdr2_block length      = strof(cf_block length,5)
+hdr2_record length     = strof(cf_maxrec,5)
+hdr2_density           = "3"
+hdr2_volume switch     = "0"
+hdr2_job id            = blanks(17)
+hdr2_rec tec           = blanks(2)
+hdr2_control chars     = blanks(1)
+hdr2_control chars     = "A" %if cf_flags & x'10' > 0
+hdr2_resa              = blanks(1)
+hdr2_block attribute   = recfm char(cf_blocking + 3)
+hdr2_resb              = blanks(3)
+hdr2_tape deck id      = blanks(5)
+hdr2_resc              = blanks(33)
+
+%return
+%end      ;!  OF CREATE LABELS
+
+
+
+!>>>>>>>>>>>>>>>>>>>>>>>  UNWIND  FILE  <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+%routine unwind file
+%integer n
+%if flag > 0 %then %return
+n = maxint
+skip blocks (channel ptr,n,flag)
+%if flag=4 %then flag=0 %elsestart
+  cc_block no=-1
+  flag=tsfo+9;    ! failed to position
+%finish
+%return
+%end         ;!  OF UNWIND FILE
+
+
+%end      ;!  OF OPEN TAPE FILE
+
+!>>>>>>>>>>>>>>>>>>>>>>>    WRITE  LABELS    <<<<<<<<<<<<<<<<<<<<<<<<<
+
+%routine write labels
+%string(80) lab
+
+%if flag > 0 %then %return
+
+length(lab) = 80
+encode label(lab,ibm file1 field,addr(header_label1))
+write block(channel ptr,addr(lab)+1,80,flag)
+%if flag > 0 %then flag = tsfo + 8 %and %return
+!  8 => FAILED TO WRITE LABEL
+length(lab)=80
+encode label(lab,ibm file2 field,addr(header_label2))
+write block(channel ptr,addr(lab)+1,80,flag)
+%if flag > 0 %then flag = tsfo + 8
+%return
+%end      ;!  OF WRITE LABELS
+
+!>>>>>>>>>>>>>>>>>>>>>>>>>>>>   ENDFILE   >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+%routine endfile (%integer closing)
+
+!  THIS ROUTINE EFFECTIVELY TRUNCATES THE FILE ON TAPE JUST AFTER
+!  THE LAST RECORD TRANSFERED.  ANY VALID DATA STILL LEFT
+!  IN THE BUFFER MUST BE WRITTEN OUT FOLLOWED BY TRAILER LABELS
+!  AND TWO TAPE MARKS.  THE TAPE IS THEN REPOSITIONED JUST AFTER
+!  THE LAST BLOCK , IE. JUST BEFORE THE TAPE MARK INDICATING
+!  THE END OF THE FILE.
+
+%record(ibm file1 format)%name trailer1 
+%record(ibm file2 format)%name trailer2 
+%integer n,bc
+
+eod = recptr    ;!  TRUNCATE BUFFER, AFTER READING OR BACKSPACING
+                       !  RECPTR MARKS THE END OF VALID DATA
+                       !  IN AN 'ENDFILE' CONTEXT.
+%if eod - sod > blkrtl + recrtl %then %start
+    !  RESIDUAL DATA IN BUFFER, MUST WRITE IT OUT.
+    !  THE TEST ABOVE HAS TO COPE WITH THE SITUATION OF 
+    !  A REWIND FOLLOWED BY A CLOSE, ESPECIALLY FOR A V FILE.
+    cf_bwf = yes    ;!  TO TRIGGER 'PROCESS EOB' CORRECTLY
+    process eob
+    %if flag > 0 %then %return
+    !  BUFFER GENUINELY EMPTIED, MUST RESET RECPTR
+    recptr = sod + blkrtl
+    cf_arec = recptr + recrtl
+%finish
+bc = cc_block no   ;!  BLOCK COUNT WILL BE ZEROISED BY WRITE TAPE MARK
+%if cf_lpmode = sl %then %start
+    header == record(cf_sob)
+    trailer1 == header_label1
+    trailer2 == header_label2
+    %if cc_et flag = no %then %start
+        trailer1_id = "EOF1"
+        trailer2_id = "EOF2"
+    %finish %else %start
+        trailer1_id = "EOV1"
+        trailer2_id = "EOV2"
+    %finish
+    bc = cc_block no   ;!  BLOCK NO ZEROISED BY WRITE TAPE MARK
+    trailer1_block count = strof(bc,6)
+    write tape mark (channel ptr,flag)   ;!  MARKS END OF FILE
+    %if flag > 0 %then %return
+    write labels     ;!  WRITE OUT EOF LABELS
+    %if flag > 0 %then %return
+%finish
+write tape mark (channel ptr,flag)    ;!(  MARKS END
+write tape mark (channel ptr,flag)    ;!(  OF TAPE.
+%if flag > 0 %then %return
+cc_term flag = yes
+%unless closing = yes %then %start
+    !  FORTRAN TYPE ENDFILE - NOT CLOSING THE FILE
+    !  NOW SKIP BACK TO JUST AFTER THE LAST BLOCK IN THE FILE
+    %if cf_lpmode = sl %then n = -3 %else n = -2
+    skip tape marks (channel ptr,n,flag)
+    %if flag = 0 %then cc_block no = bc
+    cf_bwf = no   ;! MAKES POTENTIAL FOLLOWING BACKSPACE OK
+%finish
+%return
+%end       ;!  OF ENDFILE
+
+
+!  >>>>>>>>>>>>>>>>>>>>>>>>>>CLOSE  FILE  <<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+%routine close file
+
+%if cc_term flag = no %then endfile (yes)
+disconnect(bfn base.cc_buffer file,flag)
+destroy   (bfn base.cc_buffer file,flag)
+cf_block xfers = cc_xfers
+cc_block no = 0
+cc_use = 0
+%return
+%end      ;!  OF CLOSE FILE
+
+!>>>>>>>>>>>>>>>>>>>>>>>    REWIND  FILE    <<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+%routine rewind file
+
+%integer n
+%if flag > 0 %then %return
+cc_block no = -1
+n = -1
+skip tape marks(channel ptr,n,flag)
+%if flag > 0 %then %return
+n = 1
+skip tape marks(channel ptr,n,flag)
+%if flag <= 0 %then cc_block no = 0
+!  NOW CLEAR DOWN BUFFER TO A STATE AS THOUGH THE FILE
+!  HAD JUST BEEN OPENED FOR READ
+init desc fields
+cf_relpos = at
+cc_blockno = 0
+%return
+%end         ;!  OF REWIND FILE
+
+
+!>>>>>>>>>>>>>>>>>>>>>> INIT  DESC  FIELDS  <<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+%routine init desc fields
+%if flag > 0 %then %return
+%if cf_data format > 3 %then %start
+    cf_blkrtl = 4
+    cf_recrtl = 4
+%finish %else %start
+    cf_blkrtl = 0
+    cf_recrtl = 0
+%finish
+cf_sod = cf_sob + buffsod
+cf_recptr = cf_sod + cf_blkrtl
+%if cf_rectype = 1 %then cf_reclen = cf_maxrec %c
+   %else cf_reclen = 0
+cf_recsize = cf_maxrec
+cf_eod = cf_recptr
+cf_arec = cf_recptr + cf_recrtl
+cf_bwf = no
+reclen = cf_reclen
+recptr = cf_recptr
+eod = cf_eod
+%return
+%end      ;!  OF INIT DESC FIELDS
+
+%end     ;!  OF MAGIO  >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+
+!***********************************************************************
+!*
+!*          Magnetic tape support routines for utility programs
+!*
+!*                  R.R. McLeod   ERCC   MCMLXXVIII
+!*                  R.D. Eager    UKC    MCMLXXX
+!*
+!***********************************************************************
+
+
+!***********************************************************************
+!*
+!* 16/11/79 - Accept tape claims with '?' as the last character of the
+!*            volume name: this means 'load with optional ring'.
+!*          - Different handling of failures: if flag is 2, then a
+!*            catastrophic failure has occurred (deck powered off, etc):
+!*            if flag is 1, then a hardware fault has occurred - allow
+!*            MAXFAULTCOUNT of these on a channel, then abandon.
+!* 03/01/80 - Additional routines DENSITYMAG, MODEMAG (DENSITYMT,
+!*            MODEMT) to enable use of 800 bpi tapes, and 1900
+!*            series compress/expand mode tapes.
+!*          - Channel number now given in diagnostics.
+!*          - Corrected code for '*' and '?' checks on volume name.
+!*          - Additional routine ASKMAG (ASKMT) for requesting a tape,
+!*            whilst retaining control if it not available.
+!* 08/04/80 - Correction to code of ASKMAG, to return zero flag at BT.
+!* 07/01/80 - Integration with the HLL tape support routines to
+!*            to coordinate channel allocation and tidying up after
+!*            INT:A etc
+!*            Replacement of DENSITYMAG and MODEMAG with a single
+!*            routine SETMAG: previous implementation not compatible
+!*            with the above integration and the scheme for channel
+!*            allocation.
+!*            Flag of 4 returned when writing beyond EOT.
+!***********************************************************************
+
+!  SINCE THE LIST OF LOGICAL CHANNELS FOR TAPES IS SHARED BETWEEN HLL 
+!  AND UTILITY ACCESS, THE CHANNEL NUMBERS AS PASSED TO THE UTILITY 
+!  INTERFACES BY THE CALLER (USER) CANNOT BE USED DIRECTLY
+!  AS SUCH CHANNELS MAY HAVE ALREADY BEEN ALLOCATED FOR HLL ACCESS.
+!  HENCE A LEVEL OF INDIRECTION IS INTRODUCED VIA THE STRING ARRAY
+!  'UCHANNEL' AND ALL CHANNEL NUMBERS PASSED TO THE UTILITY
+!  INTERFACES ARE TRANSPOSED VIA THIS ARRAY BEFORE BEING USED.
+
+
+
+!***********************************************************************
+!*
+!*          Internal routines
+!*
+!***********************************************************************
+
+%routine mag fail(%string(255) s)
+selectoutput(0)
+newlines(2)
+printstring("*** Error - ".s." - channel ".itos(ssown_current user channel)." ***")
+newline
+%signalevent 12,1
+%end;   ! of MAG FAIL
+
+
+%routine check channel(%integername channel)
+
+!  NOTE THAT PARTS OF THE CODE FROM THIS ROUTINE ARE REPEATED
+!  IN 'ASKMAG' AND 'UNLOADMAG'
+
+ssown_current user channel = channel    ;!  Save current user channel for possible diags
+%unless min tape channel <= channel <= max tape channel    %c
+     %then mag fail("Invalid channel")
+channel = ssown_uchannel(channel)
+%if channel = 0 %then mag fail ("Tape not claimed")
+%end;   ! of CHECK CHANNEL
+
+
+%routine recordfault(%integer channel,%integername flag)
+%if flag = 2 %or flag=3 %then mag fail("Catastrophic tape failure") ;! OFF-LINE
+%if ssown_tc(channel)_err count >= maxfaultcount %then %start
+   mag fail     %c
+   ("More than ".itos(maxfaultcount)."consecutive  tape failures")
+%finish
+ssown_tc(channel)_err count = ssown_tc(channel)_err count + 1
+%if flag = 1 %then flag = 2;   ! For return to user I/O ERROR
+!  ONLY OTHER VALUE OF FLAG = 4 => EOT ON WRITE
+%end;   ! of RECORDFAULT
+
+
+!***********************************************************************
+!*
+!*          T H E   S U P P O R T   R O U T I N E S
+!*
+!***********************************************************************
+
+%externalroutine set mag %alias "S#SETMAG"(%integer channel,density,xcmode,
+   %integername flag)
+%integer control
+check channel(channel)
+%if density = 800 %then %start
+    !  INSERT '800 BPI' CONTROL BIT
+    ssown_tc(channel)_control=ssown_tc(channel)_control ! x'80'
+%finish %else %start
+   %if density = 1600 %then %start
+    !  REMOVE '800 BPI' CONTROL BIT
+    ssown_tc(channel)_control = ssown_tc(channel)_control & x'7F'
+   %finish %else mag fail("Invalid density")
+%finish
+
+
+%if xcmode = 1900 %then %start
+    !  INSERT COMPRESS/EXPAND BIT
+    ssown_tc(channel)_control = ssown_tc(channel)_control ! x'40'
+%finish %else %start
+   %if xcmode = 2900 %then %start
+        !  REMOVE COMPRESS/EXPAND CONTROL BIT
+        ssown_tc(channel)_control = ssown_tc(channel)_control & x'BF'
+   %finish %else mag fail("Invalid mode")
+%finish
+
+control = ssown_tc(channel)_control
+rewind tape (channel,control,flag)
+%if flag > 7 %then mag fail ("DMAGIO FAILS IN SET MAG")
+%if flag = 4 %then flag = 0   ;!  ADVISORY FLAG ONLY  ?????
+%end;   ! of SETMAG
+
+
+%externalroutine askmag %alias "S#ASKMAG"(%integer channel,%string(7) vol,
+    %integername flag)
+%integer mode,permits
+%string(31) dsfis
+%integerarray dsfiia(0:31)
+ssown_current user channel = channel
+flag=dsfi(uinfs(1),-1,38,0,dsfis,dsfiia)
+  %if flag=0 %then permits=dsfiia(0)
+%if flag # 0 %then magfail("User check fails")
+%if permits & tape permit # tape permit %c
+%and uinfi(2) & 1 = 1 %c
+%then mag fail("Interactive access to tapes not permitted")
+%unless min tape channel <= channel <= max tape channel %c
+   %then mag fail ("Invalid channel")
+%if ssown_uchannel(channel) > 0 %then mag fail ("CHANNEL ALREADY IN USE")
+%if length(vol) = 0 %then vol = " "  ;!  PROPER CHECK ON VOL LATER
+%if charno(vol,length(vol)) = '?' %then %start;   ! Select optional ring
+    mode = 3
+   length(vol) = length(vol) - 1
+%finish %else %start
+   %if charno(vol,length(vol)) = '*' %then %start;   ! Select read/write or read only
+        mode = 2
+      length(vol) = length(vol) - 1
+    %finish %else %start
+        mode = 1
+    %finish
+%finish
+%unless  1 <= length(vol) <= 6 %then mag fail("Invalid volume label")
+vol = vol." " %while length(vol) < 6 
+open tape (vol,mode,channel,flag)
+%return %if flag > 0
+ssown_sscomreg(19)=1
+ssown_uchannel(ssown_current user channel) = channel
+!  ssown_TC(CHANNEL)_MODE = MODE   !  THIS FILLED IN BY OPEN TAPE
+ssown_tc(channel)_err count = 0
+ssown_tc(channel)_use = 2
+flag = 0    ;!  FLAG CAN BE < 0 IF TAPE WAS HELD
+%end;   ! of ASKMAG
+
+
+%externalroutine openmag %alias "S#OPENMAG"(%integer chan,%string(7) s)
+%integer flag
+
+askmag(chan,s,flag)
+%if flag # 0 %then mag fail("Failed to claim tape")
+%end;   ! of OPENMAG
+
+
+%externalroutine unloadmag %alias "S#UNLOADMAG"(%integer channel)
+%integer flag
+
+flag = 0
+check channel (channel)
+%if ssown_tc(channel)_tsn # ""         %c
+  %then close tape (channel,flag)
+ssown_uchannel(ssown_current user channel) = 0    ;!  ssown_current user channel CORRECTLY SET FOR THIS BY CHECK CHANNEL
+%if flag > 0 %then mag fail("FAILED IN UNLOAD MAG")
+%return
+%end;   ! of UNLOADMAG
+
+%externalroutine clear mag %alias "S#CLEARMAG"
+clear tapes(2)
+%return
+%end     ;!  OF CLEAR MAG
+
+%externalroutine readmag %alias "S#READMAG"(%integer channel,address,%integername len,flag)
+%integer n
+
+check channel(channel)
+%if len <= 0 %and address > 0 %then mag fail("Invalid length for read")
+!  NOTE THAT LEN = 0 AND ADDRESS = 0 => READ CHECK
+read block (channel,address,len,flag)
+%if flag > 0 %then %start
+    %if flag > 7 %then mag fail("DMAG IO fails in READMAG")
+    %if flag = 4 %then %start;   ! Hit tape mark
+        n = 1
+        skip tape marks(channel,n,flag)
+        flag = 1
+     %finish %else recordfault(channel,flag);   ! Read failure
+%finish %else ssown_tc(channel)_err count = 0
+%end;   ! of READMAG
+
+
+%externalroutine writemag %alias "S#WRITEMAG"(%integer channel,address,len,
+    %integername flag)
+
+check channel(channel)
+%if ssown_tc(channel)_mode < 2 %then mag fail("Writing not allowed")
+write block (channel,address,len,flag)
+%if ssown_tc(channel)_et flag = yes %then flag = 4   ;!  END OF TAPE
+%if flag > 0 %then %start
+    %if flag > 7 %then mag fail("DMAG IO fails in WRITEMAG")
+    recordfault(channel,flag)
+%finish %else ssown_tc(channel)_err count = 0
+%end;   ! of WRITEMAG
+
+
+%externalroutine writetmmag %alias "S#WRITETMMAG"(%integer channel,%integername flag)
+
+check channel(channel)
+%if ssown_tc(channel)_mode < 2 %then mag fail("Writing not allowed")
+write tape mark (channel,flag)
+%if ssown_tc(channel)_et flag = yes %then flag = 4   ;!  END OF TAPE
+%if flag > 0 %then %start
+    %if flag > 7 %then mag fail("DMAG IO fails in WRITETMMAG")
+    recordfault(channel,flag)
+%finish %else ssown_tc(channel)_err count = 0
+%end;   ! of WRITETMMAG
+
+
+%externalroutine locate mag  %alias "S#LOCATEMAG"(%integer    channel,type,
+                             %integername count,flag)
+
+check channel (channel)
+locate tape (channel,type,count,flag)
+%if flag > 7 %then mag fail ("DMAGIO failure in LOCATE MAG")
+%return
+%end     ;! OF LOCATE MAG
+
+%externalroutine rewindmag  %alias "S#REWINDMAG"(%integer channel)
+%integer flag
+
+check channel(channel)
+rewind tape (channel,0,flag)
+%if flag > 7 %then mag fail("DMAG IO fails in REWINDMAG")
+%end;   ! of REWINDMAG
+
+
+%externalroutine skipmag %alias "S#SKIPMAG"(%integer channel,n)
+! Skips N blocks (a tape mark counting as a block) backwards or forwards
+%integer flag,direction,i,len
+
+check channel(channel)
+%return %if n = 0;   ! Null call
+%if n > 0 %then direction = 1 %else n = -n %and direction = -1
+%for i = 1,1,n %cycle
+    len = direction
+    skip blocks (channel,len,flag)
+    %if flag > 7 %then mag fail("DMAG IO fails in SKIPMAG")
+    %if 1 <= flag <= 3 %then recordfault(channel,flag)
+    %if flag = 4 %then %start;   ! Found tape mark
+        len = direction
+        skip tape marks (channel,len,flag)
+        %if flag > 7 %then mag fail("DMAG IO fails in SKIPMAG")
+        %if 1 <= flag <= 3 %then recordfault(channel,flag)
+    %finish
+%repeat
+%end;   ! of SKIPMAG
+
+
+%externalroutine skiptmmag  %alias "S#SKIPTMMAG"(%integer channel,n)
+%integer flag,len,direction,i
+
+check channel(channel)
+%if n = 0 %then %return;   ! Null call
+%if n > 0 %then direction = 1 %else n = -n %and direction = -1
+%for i = 1,1,n %cycle
+    len = direction
+    skip tape marks (channel,len,flag)
+    %if flag > 7 %then mag fail("DMAG IO fails in SKIPTMMAG")
+    %if 1 <= flag <= 3 %then recordfault(channel,flag)
+%repeat
+%end;   ! of SKIPTMMAG
+
+
+%externalroutine fskiptmmag %alias "S#FSKIPTMMAG"(%integer channel,n,%integername flag)
+%integer len
+
+check channel(channel)
+%if n = 0 %then %return;   ! Null call
+len = n;   ! Number of tapemarks to skip
+skip tape marks (channel,len,flag)
+%if flag > 7 %then mag fail("DMAG IO fails in SKIPTMMAG")
+%if 1 <= flag <= 3 %then recordfault(channel,flag)
+%if flag = 4 %then flag = 1;   ! Found double tape mark before skipping enough
+%end;   ! of FSKIPTMMAG
+
+%externalroutine statusmag  %alias "S#STATUSMAG"(%integer channel,address)
+%recordformat statusrecf (%string(6) vol,%integer ring,
+   tmcount,blockcount,eovflag,errorcount)
+%record(statusrecf)%name sr 
+!
+!  This routine needs to have its function extended, ie the record
+!  format that is used for communicating the relevant details needs to be
+!  extended to include the following information:
+!        Density
+!        Ring fitted or not
+!        Was tape identified by ops or recognised from vol label, IBM or ICL 2900
+!
+sr == record(address)
+check channel(channel)
+sr_vol = ssown_tc(channel)_tsn
+sr_ring = ssown_tc(channel)_mode
+sr_tmcount = ssown_tc(channel)_tmcount
+sr_block count = ssown_tc(channel)_blockno
+sr_eovflag = ssown_tc(channel)_etflag
+sr_error count = ssown_tc(channel)_err count
+%return
+%end        ;!  OF STATUSMAG
+
+!*MAGNETIC TAPE INTERFACE ROUTINES
+!THESE ROUTINES ARE USED FOR HIGH LEVEL PROGRAMMING LANGUAGE ACCESS
+!TO MAGNETIC TAPE. THEY ARE ACCESSED BY NEWFILEOP FOR FORTRAN
+!AND BY THE IMP SQ ROUTINES DIRECTLY. THEY IN TURN CALL  ROUTINE MAGIO
+!WHICH CONTAINS THE MAIN MAG TAPE DRIVER ROUTINES.
+%constinteger closed = 0
+%constinteger pf = 1,slf = 2
+%constinteger afterread = 2
+%constinteger afterwrite = 3
+%constinteger afterendfile = 6
+%constinteger ebcdicbit = x'20'
+%constinteger ringneeded = x'40'
+%constinteger modflag = x'08'      ;!  "MOD" OPEN REQUIRED
+
+!*******************************************************************************
+
+!*                                     DEFINEMT
+
+!*******************************************************************************
+
+%externalintegerfn newmtfileop %alias "S#NEWMTFILEOP" (%integer afd, act)
+%record(fdf)%name f
+%integer flag
+%byteintegername curstate
+   f == record(afd)
+   curstate == f_curstate
+   %if act = 1 %start;                  !READ
+      %if curstate = afterread %then -> ok;  !AFTER READ
+      %if curstate = closed %start
+         flag = open(afd,1);            !OPEN FOR READING
+         curstate = afterread
+         %result = flag
+      %finish
+      %if curstate = afterwrite %then %result = 156
+                                        !FAILURE READ AFTER WRITE
+      %if curstate = afterendfile %then %result = 153
+                                        !END OF FILE
+   %finish
+!*
+!*        WRITE
+!*
+   %if act = 2 %start
+      %if curstate = afterwrite %then -> ok
+      %if curstate = closed %start
+         flag = open(afd,2);            !OPEN FOR WRITING
+         %if flag # 0 %then %result = flag
+         curstate = afterwrite
+         -> ok
+      %finish
+      %if curstate = afterread %start
+         %if f_flags&ringneeded = 0 %then %result = 319
+                                        !NO RING
+         f_validaction = f_validaction!2;    !OR IN WRITE BIT
+         magio(afd,1,flag);             !PREPARE FOR WRITE
+         curstate = afterwrite
+         %if flag # 0 %then %result = flag
+         -> ok
+      %finish
+   %finish
+!*
+!*       REWIND
+!*
+   %if act = 4 %start
+      %if curstate = closed %then -> ok
+      %if curstate = afterwrite %start; !AFTER WRITE - NEED TO DO AN ENDFILE
+         magio(afd,6,flag);             !ENDFILE
+         %if flag # 0 %then %result = flag
+         curstate = afterread
+      %finish
+      %if curstate = afterendfile %then curstate = afterread
+      %if curstate = afterread %start
+         magio(afd,4,flag);             !THE REWIND ITSELF
+         %result = flag
+      %finish
+   %finish
+!*
+!*          BACKSPACE
+!*
+   %if act = 8 %start
+      %if curstate = afterread %start
+         magio(afd,5,flag)
+         %result = flag
+      %finish
+      %if curstate = afterwrite %start
+         magio(afd,6,flag);             !DO AN ENDFILE FIRST
+         %if flag # 0 %then %result = flag
+         magio(afd,5,flag);             !THE BACKSPACE ITSELF
+         curstate = afterread
+         %result = flag
+      %finish
+      %if curstate = afterendfile %c
+         %then curstate = afterread %and -> ok
+   %finish
+!*
+!*      ENDFILE
+!*
+   %if act = 16 %start
+      %if curstate = afterwrite %start
+         magio(afd,6,flag)
+         %result = flag
+      %finish
+   %finish
+!*
+   %result = 171;                       !INVALID OPERATION
+!*
+ok: %result = 0
+%end;                                   !OF NEWMTFILEOP
+%endoffile

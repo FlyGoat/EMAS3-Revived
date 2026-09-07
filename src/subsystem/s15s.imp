@@ -1,0 +1,2810 @@
+! S15 - Directory and Loader initialisation routines
+%end %oflist
+%include "SUBARC:SSOWNF3"
+   %list
+!***********************************************************************
+!*                                                                     *
+!*                  Conditional compilation constants                  *
+!*                                                                     *
+!***********************************************************************
+
+!***********************************************************************
+!*                                                                     *
+!*                              Constants                              *
+!*                                                                     *
+!***********************************************************************
+!
+
+
+
+%const %string (11) %array modlang(0:10)= %c
+"unknown","IMP/IMP80","FORTRAN77","IMP","NASS","ALGOL","Opt code","PASCAL","SIMULA",
+ "BCPL","FORTRAN 77"
+%const %integer codecode=1, glacode=2
+%const %record (sctabf) %array %format sctabaf(0:255)
+%const %byte %integer %array unsharedareaold(1:5)=3, 2, 5, 6, 7
+%const %string (7) ustackname="T#USTK"
+%const %string (11) loadtables="T#LOAD"
+%const %integer adddir=0, remdir=1
+%const %integer ff=x'FF'
+%const %integer rmax=4096
+%const %string (11) tempdstem="T#SD"
+
+%const %string (11) %array entrytype(0:3)= %c
+         " DATA entry",
+         " CODE entry",
+         " MACRO",
+         " ALIAS"
+%const %integer %array hashconstant(1:32)= %c
+       199, 401, 607, 811,1021,1223,1429,1627,
+      1831,2039,2251,2447,2659,2865,3067,3271,
+      3469,3677,3889,4093,4297,4493,4703,4909,
+      5113,5323,5527,5717,5927,6133,6343,6551
+%const %integer %array plength(1:32)= %c
+  876, 1740, 2540, 3372, 4108, 4972, 5772, 6700,
+ 7532, 8300, 9004, 9964,10668,11468,12332,13164,
+ 14092,14860,15564,16396,17228,18188,18924,19724,
+ 20556,21292,22124,23180,23916,24716,25452,26220
+
+
+%record %format namef(%byte %integer type, (%string (10) name %or %string (6) lname,
+   %integer rest), %integer point)
+%const %record (namef) %array %format newhaf(0:99999); ! V. high limit
+%const %integer ssbstackseg=65
+%const %integer segsize=1<<segshift
+%const %integer true=1,false=0
+%const %integer wrongparflag=361
+%const %integer old=0, new=1 {LPUT-type}
+
+%const %integer abaseobj= base seg << seg shift
+
+%const %integer cmn=X'80000000',dyn=X'40000000',unsat=X'20000000',unres=X'10000000'
+%const %integer dynamic=0, unresolved=1, unsatisfied=2, wrongpbit=4
+%const %integer fnametype=0,data=1,code=2,macro=4,alias=8
+%const %integer forte=2
+%const %integer lookforbit16=16
+%const %integer k64=X'10000'
+%const %integer lhoffset=1008 {251<<2 bytes of listheads}
+%const %integer maxfindrec=128
+%const %integer maxloadtabsize=X'00100000'; ! 1Mb
+%const %integer maxuglasize=X'00C00000'; ! Max size of user gla
+%const %integer prime=251
+
+%const %integer %array %format lhf(0:prime)
+
+
+!***********************************************************************
+!*                                                                     *
+!*                           Record formats                            *
+!*                                                                     *
+!***********************************************************************
+
+%record %format breff(%integer first, last, link) {Basic rec}
+%record %format dhf(%integer dataend, datastart, size, filetype, monfile, dt, pstart, fullmarker)
+
+%record %format entf(%integer type, link, (%integer mainep, dum1 %or %integer glafrom,
+   glato %or %integer usecount,
+   accessmode %or %record (ent4f) ent4)) {Entry point or filename records}
+
+%record %format escf(%integer pc, recad, (%integer dr0, dr1, spare %or %integer ref4ad, entad,
+   pwordcopy))
+%record %format ireff(%integer dr0, dr1, (%integer offset %or %integer adynr),
+   %integer link) {Info rec}
+
+%record %format ld1f(%integer link, (%integer codeoffset, glaoffset, epoffset,
+   parmword %or %record (ent4f) ent4), %string (31) iden)
+%record %format ld2f(%integer link, area, len, props, %string (31) iden)
+%record %format ld4f(%integer link, disp, l, a, %string (31) iden)
+%record %format ld7f(%integer link, glaptr, %string (31) iden) {Also 8,11}
+
+%record %format ofmf(%integer start, l, prop)
+
+!***********************************************************************
+!*                                                                     *
+!*                  External Routine/fn/map specs                     *
+!*                                                                     *
+!***********************************************************************
+
+%external %routine %spec ssenter %alias "s#ssenter"(%string %name s, %integer %name i,
+   %string %name template)
+%external %routine %spec ssexit %alias "s#ssexit"(%string %name s, %integer %name i,
+   %string %name template)
+%external %routine %spec remove comments %alias "s#removecomments"(%string %name line)
+%external %integer %fn %spec startswith %alias "s#startswith"(%string %name a, %string (255) b,
+   %integer chop)
+%external %routine %spec printline %alias "s#printline"(%string (255) s)
+%external %routine %spec sethelp %alias "s#sethelp"(%string (255) s)
+%external %integer %fn %spec checkname %alias "s#checkname"(%string %name name,
+   %integer %name type, qualifier)
+%external %routine %spec customise %alias "s#customise"
+%external %routine %spec returntocommandlevel %alias "S#RETURNTOCOMMANDLEVEL"
+%external %integer %fn %spec dsfi(%string %name file index, %integer %name fsys, type, set,
+   %string %name s, %integer %array %name i)
+%external %string %fn %spec failuremessage %alias "s#failuremessage"(%integer i)
+%external %routine %spec terminalprint %alias "S#TERMINALPRINT"(%string (255) s)
+%external %routine %spec monout %alias "s#monout"(%string (255) s)
+%external %integer %fn %spec loadep2 %alias "EMAS3LOADEP"(%string %name entry, actualepname,
+   %integer %name type, flag, codeoff, glaoff, epoff, parmw, loadlevel)
+%external %integer %fn %spec lookloaded %alias "S#LOOKLOADED"(%string (31) entry,
+   %integer %name type, %record (ent4f) %name ent4)
+%external %routine %spec loadfile %alias "S#LOADFILE"(%string (255) file, %integer %name flag,
+   %integer locll)
+%external %integer %fn %spec loadep %alias "S#LOADEP"(%string (31) entry, %integer %name type,
+   flag, %record (ent4f) %name ent4, %integer locll)
+%external %routine %spec cascadeload %alias "S#CASCADELOAD"(%integer %name flag, %integer locll)
+%external %routine %spec minload %alias "S#MINLOAD"(%integer locll, makedynamic,
+   %integer %name flag)
+%external %integer %fn %spec checkparamwords %alias "S#CHECKPARAMWORDS"(%integer entparmword,
+   refparmword, %string (31) iden)
+%external %routine %spec enter %alias "S#ENTER"(%integer mode, %record (ent4f) %name ent4,
+   %string (255) param)
+%external %routine %spec addref %alias "S#ADDREF"(%string (31) entry, %integer %name flag,
+   %integer dr0, ad, type, status, locll, pos, nrefs, pword)
+%external %integer %fn %spec checkloaded %alias "S#CHECKLOADED"(%string (31) entry,
+   %record (ent4f) %name ent4, %integer %name type, listhead)
+%external %routine %spec satisfyref %alias "S#SATISFYREF"(%string (31) entry,
+   %record (ent4f) %name ent4, %integer %name flag, %integer type, locll, pos)
+%external %routine %spec addentry %alias "S#ADDENTRY"(%string (255) entry,
+   %integer %array %name lh, %integer %name flag, offset, %record (ent4f) %name ent4,
+   %integer type, area, pos)
+%external %integer %fn %spec hash %alias "s#hash"(%string (31) name, %integer hashconst)
+%external %routine %spec adjustloadlevel %alias "s#adjustloadlevel"(%integer p)
+%external %routine %spec unload2 %alias "S#UNLOAD2"(%integer locll, fail)
+%external %integer %fn %spec getheap %alias "S#GETHEAP"(%integer len)
+%external %routine %spec disposeheap %alias "S#DISPOSEHEAP"(%integer adr)
+%external %routine %spec readprofile %alias "S#READPROFILE"(%string (11) key, %name info,
+   %integer %name version, uflag)
+%external %routine %spec getstring %alias "s#getstring"(%string (255) vector, %string %name value)
+%external %routine %spec getinteger %alias "s#getinteger"(%string (255) vector,
+   %integer %name value)
+%external %routine %spec monparams %alias "S#MONPARAMS"(%string (255) s)
+%external %routine %spec tidyfiles %alias "S#TIDYFILES"(%integer selectflag)
+%external %routine %spec changeaccess %alias "S#CHANGEACCESS"(%string (255) file, %integer mode,
+   %integer %name flag)
+%external %routine %spec connect %alias "S#CONNECT"(%string (255) file, %integer mode, hole,
+   prot, %integer %name fconad, ffiletype, fdatastart, fdataend, flag)
+%external %routine %spec outfile %alias "S#OUTFILE"(%string (255) file, %integer filesize, hole,
+   prot, %integer %name conad, flag)
+%external %routine %spec mstop %alias "s#mstop"(%string (255) t, %integer r)
+! %external %integer %fn %spec checkcommand %alias "S#CHECKCOMMAND"(%string (255) com)
+
+%external %string %fn %spec itos %alias "s#itos"(%integer i)
+
+%external %long %real %fn %spec cputime %alias "S#CPUTIME"
+
+%external %routine %spec allowinterrupts %alias "S#ALLOWINTERRUPTS"
+%external %routine %spec changefilesize %alias "S#CHANGEFILESIZE"(%string (255) s,
+   %integer newsize, %integer %name flag)
+%external %routine %spec disconnect %alias "S#DISCONNECT"(%string (255) s, %integer %name f)
+%external %routine %spec set conlevel %alias "s#setconlevel"(%string (255) file,
+   %integer conlevel, %integer %name flag)
+%external %routine %spec dump %alias "S#DUMP"(%integer from, to)
+%external %routine %spec fill %alias "S#FILL"(%integer len, from, filler)
+%external %routine %spec move %alias "S#MOVE"(%integer l, from, to)
+%external %routine %spec ndiag %alias "S#NDIAG"(%integer pc, lnb, fault, inf)
+%external %routine %spec setreturncode %alias "s#setreturncode"(%integer n)
+%external %routine %spec setssinhibit %alias "S#SETSSINHIBIT"
+%external %string %fn %spec translateshortname %alias "s#translateshortname"(%string %name short,
+   %integer mode)
+%external %routine %spec uctranslate %alias "S#UCTRANSLATE"(%integer ad, len)
+%external %string %fn %spec confile %alias "s#confile"(%integer ad)
+%external %string %fn %spec htos %alias "s#htos"(%integer value, places)
+%external %routine %spec writeprofile %alias "S#WRITEPROFILE"(%string (11) key, %name info,
+   %integer %name version, uflag)
+%external %integer %fn %spec var rec to profile %alias "s#varrectoprofile"(%integer ap, size,
+   profvsn, %string (11) profname)
+
+%external %integer %fn %spec pstoi %alias "S#PSTOI"(%string (255) s)
+
+%external %routine %spec finfo %alias "s#finfo"(%string (255) file, %integer mode,
+   %record (frf) %name fr, %integer %name flag)
+%external %routine %spec modpdfile %alias "S#MODPDFILE"(%integer ep, %string (255) pdfile,
+   %string (11) member, %string (255) infile, %integer %name flag)
+%external %routine %spec newgen %alias "S#NEWGEN"(%string (255) file, newfile, %integer %name flag)
+%external %routine %spec fstatus %alias "S#FSTATUS"(%string (255) file, %integer act, value,
+   %integer %name flag)
+
+
+!***********************************************************************
+!*                                                                     *
+!*                     Internal routine/fn/map specs                   *
+!*                                                                     *
+!***********************************************************************
+
+
+%routine %spec moddirectory(%integer action, %string (255) dirfile, %string (31) entry,
+   %string (255) filename, %integer type, %integer %name flag)
+%routine %spec addtoplist(%string (255) name, %integer fad, %integer %name offset, flag)
+%routine %spec removefromplist(%integer pstart, %integer offset, %integer %name flag)
+%routine %spec addtohashtable(%string (31) entry, %integer fad, type, %integer %name offset, flag)
+
+%routine %spec dynamicref(%integer esctabptr, ref4ad, ent4ad)
+%routine %spec unsatref(%integer dr0, dr1, pc)
+
+
+
+!***********************************************************************
+!*                                                                     *
+!*                       Directory handling code                       *
+!*                                                                     *
+!***********************************************************************
+
+
+%integer %fn dirusers(%string (255) dirfile)
+%integer flag
+%record (frf) fr
+   finfo(dirfile, 0, fr, flag)
+   %monitor %if flag#0 {"Should not occur"!}
+   %result = fr_users
+%end;                                    ! of dirusers
+
+!-------------------------------- COPYDIRCONTENTS --------------------------------
+
+%routine copy dir contents(%integer fad1, fad2, act, %string %name tempdname, %integer %name flag)
+! Make a new directory at least as large as the existing one.
+! Except possibly for TIDYDIR, file2 is at least the size of file1.
+! FAD1 & FAD2 are their connect addresses
+
+! Monitor bits and monitor filename are REMOVED.  (The calls of ADDTOHASHTABLE
+! do not propogate the monitor bit, and we remove the monitor filename for
+! consistency.  Further, during TIDYDIR, there is nothing to distinguish the
+! monitor filename from an object filename.  Therefore we get rid of the lot.
+! Hence a directory owner should RESET THE MONITOR REQUIREMENTS AFTER ANY
+! INSERTION).
+
+
+%integer ix, hashconst1, len1, ftype, type, pstart1
+%record (dhf) %name dh1, dh2
+%record (namef) %name hh
+%record (namef) %array %name newh
+%string (255) part2, testu
+
+   dh1 == record(fad1)
+   dh2 == record(fad2)
+
+   ! Move PLIST, up to first zero byte (unless TIDYDIR, act=7)
+   ! [The PLIST will remain unchanged in the new directory, except for TIDYDIR]
+   ix = fad1+dh1_size
+   ix = ix-1 %until byteinteger(ix)#0
+   len1 = ix+1-(fad1+dh1_pstart+4)
+
+   %if act#7 %start
+      move(len1, fad1+dh1_pstart+4, fad2+dh2_pstart+4)
+      fill(dh2_size-dh2_pstart-4-len1, fad2+dh2_pstart+4+len1, 0); ! rest of directory
+
+      ! remove monitor filename from PLIST in new directory
+      %if dh2_monfile#0 %then removefromplist(fad2+dh2_pstart, dh2_monfile, flag)
+   %finish
+
+   ftype = dh1_filetype
+
+   ! Now the hash table contents.  Offset fields are the same as in the old directory.
+   pstart1 = fad1+dh1_pstart
+   hashconst1 = integer(fad1+dh1_datastart)
+   newh == array(fad1+dh1_datastart+4, newhaf)
+   %for ix = hashconst1, -1, 0 %cycle
+      hh == newh(ix)
+      %if hh_name#"" %and hh_name#".EMPTY" %start
+         type = hh_type
+         %if type&x'80'#0 %then part2 = string(fad1+dh1_pstart+hh_rest) %else part2 = ""
+         type = type&x'3F';              ! Drop bits (link to PLIST) & (monitor bit)
+         %if type=0 %and byteinteger(fad1+dh1_pstart+hh_point+1)='=' {alias, old dirtype} %then %c
+            type = 8 {alias}
+         %if type=0 %then type = code {old dirtype}
+
+         %if act=7 %start
+            ! Go through the full mechanism for macros and aliases
+            %if type=8 {alias} %or type=4 {macro} %then %c
+               moddirectory(1, tempdname, hh_name, string(pstart1+hh_point), type, flag)
+
+            ! Failure to INSERT due to file-does-not-exist or Invalid
+            ! filetype or Invalid macro header is not an error for TIDYDIR
+
+            ! 218 file does not exist
+            ! 336 invalid macro header (filename has become non-macro source)
+            ! 267 invalid filetype
+            ! 288 member does not exist
+            ! 345 groupname used where filename reqd
+            ! 346 group does not exist
+
+            %if flag=218 %or flag=336 %or flag=267 %or flag=288 %or flag=345 %or flag=346 %then flag = 0
+
+         %finish %else addtohashtable(hh_name.part2, fad2, type, hh_point, flag)
+         %if flag#0 %then %return;       ! Should occur only for TIDYDIR with too small a new file
+      %finish
+   %repeat
+   %return %if act#7
+
+   ! Finally, for TIDYDIR, add the object filenames (and entry points)
+   ix = pstart1+4
+   %while byteinteger(ix)#0 %cycle
+      part2 = string(ix)
+      testu = ""
+      %if ff#charno(part2, 1)#'=' %and length(part2)>7 %and part2->testu.(":") %and %c
+         length(testu)>=6 %and ix#dh1_monfile {not the monitorfile} %start
+         moddirectory(5, tempdname, "", part2, 0, flag)
+         %if flag=218 %or flag=336 %or flag=267 %or flag=288 %or flag=346 %then flag = 0
+         %if flag=290 %or flag=291 {full} %then %return
+      %finish
+      ix = ix+byteinteger(ix)+1
+   %repeat
+%end;                                    ! Of copy dir contents
+
+!-------------------------------- HASH --------------------------------
+
+!%integer %fn hash(%string (31) name, %integer hashconst)
+!%integer a, j, w, l
+!%const %integer %array p(1:8)=71,47,97,79,29,37,53,59
+!   a=addr(name)
+!   l=byteinteger(a)
+!   %if l>8 %then %start
+!      ! Close up last 4 to first 4
+!      move(4, a+l-3, a+5)
+!      l=8
+!   %finish %else name=name."<>#@!+&"
+!   w=0
+!   %for j=1, 1, 8 %cycle
+!      w=w+byteinteger(a+j)*p(j)
+!   %repeat
+!   %result=w-(w//hashconst)*hashconst
+!%end;                                    ! OF HASH
+
+!-------------------------------- PLOCATE --------------------------------
+
+%integer %fn plocate(%integer start, %string (255) name)
+! This routine works its way through a packed sequence of strings, assuming
+! that the first string starts four bytes after the address supplied, and that
+! the sequence is terminated by a null string (i.e., a zero byte).
+
+!    Returns      -1   if NAME not found
+!       else  offset   of start of name from START
+
+%integer p
+   p = start+4
+   %while string(p)#"" %cycle
+      %if string(p)=name %then %result = p-start; ! Found it
+      p = p+byteinteger(p)+1
+   %repeat
+   %result = -1
+%end;                                    ! OF PLOCATE
+
+
+!-------------------------------- ADDTOHASHTABLE --------------------------------
+
+%routine addtohashtable(%string (31) entry, %integer fad, type, %integer %name offset, flag)
+!   TYPE  must be   1  for a data entry
+!                   2  for a code entry
+!                   4  for a macro entry
+!                   8  for an alias entry
+!
+!   Other acceptable values are           64   set monitor bit for ENTRY
+!                                          0   unset monitor bit for ENTRY
+!
+!   It will be seen that it is not possible to distinguish the TYPE of the
+!   entry for which the monitor bit is to be set/unset.  But duplicate entries
+!   are allowed only between types code/data.  Macro/alias entries are unique.
+!   So we accept the limitation.
+
+%integer initpos, p, len, empty, poffset, xtype, bitno, kk, pstart, hstart
+%integer hashconst
+%record (namef) %array %name h
+%record (dhf) %name dh
+%string (31) part1
+%string (255) part2
+
+   flag = 0
+   dh == record(fad);                    ! Map DH on to start of file
+   pstart = fad+dh_pstart;               ! Start of PLIST
+   hashconst = integer(fad+dh_datastart)
+   hstart = fad+dh_datastart+4;          ! Start of hash table
+   h == array(hstart, newhaf)
+   empty = -1
+   len = length(entry)
+
+   ! Is it a long name (i.e. >10) or a short one?  Long names are split
+   ! so that the first 6 chars are stored in the LNAME field and the
+   ! rest in the PLIST. The REST field points to the position in the
+   ! PLIST.
+   %if len>10 %then part1 = substring(entry, 1, 6) %and part2 = substring(entry, 7, len) %else %c
+      part1 = entry %and part2 = ""
+
+   ! Now search hash table for the entry. Note the first occurrence
+   ! of a .EMPTY slot if any are encountered on the search chain for
+   ! potential use as a vacant slot.
+   initpos = hash(entry, hashconst)
+   p = initpos
+
+   ! Three possible outcomes of the search
+   ! 1. Find ENTRY
+   ! 2. ENTRY not there.
+   ! 3. Table full
+
+   %cycle
+      %if h(p)_name="" %then %start
+
+         ! End of search, ENTRY not there.  Error if TYPE=0,64 (switching  monitoring)
+
+         %if type=0 %or type=64 %then ssown_ssfname = entry %and flag = 289 %and %return
+
+         %unless empty<0 %then p = empty; ! Nearest available slot.
+         h(p)_name = part1
+         %if part2#"" %then %start
+            ! Long name, try to add PART2 to PLIST if its not already there.
+            poffset = plocate(pstart, part2)
+            %if poffset<0 %then %start
+               addtoplist(part2, fad, poffset, flag)
+               %return %unless flag=0
+            %finish
+            h(p)_rest = poffset
+            h(p)_type = X'80'
+         %finish
+         h(p)_type = h(p)_type!type
+         h(p)_point = offset
+         %return
+      %finish
+
+      %if h(p)_name=".EMPTY" %and empty<0 %then empty = p; ! Note it
+      %if h(p)_name=part1 %then %start
+         ! Entry already in directory if both are short names or
+         ! both are long names and PART2 matches the string in the PLIST.
+         %if (h(p)_type&X'80'=0 %and part2="") %or ((h(p)_type&X'80'#0 %and part2#"") %and %c
+            part2=string(pstart+h(p)_rest)) %then %start
+
+            ! ENTRY found
+
+            ! Switch monitoring bit for TYPE=0,64
+            %if type=0 %or type=64 %then %c
+               h(p)_type = (h(p)_type&(\64))!type %and %return {with flag zero}
+
+            ! Duplicate entries are acceptable provided TYPE fields differ
+            ! and provided that none of the duplicates is an
+            ! alias. It is an Absolute rule that ALIAS entries are
+            ! unique. Ditto for macros. This will prevent aliasing e.g. code entries
+            ! to data entries in the same directory at least
+            ! Ideally I suspect that the best way is really to store the
+            ! alias type in the alias string but this would require ALIAS
+            ! to ask for TYPE.
+            xtype = h(p)_type&X'3F';     ! Remove long name bit and monitor bit
+            %if xtype=type %or type=8 {alias} %or xtype=8 %or type=4 {macro} %or xtype=4 %start
+               flag = 290;               ! Entry already in directory
+               offset = h(p)_point
+               ssown_ssfname = entry
+               %return
+            %finish %else %start
+               ! Diff TYPE - print warning and continue
+               !*lss_xtype
+               !*shz_bitno;               ! << until top bit set. No of shifts in BITNO
+               kk = xtype
+               bitno = 0
+               %while kk>0 %cycle
+                  bitno = bitno+1
+                  kk = kk<<1
+               %repeat
+               printline("Warning - ".part1.part2." is also present as a".entrytype(31-bitno))
+            %finish
+         %finish
+      %finish
+      p = p+1
+      p = 0 %if p=hashconst
+      %if p=initpos %start
+         ! Table full
+         flag = 291 {hash table full}
+         dh_fullmarker = -1
+         %return
+      %finish
+   %repeat
+%end;                                    ! OF ADDTOHASHTABLE
+
+!---------------------------------- ADDTOPLIST ----------------------------------
+
+%routine addtoplist(%string (255) name, %integer fad, %integer %name offset, flag)
+%integer top, len, p, hlen, pstart
+%record (dhf) %name dh
+! Find a suitable hole, write in NAME and return location in OFFSET
+   flag = 0
+   ! A hole is acceptable if either it's an exact fit or >=LENGTH(NAME)+2.
+   dh == record(fad)
+   pstart = fad+dh_pstart
+   top = pstart+integer(pstart)
+   len = length(name)
+   hlen = 0
+   p = pstart+4
+   %while string(p)#"" %cycle
+      %if byteinteger(p+1)=ff %start
+         hlen = byteinteger(p)
+         %if len=hlen {exact fit} %or len<=hlen-2 %then %exit
+      %finish
+      p = p+byteinteger(p)+1
+   %repeat
+   ! Is there room at the end?  [If the name will fit in a hole, this next condition will certainly be
+   ! satisfied, and the len<hlen test determines whether or not we are fitting
+   ! it into a bigger hole rather than at the end or into a hole as an exact fit].
+   %if top-p>=len+2 %start
+      %if len<hlen %then byteinteger(p+len+1) = hlen-len-1
+      string(p) = name
+      offset = p-pstart
+   %finish %else %start
+      flag = 292 {point list full}
+      dh_fullmarker = -1
+   %finish
+%end;                                    ! OF ADDTOPLIST
+
+!---------------------------------- REMOVEFROMPLIST ----------------------------------
+
+%routine removefromplist(%integer pstart, %integer offset, %integer %name flag)
+%integer ok, p, prevp
+%routine %spec mergeholes(%integer p)
+
+   ok = no
+   p = pstart+4
+   prevp = -1
+   ! This cycle (a) checks that OFFSET is valid (though there is little reason
+   !                to doubt it)
+   !       and  (b) provides pointer to previous string so that we can merge it
+   !                with the present one if it is a hole and not too large.
+   %while byteinteger(p)>0 %cycle
+      %if p=pstart+offset %then ok = yes %and %exit
+      prevp = p
+      p = p+byteinteger(p)+1
+   %repeat
+   %if ok=yes %start
+      fill(byteinteger(p), p+1, ff)
+      ! Now merge following hole(s) if any.  Start from previous string if
+      ! previous string is a hole
+      %if prevp>0 %and byteinteger(prevp+1)=ff %then p = prevp
+      mergeholes(p)
+      flag = 0
+   %finish %else %start
+      printline("Directory corrupt")
+      flag = 257
+   %finish
+
+%routine mergeholes(%integer ptr)
+!  This routine is entered with PTR pointing to a non-null string which is
+!  a hole (full of FFs).  On exit PTR is still pointing at the same place, and
+!  the hole is either:
+!        (a)  unchanged because (i) the next string is not a hole or
+!                              (ii) the next string is a hole but when added to
+!                                   the current hole the resulting length would
+!                                   exceed 255 bytes.
+!   or   (b)  altered because the next string was a hole which has now been
+!             added to the current hole.
+!   or   (c)  altered because the "next string" was the end of the PLIST, and
+!             so the current string has been zeroed completely.
+
+%integer nextp, newlen
+   nextp = ptr+byteinteger(ptr)+1
+   %if byteinteger(nextp+1)=ff %then mergeholes(nextp)
+   newlen = byteinteger(ptr)+byteinteger(nextp)+1
+   {if the next string is a hole and we can join it to the present one}
+   %if byteinteger(nextp)=0 %start
+      ! Current hole can be zeroed to become new end-of-PLIST
+      fill(byteinteger(ptr)+1, ptr, 0)
+   %finish %else %if byteinteger(nextp+1)=ff {We MUST test again!} %and newlen<=255 %start
+      byteinteger(nextp) = ff
+      byteinteger(ptr) = newlen
+   %finish {else next string is not a hole, or it IS a hole but too big together with this one}
+%end;                                    ! OF MERGEHOLES
+%end;                                    ! OF REMOVEFROMPLIST
+
+!--------------------------------- CREATEDIR ---------------------------------
+
+%external %routine createdir %alias "S#CREATEDIR"(%string (255) file, %integer epages,
+   %integer %name flag)
+%record (dhf) %name dh
+%integer len, conad, plist, hashtablesize
+   len = epages<<12;                     ! Epages to bytes
+   hashtablesize = hashconstant(epages)<<4; ! 16 byte entries
+   plist = plength(epages)
+   outfile(file, len, 0, 0, conad, flag)
+   %return %if flag#0
+   fstatus(file, 1, 0, flag);            !Cherish file
+   dh == record(conad);                  ! Map DH on to start of file
+   dh_dataend = len
+   dh_datastart = 32
+   dh_filetype = ssdirfiletype;          ! Type=directory
+   dh_pstart = 36+hashtablesize
+   integer(conad+32) = hashconstant(epages)
+   integer(conad+dh_pstart) = plist
+%end;                                    ! OF CREATEDIR
+
+
+
+
+!-------------------------------- MODDIRECTORY --------------------------------
+
+%external %routine moddirectory %alias "S#MODDIRECTORY"(%integer action, %string (255) dirfile,
+   %string (31) entry, %string (255) filename, %integer type, %integer %name flag)
+! %string(35) to permit length 31 aliased items (= added in front).
+
+!   Action   =   1   With TYPE=8
+!                    Add alias.  FILENAME is the alias-name, with "=" at the start
+!                                ENTRY is the entry being aliesed-to
+!                    With TYPE=4
+!                    Add macro.  FILENAME is the macro-file-name, with "=" at the start
+!                                ENTRY is not reuired to be set - it is extracted from the macro header
+!   NOTE several macros per file
+!      'first' lines can be MACRO fred or PROCEDURE fred
+!      should really skip over data when searching for 'first' lines
+!      and comments ??
+!                3   Remove all entries for FILENAME, and remove FILENAME from PLIST
+!                    This action will remove an alias name and all alias entries
+!                    pointing to it.  Likewise a macrofile name and the macro
+!                    entry pointing to it.  If FILENAME does not commence "="
+!                    and does not exist in the PLIST, then we try again with the "="
+!                4   Remove all entries for FILENAME, but do not remove FILENAME from PLIST
+!                5   Add all entries in FILENAME
+!                6   Check entries in FILENAME against those in directory.  FLAG indicates the result as follows.
+
+!                    291   there are too many entries in FILENAME
+!                    257   FILENAME is not inserted
+!                      1   Entries in FILENAME exactly match the directory
+!                          entries for the FILENAME in the directory
+!                      2   Entries do not match (implying that the filename
+!                          will need to be removed and re-inserted)
+!
+!                7   TIDYDIR.  FLAG contains new number of pages.
+!                8   Set or unset entry monitoring bit for ENTRY.
+!                    TYPE = 0   unset the bit
+!                          64   set the bit
+!                9   Set FILENAME as the monitor filename
+!               10   Remove the monitor filename
+!
+!   Type  is relevant only for Action = 1, when it must be set to
+!                4  to add a macro entry
+!                8  to add an alias entry
+!         or for action = 8, when it must be set to
+!                0  to set a monitor bit
+!               64  to add a monitor bit
+%routine %spec getline { into ssfname }
+%integer %fn %spec checkentryname(%string %name entry)
+%integer %fn %spec checkentries
+%routine %spec removefromhashtable(%integer pstart, offset, %integer %name flag)
+
+%integer objconad, objfiletype, objdatastart, objdataend, pages, dflag, users, data
+%integer hashconst, i, j, ch, pstart, hstart, lstart, offset, newgen reqd, oldad, inflag
+%integer inhibited, connectmode, saveoffset, qual
+%record (namef) %array %name h
+%record (reportf) rr
+%record (dhf) %name dh
+%integer %array %format ldataaf(0:15)
+%integer %array %name ldata
+%record (ld1f) %name codeentry
+%record (ld2f) %name ld2
+%record (ld4f) %name dataentry
+%string (39) tempdname
+%string (255) ssfname
+%string (9) header style { MACRO, PROCEDURE or null }
+
+   !                        1
+   !           entry number 0987654321
+%const %integer writemode=2_11100111110
+%const %integer validmode=2_11111111010
+%const %integer maxsw=10
+%switch sw(1:maxsw)
+
+   %if ssown_ssnote&4#0 %then monparams(">jrtrurtrjriw")
+   %if action=7 {TIDYDIR} %then inflag = flag
+   flag = 0
+   newgen reqd = 0
+   inhibited = 0
+   %if validmode&(1<<action)=0 %or dirfile="" %start
+      ! Trap obvious idiocies since MODDIRECTORY callable.
+      printline("MODDIRECTORY - Bad param")
+      flag = -1
+      ->early err
+   %finish
+
+   %if (1<<action)&writemode=0 %then connectmode = 1 {read} %else connectmode = 3 {write}
+
+   %if action=6 %then qual = 2048+1 {Directory/read} %else qual = 2048+2 {Directory/write}
+   flag = checkname(dirfile, 2 {file}, qual)
+   ->err %unless flag=0
+
+   dirfile -> ssfname.(":"); tempdname = ssfname.":".tempdstem
+
+   ! This cycle essentially sets RR_CONAD for the directory
+   %cycle
+      connect(dirfile, connectmode, 0, 0, rr_conad, rr_filetype, rr_datastart, rr_dataend, flag)
+      %if flag=279 {conflicting mode} %or flag=234 {in use at lower level} %start
+         %if connectmode=3 {write} %then connectmode = 1 {read} %and newgenreqd = 1 %else %c
+            ->early err
+      %finish %else %if flag=218 %and action#3 {don't create dir for "remove"} %and %c
+         dirfile=ssown_avd %start
+         ! Doesn't exist - create default size directory
+         createdir(dirfile, 1, dflag)
+         %if dflag#0 %then flag = dflag %and ->early err {else go round again}
+         printline("Warning - ".dirfile." did not exist and has been created")
+      %finish %else %if flag#0 %then ->early err
+   %repeat %until flag=0
+
+   dh == record(rr_conad)
+
+   %if connectmode=3 {write} %start
+      setssinhibit
+      inhibited = 1
+   %finish
+
+   %if newgen reqd#0 %or dh_fullmarker#0 %or action=7 {TIDYDIR} %start
+      %if dirfile=tempdname %then %monitor; ! SHOULD NOT OCCUR !!
+      ! Make a copy, one page bigger if FULLMARKER set
+      oldad = rr_conad
+      pages = dh_size>>12
+      %if dh_fullmarker#0 %then pages = pages+1
+      %if action=7 {TIDYDIR} %then pages = inflag
+      createdir(tempdname, pages, flag)
+      %if flag#0 %start
+         printline("MODDIRECTORY/tempcreate fails ".itos(flag))
+         %return
+      %finish
+      connect(tempdname, 0, 0, 0, rr_conad, rr_filetype, rr_datastart, rr_dataend, flag)
+      %if flag#0 {shouldn't be. should pass connect addres back from create} %then ->early err
+
+      %if dh_fullmarker=0 %and dh_filetype=ssdirfiletype{i.e. not old-type} %and action#7 %start
+         dflag = integer(rr_conad+20);   ! Preserve dtword from NEW file
+         move(pages<<12, oldad, rr_conad)
+         integer(rr_conad+20) = dflag;   ! restore NEW dtword
+      %finish %else copy dir contents(oldad, rr_conad, action, tempdname, flag)
+
+      %if flag#0 %then ->early err
+
+      dh == record(rr_conad)
+      dh_fullmarker = 0 %if action#7
+      newgen reqd = 1
+      %if ssown_ssnote&4#0 %then printline("Newgen reqd")
+   %finish
+
+   hashconst = integer(rr_conad+rr_datastart)
+   pstart = rr_conad+dh_pstart;          ! Start of PLIST
+   hstart = rr_conad+rr_datastart+4;     ! Start of hash table
+   h == array(hstart, newhaf)
+
+   %unless filename="" %or charno(filename, 1)='=' %start
+      j = x'A0' {type character or object}
+      %if action=3 {remove} %or action=4 {remove} %then j = x'2000'; ! Ignore(existence of)username
+      flag = checkname(filename, 1, j)
+      ->err %unless flag=0
+   %finish
+
+   %if action=5 %or action=6 %or (action=1 {INSERT} %and type=4 {MACRO}) %start
+
+      ssfname{work-string} = filename
+      %if action=1 %then ssfname = substring(ssfname, 2, length(ssfname)); ! Remove leading "=" %else ssfname=last
+      connect(ssfname, 0, 0, 2 {available for disconn}, objconad, objfiletype, objdatastart,
+         objdataend, flag)
+      ->err %unless flag=0
+
+      %if action=1 {Insert Macro} %start
+
+         %unless objfiletype=sscharfiletype %then flag = 267 %and ->err
+
+         ! Look in the file for the macro header.  Extract entry.
+         objdatastart = objconad+objdatastart
+         objdataend = objconad+objdataend
+         getline { into ssfname }
+         ! Now we have the first line in SSFNAME.  The first word should obey the usual name-rules
+
+         header style = "MACRO"
+         ->check %if startswith(ssfname, header style, 1)=yes
+         header style = "PROCEDURE"
+         ->check %if startswith(ssfname, header style, 1)=yes
+         header style = ""
+check:
+! printline("Headerstyle: ".headerstyle)
+         flag = checkentryname(ssfname)
+         ->err %unless flag=0
+         entry = ssfname
+
+      %else
+         ! Object file
+         %unless objfiletype=ssobjfiletype %then flag = 267 %and ->err
+         lstart = objconad+integer(objconad+24); ! Start of load data
+         ldata == array(lstart, ldataaf)
+         filename = translateshortname(filename, 0)
+      %finish
+
+   %finish
+
+   %if action=10 {filename not relevant} %then offset = dh_monfile %else %c
+      offset = plocate(pstart, filename)
+
+   flag = 0
+   ->sw(action)
+
+!-------------------------------------------------------------------------------
+
+sw(1):                                   ! Add ALIAS or MACRO
+   ! TYPE is (must be) set 4 {macro} or 8 {alias} by the caller
+   i = offset
+   %if offset<0 %start { FILENAME not already present }
+      addtoplist(filename, rr_conad, offset, flag)
+   %finish %else %if type=4 {macro} %then remove from hash table(pstart, offset, flag)
+   ->err %unless flag=0
+   saveoffset = offset
+
+   data = 0 { not inside data brackets }
+   %cycle
+      %if ssown_ssnote&4#0 %then printline("ENTRY=".entry)
+      addtohashtable(entry, rr_conad, type, offset, flag)
+      ssfname{used as work string} = string(pstart+offset)
+      %if flag=290 {entry already in hash-table} %start
+         %if ssfname=filename %then flag = 0 %else %start
+            %if charno(ssfname, 1)='=' %c
+               {it SHOULD be, unless the user has done some curious file renaming} %then %c
+               ssfname = substring(ssfname, 2, length(ssfname))
+            ssown_ssfname = "Entry ".ssown_ssfname." already in directory as pointer to ". %c
+               ssfname %and flag = 100
+         %finish
+      %finish
+
+      %if flag=0 %and type=4 %and header style#"" %start
+         %cycle { any more macros in file }
+            getline
+            ->err %if objdatastart>=objdataend { NO }
+
+            %if data=0 %start
+               data = 1 %and %continue %if ssfname="----"
+            %finish %else %start
+               data = 0 %if ssfname="++++" %or ssfname="...."
+               %continue
+            %finish
+
+            %continue %if startswith(ssfname, header style, 1)=no
+            flag = checkentryname(ssfname)
+            entry = ssfname %if flag=0
+            %exit
+         %repeat
+      %finish
+
+      %if flag#0 %start
+         removefromplist(pstart, saveoffset, i) %if type=4 {macro} %or i<0
+         remove from hash table(pstart, saveoffset, i) %if type=4
+         %exit
+      %finish
+      %exit %if type=8 %or header style=""
+   %repeat
+   ->err
+
+sw(3):                                   ! REMOVE filename and all entries pointing to it
+sw(4):                                   ! REMOVE entries & leave filename in PLIST
+   %if offset<0 %and charno(filename, 1)#'=' %then offset = plocate(pstart, "=".filename)
+   %if offset<0 %start
+      ssown_ssfname = filename
+      flag = 257 {not inserted}
+      ->err
+   %finish
+   %if flag#0 %then ->err
+   removefromhashtable(pstart, offset, flag); ! Clear out hash table entries with POINT field = OFFSET
+   removefromplist(pstart, offset, flag) %if action=3
+   ->err
+
+sw(5):                                   ! Add entries from FILENAME
+   %if offset<0 %then %start
+      ! Not found.  Add FILENAME to PLIST
+      addtoplist(filename, rr_conad, offset, flag)
+      ->err %unless flag=0
+   %finish %else removefromhashtable(pstart, offset, flag)
+
+   ! Save OFFSET (since ADDTOHASHTABLE alters it) so that we can remove
+   ! the just-added filename and entries in the event of failure
+   saveoffset = offset
+
+   ! Procedure entries
+   i = ldata(1)
+   %while i#0 %cycle
+      codeentry == record(objconad+i)
+      {printline("Codeentry ".codeentry_iden)}
+      addtohashtable(codeentry_iden, rr_conad, 2, offset, flag) %unless codeentry_iden="S#GO"
+      %if flag=290 %then ssown_ssfname = "Entry ".ssown_ssfname." already in directory in file ". %c
+         string(pstart+offset) %and flag = 100
+      %if flag#0 %then %exit
+      i = codeentry_link
+   %repeat
+
+   %if flag=0 %start
+      ! Data entries
+      i = ldata(4)
+      %while i#0 %cycle
+         dataentry == record(objconad+i)
+         addtohashtable(dataentry_iden, rr_conad, 1, offset, flag)
+         %if flag=290 %then ssown_ssfname = "Entry ".ssown_ssfname. %c
+            " already in directory in file ".string(pstart+offset) %and flag = 100
+         %if flag#0 %then %exit
+         i = dataentry_link
+      %repeat
+
+      %if integer(objconad+integer(objconad+28))>7 %start
+         ! Only for PUT versions PUT5 and later
+         ! COMMON entries
+         i = ldata(2)
+         %while i#0 %cycle
+            ld2 == record(objconad+i)
+            %if ld2_props&x'700'#0 %start
+               addtohashtable(ld2_iden, rr_conad, 1, offset, flag)
+               %if flag=290 %then ssown_ssfname = "Entry ".ssown_ssfname. %c
+                  " already in directory in file ".string(pstart+offset) %and flag = 100
+               %if flag#0 %then %exit
+            %finish
+            i = ld2_link
+         %repeat
+      %finish;                           ! PUT5 and later
+   %finish
+
+   %if flag#0 %start
+      ! Remove entries and filename in event of failure
+      removefromhashtable(pstart, saveoffset, i)
+      removefromplist(pstart, saveoffset, i)
+   %finish
+   ->err
+
+sw(6):                                   ! Check FILENAME for identical existing entries
+   flag = checkentries {FLAG is always non-zero from CHECKENTRIES}
+   ->err
+
+sw(8):                                   ! Set/unset entrypoint monitor
+   addtohashtable(entry, rr_conad, type&64, offset, flag)
+   ->err
+
+sw(9):                                   ! Set monitor filename
+   %if dh_monfile=0 %start
+      ! No monitor file already present
+      %if offset>0 %then ssown_ssfname = filename %and flag = 428 %and ->err; ! Already in directory
+      addtoplist(filename, rr_conad, offset, flag)
+      %if flag=0 %then dh_monfile = offset
+
+   %else
+      ! Monitor file already present
+      %unless offset>0 %and offset=dh_monfile %and filename=string(pstart+offset) %then %c
+         flag = 433 {monitor file alrady set}
+      ! else already there
+   %finish
+
+   ->err
+
+sw(10):                                  ! Remove monitor filename
+   %if dh_monfile>0 %then removefromplist(pstart, dh_monfile, flag); ! else nothing to do - success
+   ->err
+
+early err:
+   newgen reqd = 0
+
+sw(7):                                   ! TIDYDIR
+err:
+
+   ssfname = ssown_ssfname
+   %if flag=0 %and newgen reqd#0 %start
+      users = dirusers(dirfile)
+      newgen(tempdname, dirfile, dflag); ! NEWGEN does the disconnects
+   %finish %else users = 0
+
+   %if inhibited>0 {then we got write access & inhibited} %start
+      changeaccess(dirfile, 1, dflag)
+      allowinterrupts
+   %finish
+
+   %if users>1 %then disconnect(dirfile, dflag)
+
+   ssown_ssfname = ssfname
+   ssown_dirdiscon = 1 %if action#6
+   %if ssown_ssnote&4#0 %then monparams("<jrtrurtrjriw")
+   %return
+
+!-------------------------------- CHECKENTRIES --------------------------------
+
+%integer %fn checkentries
+
+!   This function compares code and data entries of FILENAME with those in
+!   DIRFILE.  FLAG indicates the result as follows.
+
+!       291   there are too many entries in FILENAME
+!       257   FILENAME is not inserted
+!         1   Entries in FILENAME exactly match the directory
+!             entries for the FILENAME in the directory
+!         2   Entries do not match (implying that the filename will need to be removed and re-inserted)
+
+%integer ndirent, nfileent, ncode, ndata, clash, inserted, ix, jx
+%integer lnk
+%record (namef) %name q
+%record (%string (31) entry, %integer type) %name ee, de, fe
+%record (ee) %array entarray(1:hashconst<<1) {allow double directory (entries) size}
+
+   flag = 0
+   ncode = 0; ndata = 0
+   ndirent = 0
+   nfileent = 0
+   ! Procedure entries
+   lnk = ldata(1)
+   %while lnk#0 %cycle
+      codeentry == record(objconad+lnk)
+      ncode = ncode+1
+      %if nfileent>=hashconst %then %result = 291
+      nfileent = nfileent+1
+      ee == entarray(nfileent)
+      ee_entry = codeentry_iden
+      ee_type = code
+      lnk = codeentry_link
+   %repeat
+
+   ! Now data entries
+   lnk = ldata(4)
+   %while lnk#0 %cycle
+      dataentry == record(objconad+lnk)
+      ndata = ndata+1
+      %if nfileent>=hashconst %then %result = 291
+      nfileent = nfileent+1
+      ee == entarray(nfileent)
+      ee_entry = dataentry_iden
+      ee_type = data
+      lnk = dataentry_link
+   %repeat
+
+   %if integer(objconad+integer(objconad+28))>7 %start; ! PUT5 and later
+      ! And COMMON entries
+      lnk = ldata(2)
+      %while lnk#0 %cycle
+         ld2 == record(objconad+lnk)
+         %if ld2_props&x'700'#0 %start
+            ndata = ndata+1
+            %if nfileent>=hashconst %then %result = 291
+            nfileent = nfileent+1
+            ee == entarray(nfileent)
+            ee_entry = ld2_iden
+            ee_type = data
+         %finish
+         lnk = ld2_link
+      %repeat
+   %finish;                              ! PUT5 and later
+
+   ! Now look at the Directory entries
+   ! Has this filename already been inserted?
+   %if offset<0 %start
+      inserted = no
+      %result = 257;                     ! Not inserted
+      ! (Initially we were coding to say whether entries clashed, if FILENAME not inserted)
+   %finish %else inserted = yes
+
+   ! If the file IS already inserted, then we pick out all entries belonging to
+   ! this filename, checking against the entries already stored from the file.
+   ! At the same time, we set _TYPE to zero for the corresponding array entry, so
+   ! that we can see whether there are any left afterwards!
+
+   %for ix = hashconst, -1, 0 %cycle
+      q == h(ix)
+      %if q_name#"" %and ((inserted=no %and q_type&(code!data)#0) %or (inserted=yes %and %c
+         q_point=offset)) %start
+         ndirent = ndirent+1
+         ee == entarray(nfileent+ndirent)
+         ee_entry = q_name
+         %if q_type&x'80'#0 %then ee_entry = ee_entry.string(pstart+q_rest)
+         ee_type = q_type&(code!data)
+      %finish
+   %repeat
+
+   %if inserted=yes %and nfileent#ndirent %then %result = 2; ! Entries not identical
+   clash = 0
+   %for ix = 1, 1, nfileent %cycle
+      fe == entarray(ix)
+      %for jx = nfileent+1, 1, nfileent+ndirent %cycle
+         de == entarray(jx)
+         %if fe_type=de_type %and fe_entry=de_entry %start
+            %if inserted=no %then clash = 3 %else fe_type = 0 %and de_type = 0
+            %exit
+         %finish
+      %repeat
+      %exit %if clash#0
+   %repeat
+
+   %if inserted=no %then %result = clash %else %start
+      ! If any _TYPE is non-zero, it has not been matched up
+      %for ix = 1, 1, nfileent+ndirent %cycle
+         %if entarray(ix)_type#0 %then %result = 2; ! Entries not identical
+      %repeat
+      %result = 1;                       ! Entries identical
+   %finish
+%end;                                    ! OF CHECKENTRIES
+
+!-------------------------------- REMOVEFROMHASHTABLE --------------------------------
+
+%routine removefromhashtable(%integer pstart, offset, %integer %name flag)
+! CLEAR - remove all entries pointing at OFFSET in the PLIST
+%integer i, p, usemarker
+%integer %fn %spec isitinuse(%integer offset, exception)
+
+   flag = 0
+   %for p = hashconst-1, -1, 0 %cycle
+      %if h(p)_point=offset %then %start
+         ! This entry has to go.
+         ! There are two extra considerations though.
+         ! 1. Search chain minimisation.
+         !  Search chains end with a null entry. To preserve a search
+         !  chain when an entry has to be removed then the NAME field
+         !  is set to ".EMPTY". However, if the entry to go is already
+         !  the last in a search chain (the next is null) then this
+         !  entry should be nulled rather than given ".EMPTY". Equally
+         !  if the entry being removed is at the end of a chain and
+         !  is immediately preceded by one or more ".EMPTY" entries
+         !  then these should also be nulled.
+         ! 2. Multiple use of PLIST fragments.
+         !  Although unlikely, fragments of long names held in the PLIST
+         !  may be shared with other long names. These obviously could
+         !  not be removed when the entry was being removed from the
+         !  table. It would be possible to either a) never remove long
+         !  name fragments or b) always remove if possible.
+         !  Option a) has the (possibly considerable) advantage of saving
+         !  another pass through the hash table at the expense of less
+         !  than optimal reutilisation of the PLIST. The code for
+         !  option b) is provided. If the next start-finish block
+         !  is commented out along with function ISITINUSE then the
+         !  code reverts to option a).
+         %if h(p)_type&X'80'#0 %then %start
+            ! Long name
+            usemarker = isitinuse(h(p)_rest, p)
+            removefromplist(pstart, h(p)_rest, flag) %if usemarker=false
+         %finish
+         ! If the P+1th entry is null then this one can also be nulled
+         ! otherwise H(P)_NAME set to ".EMPTY".
+         ! If it has to be nulled then look at the P-1th entry. If
+         ! this is .EMPTY then it also can be nulled. And so on
+         ! until an entry other than .EMPTY is encountered.
+         h(p) = 0
+         i = p+1
+         i = 0 %if i=hashconst
+         %if h(i)_name="" %then %start
+            i = p-1
+            %cycle
+               i = hashconst-1 %if i<0
+               %exit %unless h(i)_name=".EMPTY"
+               h(i) = 0
+               i = i-1
+            %repeat
+         %finish %else h(p)_name = ".EMPTY"
+      %finish
+   %repeat
+
+
+%integer %fn isitinuse(%integer offset, exception)
+! Checks whether a PLIST long name fragment is pointed at
+! by anything other than table position EXCEPTION.
+%integer i
+   %for i = hashconst-1, -1, 0 %cycle
+      %if h(i)_type&X'80'#0 %then %start
+         %result = true %if h(i)_rest=offset %and i#exception
+      %finish
+   %repeat
+   %result = false
+%end;                                    ! OF ISITINUSE
+%end;                                    ! OF REMOVEFROMHASHTABLE
+
+!---------------------------------------- GETLINE ----------------------------------------
+
+%routine getline { into ssfname }
+
+   %cycle
+      ssfname = ""
+      %cycle
+         %exit %if objdatastart>=objdataend
+         ch = byteinteger(objdatastart)
+         objdatastart = objdatastart+1
+         %continue %if (ch=nl %and ssfname="")
+         %exit %if ch=nl
+         ssfname = ssfname.tostring(ch)
+      %repeat
+      remove comments(ssfname)
+      %exit %if ssfname#"" %or objdatastart>=objdataend
+   %repeat
+   uctranslate(addr(ssfname)+1, length(ssfname))
+! printline("getline: ".ssfname)
+%end;                                    ! getline
+
+!------------------------------------- CHECKENTRYNAME -------------------------------------
+
+%integer %fn checkentryname(%string %name entry)
+%integer j, k
+
+   flag = 1 { no chs found }
+   j = 0
+   %cycle
+      j = j+1
+      %exit %if j>length(entry)
+      ch = charno(entry, j)
+      %if ch=' ' %start
+         %continue %if flag=1 { omit leading spaces }
+         %exit
+      %finish
+      k = j %and flag = 0 %if flag=1 { first non blank }
+      flag = 336 %and %exit %unless '0'<=ch<='9' %or 'A'<=ch<='Z'
+   %repeat
+   %if flag=0 %and j-k<30 %then entry = "C#".substring(entry, k, j-1) %else flag = 336
+   %result = flag
+%end;                                    ! checkentryname
+%end;                                    ! OF MODDIRECTORY
+
+
+!-------------------------------- SEARCHLIST -------------------------------
+
+%routine searchlist(%integer action, %integer %name flag)
+%routine %spec copy across(%string (255) dirname)
+
+%integer pt, size, ix, ndirs, ch, position, hit, limit
+%integer profvsn, ap, dirnum
+%string (255) wk, dirfile, dirname
+%record (%byte %integer %array a(0:4059) {max profile entry len=4060}) p
+
+%const %integer prog vsn=1
+%const %integer no=0, yes=1
+%const %integer setkey=1, getkey=0, alter=2, display=3
+%const %integer maxproflen=4060
+
+%const %string (11) profname="SS#Searchd"
+%const %integer maxd=16
+%string (255) %array dirlist(1:maxd)
+
+   ! Now the array DIRLIST correctly describes the current SEARCHDIR list.
+
+   %if action=-1 %start
+      writeprofile(profname, p, -1, flag)
+      printline("Flag ="); write(flag, 1)
+      %return
+   %finish
+
+   flag = 0
+   profvsn = 0
+   ap = addr(p)
+   p = 0
+   readprofile(profname, p, 1, flag)
+   %unless flag=0 %or 237<=flag<=240 %start
+      ! 237 SS#PROFILE not exist, 240 Keyword not found, 238 Info held larger
+      ! 239 Info held smaller
+      printline("PROFILE fails "); write(flag, 1)
+      %return
+   %finish
+   flag = 0
+
+   ! Move profile data to array
+   ndirs = 0
+   wk = ""
+   %for ix = ap, 1, ap+4059 %cycle
+      ch = byteinteger(ix)
+      %if ch=0 %then %exit
+      %if (ch=',' %or ch=nl) %and wk#"" %start
+         ndirs = ndirs+1
+         dirlist(ndirs) = wk
+         wk = ""
+      %finish %else wk = wk.tostring(ch)
+   %repeat
+
+
+   %if action=remdir %then wk = "Directory file;fileormem,or.all,ignoreuser;?;" %else %c
+      wk = "Directory file;fileormem,dir,read,ornull,exist,orequals;;"
+   wk = wk."call pamhelp(helper:one.one31)"
+   getstring(wk, dirfile)
+
+   %if (dirfile="" %or dirfile="=") %and action=adddir %start
+      ! No prameter supplied.  Report SEARCHDIRLIST
+      %for ix = 1, 1, ndirs %cycle
+         write(ix, 3)
+         spaces(2)
+         printline(dirlist(ix))
+      %repeat
+      %return
+   %finish
+
+   %if action=remdir %start
+      %if dirfile=".ALL" %then size = 0 %and ->writerec
+      position = -1
+      hit = 0
+      ! In the case of REMOVEDIR, we will accept a number in the range 1:ndirs
+      ! as being the directory number to be removed.  Variable DIRNUM will be used.
+      ! A number is fortunately a valid filename.
+      wk = substring(dirfile, 8, length(dirfile))
+      dirnum = pstoi(wk)
+      dirnum = -1 %unless 1<=dirnum<=ndirs
+   %finish %else %start
+      hit = -1
+      %if ndirs < maxd %then limit = ndirs + 1 %else limit = maxd
+      getinteger("Position in list;1:".itos(limit).";1;Give the intended position of ".dirfile. %c
+         " in the SEARCHDIR list", position)
+      dirnum = -1
+   %finish
+
+   ! First remove existing entry DIRFILE, in both cases of ACTION
+   hit = 0
+   ix = 1
+   %while ix<=ndirs %cycle
+      %if ix=dirnum %or dirlist(ix)=dirfile %then hit = 1
+      %if hit>0 %and ix<ndirs %then dirlist(ix) = dirlist(ix+1)
+      ix = ix+1
+   %repeat
+   %if hit>0 %then ndirs = ndirs-1
+   %if hit=0 %start
+      %if action=remdir %start
+         printline("Directory ".dirfile." not found in SEARCHDIR list")
+         %return
+      %finish %else %start
+         %if ndirs = maxd %start
+            printline("SEARCHDIR list FULL! (max 16)")
+            %return
+         %finish
+      %finish
+   %finish
+
+   ! Make up the new record, copying from the array of directory names and
+   ! inserting the new one at the appropriate point
+
+   pt = ap
+   ix = 1
+   %while ix<=ndirs %cycle
+      %if ix=position %start
+         dirname = dirfile
+         position = -1
+      %finish %else %start
+         dirname = dirlist(ix)
+         ix = ix+1
+      %finish
+      copy across(dirname)
+   %repeat
+   %if position>ndirs %then copy across(dirfile)
+
+   ! Some zeroes to mark the end
+   fill(4, pt, 0)
+
+   ! Write back to profile
+   size = pt-ap
+writerec:
+   flag = var rec to profile(ap, size, profvsn, profname)
+
+   !Tell LOADER
+   ssown_dirdiscon = 1
+
+%routine copy across(%string (255) dirname)
+%integer j
+   %for j = 1, 1, length(dirname) %cycle
+      byteinteger(pt) = charno(dirname, j)
+      pt = pt+1
+   %repeat
+   byteinteger(pt) = nl
+   pt = pt+1
+%end;                                    ! of   COPY ACROSS
+%end;                                    ! of SEARCHLIST
+
+!--------------------------------- SEARCHDIR -----------------------------------
+
+%external %routine searchdir %alias "C#SEARCHDIR"
+%integer flag
+   searchlist(adddir, flag)
+   setreturncode(flag)
+%end;                                    ! of SEARCHDIR
+
+!------------------------------- REMOVEDIR -------------------------------------
+
+%external %routine removedir %alias "EMAS#REMOVEDIR"
+%integer flag
+   searchlist(remdir, flag)
+   setreturncode(flag)
+%end;                                    ! of REMOVEDIR
+
+!------------------------------ ACTIVEDIR --------------------------------------
+
+%external %routine activedir %alias "EMAS#ACTIVEDIR"
+%integer flag
+%string (255) dirfile, user, rest
+   flag = 0
+   getstring("Directory;file,dir,exist,orequals;:SS#DIR;call pamhelp(helper:one.one31)", dirfile)
+   %if dirfile="=" %start
+      printline("Active directory is ".ssown_avd)
+   %finish %else %start
+      %unless dirfile->user.(":").rest %and user=ssown_ssowner %then %c
+         flag = 258 {ill.use of another's file} %else %start
+
+         %if length(dirfile)>length(ssown_avd) %start
+            disposeheap(addr(ssown_avd))
+            ssown_avd == string(getheap(length(dirfile)+1))
+         %finish
+
+         ssown_avd = dirfile
+         ssown_dirdiscon = 1
+      %finish
+   %finish
+   setreturncode(flag)
+%end;                                    ! of ACTIVEDIR
+
+%external %routine tidydir %alias "EMAS#TIDYDIR"
+%integer conad, filetype, start, end, flag
+%string (6) user
+%string (255) dirfile, rest
+
+   getstring("Directory;file,dir,write,exist;".ssown_avd.";call pamhelp(helper:one.one31)",
+      dirfile)
+
+   connect(dirfile, 0, 0, 2, conad, filetype, start, end, flag)
+   %if flag=0 %start
+      getinteger("Pages;1:32;".itos(integer(conad+8)>>12).";", flag)
+      moddirectory(7, dirfile, "", "", 0, flag)
+      ssown_dirdiscon = 1
+   %finish
+   setreturncode(flag)
+%end;                                    ! of TIDYDIR
+
+%external %routine verifypd %alias "EMAS#VERIFYPD"
+%integer flag
+%string (255) s
+   getstring("Pdfile;file,uc;?;Give name of Pdfile to be VERIFIED", s)
+   modpdfile(7, s, "", "", flag)
+   set return code(flag)
+%end;                                    ! of verifypd
+
+
+!------------------------------ ADDBASEENTRIES -------------------------------
+
+%routine addbaseentries(%integer %name flag)
+
+! To be called only for UNSHARED BASEGLA
+
+%record (ofmf) %array %format ofmaf(1:11)
+%record (ofmf) %array %name ofm
+%integer %array %format ldataaf(0:15)
+%integer %array %name ldata
+%record (ld1f) %name ld1{Procedure entries}
+%record (ld4f) %name ld4{Data entries}
+%integer %name offset
+%integer %array %name lh
+%integer fconad, areano
+%integer i, fflag, lbase, lang, locll, gladifference
+%integer ad, mainbit, area, kmon, count, lhd
+%record (ent4f) ent4
+
+   kmon = 0 {%if flag=13 %then kmon=1 %else kmon=0}
+   count = 0
+   locll = 0
+   fconad = abaseobj
+
+   gladifference = ssown_abgla-(abaseobj+integer(abaseobj+8))
+
+   lbase = fconad+integer(fconad+24);    ! Start of load data
+   ldata == array(lbase, ldataaf)
+   ofm == array(fconad+integer(fconad+28)+4, ofmaf)
+   ssown_areastart(1) = fconad+ofm(1)_start; ! Code
+   ssown_areastart(4) = fconad+ofm(4)_start; ! SST
+
+   %for i = 1, 1, 4 %cycle
+      area = unsharedareaold(i)
+      ssown_areastart(area) = ssown_abgla
+   %repeat
+
+   ! And what language it is - top byte of 4th word of GLA (or PLT if it exists)
+   %if ofm(3)_l=0 %then i = 2 %else i = 3
+   lang = byteinteger(fconad+ofm(i)_start+16)
+   %unless 1<=lang<=10 %then lang = 0
+   %if ssown_loadmonitor&2#0 %then monout("Module source language ".modlang(lang))
+
+!*
+!*  CODE ENTRIES (listhead 1)
+!*
+
+   ! %if kmon#0 %then MONOUT("Entries")
+   i = ldata(1)
+   %while i#0 %cycle
+      count = count+1
+      ld1 == record(fconad+i)
+      !      %if kmon#0 %then monout(ld1_iden)
+      i = ld1_link
+      ad = ssown_areastart(codecode)+ld1_epoffset
+      ent4 = ld1_ent4
+      ent4_codeoffset = ent4_codeoffset+ssown_areastart(codecode)
+      ent4_epoffset = ent4_epoffset+ssown_areastart(codecode)
+      ent4_glaoffset = ent4_glaoffset+ssown_areastart(glacode)
+
+      ! If the top bit of LD1_EPOFFSET is set then this is a main entry.
+      ! If it's the first encountered in this load then assign AD
+      ! to SSOWN_MAINENT4. Don't add entry points called S#GO to loader tables
+      %if ld1_epoffset&X'80000000'#0 %then %start
+         ! Found a main entry
+         mainbit = X'80000000'
+      %finish %else mainbit = 0
+
+      %unless ld1_iden="S#GO" %then %start
+         ! Add to loader tables
+         lhd = hash(ld1_iden, prime)
+         %if locll=0 %start
+            lh == ssown_plh
+            offset == ssown_permoffset
+            areano = 2
+         %else
+            lh == ssown_tlh
+            offset == ssown_tempoffset
+            areano = 3
+         %finish
+         addentry(ld1_iden, lh, fflag, offset, ent4, mainbit!code, areano, lhd)
+         %if fflag=354 %then %start
+            %if ssown_nowarnings=false %then %c
+               terminalprint("**WARNING - Code entry ".ld1_iden." already loaded")
+            fflag = 0
+         %finish
+         flag = fflag %and %return %if fflag#0
+
+      %finish
+
+      %if ssown_loadmonitor&4#0 %and count<10 %then %c
+         monout("Code Entry ".ld1_iden." at ".htos(ent4_epoffset, 8))
+   %repeat
+
+
+!*
+!* DATA ENTRIES  (listhead 4)
+!*
+
+   i = ldata(4)
+   %while i#0 %cycle
+      ld4 == record(fconad+i)
+      ! Values of LD_A>=10 are treated as initialised common i.e. area 6
+      %if ld4_a>=10 {%and lputtype=old} %then ad = ssown_areastart(6) %else %c
+         ad = ssown_areastart(ld4_a)
+      ad = ad+ld4_disp
+
+      ent4_datadr0 = ld4_l
+      ent4_datadr1 = ad
+
+      lhd = hash(ld4_iden, prime)
+      %if locll=0 %start
+         lh == ssown_plh
+         offset == ssown_permoffset
+         areano = 2
+      %else
+         lh == ssown_tlh
+         offset == ssown_tempoffset
+         areano = 3
+      %finish
+      addentry(ld4_iden, lh, fflag, offset, ent4, data, areano, lhd)
+      %if fflag#0 %then terminalprint("Error in Addbaseentries ".itos(fflag))
+      %if ssown_loadmonitor&4#0 %then %c
+         monout("Data Entry ".ld4_iden." at ".htos(ad, 8)." of length ".htos(ld4_l, 8))
+      i = ld4_link
+   %repeat
+
+   ssown_llinfo(0)_tab = ssown_permoffset
+
+%end {addbaseentries}
+
+!--------------------------------- INITLOADER ---------------------------------
+
+%external %routine initloader %alias "S#INITLOADER"(%integer %name flag)
+! Routine is called once from SSINIT at startup time.
+! This routine creates the loader tables and adds the system call table
+! to the perm loaded table. File is 3 pages initially: 1 for refs, 1 for
+! permloaded entries and 1 for temploaded entries.
+! LLINFO fields are initialised where possible.
+%integer %array %name rlh, plh, tlh
+%record (sctabf) %array %name sct
+%integer type, j, j1, j2
+%record (ent4f) ent4
+! Map subsystem entry listheads
+
+%const %integer ltabsi=x'8000';          ! Initially
+
+   ! outfile(loadtables, -ltabsi, maxloadtabsize, 4 {perm, lev 1}, ssown_ssloadtab(0)_start, flag)
+   connect(loadtables, 19 {RW-newcopy}, maxloadtabsize{hole}, 4 {Perm, lev1},
+      ssown_ssloadtab(0)_start, type, j1, j2, flag)
+
+   %if flag#0 %then mstop("Flag=".itos(flag), 123); ! Unable to connect T#LOAD
+
+   ! Director has created this file, and we therefore need to give it a header
+   integer(ssown_ssloadtab(0)_start+8) = ltabsi; ! This needs to agree with what Director makes it
+   integer(ssown_ssloadtab(0)_start) = ltabsi; ! This needs to agree with what Director makes it
+
+   ssown_partloaded(0) = getheap(256);   ! addr(ssown_fileloading)
+   ssown_partloaded(1) = addr(ssown_glaloading)
+   ssown_partloaded(2) = addr(ssown_codeloading)
+
+   ! Note that T#LOAD will always be connected at this address.
+   integer(ssown_ssloadtab(0)_start) = ltabsi
+   integer(ssown_ssloadtab(0)_start+4) = 32
+   ssown_ssloadtab(0)_len = 32
+   ssown_ssloadtab(1)_start = ssown_ssloadtab(0)_start+32
+   ssown_ssloadtab(1)_len = X'1000'-32
+
+   ssown_ssloadtab(2)_start = ssown_ssloadtab(0)_start+X'1000'; ! Start of permloaded entries
+
+   ssown_ssloadtab(3)_start = ssown_ssloadtab(0)_start+ltabsi-x'1000'
+   ssown_ssloadtab(3)_len = X'1000'
+   ssown_ssloadtab(2)_len = ssown_ssloadtab(3)_start-ssown_ssloadtab(2)_start
+
+   ssown_permoffset == ssown_nextad(2)
+   ssown_tempoffset == ssown_nextad(3)
+   ssown_nextad(j) = lhoffset %for j = 3, -1, 1
+
+   ! Fill ref table with X'82'
+   fill(ssown_ssloadtab(1)_len-lhoffset, ssown_ssloadtab(1)_start+lhoffset, X'82')
+
+   ! Initialise LLINFO.   LLINFO(-1) holds the starting values of the perm items.
+   ssown_llinfo(0)_tab = ssown_permoffset
+   ssown_llinfo(-1)_tab = ssown_permoffset
+   ssown_llinfo(basell)_tab = ssown_tempoffset
+   ! LLINFO(0)_GLA initialised by INITDYNAMICREFS
+   ! LLINFO(0)_ISTK and LLINFO(1)_ISTK initialised by INITUSTK
+   ! LLINFO(1)_GLA initialised by GETGLA
+   rlh == array(ssown_ssloadtab(1)_start, lhf)
+   plh == array(ssown_ssloadtab(2)_start, lhf)
+   tlh == array(ssown_ssloadtab(3)_start, lhf)
+   ssown_rlh == rlh
+   ssown_plh == plh
+   ssown_tlh == tlh
+
+   flag = 0
+   ! Map on to system call list
+   sct == array(uinf_sct block ad+32, sctabaf)
+   ssown_sct == sct
+   ssown_topsct = integer(uinf_sct block ad)-2
+
+   type = code
+   ! lhd=-1
+   ! desc=checkloaded("S#ICLMATHSERRORROUTINE", ent4, type, lhd)
+   ! longinteger(addr(ssown_ssliberr(1)))=desc
+   ! ssown_sscomreg(13)=addr(ssown_ssliberr(1)); ! Needed by BASIC
+   ! ssown_sscomreg(58)=addr(ssown_maindr1); ! Needed by COBOL run
+
+   ent4_datadr0 = 4
+   ent4_datadr1 = addr(ssown_topstk)
+   addentry("EMAS3TOPSTK", ssown_plh, j, ssown_permoffset, ent4, data, 2, hash("EMAS#TOPSTK",
+      prime))
+
+   addbaseentries(j) %if ssown_unsharedbgla#0
+
+   ssown_llinfo(0)_tab = ssown_permoffset
+%end;                                    ! OF INITLOADER
+
+
+!-------------------------------- MAXFILESIZE ----------------------------------
+
+%integer %fn maxfilesize
+%integer %array aa(0:31)
+%integer j
+%string (255) s
+   j = dsfi(ssown_ssowner, ssown_ssownfsys, 12, 0, s, aa)
+   %if j=0 %then %result = aa(0) {no of Kbytes}
+   %result = 0
+%end;                                    ! of MAXFILESIZE
+
+
+!---------------------------------- INITUSTK ----------------------------------
+
+%external %routine initustk %alias "S#INITUSTK"
+! Initialises the user stack and sets up pointers to the initialised
+! stack reserved areas
+%integer flag, i, ustacksize, maxfsizebytes
+
+   !ssown_ustb=ustackconad
+   ustacksize = ssown_ustacksize>>12<<12 {bytes, rounded DOWN to 4K bdy}
+   maxfsizebytes = maxfilesize{in Kbytes}>>2<<12 {to bytes, but rounded DOWN to 4K bdy}
+   ! %if ustacksize>maxfsizebytes %then ustacksize=maxfsizebytes
+   %if ustacksize>12<<segshift %then ustacksize = 12<<segshift; ! max 12 Megabytes
+   %if ustacksize<(1<<(segshift-2)) %then ustacksize = 1<<(segshift-2); ! min 1/4 Megabyte
+   %if ustacksize<<(32-segshift)=0 {would exactly fill a segment} %then %c
+      ustacksize = ustacksize-4096
+
+   outfile(ustackname, ustacksize {temp, was:ssown_ssustacksize}, 0,
+      X'20000004' {Vtemp, Permt.conn/Subsys soft}, ssown_ustb, flag)
+   %if flag#0 %then %start
+      ssown_ustb = 0
+      terminalprint("Unable to create USERSTACK - ".failuremessage(flag))
+      return to command level
+   %finish
+
+   ssown_topstk = ssown_ustb+ustacksize-x'4000' {16K less}
+
+   ssown_tempistk = ssown_ustb+32
+   ssown_permistk = ssown_ustb
+   ssown_llinfo(-1)_istk = ssown_permistk; ! Base value if loader tabs reset
+   ssown_llinfo(0)_istk = ssown_permistk
+   ssown_llinfo(i)_istk = ssown_tempistk %for i = ssown_loadlevel, -1, basell; ! In case LOADLEVEL>BASELL
+! **Comment** The trouble with this approach is that there may be a lot
+! of paging between initialised and normal user stack but its the only way
+! of easily implementing 'permanently loaded' ISTK. Perhaps worth thinking
+! about though.
+%end;                                    ! OF INITUSTK
+
+!----------------------------------- GIVEENT------------------------------------
+
+%routine giveent(%routine x, %record (ent4f) %name ent4)
+   *l_1,ent4
+   *L_2,64(10)
+   *mvc_0(16,1),0(2)
+   ent4_epad = ent4_epad-4 {set back to set consttab ptr}
+   ! Not bothering with the environment, and will work only for external routines "x"
+%end {giveent}
+
+
+
+!------------------------------ INITDYNAMICREFS ------------------------------
+
+%external %routine initdynamicrefs %alias "S#INITDYNAMICREFS"
+! Called by SSINIT at startup time.
+! This routine has two functions -
+! 1. Sets up code and branches to handle dynamic and unresolved refs
+!    from user programs
+! 2. Deal with dynamic refs within the subsystem itself.
+%integer %array %format ldataaf(0:15)
+%integer %array %name ldata
+%record (ld7f) %name ld8
+%integer i, pc, lstart, abgla, ad, lhd, flag, type, refloc
+! Get DYNPC and SSOWN_UNSATPC. Need these before can call ADDREF
+
+   *LA_1,<dynref>
+   *ST_1,PC
+   ssown_dynpc = pc;                     ! To ensure accessing %own does not have unexpected effect
+   *la_1,<unsatref>
+   *st_1,pc
+   ssown_unsatpc = pc
+
+   ! Now get entry entry four-words of S#DYNAMIC and S#UNSATREF
+   type = code
+   lhd = -1
+   i = checkloaded("S#DYNAMICREF", ssown_dynent4, type, lhd)
+   lhd = -1
+   i = checkloaded("S#UNSATREF", ssown_unsatent4, type, lhd)
+
+   ! The above isn't  going to work in the testbed, so look use a new procedure GIVEENT
+   giveent(dynamicref, ssown_dynent4)
+   giveent(unsatref, ssown_unsatent4)
+
+   ! Deal with subsystem dynamic refs
+   ssown_dynrefstart = ssown_sscurbgla
+   lstart = abaseobj+integer(abaseobj+24); ! Load data
+   ldata == array(lstart, ldataaf)
+   i = ldata(8);                         ! Dynamic refs listhead
+   abgla = abaseobj+integer(abaseobj+integer(abaseobj+28)+16)
+   ssown_areastart(1) = abgla;           ! Dummy to fool ADDREF
+   ad = addr(refloc);                    ! Ditto
+   %while i#0 %cycle
+      ld8 == record(abaseobj+i)
+      refloc = (ld8_glaptr&X'00FFFFFF')!X'01000000'; ! Dummy REFLOC
+      lhd = hash(ld8_iden, prime)
+      addref(ld8_iden, flag, 0, ad, code, dynamic, 0, lhd, 1, 0)
+      %if flag>0 %then mstop("Flag=".itos(flag), 125); ! Failure adding subsystem dynamic refs to T#LOAD
+      i = ld8_link
+   %repeat
+   ssown_llinfo(0)_gla = ssown_sscurbgla
+   ssown_llinfo(-1)_gla = ssown_sscurbgla
+   ssown_dynrefend = ssown_sscurbgla;    ! Save BGLA pointer so that a call of RESETLOADER can restore
+   ! the subsys dynamic refs. Only ss dynamic refs will have
+   ! SSOWN_DYNREFSTART<=R2_ADYNR<OWN_SSDYNREFEND
+   ! Note that SSOWN_DYNREFEND and SSOWN_LLINFO(-1)_GLA are not necessarily
+   ! always the same. Student subsystems tinker with LLINFO(-1) later.
+   %return;                              ! End of initialisation sequence
+
+
+! Here is the picture during the dynamic call execution.
+
+
+! 1. The Stack
+!
+!   +----------------<-----------------------------<---------------+
+!   |                                                              |
+!   V                                                              |
+!   +---------------------------+-----+---------+-----------------+------+------+cont1
+!   | Dsply for rt to be called | link| Params  |Wkspace 4 words +| Ptr  | Pad  |
+!   +---------------------------+-----+---------+-----------------+------+------+cont1
+!   |                                           |
+!   Stackfront at time of                       |
+!   dynamic call                                |
+!                                               |
+!                                               |     [The Pad wd is to preserve double-wd alignment of R11]
+!                                               +-<-------<-+
+!                                                           |
+!                                        Three params       |
+!   cont1+------------------------+-----+-------+-------+--------+- - -
+!        | Display for rt DYNREF  | link| Esctab| GLAref| Wkspace|
+!   cont1+------------------------+-----+-------+-------+--------+- - -
+!                                           |        |
+!                                           |        |
+! 2. The Escape Table Entry                 V        |
+!                                           |        |
+!   +-------------------<-------------------+        |
+!   |                                                |
+!   V                                                |
+!   +-----+-------+-------+-------+--------+         V
+!   |  PC | Recad | GLAref| Entad | P-word |         |
+!   +-----+-------+-------+-------+--------+         |
+!   |                 |                              |
+!   |                 +---------->---------+         |
+!   |                                      |         |
+! 3. The four-word reference in            |         |
+!    caller's GLA                          +----<----+
+!   |                                      |
+!   |                                      V
+!   |                                      +-------+-------+-------+-------+
+!   +--------<-------------------<---------| Esctab|ldr GLA| dynref| P-word|
+!                                          +-------+-------+-------+-------+
+!                                            C-word  G-word  E-word  P-word
+
+
+! Come here from user prog for unsatisfied code refs
+unsatref:
+   *using_14
+   *st_15,60(11);                        ! Put away return link
+   *la_15,16;                            ! indicator for Dyn/Unsat and offset into ssowns
+   *bc_15,<arounddyn>
+   *drop_14
+
+! Come here from user prog for dynamic code refs
+dynref:
+   *st_15,60(11);                        ! Put away return link
+   *sr_15,15;                            ! indicator for Dyn/Unsat
+around dyn:
+
+! Preserve environment for eventual call.
+! Register 12 contains the address of the escape table.
+! At (r2)+8 we have
+! the address of the location in the gla where the four-words have
+! to go.
+
+! R12 points to the escape table entry, R13 points to loader's GLA, R14=label <dynref> or <unsatref>
+
+! DYNAMICREF and UNSATREF receive three parameters:
+!                                        i  the address of the escape table entry
+!                                       ii  the address of the reference four-words
+!                                      iii  the address of four words to be filled with the entry data
+
+   *lr_0,12;                             ! Pointer to esc table entry: param1 for DYNAMICREF
+   *l_1,8(12)
+
+   ! R1 is pointer to the reference four-words from the escape table: param2 for DYNAMICREF
+
+   ! Now work out how many bytes of params there are on the stack.
+   *l_2,16(12);                          ! Get paramword from escape table
+
+   {comment align                       }! If no of param bytes not specified by calling routine (paramword = -1)
+   {comment align                       }! then assume 2048 and Warn in rt DYNAMICREF
+   *basr_14,0
+   *using_14
+   *la_3,1
+   *ar_2,3;                              ! if paramword was -1, R2 is now zero
+   *bc_7,<parnotminusone>
+   *la_2,2048
+   *bc_15,<upr11>
+par not minus one:
+   *drop_14
+
+   *la_3,6;                              ! We want to round the number of param
+   {comment align                       }! bytes up to a multiple of 8, to
+   {comment align                       }! preserve stack-front alignment. R2
+   {comment align                       }! currently has 1 more than the no of params
+   {comment align                       }! We are taking 1 off, adding 7 (=adding 6), then
+   {comment align                       }! right then left shifting 3 to do this.
+   *ar_2,3
+   *sll_2,16(0)
+   *srl_2,19(0);                         ! Get rid of top half, leaving number of bytes
+   *sll_2,3(0)
+
+up r11:
+   *lr_3,11;                             ! Save R11 to put in the fifth word of the workspace
+   *la_11,64(2,11);                      ! Past stackframe and params
+   *lr_2,11;                             ! Points to 24 bytes of workspace, the first
+   {comment align                       }! 16 bytes being a place to receive the entry
+   {comment align                       }! information, and the fifth word to contain the
+   {comment align                       }! previous value of R11 (at call of label DYNREF:)
+   {comment align                       }! The pointer to this workspace is param3 for DYNAMICREF
+   *st_3,16(11);                         ! Save previous R11 in workspace
+   *la_11,24(11);                        ! past the workspace and pad word
+   *l_14,24(13);                         ! load const table pointer to enable ssown to be addressed
+   *l_3,ssown;                           ! Address of the DYNAMICREF entry four-words
+   *ar_3,15;                             ! Or of the UNSATREF four-words
+   *stm_4,2,16(11);                      ! Stack the environment plus three one-word params
+   {comment align}! Not that the environment is so important
+   *lm_12,14,0(3);                       ! Ep-words
+   *basr_15,14;                          ! To DYNAMICREF
+
+! We do not return at all from UNSATREF
+
+! Now if we couldn't find the ref then we won't return here from
+! S#DYNAMICREF. Conversely, if we have returned, then we can now enter the
+! procedure whose entry-point four-words are in the workspace on the stack.
+
+   *la_0,8
+   *sr_11,0;                             ! To point to the word containing the original value of R11
+   *l_3,0(11);                           ! Save it for later
+   *la_0,16
+   *sr_11,0;                             ! To point to the entry four-words
+   *lm_12,14,0(11);                      ! Pick up code, GLA and EP addresses
+   *lr_11,3;                             ! To where it was when control arrived here from the dynamic call
+   *l_15,60(11)
+   *bcr_15,14;                           ! To the dynamic procedure
+%end;                                    ! OF INITDYNAMICREF
+
+!------------------------------------ DYNLOAD ------------------------------------
+
+%integer %fn dynload
+! Result is TRUE if LOADPARM MIN set
+   %result = ssown_sscomreg(39)&1
+%end;                                    ! OF DYNLOAD
+
+
+!-------------------------------------- LET --------------------------------------
+
+%integer %fn let
+! Result#0 if LOADPARM LET is set
+   %result = ssown_sscomreg(39)&2
+%end;                                    ! OF LET
+
+
+!--------------------------------- CURRENTLL ---------------------------------
+
+%external %integer %fn currentll %alias "S#CURRENTLL"
+! Result is the current value of the overall LOADLEVEL
+   %result = ssown_loadlevel
+%end;                                    ! OF CURRENTLL
+
+
+!---------------------------------- CURSTACK ----------------------------------
+
+%external %integer %fn curstack %alias "S#CURSTACK"
+! Result is 0 if running on base stack, else 1
+%integer lnb
+   %result = 0 {for now}
+   ! *STLN_lnb
+   %if lnb>>segshift=ssbstackseg %then %result = 0 %else %result = 1
+%end;                                    ! OF CURSTACK
+
+
+
+!---------------------------------- LOADENTITY2 ---------------------------------
+
+%external %integer %fn loadentity2 %alias "EMAS3LOADENTITY"(%string %name entry, actualepname,
+   %integer %name type, flag, codeoff, glaoff, epoff, parmw, loadlevel)
+
+!     Result  =  1    success, flag = 0
+!                0    failure, flag = reason
+
+%string (31) s1, s2
+%record (ld1f) %name ld1
+%integer etype, i, start, found, idesc, locll
+%integer fconad, ffiletype, fdatastart, fdataend
+%record (ent4f) ent4
+
+   locll = loadlevel;                    ! do not want to alter the parameter
+   ent4 = 0 {temp avoid unass check}
+   %if ssown_loadinprogress=false %then ssown_loadinprogress = true
+   ! If ENTRY contains '_' or '.' then can avoid LOADEP call
+   %unless entry->s1.(":").s2 %or entry->s1.("_").s2 %then %start
+      ! Try as a command
+      etype = type
+      idesc = loadep2(entry, actualepname, etype, flag, codeoff, glaoff, epoff, parmw, locll)
+      %if ssown_loadmonitor#0 %then monout("LOADEP2 flag = ".itos(flag))
+      %if flag=0 {success} %then %start
+         type = etype
+         %result = idesc
+      %finish
+      ! If FLAG#289 then error and give up. However if 'not found' (289)
+      ! then this might have come from failed cascade and want to give up
+      ! under these circumstances as well. Only proceed if we couldn't find ENTRY
+      %if flag#289 %or (flag=289 %and ssown_ssfname#entry) %then ->err
+   %finish
+
+   ! Not a command and no funny failure. Try to CONNECT
+   connect(entry, 1, 0, 0, fconad, ffiletype, fdatastart, fdataend, flag)
+   %if 218#flag#0 %and 220#flag#167 {Invalid filename} %then ->err
+   %if flag=218 %or (flag=0 %and sscharfiletype#ffiletype#ssobjfiletype) %or flag=220 %or %c
+      flag=167 %then %start
+      ! Didn't find it
+      flag = 289
+      ->err
+   %finish
+   %if ffiletype=sscharfiletype %then %start
+      printline("Character file ".entry." found - attempting OBEYJOB")
+      ssown_loadinprogress = false
+      flag = -1
+      ->err
+   %finish
+   ssown_mainent4 = 0
+   printline("Object file ".entry." found - looking for main entry")
+
+   ! Check for main entry before calling LOADFILE2
+   start = fconad+integer(fconad+24)+4;  ! Listhead of code entries
+   i = integer(start)
+   found = false
+   %while i#0 %cycle
+      ld1 == record(fconad+i)
+      %if ld1_epoffset&X'80000000'#0 %then found = true %and %exit
+      i = ld1_link
+   %repeat
+   %if found=false %then flag = 298 %and ->err; ! No main entry
+   printline("Main entry found")
+   loadfile(entry, flag, locll)
+   %if 350 {already loaded}#flag#0 %and %not (flag=wrongparflag %and let#0) %then ->err
+
+   %if ssown_sscomreg(7)#0 %then %start
+      ! Unsatisfied refs
+      %if dynload=false %then cascadeload(flag, locll) %else minload(locll, dynload, flag)
+      %if flag#0 %and %not (flag=wrongparflag %and let#0) %then ->err
+   %finish %else ssown_loadinprogress = false
+   flag = 0 %if flag#350 {350=already loaded}
+
+   ! All O.K. if here - update LLINFO(0)
+   %if ssown_llinfo(0)_tab#ssown_permoffset %then %start
+      ssown_llinfo(0)_tab = ssown_permoffset
+      ssown_llinfo(0)_gla = ssown_sscurbgla
+      ssown_llinfo(0)_istk = ssown_permistk
+   %finish
+   type = X'80000000';                   ! Set top bit to indicate ENTER mode is 0
+   ent4 = ssown_mainent4
+   codeoff = ent4_codeoffset
+   glaoff = ent4_glaoffset
+   epoff = ent4_epoffset
+   parmw = ent4_parmword
+   %result = idesc
+err:
+   idesc = 0
+   %result = 0
+%end;                                    ! OF LOADENTITY2
+
+
+!------------------------------- DEFLOADENTRY ----------------------------------
+
+%external %routine defloadentry %alias "s#defloadentry"(%string (31) epname, %integer codeoffset,
+   glaoffset, epoffset, parmword, type, locll, %integer %name flag)
+!* Routine added by S.H. Oct. 86.
+!* Used by VSS to declare that certain already-loaded areas may be
+!* linked as COMMON.
+! call with:
+!type=1..data, 2..code, 4..macro, 8..alias
+!locll=0..permanently loaded, 1..loaded at current level.
+%record (ent4f) ent4
+%integer %array %name lh
+%integer lhd, offset, areano
+   ent4_codeoffset = codeoffset
+   ent4_glaoffset = glaoffset
+   ent4_epoffset = epoffset&x'7fffffff'; !not a main entry
+   ent4_parmword = parmword;             !not used ???
+   lhd = hash(epname, prime);            !get hash position
+   %if locll#0 %then locll = ssown_loadlevel; !in case req
+   %if locll=0 %then %start
+      lh == ssown_plh
+      offset = ssown_permoffset
+      areano = 2
+   %finish %else %start
+      lh == ssown_tlh
+      offset = ssown_tempoffset
+      areano = 3
+   %finish
+   addentry(epname, lh, flag, offset, ent4, type, areano, lhd)
+   %if flag=354 %then %start
+      terminalprint("**Warning - entry ".epname." already loaded")
+      flag = 0
+   %finish
+   ->out %if flag#0
+   satisfyref(epname, ent4, flag, type, locll, lhd)
+   %if flag=289 %then flag = 0;          !not found is ok.
+out:
+%end;                                    !of defloadentry
+
+!--------------------------------- PRELOADENTRY ------------------------------------
+
+%external %routine preload entry %alias "C#PRELOADENTRY"
+!  Routine to do a load-without-enter, just to see if the entrypoint can be
+!  found and all references satisfied.
+%integer j, flag, type, codeoff, gla, ep, pw, ll, lparm
+%integer %name com39
+%string (31) actualepname
+%string (255) entry
+   getstring("Entry;any;?;Give entrypoint for which a cascade load is to be performed", entry)
+   getinteger("Load status;word,perm,temp;temp", ll)
+   com39 == ssown_sscomreg(39)
+   lparm = com39;                        ! Save current LOADPARM
+   com39 = 0;                            ! Order a full load
+   type = code!data
+   ! LOADLEVEL 0 for perm-load, 1 for load at current ll
+   j = loadep2(entry, actualepname, type, flag, codeoff, gla, ep, pw, ll)
+   com39 = lparm
+   setreturncode(flag)
+%end;                                    ! PRELOADENTRY
+
+
+!--------------------------------- LOADENTITY ----------------------------------
+
+%external %integer %fn loadentity %alias "S#LOADENTITY"(%string (31) entry, %integer %name type,
+   flag, %record (ent4f) %name ent4, %integer locll)
+
+%string (31) actualepname
+
+   %result = loadentity2(entry, actualepname, type, flag, ent4_codeoffset, ent4_glaoffset,
+      ent4_epoffset, ent4_parmword, locll)
+%end;                                    ! OF LOADENTITY
+
+
+!--------------------------------- DYNAMICREF ---------------------------------
+
+%external %routine dynamicref %alias "S#DYNAMICREF"(%integer esctabptr, ref4ad, ent4ad)
+
+! This routine handles dynamic refs which require to be satisfied.
+! Called from INITDYNAMICREF.
+
+! It also handles calls on procedures where wrong parameters are provided.  This
+! situation is indicated by the top bit being set in the first word of the escape table
+
+! The parameters are as follows:
+!       ESCTABAD  points to the escape table entry for the unsatifies ref
+!       REF4AD    points to the reference four-words in the caller's GLA
+!       ENT4AD    points to workspace of 20 bytes, of which the last word contains
+!                 the value of R11 at the point of the call of the unsat ref.
+!                 NDIAG can work back from this to give diagnostics.
+
+%string (31) ename
+%integer idesc
+%record (escf) %name escrec
+%record (ent4f) %name ee, ref4
+%record (ent4f) ent4
+%integer recad, lene, type, flag, pc, lnb
+
+! ESCTABPTR is the address of the escape table from which the basic record
+! describing this ref can be obtained. From this we want the name and
+! the type to call LOADEP.
+   lnb = integer(ent4ad+16)
+   pc = integer(lnb+15*4)
+   ee == record(ent4ad)
+   escrec == record(esctabptr)
+   recad = escrec_recad;                 ! Addr of basic record
+   ename = string(recad)
+   lene = (byteinteger(recad)+8)&X'FFFFFFF8'; ! Bytes of name string
+   type = integer(recad+lene)&X'1FFFFFFF'; ! Off cmn/dyn/unsat bits
+   %if escrec_pc#1 %start
+      select output(0)
+      printline("Attempted call of ".ename." with incorrect parameters")
+      ref4 == record(ref4ad)
+      idesc = checkparamwords(escrec_pc{entry parmword}, escrec_pwordcopy,
+         ename) {to print message}
+      flag = wrongparflag
+      ->dynfail
+   %finish
+   %if ssown_loadmonitor&1#0 %then %c
+      printline("+++ Call to DYNAMICREF ==> ".htos(esctabptr, 8)." +++")
+   %if ssown_loadmonitor&1#0 %then monout("Attempting to load ".ename." dynamically")
+
+   ! Now a call on LOADEP should, if successful, satisfy all outstanding refs
+   ! to ENAME in the course of loading the file in which it occurs.
+   ! N.B. It can't already be loaded since it wouldn't still be in the ref
+   ! tables
+   idesc = loadep(ename, type, flag, ent4, ssown_loadlevel)
+   %if flag=0 %then %start
+      idesc = checkparamwords(ent4_parmword, escrec_pwordcopy, ename)
+      %if idesc>0 {success} %start
+
+         ! Warning suppressed, as not being useful (Feb 88)
+         !%if idesc=3 {calling rt gave "-1"} %start
+         !   printline("**Warning - no of parameter bytes unknown and assumed to be less than 2048")
+         !%finish
+
+         %if ssown_loadmonitor&1#0 %then %c
+            monout("Load initiated by dynamic call to ".ename." successful")
+
+         ! Move entrypoint four-words to the area whose address is supplied in ENT4AD
+         ee_codead = ent4_codead
+         ee_glaad = ent4_glaad
+         ee_epad = ent4_epad
+         ee_parmword = ee_glaad {See Note A in routine SATISFYREFS}
+
+         %return
+      %finish
+   %finish
+dynfail:
+! If here then LOADEP failed for one reason or another. This means abandoning
+! the load.
+   selectoutput(0)
+   printline("
+Load initiated by dynamic call to ".ename." failed")
+   setreturncode(flag)
+   ssown_sscomreg(10) = 1;               ! %monitor called flag for JCL interpreter
+   ! Display giving GLA for the caller of the unsat ref is beyond the 5 words pointed to by ENT4AD
+   ndiag(-2 {flag to NDIAG}, lnb, 0, ent4ad+20)
+   return to command level
+%end;                                    ! OF DYNAMICREF
+
+
+!---------------------------------- UNSATREF ----------------------------------
+
+%external %routine unsatref %alias "S#UNSATREF"(%integer esctabad, ref4ad, ent4ad)
+! This routine handles any direct calls on unresolved refs.
+
+! The parameters are as follows:
+!       ESCTABAD  points to the escape table entry for the unsatifies ref
+!       REF4AD    points to the reference four-words in the caller's GLA (not used)
+!       ENT4AD    points to workspace of 20 bytes, of which the last word contains
+!                 the value of R11 at the point of the call of the unsat ref.
+!                 NDIAG can work back from this to give diagnostics.
+
+%record (escf) %name drec
+%integer recad, lnb, pc
+
+! All we require to do here is extract the name of the ref from the
+! basic record then call NDIAG and tidy up.
+   lnb = integer(ent4ad+16) {ENT4AD points at the workspace, and reqd LNB is 5th word}
+   pc = integer(lnb+15*4)
+   drec == record(esctabad);             ! The escape table
+   recad = drec_recad
+   selectoutput(0)
+   printline("Attempt to call unsatisfied reference - ".string(recad))
+   ! Display giving the GLA for the procedure calling the dynamic reference is beyond the 5 words given by ENT4AD
+   ndiag(-2, lnb, 0, ent4ad+20)
+   return to command level
+%end;                                    ! OF UNSATREF
+
+!----------------------------------- SPRELOAD ------------------------------------
+
+%external %routine spreload %alias "S#PRELOAD"(%string (255) file, %integer %name flag)
+%integer ll, j, stackseg
+
+   %if ssown_ssnote&4#0 %then monparams(">triw")
+   *st_11,j
+   stackseg = j>>segshift
+   %if stackseg=basestackseg %start
+      ll = 0;                            ! All loading on the base gla
+      loadfile(file, flag, ll)
+      %if flag=0 %or flag=350 %start
+
+         %if ssown_sscomreg(7)#0 %start
+            minload(ll, true, flag);     ! Make any unsat refs dynamic
+            %if flag#0 %then ->err
+         %finish %else ssown_loadinprogress = false
+
+         ! All O.K. if here - update LLINFO(0)
+         ssown_llinfo(0)_tab = ssown_permoffset
+         ssown_llinfo(0)_gla = ssown_sscurbgla
+         ssown_llinfo(0)_istk = ssown_permistk
+         ssown_rcode = 0
+      %else
+         ! If the PRELOAD failed at command level then call UNLOAD2(1,1)
+         ! immediately but if the failure was within a program then an immediate
+         ! call on UNLOAD2 would probably unload the calling program. To avoid this
+         ! set the own PRELOADFAILED which is acted on at the next call of UNLOAD2.
+         %if ssown_loadlevel>basell %then ssown_preloadfailed = true %else unload2(1, 1)
+         ! Which will only unload the file which failed
+      %finish
+   %finish %else flag = 358
+err:
+   %if ssown_ssnote&4#0 %then monparams("<triw")
+%end;                                    ! OF PRELOAD
+
+!------------------------------------ PRELOAD ------------------------------------
+
+%external %routine preload %alias "C#PRELOAD"
+%integer flag
+%string (255) file
+
+   getstring("Object file;fileormem,object,exist;?;call pamhelp(helper:one.one55);FILE", file)
+   spreload(file, flag)
+   setreturncode(flag)
+
+%end;                                    ! PRELOAD
+
+
+!------------------------------------ CALL ------------------------------------
+
+%external %routine emas3 call(%string %name xcommand, xparam)
+%integer flag, etype, idesc, fail
+%string (255) command, param
+%record (ent4f) ent4
+
+   ! Check if illegal request by a student
+   !if studentss#0 %then %start
+   !%if checkcommand(command)#0 %then %start
+   !   printstring(command." not valid")line   !   newline
+   !   %return
+   !%finish
+   !%finish
+   ssenter(command, 0, "srsr")
+   uctranslate(addr(command)+1, length(command))
+
+   fail = 1
+!*    ssown_loadlevel = ssown_loadlevel+1
+   adjustloadlevel(+1)
+   %if ssown_loadlevel>toploadlevel %then flag = 351 %and ->err
+!*    ssown_llinfo(ssown_loadlevel)_tab = ssown_tempoffset
+!*    ssown_llinfo(ssown_loadlevel)_gla = ssown_sscomreg(44)
+!*    ssown_llinfo(ssown_loadlevel)_istk = ssown_tempistk
+   etype = code
+   idesc = loadep(command, etype, flag, ent4, ssown_loadlevel)
+   %if flag#0 %start
+      %unless flag=wrongparflag %and let#0 %then ->err
+   %finish
+   ssown_rcode = 0;                      ! Before we ENTER
+   enter(2, ent4, param)
+   ! Note that return code should be set by whatever ENTERed or by
+   ! ENTERONUSERSTACK if a contingency occurred.
+   flag = 0
+   fail = 0
+
+err:
+   unload2(ssown_loadlevel, fail)
+   ! Note that the old loader used -86 to ensure a call on %stop
+   ! if the CALL ran into trouble. This version allows failures to be
+   ! trapped by the user.
+   setreturncode(flag)
+
+   tidyfiles(0)
+   adjustloadlevel(-1)
+   ssexit(command, 0, "srsr")
+%end;                                    ! OF CALL
+
+
+!---------------------------------- DATASPACE ----------------------------------
+
+%external %routine dataspace %alias "EMAS#DATASPACE"
+! This routine is used to make a pseudo data entry into the perm
+! loaded entry table. The routine takes 3, optionally 5 params:
+! ENTRY - name of new data entry
+! FILE - name of the file which contains the area used by the data entry
+! LENGTH - length of data area in bytes
+! OFFSET(optional) - offset of start of data area from start of file
+!                    i.e. CONAD+DATASTART, in bytes, defaults to 0
+! ACCESS(optional) - type of access required to data area. Permitted values:
+!        R - read and read shared
+!        W - write unshared
+!        WS - write shared
+! Defaults to W on file, R on pdfile
+%constant %byte %integer %array conmode(0:2)=1, 3, 3 ; ! 1, 3, 11 when XA available
+%constant %string (11) %array accstring(0:2)="READ", "WRITE", "SHAREDWRITE"
+%string (35) entry, defacc
+%string (255) file
+%record (ent4f) ent4
+%record (entf) %name ent
+%integer flag, len, ad, offset, i, j, holdprmoff, lene, lhd, mode, pdmem, k
+%integer kk, usecountad, recad, rmode, reqmode
+%integer fconad, ffiletype, fdatastart, fdataend
+
+   getstring("Entry;any,uc;?;call pamhelp(helper:one.one55)", entry)
+   getstring("File;fileormem,exist,char,data", file)
+   %if file->("_") %then defacc="read;read" %else DEFACC="read,write,sharedwrite;write"
+
+   getinteger("Length;1:", len)
+   getinteger("Offset;0:;0;", offset)
+   getinteger("Access mode;word,".defacc, reqmode)
+   !  Mode is:  0=R  1=W  2=WS
+   mode=conmode(reqmode)
+
+   ! Do we know about FILE already, i.e. is there another DATASPACE entry
+   ! in it? Check filenames listhead.
+   rmode = 0
+   j = integer(ssown_ssloadtab(2)_start+1004)
+   %while j>0 %cycle
+      recad = ssown_ssloadtab(2)_start+j
+      lene = (byteinteger(recad)+4)&X'FFFFFFFC'
+      ent == record(recad+lene)
+      %if ent_type&X'40000000'#0 %and file=string(recad) %then %start
+         ! Found another dataspace entry in the same file
+         ! Check access modes
+         rmode = ent_accessmode
+         %if rmode&2#mode&2 %then %start
+            printstring("**Error - ".file." is already connected in ")
+            %if rmode&2=0 %then printline("READ") %else printline("WRITE")
+            printline("           mode for DATASPACE entries")
+            flag = 266;                  ! Inconsistent file use
+            ->err
+         %finish
+         usecountad = addr(ent_usecount)-ssown_ssloadtab(2)_start
+         ! Note it's an offset
+      %finish
+      j = ent_link
+   %repeat
+
+   ! Connect FILE
+   connect(file, mode, 0, 2 {at level 0 pro tem}, fconad, ffiletype, fdatastart, fdataend, flag)
+   %if flag#0 %then ->err
+
+   %if ffiletype=sscharfiletype %then %c
+         printline("**WARNING: ".file." is a character file") 
+
+   ! Check data area is wholly within FILE
+   ad = fconad+fdatastart+offset;        ! Start of data area
+   %unless ad+len-1<fconad+fdataend %then flag = 355 %and ->err
+
+   ! If there is at least 1 other DATASPACE entry in this file
+   ! i.e. RMODE#0 then must check for overlap
+   ! Search the perm loaded entries to check for overlap
+
+   %if rmode#0 %then %start
+      j = ssown_ssloadtab(2)_start+ssown_llinfo(-1)_tab; ! Start searching from here
+      %while byteinteger(j)#0 %cycle
+         lene = (byteinteger(j)+4)&X'FFFFFFFC'
+         ent == record(j+lene)
+         k = ent_type&X'1FFFFFFF';       ! Remove special entry bits
+         %if ent_type&X'40000000'#0 %start
+            ! printstring(string(j)."   ")
+            !printstring(htos(ent_type,8));newline
+            ! Found another dataspace entry
+            %if %not (ad+len-1<ent_ent4_datadr1 %or ad>ent_ent4_datadr1+ent_ent4_datadr0-1) %then %c
+               %start
+               ssown_ssfname = string(j)
+               flag = 356;               ! Overlaps previously defined data area
+               ->err
+            %finish
+         %finish
+         j = j+lene+16
+      %repeat
+newline
+   %finish
+
+   holdprmoff = ssown_permoffset;        ! For possible failure if adding a file record
+   lhd = hash(entry, prime)
+   ent4_datadr0 = len
+   ent4_datadr1 = ad
+   addentry(entry, ssown_plh, flag, ssown_permoffset, ent4, x'40000000'!data, 2, lhd)
+   ! Perm load it
+   %if flag#0 %then ->err;               ! No need to unload
+
+   ! Now add file record to listhead PRIME if required otherwise increment
+   ! file record use count
+
+   %if rmode=0 %then %start
+      ent4_datadr0 = 1
+      ent4_datadr1 = mode
+      addentry(file, ssown_plh, flag, ssown_permoffset, ent4, x'40000000', 2, prime)
+      %if flag#0 %then %start
+         fill(ssown_permoffset-holdprmoff, ssown_ssloadtab(2)_start+holdprmoff, X'00')
+         ssown_permoffset = holdprmoff
+         ->err
+      %finish
+   %finish %else integer(ssown_ssloadtab(2)_start+usecountad) = integer(ssown_ssloadtab(2) %c
+      _start+usecountad)+1
+
+   printstring("Data entry ".entry." defined - start ".htos(ad, 8)." len ".htos(len, 8)." access mode ".accstring(reqmode))
+
+   ! Since a new entry has been added to the perm entry tables we must
+   ! satisfy any outstanding refs to it exactly as in LOADFILE2
+   ent4_datadr0 = len
+   ent4_datadr1 = ad
+
+   ! Find which listhead refs to ENTRY will be chained on.
+   satisfyref(entry, ent4, flag, data, 0, lhd)
+   %if 289#flag#0 %then ->err
+
+   ! Make file connection permanent
+   setconlevel(file, 1, flag)
+
+   ! Update LLINFO(0)_TAB and LLINFO(0)_GLA
+   ssown_llinfo(0)_tab = ssown_permoffset
+   ssown_llinfo(0)_gla = ssown_sscurbgla
+   ssown_rcode = 0
+   %return
+err:
+   setreturncode(flag)
+%end;                                    ! OF DATASPACE
+
+!---------------------------------- ALIASENTRY ----------------------------------
+
+%external %routine aliasentry %alias "EMAS#ALIASENTRY"
+! This is a PRELIMINARY version of the command which will add an alias
+! to the temp loaded table only. cf DATASPACE
+! Command is similar to DATASPACE in that it adds a pseudo entry to
+! the loader tables. It is used to provide an alias to an entry name
+! which is already loaded.
+%string (31) entry, alias
+%record (ent4f) ent4
+%integer flag, type, lhd, dsc
+   getstring("Entry;any,uc;?;call pamhelp(helper:one.one31)", entry)
+   getstring("Alias;any,uc;?;", alias)
+
+   type = code!data;                     ! or MACRO perhaps? Think about it
+   ! Check that ALIAS is not loaded
+   lhd = -1
+   dsc = checkloaded(alias, ent4, type, lhd)
+   %if dsc#0 %then %start
+      ssown_ssfname = alias
+      flag = 354;                        ! Entry already loaded
+
+   %finish %else %start
+
+      ! Now check that ENTRY is loaded
+      dsc = lookloaded(entry, type, ent4)
+      %if dsc=0 %then %start
+         ssown_ssfname = entry
+         flag = 353;                     ! Entry not loaded
+      %finish %else %start
+
+         ent4_datadr1 = x'20000000'!type
+         addentry(alias, ssown_plh, flag, ssown_permoffset, ent4, type, 2, lhd)
+         ! Perm load it
+         %if flag=0 %start
+            printline(alias." aliased to entry name ".entry)
+            ! Satisfy any outstanding refs
+            satisfyref(alias, ent4, flag, type, 0, lhd)
+            %if flag=0 %or flag=289 %start
+               ! Update LLINFO(0)_TAB
+               ssown_llinfo(0)_tab = ssown_permoffset
+               flag = 0
+            %finish
+         %finish
+      %finish
+   %finish
+   setreturncode(flag)
+%end;                                    ! OF ALIASENTRY
+
+!---------------------------------- RESETLOADER ----------------------------------
+
+%external %routine resetloader %alias "C#RESETLOADER"
+! Causes ALL user loaded material to be unloaded.
+! Fools UNLOAD2 into thinking there is a failed load incorporating
+! all the user loaded material
+! Note that LLINFO(-1) contains the initial perm values of TAB
+! GLA and ISTK so we unload to these values at level 0.
+! First make sure it has been called by the CLI.
+%integer flag, savell, j, stackseg
+%record (ent4f) ent4
+
+   sethelp("call pamhelp(helper:two.two4)")
+   *st_11,j
+   stackseg = j>>segshift
+   %if stackseg=basestackseg %start
+      ! %if ssown_loadlevel>basell+2 %then flag=358 %else %start
+      ssown_llinfo(0)_tab = ssown_llinfo(-1)_tab
+      ssown_llinfo(0)_gla = ssown_llinfo(-1)_gla
+      ssown_llinfo(0)_istk = ssown_llinfo(-1)_istk
+      savell = ssown_loadlevel
+      adjustloadlevel(0);          ! else trouble in TIDYFILES when called from a macro
+      unload2(ssown_loadlevel, 1)
+      ssown_loadlevel = savell
+      ssown_dirdiscon = 1
+      flag = 0
+
+      ent4_datadr0 = 4
+      ent4_datadr1 = addr(ssown_topstk)
+      addentry("EMAS3TOPSTK", ssown_plh, j, ssown_permoffset, ent4, data, 2, hash("EMAS#TOPSTK",
+         prime))
+
+      addbaseentries(j) %if ssown_unsharedbgla#0
+
+      ssown_llinfo(0)_tab = ssown_permoffset
+
+      customise
+
+   %finish %else flag = 358
+   setreturncode(flag)
+%end;                                    ! OF RESETLOADER
+
+
+!---------------------------------- LOADPARM ----------------------------------
+
+%external %routine loadparm %alias "EMAS#LOADPARM"
+! This routine is the loader's equivalent of PARM which refers to compilers
+! and allows loader options to be set. The default is FULL which means a
+! full cascade load and fails if any unsatisfied refs remain. LOADPARM MIN
+! loads only the file which contains the required entry point. Any common
+! areas required are created and all unsatisfied refs are made dynamic.
+! LOADPARM LET makes unsatisfied refs unresolved after a full cascade load
+! so that execution can begin.
+!The following comment line seems to be incorrect and differs from the
+!description of this command in User Note 31 (page 3) - G.Rule 25/7/85
+! LET is ignored when LOADPARM MIN is set.
+%string (255) vector, parmsout
+%integer i, com39
+   com39 = ssown_sscomreg(39)
+   vector = "Loader Parms;wordornull,=,full,min,let,zero;;call pamhelp(helper:one.one55);PARM"
+   getinteger(vector, i)
+   %if i=0 %then %start
+      %if com39&1=0 %then parmsout = "FULL" %else parmsout = "MIN"
+      %if com39&2#0 %then parmsout = parmsout.",LET"
+      %if com39&4#0 %then parmsout = parmsout.",ZERO"
+      printline("Loader parms are: ".parmsout)
+      ssown_rcode = 0
+      %return
+   %finish
+   %cycle
+      %if i=-1 %then com39 = 0 %else %if i=1 %then com39 = com39&X'FFFFFFFE' %else %c
+         com39 = com39!(1<<(i-2))
+      getinteger(vector, i)
+      %exit %if i=-1
+   %repeat
+   ssown_sscomreg(39) = com39
+   ssown_rcode = 0
+%end;                                    ! OF LOADPARM
+
+
+!------------------------------------ FIND ------------------------------------
+
+!***********************************************************************
+!*                                                                     *
+!*                        Loader hash commands                         *
+!*                                                                     *
+!***********************************************************************
+
+!---------------------------------- CURRENTREFS ----------------------------------
+
+%external %routine currentrefs %alias "EMAS#CURRENTREFS"
+! Prints out a list of currently active refs
+! An active reference is one which will trigger off a loader search i.e.
+! dynamic or unsatisfied. NOT unresolved or satisfied by entry at higher loadlvl
+%constant %string (15) %array st(1:3)="- Data",
+                               "- Code",
+                               "- Single word"
+%record (breff) %name r1
+%record (ireff) %name r2
+%integer i, j, recad, irecad, start, lene, found, type, xtype, k, n
+
+   sethelp("call pamhelp(helper:one.one55)")
+   found = false
+   start = ssown_ssloadtab(1)_start;     ! Start of ref table.
+   printline("Current active refs are:")
+   %for i = prime-1, -1, 0 %cycle
+      %if ssown_rlh(i)>0 %then %start
+         ! Something off this listhead
+         j = ssown_rlh(i)
+         %while j>0 %cycle
+            recad = start+j;             ! Basic record
+            lene = (byteinteger(recad)+8)&X'FFFFFF8'; ! Bytes of name
+            type = integer(recad+lene)
+            r1 == record(recad+lene+4)
+            %if type&X'60000000'#0 %then %start
+               found = true %if found=false
+               printstring(string(recad))
+               spaces(11-byteinteger(recad))
+               xtype = type&X'1FFFFFFF'
+               printstring(st(xtype))
+               n = 0
+               k = r1_first
+               %while k>0 %cycle
+                  n = n+1
+                  %if n&7=0 %then newline
+                  spaces(2)
+                  irecad = start+k
+                  r2 == record(irecad)
+                  printstring(htos(r2_dr1, 8))
+                  %if r2_dr0&cmn#0 %then printstring(" (Common)")
+                  %if r2_dr0&dyn#0 %then printstring(" (Dynamic)") %else %if r2_dr0&unsat#0 %then %c
+                     printstring(" (Unsat)")
+                  k = r2_link
+               %repeat
+               newline
+            %finish
+            j = r1_link
+         %repeat
+      %finish
+   %repeat
+   %if found=false %then printline("* None *")
+%end;                                    ! OF CURRENTREFS
+
+
+!---------------------------------- LOADEDFILES ----------------------------------
+
+%external %routine loadedfiles %alias "EMAS#LOADEDFILES"
+%routine %spec dofiles(%integer start)
+
+   sethelp("call pamhelp(helper:one.one55)")
+   printline("Perm loaded files:")
+   dofiles(ssown_ssloadtab(2)_start)
+   printline("Temp loaded files:")
+   dofiles(ssown_ssloadtab(3)_start)
+!------------------------------------ DOFILES ------------------------------------
+
+%routine dofiles(%integer start)
+%record (entf) %name ent
+%string (255) fname
+%integer j, recad, lene
+   j = integer(start+1004)
+   %if j=0 %then printline("* None *") %and %return
+   %while j>0 %cycle
+      recad = start+j
+      lene = (byteinteger(recad)+4)&X'FFFFFFFC'
+      ent == record(recad+lene)
+      fname = string(recad)
+      %unless 32<=ent_type<=64 %then %start
+         printstring(fname)
+         %if ent_type#0 %then printstring(" (DATASPACE entries)")
+         newline
+      %finish
+      j = ent_link
+   %repeat
+%end;                                    ! OF DOFILES
+%end;                                    ! OF LOADEDFILES
+
+
+!-------------------------------- LOADEDENTRIES --------------------------------
+
+%external %routine loadedentries %alias "EMAS#LOADEDENTRIES"
+%string (255) s
+! Prints entries which have been loaded by the caller i.e. no subsys or
+! system call table entries
+! Does permanent then temporary entries
+
+%routine %spec doent(%integer start, offset)
+   getstring("P or T or null;any,uc,ornull;;call pamhelp(helper:one.one55);TYPE", s)
+   ! Perm loaded first
+   %if s="" %or s="P" %start
+      printline("Perm loaded entries:")
+      doent(ssown_ssloadtab(2)_start, ssown_llinfo(-1)_tab)
+   %finish
+
+   ! Temp loaded
+   %if s="" %or s="T" %start
+      printline("Temp loaded entries:")
+      doent(ssown_ssloadtab(3)_start, ssown_llinfo(2)_tab)
+   %finish
+!------------------------------------ DOENT ------------------------------------
+
+%routine doent(%integer start, offset)
+%constant %string (7) %array st(0:2)="Data ",
+                               "Code ",
+                               "Macro"
+%string (31) ename
+%record (entf) %name ent
+%integer j, lene, k, varbytes
+
+! Note 1008 rather than 1004 as in LOADEDFILES. START+1004 is the address
+! of the listhead of files. An ALIASENTRY record won't add a
+! file record so to be sure of picking them up check the first integer
+! after the listheads. If it has anything in it then there must be entries.
+
+   %if integer(start+1008)=0 %then printline("* None *") %and %return
+
+   ! Plod down the entry table
+   j = start+offset
+   %while byteinteger(j)#0 %cycle
+      ename = string(j)
+      lene = (byteinteger(j)+4)&X'FFFFFFFC'
+      ent == record(j+lene)
+      k = ent_type&X'1FFFFFFF';          ! i.e. remove special entry type bits
+      varbytes = 16;                     ! Variable number of bytes in entry (code 24 else 16}
+
+      %if k=0 %or k>=32 %then %start
+         ! Got a file record
+         %if k=0 %then printline("=>=>=>=>=> found in file ".ename)
+      %finish %else %start
+         ! Code, Data, Macro, Alias
+         printstring(ename)
+         spaces(11-length(ename))
+         printstring(" ".st((k&7)>>1)." at ")
+
+         %if k&1#0 {data} %start
+            printstring(htos(ent_glato, 8)." length ".htos(ent_glafrom, 8))
+         %finish %else %start {code/?macro}
+            %if k&2#0 %then varbytes = 24
+            printstring(htos(ent_ent4_epoffset, 8))
+         %finish
+         %if ent_type&X'80000000'#0 {dyn or unsat} %then printstring(" (Main entry)")
+         %if ent_type&X'40000000'#0 %then printline(" (DATASPACE entry => ".confile(ent_glato).")")
+         %if ent_type&X'20000000'#0 %then printline(" (ALIASENTRY entry)")
+      %finish
+      newline
+      j = j+lene+varbytes
+   %repeat
+%end;                                    ! OF DOENT
+%end;                                    ! OF LOADEDENTRIES
+
+
+!---------------------------------- LOADDUMP ----------------------------------
+
+%external %routine loaddump %alias "EMAS#LOADDUMP"
+! Dumps out loader tables and SSLOADTAB, DUFFGLA, LLINFO
+%constant %string (11) %array ltarea(1:3)= "REFS    ","PERM ENT","TEMP ENT"
+%integer i, ch
+   getinteger("Section of table to dump;-1:3;-1;call pamhelp;SECTION", ch)
+   printline("***** DUFFGLA *****")
+   %for i = 0, 1, 63 %cycle
+      %continue %if ssown_duffgla(i)_from=0
+      printline(htos(ssown_duffgla(i)_from, 8)." ".htos(ssown_duffgla(i)_to, 8)."")
+   %repeat
+   newlines(2)
+   printline("***** LLINFO *****")
+   printline("Level   TAB      GLA      ISTK")
+   %for i = -1, 1, 31 %cycle
+      %if ssown_llinfo(i)_tab#0 %then %start
+         write(i, 4); spaces(3)
+         printline(htos(ssown_llinfo(i)_tab, 8)." ".htos(ssown_llinfo(i)_gla,
+            8)." ".htos(ssown_llinfo(i)_istk, 8))
+      %finish
+   %repeat
+   newlines(2)
+   %return
+
+!Bish    %if s#"" %then ch=byteinteger(addr(s)+1)-'0' %else ch=-1
+!Bish    %unless-1<=ch<=3 %then ch=-1
+   printline("     Dump of loader tables")
+   printline("   AREA     START    LEN")
+   %for i = 1, 1, 3 %cycle
+      printline(ltarea(i)." ".htos(ssown_ssloadtab(i)_start, 8)." ".htos(ssown_ssloadtab(i)_len,
+         8))
+   %repeat
+   newlines(2)
+   %if ch<0 %then dump(ssown_ssloadtab(0)_start,
+      ssown_ssloadtab(0)_start+integer(ssown_ssloadtab(0)_start)-1) %else %c
+      dump(ssown_ssloadtab(ch)_start, ssown_ssloadtab(ch)_start+ssown_ssloadtab(ch)_len-1)
+%end;                                    ! OF LOADDUMP
+
+
+%end %of %file

@@ -1,0 +1,836 @@
+! Changes for idev21
+!    1) attempt to make recoverying FEPs easier
+!    2)  Clear subchannel on deallocation
+!    3) Revised timeout handling with no sense
+!    4) Discard of ints with halt or clear fn bit set (Did not happen nonXA)
+!    5) Icorporation of deferred CC into PSEUDOTERM
+!
+!! 17-05-88 Semaphoring added for dual nass PDS
+!09-09-85..statistics gathering for auscom
+!05-09-85..use tio in case mag tape off-line..sh
+%INCLUDE "ercc07:ibmsup_comf370"
+%INCLUDE "ercc07:ibmsup_page0f"
+%INCLUDE "ercc07:ibmsup_dtform2s"
+%INCLUDE "ercc07:IBMSUP_xaioform"
+%RECORD %FORMAT PARMF(%INTEGER DEST,SRCE,(%INTEGER P1,P2,P3,P4,P5,P6 %OR %STRING (23) TEXT))
+%RECORD %FORMAT PARMXF(%INTEGER DEST,SRCE,P1,P2,P3,P4,P5,P6,LINK)
+      %IF VA MODE=YES %START
+      %CONST %RECORD (PARMXF) %ARRAY %NAME PARM=PARM0AD
+      %FINISH %ELSE %START
+!* %EXTERNALINTEGERSPEC parmad
+      %OWN %RECORD (PARMXF) %ARRAY %NAME PARM
+!* %OWNRECORD(parmxf)%ARRAYFORMAT parmaf(0:128)
+      %FINISH
+!
+%EXTERNAL %INTEGER %FN %SPEC REALISE(%INTEGER VAD)
+%externalintegerfnspec softtrans(%integer virtaddr,segtbase)
+%EXTERNAL %INTEGER %FN %SPEC HSCH(%INTEGER SLOTADDR)
+%EXtERNAL %INTEGER %FN %SPEC CSCH(%INTEGER SLOTADDR)
+%EXTERNAL %INTEGER %FN %SPEC TSCH(%INTEGER SLOTADDR, %RECORD (IRBF) %NAME IRB)
+%EXTERNAL %INTEGER %FN %SPEC SSCH(%INTEGER SLOTADDR,CCWA,KEY)
+%EXTERNAL %INTEGER %FN %SPEC STSCH(%INTEGER SLOTADDR, %RECORD (SCHIBF) %NAME SCHIB)
+%EXTERNAL %INTEGER %FN %SPEC MSCH(%INTEGER SLOTADDR, %RECORD (SCHIBF) %NAME SCHIB)
+%EXTERNAL %STRING %FN %SPEC HTOS(%INTEGER N,P)
+%if XA#YES %then %start
+      %EXTERNAL %INTEGER %FN %SPEC NEW PP CELL
+      %EXTERNAL %ROUTINE %SPEC RETURN PP CELL(%INTEGER CELL)
+%finish
+%EXTERNAL %ROUTINE %SPEC PON(%RECORD (PARMF) %NAME P)
+%EXTERNAL %ROUTINE %SPEC DUMPTABLE(%INTEGER TABNO,ADDR,LEN)
+%EXTERNAL %ROUTINE %SPEC OPMESS(%STRING (63) S)
+%EXTERNAL %ROUTINE %SPEC PKMONREC(%STRING (23) TEXT, %RECORD (PARMF) %NAME P)
+      %IF MULTI OCP=YES %START
+      %EXTERNAL %ROUTINE %SPEC SEMALOOP(%INTEGER %NAME SEMA)
+      %EXTERNAL %ROUTINE %SPEC reserve log
+      %EXTERNAL %ROUTINE %SPEC release log
+      %FINISH
+!
+!------------------------------------------------------------------------
+!
+%RECORD %FORMAT SLOTF(%BYTE %INTEGER SPB0,DEVTYPE,SPB1,SPB2, %INTEGER SP1,SP2,DEV ENTA,ALT CUU,CUU,MNEM,
+   %BYTE %INTEGER SPB3,SPB4,SPB5,QSTATE)
+%RECORD %FORMAT CQF(%INTEGER ADSLOT,CCWA,P1,P2,P3,P4,P5,P6,LINK)
+!
+%EXTERNAL %ROUTINE DEVIO(%RECORD (PARMF) %NAME P)
+%CONST %STRING (3) VSN="12"
+%CONST %STRING (9) VDATE= " 31/08/86"
+%EXTERNAL %LONG %INTEGER %SPEC KMON
+%ROUTINE %SPEC DUMP STATISTICS
+%ROUTINE %SPEC FAIL TRANSFER(%RECORD (SLOTF) %NAME DSLOT)
+%INTEGER %FN %SPEC FIND(%INTEGER MNEM)
+%STRING %FN %SPEC MTOS(%INTEGER M)
+ %if XA#yes %Start
+      %ROUTINE %SPEC Q REQUEST(%INTEGER CCWA,NEWSTATE,COUNT)
+%ROUTINE %SPEC FIRE QUEUED(%INTEGER CHAN)
+%finish
+      %INTEGER %FN %SPEC FIRE(%RECORD (SLOTF) %NAME DSLOT, %RECORD (IRBF) %NAME IRB, %INTEGER CCWA,KEY,COUNT,TIME)
+%ROUTINE %SPEC PSEUDO TERM(%RECORD (SLOTF) %NAME DLOT, %INTEGER CSW1,CSW2,Def CC)
+%ROUTINE %SPEC TREPLY(%RECORD (DTFORM) %NAME DEV, %INTEGER P4)
+%RECORD (CQF) %NAME CQ
+%RECORD (SLOTF) %NAME DSLOT
+%RECORD (DTFORM) %NAME DEV
+%RECORD (PARMF) Q
+%OWN %INTEGER SETUP=NO,DSLOT BASE,LAST SLOT
+%OWN %INTEGER MON=0,MCHAN=0
+%OWN %INTEGER channelq sema=-1
+%INTEGER I,J,K,DACT,FLAG,SLOT,CCWA,KEY,FIRE CHAN,DUMMY,Sbase
+%RECORD (SCHIBF) SCHIB
+%RECORD (IRBF) IRB
+%SWITCH ACT(0:15),INTSW(0:6)
+%STRING (4) s
+      %CONST %STRING (9) %ARRAY STATES(0:6)="not alloc",
+  "ready","req fired","sns fired","queued","sens qu'd","discncted"
+%CONST %INTEGER ATTN=x'80000000'
+%CONST %INTEGER BUSY=x'10000000'
+%CONST %INTEGER CHANEND=x'08000000'
+%CONST %INTEGER CHAN ERR=x'000f0000'
+%CONST %INTEGER CUEND=x'20000000'
+%CONST %INTEGER DEVEND=x'04000000'
+%CONST %INTEGER DEVIO DEST=x'300000'
+%CONST %INTEGER DISCONNECTED=6
+%CONST %INTEGER ERR MASK=x'ffff0000'!!(ATTN!CHANEND!CUEND!DEVEND)
+%CONST %INTEGER FE=14
+%CONST %INTEGER LOID=x'6e'
+%CONST %INTEGER LP=6
+%CONST %INTEGER MT=5
+%CONST %INTEGER NOT ALLOCATED=0
+%CONST %INTEGER OK=0
+%CONST %INTEGER OP=8
+%CONST %INTEGER QUEUED=4
+%CONST %INTEGER READY=1
+%CONST %INTEGER REQUEST FIRED=2
+%CONST %INTEGER SENSE FIRED=3
+%CONST %INTEGER SENSE QUEUED=5
+%CONST %INTEGER SLOT SIZE=32
+%CONST %INTEGER SMOD=x'40000000'
+%CONST %INTEGER TICK INTERVAL=1
+%CONST %INTEGER UNIT CHECK=x'02000000'
+%CONST %INTEGER NOSTARTMASK=x'ffff0000'!!(BUSY!SMOD!CUEND)
+%if XA=YES %then %Start
+      %constinteger csw1mask=X'7FFFFFFF'
+%else
+      %constinteger csw1mask=X'FFFFFF'
+%finish
+!
+!statistics gathering
+%OWN %INTEGER STATSDEV=x'050';           ! FE2 as default
+%OWN %INTEGER SDVS=0
+%CONST %INTEGER SDVSTOP=100000;          !stop statistics after 100000
+%CONST %INTEGER SDVMAX=100
+      %OWN %INTEGER %ARRAY SDVTIMES(0:SDVMAX)=0(*)
+%OWN %INTEGER liptr
+      %OWN %RECORD (parmf) %ARRAY lastints(0:7)=0(*)
+!
+!
+      %IF KMON>>48&1#0 %THEN PKMONREC("Devio:",P)
+      DACT=P_DEST&255
+      ->ACT(DACT)
+!
+ACT(0):                                  !dump statistics
+      DUMP STATISTICS
+      %RETURN
+!
+ACT(2):                                  ! initialise
+      %RETURN %UNLESS SETUP=NO
+      %IF VA MODE=NO %THEN COM==RECORD(P_P3); ! in Chopsupe
+      J=COM_SLDEVTAB AD
+      INTEGER(J+8)=P_P2;                 ! process picture space
+      %IF MCHAN=0 %THEN MCHAN=INTEGER(J+16)
+      %UNLESS MCHAN=0 %THEN MON=1
+      DSLOT BASE=J+INTEGER(J+4)
+      LASTSLOT=COM_NSLDEVS-1
+      %FOR I=0,1,LASTSLOT %CYCLE
+         DSLOT==RECORD(DSLOT BASE+I*SLOT SIZE)
+         DEV==RECORD(DSLOT_DEV ENTA)
+         DEV_ISERV=DEVIO DEST!3
+         DEV_SLOT=I
+         DSLOT_QSTATE=NOT ALLOCATED
+         DEV_REPSNO=0
+         %IF multi ocp=yes %THEN dev_sdsema=-1
+         %IF XA=YES %START
+            J=STSCH(DSLOT_DEV ENTA,SCHIB)
+            %IF J=0 %START
+               SCHIB_FLAGS=SCHIB_FLAGS!x'0080'; ! make operable
+               SCHIB_IP=DSLOT_DEV ENTA
+               J=MSCH(DSLOT_DEV ENTA,SCHIB)
+            %FINISH
+            %IF CCW Format=1 %START
+               integer(dev_ua ad-8)=X'04200018'; ! sense to format1
+               integer(dev_ua ad-4)=realise(addr(dev_sense1))
+            %FINISH
+         %FINISH
+         %IF DSLOT_DEVTYPE=OP %START
+            K=DSLOT_MNEM&15
+            P=0
+            P_DEST=x'30000b';            ! allocate
+            P_SRCE=x'320002'!K<<8
+            P_P1=DSLOT_MNEM
+            P_P2=x'320005'!K<<8
+            PON(P)
+         %FINISH %ELSE %IF DSLOT_DEVTYPE=FE %START
+            %IF VA MODE=YES %THEN %START; !not for chopsupy..sh
+               P=0
+               P_DEST=x'30000b'
+               P_SRCE=x'390002'
+               P_P1=DSLOT_MNEM
+               P_P2=x'390005'
+               PON(P)
+            %FINISH
+         %FINISH %ELSE %IF DSLOT_DEVTYPE=MT %START
+            P=0
+            P_DEST=x'310004'
+            P_SRCE=x'300000'
+            P_P1=DSLOT_MNEM
+            PON(P)
+         %FINISH
+      %REPEAT
+      PRINTSTRING("DEVIO ".VSN.VDATE)
+      NEWLINE
+!      PRINTSTRING("DEVIO's tables:-")
+!      DUMPTABLE(0,COM_SLDEV TABAD,INTEGER(COM_SLDEV TABAD))
+      P_DEST=x'a0001';                   ! clock tick
+      P_SRCE=0
+      P_P1=x'300006'
+      P_P2=TICK INTERVAL
+      PON(P)
+      %RETURN
+!
+ACT(11):                                 ! allocate
+      %UNLESS FIND(P_P1)<0 %START
+         %IF multi ocp=yes %THEN semaloop(DEV_SDSEMA)
+         %IF DSLOT_QSTATE=NOT ALLOCATED %START
+            FLAG=0
+            DSLOT_QSTATE=READY
+            DEV_REPSNO=P_P2
+            P_P2=LOID+SLOT
+            P_P3=ADDR(DEV)
+            %IF VA MODE=NO %THEN P_P4=ADDR(COM); ! in Chopsupe
+            P_P6=DSLOT_MNEM
+         %FINISH %ELSE FLAG=2
+         %IF multi ocp=yes %THEN DEV_SDSEMA=-1
+      %FINISH %ELSE FLAG=1
+      ->ACK
+!
+ACT(8):                                  ! force allocate (call not pon)
+      %UNLESS FIND(P_P1)<0 %START
+         %IF multi ocp=yes %THEN semaloop(DEV_SDSEMA)
+         %UNLESS P_P1=m'LP' %AND DSLOT_QSTATE=DISCONNECTED %START
+            FLAG=0
+            DSLOT_QSTATE=READY
+            DEV_REPSNO=P_P2
+            P_P2=LOID+SLOT
+            P_P3=DSLOT_DEV ENTA
+            P_P6=DSLOT_MNEM
+         %FINISH %ELSE FLAG=2
+         %IF multi ocp=yes %THEN DEV_SDSEMA=-1
+      %FINISH %ELSE FLAG=1
+      P_P1=FLAG
+      %RETURN
+!
+ACT(5):                                  ! deallocate
+      %UNLESS P_P1=m'LP' %START
+         %UNLESS FIND(P_P1)<0 %START
+            %IF multi ocp=yes %THEN semaloop(DEV_SDSEMA)
+            %IF DSLOT_QSTATE=READY %START
+               %IF P_SRCE<<1>>17>63 %START; ! from user
+                  %IF DEV_REPSNO>>16<64 %THEN FLAG=4 %AND ->FALL
+               %FINISH
+               DSLOT_QSTATE=NOT ALLOCATED
+               P_P3=DSLOT_DEV ENTA
+               %unless p_p1>>8=m'MP' %then I=CSCH(DSLOT_DEV ENTA);  ! Clear down before reallocation
+               FLAG=0
+            %FINISH %ELSE FLAG=DSLOT_QSTATE<<16!3
+            %IF multi ocp=yes %THEN DEV_SDSEMA=-1
+         %FINISH %ELSE FLAG=2
+      %FINISH %ELSE FLAG=1
+FALL:
+      ->ACK
+!
+ACT(6):                                  ! clock tick
+      %FOR SLOT=0,1,LASTSLOT %CYCLE
+         DSLOT==RECORD(DSLOT BASE+SLOT*SLOT SIZE)
+         %IF DSLOT_QSTATE=REQUEST FIRED %OR DSLOT_QSTATE=SENSE FIRED %START
+            DEV==RECORD(DSLOT_DEV ENTA)
+            %IF multi ocp=yes %THEN semaloop(DEV_SDSEMA)
+            DEV_STICK=DEV_STICK+TICK INTERVAL
+            %IF DEV_STICK>DEV_TIMEOUT %START
+               OPMESS(MTOS(DSLOT_MNEM)." timed out")
+               FAIL TRANSFER(DSLOT)
+            %FINISH
+            %IF multi ocp=yes %THEN DEV_SDSEMA=-1
+         %FINISH
+      %REPEAT
+ACT(14):
+       %if XA#yes %then FIRE QUEUED(-1);! poke feps  may be unnecessary
+      %RETURN
+!
+ACT(3):                                  ! interrupt
+                                         !
+                                         ! parameters of the interrupt pon
+                                         ! on non XA machines
+                                         ! P_P1 = channel unit interupting
+                                         ! P_P2 and P_P3 are the csw1&2 from page 0
+                                         ! P_P4 is the device slot via a chopsupe table
+                                         !
+                                         ! on XA machines
+                                         ! P_P1 is the IP which has the virtad of the device slot
+                                         ! P_P2&P3 are words 1&2 of SCSW (very close to csw1&2)
+                                         ! P_P4 is SCSW word 0 (no nonxa equivalent)
+                                         ! P_P5 is the extended Subchannel status word
+                                         !
+      lastints(liptr)=p;                 ! record last few ints to track funnies
+      liptr=(liptr+1)&7
+      FIRE CHAN=0;                       ! no channels freed by this term yet
+      %IF com_SCHANNELQ#0 %AND P_SRCE=M'INT' {genuine int} %AND (XA=YES %OR P_P4=-1 %OR P_P3&(CHANEND!CUEND)#0) %THEN %C
+         FIRE CHAN=P_P1>>8
+      %IF VAMODE=NO %THEN FIRE CHAN=-1;  ! no clock tick in chopsupe
+      %IF P_P4=-1 %THEN ->INT END;       ! channel available interrupt only
+      %IF XA=YES %START
+         DEV==RECORD(P_P1)
+         SLOT=DEV_SLOT
+         DSLOT==RECORD(DSLOT BASE+SLOT*SLOT SIZE)
+         %IF DSLOT_DEVTYPE=OP %THEN P_P3=P_P3&X'FEFFFFFF'
+      %ELSE
+         SLOT=P_P4&x'7f'
+         DSLOT==RECORD(DSLOT BASE+SLOT*SLOT SIZE)
+         DEV==RECORD(DSLOT_DEV ENTA)
+      %FINISH
+                                         ! cuend is given when a controller
+                                         ! of a sort controlling multiple devices
+                                         ! comes free. It is always alleged to come from dev 0
+      %IF MON#0 %AND ((XA=YES %and MCHAN=DEV_CUU) %or (XA#YES %and 1<<(P_P1>>8)&MCHAN#0)) %THEN PKMONREC("DEVIO int:",P)
+      %IF multi ocp=yes %THEN semaloop(DEV_SDSEMA)
+      ->INT END FS %IF P_P3=CUEND %AND (DSLOT_DEVTYPE=FE %OR DSLOT_DEVTYPE=MT)
+      %if XA=YES %and P_SRCE=M'INT' %and P_P4&3<<12#0 %then -> INT END FS
+                                        ! Genuine Ints from halt or clear subchannel
+      ->INTSW(DSLOT_QSTATE)
+INTSW(SENSE QUEUED{5}):
+                                         ! if a solitary device end or cuend comes separately
+                                         ! from the rest of the termination
+      DEV_CSW1=DEV_CSW1!P_P2
+      DEV_CSW2=DEV_CSW2!P_P3
+      ->INT END FS
+INTSW(QUEUED{4}):
+      %IF P_P3&ATTN#0 %START
+         DEV_CSW1=P_P2
+         DEV_CSW2=P_P3
+         TREPLY(DEV,0);                  ! forward it to handler
+         ->INT END FS
+      %FINISH
+      PRINTSTRING("DEVIO..interrupt while queued ")
+      PKMONREC("Int rec:",P)
+      NEWLINE
+INT END FS:                              ! release SEMA and exit from INT sequence
+      %IF multi ocp=yes %THEN DEV_SDSEMA=-1
+INT END:                                 ! exit from int sequence
+      FIRE QUEUED(FIRE CHAN) %IF XA#YES %and FIRE CHAN#0
+      %RETURN
+INTSW(REQUEST FIRED{2}):
+      %if XA=YES %and P_P4&X'0300000E'=X'01000000' %and p_P3&ERR MASK=0 %Start
+                                        ! Deferred cc last transfer did not start!
+          %if mon#0 %and ((XA=YES %and mchan=dev_cuu)  %or (XA#YES %and 1<<(dev_cuu>>8)&mchan#0)) %c
+            %then printstring(mtos(dslot_mnem)."  Def CC after fired!".HTOS(P_P4,8)) %and newline
+         Q_DEST=DEVIO DEST+12
+         Q_SRCE=DEV_REPSNO; Q_P6=M'RFRE'
+          Q_p1=DEV_CCWva
+         Q_P2=  DEv_KEY<<28!(DEV_SLOT+LOID)
+         Q_P4=DEV_ID
+         PON(Q)
+         P_p4=P_P4&x'FCFFFFFF';         ! remove deferred cc
+         Dslot_qstate=READY
+      %finish
+INTSW(READY{1}):
+                                         ! assume charitably that this is an attentio
+                                         ! and forward it to user. However sense
+                                         ! must be done to clear down unsolicited
+                                         ! unit check (etc)
+      DEV_CSW1=P_P2
+      DEV_CSW2=P_P3
+      %IF P_P3&ERR MASK#0 %and P_P3#-1 %START;  ! not normalterm or timeout
+         DEV_STATS2=DEV_STATS2+1;        ! abterm so inc failure count
+         %IF DSLOT_DEVTYPE#FE %OR p_p3&unit  check#0 %START; ! lest we upset the DX11 !
+            I=REALISE(DEV_UA AD-8);      ! do sense
+            J=SSCH(DSLOT_DEV ENTA,I,X'80000000'); ! Flagged as a sense
+            %IF MON#0 %AND ((XA=YES %and MCHAN=DEV_CUU) %or (XA#YES %and 1<<(DSLOT_CUU>>8)&MCHAN#0)) %AND J#0 %THEN %C
+               PRINTSTRING("Devio SENS nostart ".HTOS(J,1)." Cuu ".HTOS(DSLOT_CUU,3)." ".HTOS(PAGE0_CSW2,
+               8)." ".HTOS(CCWA,8)."
+")
+            %IF XA#YES %AND (J=2 %OR (J=1 %AND PAGE0_CSW2&NOSTARTMASK=0)) %START
+               KEY=0
+               %IF multi ocp=yes %THEN DEV_SDSEMA=-1
+               Q REQUEST(I,SENSE QUEUED,1)
+               %RETURN
+            %FINISH
+            DSLOT_QSTATE=SENSE FIRED
+            DEV_STICK=0
+            %IF MON#0 %AND ((XA=YES %and MCHAN=DEV_CUU) %or (XA#YES %and 1<<(DSLOT_CUU>>8)&MCHAN#0)) %THEN PRINTSTRING("DEVIO sense: ".HTOS(DSLOT_CUU,3)."
+")
+            %IF J=0 %THEN ->wayout
+            %IF J=1 %THEN %START
+               %IF xa=yes %THEN dummy=tsch(dslot_dev enta,irb) %ELSE irb_csw1=page0_csw1 %AND irb_csw2=page0_csw2
+               PSEUDOTERM(DSLOT,irb_CSW1,irb_CSW2,J)
+            %FINISH %ELSE PSEUDOTERM(DSLOT,DEV_CCWA,CHANERR!CHANEND!DEVEND!3,3)
+            ->INT END FS
+         %FINISH
+      %FINISH
+      TREPLY(DEV,0)
+      DSLOT_QSTATE=READY %IF DEV_CSW2&(CHANEND!DEVEND)#0
+      ->INT END FS
+INTSW(SENSE FIRED{3}):
+      DEV==RECORD(DSLOT_DEV ENTA)
+      %UNLESS P_P3&(CHANEND!DEVEND)=CHANEND!DEVEND %THEN ->INTSW(SENSE QUEUED)
+                                         ! check it really was sense ending
+      %IF P_P3&ERR MASK=0 %THEN J=0 %ELSE J=1
+      TREPLY(DEV,J)
+      DSLOT_QSTATE=READY
+      ->INT END FS
+INTSW(*):
+      PKMONREC("DEVIO int?:",P)
+      ->wayout
+
+!
+ACT(12):                                 ! execute request
+      SLOT=P_P2&x'ffff'-LOID
+      %UNLESS 0<=SLOT<=LAST SLOT %THEN FLAG=1 %AND ->ACK
+      DSLOT==RECORD(DSLOT BASE+SLOT*SLOT SIZE)
+      DEV==RECORD(DSLOT_DEV ENTA)
+      %IF MON#0 %AND ((XA=YES %and MCHAN=DEV_CUU) %or (XA#YES %and 1<<(DSLOT_CUU>>8)&MCHAN#0)) %THEN %C
+         PKMONREC("DEVIO req: ".HTOS(DSLOT_CUU,3),P) %AND DUMPTABLE(0,P_P1,16)
+      J=P_SRCE<<1>>17;                  ! service no
+      %if j<=64 %then %Start;           ! resident service
+         CCWA=REALISE(P_P1);            ! adddress
+      %else;                            ! Paged service
+         j=(j-locsn0)&(Maxprocs-1);     ! process no
+         Sbase=integer(COM_PROCAAD+32*j+16);    ! Lstbase
+         CCWA=softtrans(P_P1,Sbase)
+         %if CCWA=0 %then flag=M'BADA' %and ->Ack
+      %finish
+      KEY=P_P2>>28
+      %IF byteinteger(p_p1)=x'04' {sense as first} %THEN key=key!X'80000000'
+      %UNLESS CCWA&7=0 %THEN FLAG=m'BCCW' %AND P_P3=P_P1 %AND ->ACK
+      %IF multi ocp=yes %THEN semaloop(DEV_SDSEMA)
+      %IF DSLOT_QSTATE#READY %START
+         FLAG=2
+         P_P3=ADDR(DEV)
+         P_P6=P_P4
+         %IF multi ocp=yes %THEN DEV_SDSEMA=-1
+         ->ACK
+      %FINISH
+      DEV_CCWA=CCWA
+      DEV_CCWVA=P_P1
+      DEV_KEY=KEY
+      DEV_STICK=0
+      DEV_ID=P_P4
+      DEV_STATS1=DEV_STATS1+1;           ! request count
+                                         ! and drop thro' to fire the chain
+      J=FIRE(DSLOT,IRB,CCWA,KEY,0,0)
+      %if J=1 %and IRB_CSW2&(ATTN!CHAN END!DEV END)#0 %Start
+         Q_DEST=DEVIO DEST+3
+         Q_SRCE=M'RTRY'
+         Q_P1=ADDR(DEV)
+         Q_P2=IRB_CSW1
+         Q_P3=IRB_CSW2
+         Q_P4=IRB_KEYCNTR
+         Q_P5=IRB_XSTATUSW
+         PON(q);                         ! Forward interuupt
+         pon(p);                         ! retry transfer
+         ->wayout
+      %finish
+      DSLOT_QSTATE=REQUEST FIRED
+      %IF J=0 %THEN ->wayout
+      %IF XA#YES %and (J=2 %OR (J=1 %AND IRB_CSW2&NOSTARTMASK=0)) %START; ! channel busy non xa only
+         %IF multi ocp=yes %THEN DEV_SDSEMA=-1
+         Q REQUEST(CCWA,QUEUED,1)
+         %RETURN
+      %FINISH
+      printstring("Failed to start ".mtos(dslot_mnem)." CC:".htos(j,1)." Csw2:".htos(irb_csw2,8))
+      newline
+      PSEUDOTERM(DSLOT,CCWA,IRB_CSW2,J);   ! force a termination
+wayout:
+      %IF multi ocp=yes %THEN DEV_SDSEMA=-1
+      %RETURN
+!
+ACK:                                     ! reply when transfer has not been started
+                                         ! includes transfer rejections
+      P_P1=FLAG
+      %IF P_SRCE>0 %START
+         P_DEST=P_SRCE
+         P_SRCE=x'300000'!DACT
+         PON(P)
+         %IF MON#0 %THEN PKMONREC("DEVIO ack:",P)
+      %FINISH
+      %RETURN
+!
+ACT(1):                                  ! text
+      %IF P_TEXT="?" %START
+         %FOR SLOT=0,1,LASTSLOT %CYCLE
+            DSLOT==RECORD(DSLOT BASE+SLOT*SLOT SIZE)
+            dev==record(dslot_dev enta)
+            %IF DEV_ALT CUU=0 %THEN S="none" %ELSE S=HTOS(DEV_ALT CUU,3)
+            OPMESS(MTOS(DEV_MNEMONIC)." (".HTOS(DEV_CUU,3)."/".S.") ".STATES(DSLOT_QSTATE&15))
+         %REPEAT
+      %FINISH %ELSE %IF P_TEXT="Q" %START
+         J=COM_SCHANNELQ
+         %WHILE J>0 %CYCLE
+            CQ==PARM(J)
+            DSLOT==RECORD(CQ_ADSLOT)
+            OPMESS(MTOS(DSLOT_MNEM)." ".STATES(DSLOT_QSTATE&15))
+            J=CQ_LINK
+         %REPEAT
+      %FINISH %ELSE OPMESS("DEVIO ?? ".P_TEXT)
+      %RETURN
+!
+ACT(10):
+      %IF VA MODE=NO %START;             ! relocate tables for supervisor
+         %FOR I=0,1,LAST SLOT %CYCLE
+            DSLOT==RECORD(DSLOT BASE+I*SLOT SIZE)
+            DEV==RECORD(DSLOT_DEV ENTA)
+            DSLOT_DEV ENTA=(DSLOT_DEV ENTA-P_P1)!COM SEG<<SSHIFT
+            DEV_SENSEDATAD=(DEV_SENSEDATAD-P_P1)!COM SEG<<SSHIFT
+            %UNLESS DEV_TRTABAD=0 %THEN DEV_TRTABAD=(DEV_TRTABAD-P_P1)!COMSEG<<SSHIFT
+            DEV_UA AD=(DEV_UA AD-P_P1)!COM SEG<<SSHIFT
+         %REPEAT
+      %FINISH
+      %RETURN
+!
+ACT(13):                                 ! monitoring
+      DUMP STATISTICS
+      MCHAN=P_P1
+      MON=P_P2
+      STATSDEV=P_P3
+      %RETURN
+!
+act(15):                                 ! Change route to device
+                                         ! P_P1=Mnem
+                                         ! P_P2=Route
+                                         ! P_p3=0 Add route-- p_p3#0 Subtract Route
+                                         ! route only added if one route only present
+                                         ! Route only subtracted if there is an alternative
+      %FOR i=0,1,last slot %CYCLE
+         Dslot==record(Dslotbase+I*Slotsize)
+         Dev==record(Dslot_Deventa)
+         %IF Dev_Mnemonic=P_P1 %START
+            %IF multi ocp=yes %THEN semaloop(DEV_SDSEMA)
+            %IF P_P3=0 %START
+               %IF Dev_Alt Cuu=0 %THEN Dev_Alt cuu=P_P2
+            %ELSE
+               %IF Dev_Alt cuu=P_p2 %THEN Dev_Alt cuu=0 %ELSE %IF DEv_Cuu=P_P2 %AND Dev_Alt cuu#0 %THEN %C
+                  Dev_cuu=dev_alt cuu %AND Dev_alt cuu=0
+               %EXIT
+            %FINISH
+            %IF multi ocp=yes %THEN DEV_SDSEMA=-1
+         %FINISH
+      %REPEAT
+      %RETURN
+
+ACT(*):
+      PKMONREC("DEVIO?:",P)
+      %RETURN
+!
+%ROUTINE DUMP STATISTICS
+!***********************************************************************
+!*    Semaphore irrelevant apart from logsema                          *
+!***********************************************************************
+      %IF XA=YES %THEN %START
+      %CONST %STRING (4) SDVNAME= "SSCH"
+      %ELSE
+      %CONST %STRING (3) SDVNAME= "SDV"
+      %FINISH
+%INTEGER II,KK,SUBTOTAL
+      %if multi ocp=yes %then reserve log
+      PRINTSTRING("IDEV ".VSN."..".VDATE)
+      NEWLINE
+      PRINTSTRING("IDEV statistics for ".SDVNAME." on DEVICE ")
+      PRINTSTRING(HTOS(STATSDEV,3))
+      NEWLINE
+      PRINTSTRING(SDVNAME."s done: ")
+      WRITE(SDVS,10)
+      NEWLINE
+      SUBTOTAL=0
+      %IF SDVS#0 %THEN %START
+         %CYCLE II=0,1,SDVMAX
+            WRITE(II,3)
+            KK=SDVTIMES(II)
+            SUBTOTAL=SUBTOTAL+KK;        !running total
+            WRITE(KK,6);                 !events
+            KK=(KK*100+(SDVS>>1))//SDVS; !rounded
+            WRITE(KK,4);                 !percent
+            KK=(SUBTOTAL*100+(SDVS>>1))//SDVS; !subtotal % rounded
+            WRITE(KK,4);                 !subtotal percent
+            NEWLINE
+            %EXIT %IF SUBTOTAL=SDVS;     !rest must be zero
+         %REPEAT
+      %FINISH
+      %if multi ocp=yes %then release log
+      SDVS=0;                            !clear statistics
+      %CYCLE II=0,1,SDVMAX
+         SDVTIMES(II)=0
+      %REPEAT
+%END
+!
+%ROUTINE FAIL TRANSFER(%RECORD (SLOTF) %NAME DSLOT)
+!***********************************************************************
+!*      a transfer or sense has been fired for too long                *
+!*        try and halt it and send a termination                       *
+!*     Slot sema should be claimed when this is called                 *
+!***********************************************************************
+      %IF XA=YES %THEN %START
+      %CONST %STRING (4) HDVNAME= "HSCH"
+      %ELSE
+      %CONST %STRING (3) HDVNAME= "HIO"
+      %FINISH
+%INTEGER I
+      DEV==RECORD(DSLOT_DEV ENTA)
+      PSEUDOTERM(DSLOT,CHANEND!DEVEND!UNIT CHECK,-1 {timeout},0)
+      I=HSCH(DSLOT_DEV ENTA)
+      PRINTSTRING(HDVNAME." on ".MTOS(DSLOT_MNEM)." CC = ".HTOS(I,1)."
+")
+      %IF xa=no %AND i=1 %THEN printstring("CSW=".htos(page0_csw2,8)."
+")
+%END
+!
+%INTEGER %FN FIND(%INTEGER FDEV)
+!***********************************************************************
+!*     Semaphore is not needed for this routine which only looks       *
+!*     at invariant information                                        *
+!***********************************************************************
+%INTEGER PTR,MYSLOT
+AGN:
+      PTR=DSLOT BASE
+      %FOR MYSLOT=0,1,LAST SLOT %CYCLE
+         DSLOT==RECORD(PTR)
+         DEV==RECORD(DSLOT_DEV ENTA)
+         %IF FDEV=MYSLOT %OR FDEV=DSLOT_MNEM %OR FDEV=DSLOT_CUU %OR (FDEV=m'LP' %AND DSLOT_MNEM>>8=m'LP' %AND %C
+            DSLOT_QSTATE=NOT ALLOCATED) %THEN %START
+            SLOT=MYSLOT;                 !assign to global
+            %RESULT=0
+         %FINISH
+         PTR=PTR+SLOT SIZE
+      %REPEAT
+      %IF FDEV=m'LP' %THEN FDEV=m'LP0' %AND ->AGN
+      %RESULT=-1
+%END
+!
+%STRING %FN MTOS(%INTEGER M)
+%INTEGER I,J
+      J=M<<8; I=3
+      %RESULT=STRING(ADDR(I)+3)
+%END
+!
+%if XA#YES %then %Start
+%ROUTINE Q REQUEST(%INTEGER CCWA,NEWSTATE,COUNT)
+!***********************************************************************
+!*      queues a request for later actioning. FEs & Senses at front    *
+!*      others at the rear                                             *
+!*    Slot sema for the request should not be held since there is      *
+!*    a faint chance of a deadly embrace with FIRE QUEUED              *
+!***********************************************************************
+%INTEGER OLDLINK
+%INTEGER %NAME LINK
+%LONG %INTEGER CLOCK
+%INTEGER MSEC
+      *STCK_clock; MSEC=CLOCK>>22&x'ffff'
+      %IF MULTI OCP=YES %START
+         SEMALOOP(CHANNELQ SEMA)
+      %FINISH
+      LINK==COM_SCHANNELQ
+      %IF DSLOT_DEVTYPE#FE %AND NEWSTATE#SENSE QUEUED %START
+         %WHILE LINK#0 %CYCLE
+            CQ==PARM(LINK)
+            LINK==CQ_LINK
+         %REPEAT
+      %FINISH
+      OLDLINK=LINK
+      LINK=NEW PP CELL
+      %IF MULTI OCP=YES %THEN CHANNELQ SEMA=-1
+      CQ==PARM(LINK)
+      CQ=0
+      CQ_LINK=OLDLINK
+      CQ_ADSLOT=ADDR(DSLOT)
+      DSLOT_QSTATE=NEWSTATE
+      CQ_CCWA=CCWA
+      CQ_P1=P_P1;                        ! for info & dumpcracking only
+      CQ_P2=P_P2;                        ! for info & dumpcracking only
+      CQ_P3=P_P3;                        ! for info & dumpcracking only
+      CQ_P4=P_P4;                        ! for info & dumpcracking only
+      CQ_P5=MSEC;                        ! for info & dumpcracking only
+      CQ_P6=KEY<<28!COUNT;               ! key and retry count
+      %IF MON#0 %AND ((XA=YES %and MCHAN=DEV_CUU) %or (XA#YES %and 1<<(DSLOT_CUU>>8)&MCHAN#0)) %THEN PRINTSTRING("DEVIO CH Queued: ".HTOS(DSLOT_CUU,3)."
+")
+      DEV_STATS3=DEV_STATS3+1;           ! CH Q'ed count
+%END
+!
+!
+
+%ROUTINE FIRE QUEUED(%INTEGER CHAN)
+!***********************************************************************
+!*     try any queued transfers that might work via channel "chan"     *
+!*    FE transfers are tried anyway as limitations in the FE hardware  *
+!*    may result in device busy indication unrelated to the 370 end    *
+!*    and which will not give caannel available                        *
+!*    No semaphore should be held when this routine is called          *
+!***********************************************************************
+%INTEGER I,J,CELLNO
+%INTEGER %NAME LINK
+%RECORD (SLOTF) %NAME DSLOT
+%RECORD (IRBF) IRB
+%RECORD (CQF) %NAME CQ
+%RECORD (DTFORM) %NAME DEV
+      %RETURN %IF COM_SCHANNELQ=0;       ! nothing queued
+      %IF MULTI OCP=YES %START
+         SEMALOOP(CHANNELQ SEMA)
+      %FINISH
+      LINK==COM_SCHANNELQ
+      %WHILE LINK#0 %CYCLE
+         CELLNO=LINK
+         CQ==PARM(CELLNO)
+         DSLOT==RECORD(CQ_ADSLOT)
+         DEV==RECORD(DSLOT_DEV ENTA)
+         %IF DSLOT_DEVTYPE=FE %OR XA=YES %OR DEV_CUU>>8=CHAN %OR DEV_ALT CUU>>8=CHAN %OR CHAN=-1 %START
+            %IF MON#0 %AND ((XA=YES %and MCHAN=DEV_CUU) %or (XA#YES %and 1<<(DSLOT_CUU>>8)&MCHAN#0)) %THEN %C
+               PRINTSTRING("devio CH unQ: ".STATES(DSLOT_QSTATE).HTOS(DSLOT_CUU,3)."
+")
+            %IF multi ocp=yes %THEN semaloop(DEV_SDSEMA)
+            J=FIRE(DSLOT,IRB,CQ_CCWA,CQ_P6>>28,CQ_P6&x'ffff',CQ_P5)
+            %IF XA#YES %AND (J=2 %OR (J=1 %AND IRB_CSW2&NOSTARTMASK=0)) %START
+               %UNLESS CQ_P6&x'ffff'>512 %START
+                  LINK==CQ_LINK;         ! still busy leave till later
+                  CQ_P6=CQ_P6+1
+                  %IF multi ocp=yes %THEN DEV_SDSEMA=-1
+                  %CONTINUE
+               %ELSE
+                  irb_csw2=irb_csw2!chanend!devend; ! ensure termination not awaited
+               %FINISH
+            %FINISH
+                                         ! device has started OK (j=0)
+                                         ! device has not started or passed limit
+                                         ! frig up a ponned termination interrupt
+            DSLOT_QSTATE=DSLOT_QSTATE-2
+            LINK=CQ_LINK
+            RETURN PPCELL(CELLNO)
+            %IF J#0 %THEN PSEUDOTERM(DSLOT,j<<24!IRB_CSW1,IRB_CSW2,J)
+            %CONTINUE
+         %ELSE
+                                         ! transfer not being tried this time
+            LINK==CQ_LINK
+         %FINISH
+         %IF multi ocp=yes %THEN DEV_SDSEMA=-1
+      %REPEAT
+      %IF MULTI OCP=YES %THEN CHANNELQ SEMA=-1
+%END
+%finish
+%ROUTINE PSEUDOTERM(%RECORD (SLOTF) %NAME DSLOT, %INTEGER CSW1,CSW2,Def CC)
+!***********************************************************************
+!*       sends a pseudo failure by ponning a termination int           *
+!*       rationale is that this very rare and simplifies the code      *
+!*       by putting all special sensing etc into a single sequence     *
+!*    The routine assumes the slot sema will be held by caller         *
+!*    other wise CSW words might change                                *
+!***********************************************************************
+%RECORD (PARMF) Q
+%RECORD (IRBF) IRB
+%RECORD (DTFORM) %NAME DEV
+      DEV==RECORD(DSLOT_DEV ENT A)
+      Q=0;                               ! simulate I/O termination
+      Q_DEST=DEVIO DEST!3
+      Q_SRCE=m'FRQD'
+      Q_P1=DSLOT_CUU
+      %IF XA#YES %START
+         Q_P4=DEV_SLOT
+      %ELSE
+         J=TSCH(ADDR(DEV),IRB)
+         Q_P1=ADDR(DEV)
+         Q_P4=IRB_KEYCNTR&X'FCFFFFFF'!Def CC<<24
+         Q_P5=IRB_XSTATUSW
+      %FINISH
+      Q_P2=CSW1; Q_P3=CSW2
+      %IF DSLOT_QSTATE=SENSE fired %OR csw2&errmask#0 %THEN Q_P3=Q_P3!CHANEND!DEVEND
+                                         ! ensure the termination is recognised
+                                         ! but must allow for solitary chanend
+                                         ! which comes back with cc=1 on start of skiptm
+      %IF MULTI OCP=Yes %THEN pon(Q) %ELSE DEVIO(Q); ! recursive call avoids device ends or attentions sneeking thro'
+%END
+%ROUTINE TREPLY(%RECORD (DTFORM) %NAME DEV, %INTEGER P4)
+!***********************************************************************
+!*    replies to requesting service when transfer ends                 *
+!*    reply format :-                                                  *
+!*      p_p1=dev idno<<24 ! ccw no (ie more useful form of csw1)       *
+!*      p_p2=csw2                                                      *
+!*      p_p3=address of device table entry                             *
+!*      p_p4=0 if sense OK or not performed (no errors or FE type dev) *
+!*          =1 if sense failed                                         *
+!*      p_p5= original form of CSW1                                    *
+!*      p_P6= returned value of user supplied identifier               *
+!*    Routine assumes slot sema is held but only risk is to csw data   *
+!***********************************************************************
+%RECORD (PARMF) Q
+%INTEGER I
+      I=0
+      %IF DEV_CSW2&CHAN ERR=0 %START
+         I=DEV_CSW1&csw1mask
+         %IF I#0 %THEN I=(I-DEV_CCWA&csw1mask)//8
+         %IF i<0 %THEN i=0
+      %FINISH
+      Q_DEST=DEV_REPSNO
+      Q_SRCE=DEVIO DEST!3
+      Q_P1=(LOID+DEV_SLOT)<<24!I
+      Q_P2=DEV_CSW2
+      Q_P3=ADDR(DEV)
+      Q_P4=P4
+      Q_P5=DEV_CSW1
+      Q_P6=DEV_ID
+      %IF MON#0 %AND ((XA=YES %and MCHAN=DEV_CUU) %or (XA#YES %and 1<<(DEV_CUU>>8)&MCHAN#0)) %THEN PKMONREC("DEVIO reply:",Q)
+      PON(Q)
+%END
+%INTEGER %FN FIRE(%RECORD (SLOTF) %NAME DSLOT, %RECORD (IRBF) %NAME IRB, %INTEGER CCWA,KEY,COUNT,TIME)
+!***********************************************************************
+!*      tries to the start the chain and returns the cc as result      *
+!*     The slot sema must be held when calling this routine            *
+!***********************************************************************
+%RECORD (DTFORM) %NAME DEV
+%INTEGER J,TDVCC,SDVCC,dummy
+%LONG %INTEGER CLOCK; %INTEGER MSEC
+      DEV==RECORD(DSLOT_DEV ENTA)
+      TDVCC=0; SDVCC=0
+      %IF DSLOT_DEVTYPE=MT %AND DSLOT_QSTATE#SENSE QUEUED %THEN %START
+         TDVCC=TSCH(DSLOT_DEV ENTA,IRB); !use tio first..in case mag tape off-line
+                                         ! tio gives a solitary device end
+                                         ! which is reset by sio (xa   ??????)
+         %IF xa=yes %AND tdvcc=1 %THEN tdvcc=tdvcc!!1
+                                         ! Ateempt to get the same effect on XA assuming
+                                         ! the solitary dev end will cause the
+                                         ! subchannel to be status pending
+      %FINISH
+      %IF TDVCC=0 %THEN SDVCC=SSCH(DSLOT_DEV ENTA,CCWA,KEY)
+      %IF SDVCC!TDVCC=0 %START;          ! device has starte
+         DEV_STICK=0
+         %IF MON#0 %AND ((XA=YES %and MCHAN=DEV_CUU) %or (XA#YES %and 1<<(DSLOT_CUU>>8)&MCHAN#0)) %THEN %C
+            PRINTSTRING("devio started after ".HTOS(COUNT,3)." cuu: ".HTOS(DSLOT_CUU,3)."
+")
+         %IF DSLOT_CUU=STATSDEV %AND SDVS#SDVSTOP %START
+            SDVS=SDVS+1
+            %IF COUNT#0 %START
+               *STCK_clock
+               MSEC=CLOCK>>22&x'ffff'
+               COUNT=(MSEC-TIME)&x'ffff'
+            %FINISH
+            COUNT=SDVMAX %IF COUNT>SDVMAX
+            SDVTIMES(COUNT)=SDVTIMES(COUNT)+1
+         %FINISH
+         %RESULT=0
+      %FINISH
+      J=SDVCC!TDVCC
+      %IF J=1 %START
+         %IF SDVCC=1 %START
+            %IF XA=YES %THEN dummy=TSCH(DSLOT_DEV ENTA,IRB) %ELSE IRB_CSW1=PAGE0_CSW1 %AND IRB_CSW2=PAGE0_CSW2
+         %FINISH
+      %FINISH
+      %IF J=3 %THEN IRB_CSW1=CCWA %AND IRB_CSW2=CHANERR!CHANEND!DEVEND!3
+      irb_csw1=irb_csw1!j<<24;           ! stick cc in deffered cc place
+      %IF MON#0 %AND ((XA=YES %and MCHAN=DEV_CUU) %or (XA#YES %and 1<<(DSLOT_CUU>>8)&MCHAN#0)) %THEN %C
+         PRINTSTRING("Devio nostart ".HTOS(J,1)." Cuu ".HTOS(DSLOT_CUU,3)." ".HTOS(IRB_CSW2,8)." ".HTOS(CCWA,8)."
+")
+      %RESULT=J
+%END
+%END
+%END %OF %FILE

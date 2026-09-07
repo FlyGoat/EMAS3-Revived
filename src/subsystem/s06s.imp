@@ -1,0 +1,3361 @@
+! S06-Diagnostics
+%end %oflist
+%include "subarc:SSOWNF3"
+   %list
+!***********************************************************************
+!*                                                                     *
+!*                              Constants                              *
+!*                                                                     *
+!***********************************************************************
+!
+%const %integer levels limit= 31
+%const %integer maxe= 5
+%const %integer maxlanguage= 15
+%record %format e4f(%integer code, gla, ep, pword)
+
+!***********************************************************************
+!*                                                                     *
+!*                           External specs                            *
+!*                                                                     *
+!***********************************************************************
+!
+%externalroutinespec dump2 %alias "s#dump2" (%integer from, to)
+%externalroutinespec printfd %alias "s#printfd" (%integer afd, mode{1})
+%externalroutinespec shout %alias "s#shout" (%string(255)s)
+%external %routine %spec emas3(%string %name cmd, par, %integer %name flag)
+%external %routine %spec terminalprint %alias "s#terminalprint" (%string(255)s)
+%external %routine %spec ssenter %alias "s#ssenter"(%string %name s, %integer %name i,
+   %string %name t)
+%external %routine %spec ssexit %alias "s#ssexit"(%string %name s, %integer %name i,
+   %string %name t)
+%external %routine %spec printline %alias "s#printline"(%string (255) s)
+%external %routine %spec fdiag %alias "S#FDIAG"(%integer lnb, gla, pc, asize,
+   %integer %name newlnb)
+%external %routine %spec cgdiags %alias "S#CGDIAGS"(%integer langflag, lnb, gla, pc, asize,
+   %integer %name newlnb)
+%external %integer %fn %spec dvalidate(%integer %name a, l, rw)
+%external %string %fn %spec failuremessage %alias "s#failuremessage"(%integer n)
+%external %routine %spec cxdump %alias "S#CXDUMP"(%integer start, n, f)
+%external %routine %spec ncode %alias "S#NCODE"(%integer start, n, f)
+%external %routine %spec hashcommand %alias "S#HASHCOMMAND"(%string (255) com, param)
+%external %integer %fn %spec aabprintstring %alias "DPRINTSTRING"(%string %name s)
+!* %external %routine %spec eliminate trap(%integer p, id)
+%external %routine %spec tidy traps %alias "s#tidytraps"(%integer stkfront)
+!* %external %routine %spec default trap(%integer %name id, %integer prot,
+%integername flag)
+%external %integer %fn %spec currentll %alias "s#currentll"
+%external %integer %fn %spec loadep %alias "s#loadep"(%string (31) entry, %integer %name type,
+   flag, %record (e4f) %name e4, %integer locll)
+%external %routine %spec unload2 %alias "S#UNLOAD2"(%integer loadlevel, fail)
+! %external %routine %spec etoi %alias "S#ETOI" (%integer ad, len)
+%external %routine %spec phex %alias "S#PHEX"(%integer i)
+%external %string %fn %spec htos %alias "s#htos"(%integer h, places)
+%external %string %fn %spec itos %alias "s#itos"(%integer i)
+%external %routine %spec set comreg36 %alias "s#setcomreg36" (%integer val, by)
+%external %routine %spec tidyfiles %alias "S#TIDYFILES"(%integer selectflag)
+!
+!***********************************************************************
+!*                                                                     *
+!*                         End of declarations                         *
+!*                                                                     *
+!***********************************************************************
+
+
+
+%routine %spec trans(%integer %name fault, event, subevent)
+%routine %spec indiag(%integer action, lnb, gla, %integer %name saveareapointer, regs printed)
+%routine %spec ermess(%integer n, inf)
+%integer %fn %spec wtfault(%integer inf)
+%integer %fn %spec validate gla(%integer addr)
+
+%routine print intinfo
+   printstring("Intinfo:"); newline
+   cxdump(addr(ssown_intinfo_class), addr(ssown_intinfo_gr(0))-4, 2)
+   newline
+   cxdump(addr(ssown_intinfo_gr(0)), addr(ssown_intinfo_fr(0))-4, 2)
+   newline
+%end;                                    ! of PRINT INTINFO
+
+!---------------------------------- NEXTLNB ----------------------------------
+
+%external %integer %fn nextlnb %alias "s#nextlnb"(%integer lnb, type, %c
+   %integername stmpc)
+! Currently works only for IMP.  Attempts to work out next LNB.  If it cannot
+! progress from LNB supplied (either because non-IMP language noted or because
+! bottom of stack reached), then the result returned is the same as the parameter
+! supplied.
+! parameter type should be 0 normally, 1 if called with the address
+! of a dump of registers.
+
+%integer j, low, lowreglim, reg, link, lnbseg, com36, com36seg, gla, shmon
+%integer quality, stkpt, dummy
+%const %integer basestackseg=65
+%const %integer min=64;                  ! minimum stack frame
+
+   stmpc=0; !not yet found
+   shmon=ssown_sscomreg(25)&2;           !extra monitoring
+
+   %if shmon#0 %then %start
+      printstring("nextlnb ")
+      phex(lnb)
+      write(type, 1)
+      newline
+   %finish
+
+   %result=lnb %if lnb&3#0 %or dvalidate(lnb, 64, 1)#0;  ! if lnb clearly does  not point to a stack frame.
+
+   gla=integer(lnb+13*4)
+
+   %result=lnb %if lnb=ssown_sscomreg(36);  ! i.e., if we are already at
+   ! the bottom of the stack (or at least, as far down the stack as
+   ! diagnostics are supposed to go).
+
+   %result=lnb %if dvalidate(integer(lnb+52), 17, 0)#0
+   !j=byte integer(integer(lnb+52)+16) {language flag}
+   ! Assumes EMAS conventions, viz. LNB points to a dumped set of
+   ! registers, of which register 13 is the GLA pointer, and the language
+   ! flag is in the 17th byte of the GLA.
+
+   low=integer(lnb+40);                  ! contents of register 10 as stored in the stack frame.
+
+   ! We can find out how many registers we have to look at, downwardss from
+   ! R10.  This is not an academic question, because holes for registers not stored can
+   ! have garbage in them which can be mistaken for valid display pointers if
+   ! we look at too many of them in the display.
+
+   ! So, we take the return link address from the display and work backwards a
+   ! short distance in the calling code to find the STM instruction which
+   ! precedes the BAS instruction.  It will be a different number of halfwords
+   ! backwards for external as against internal routine calls.  Also there may
+   ! be interspersed LOADs of multiples of 4K.  However, twenty bytes back from
+   ! the link address should be plenty.
+
+   %if type=0 %then %start
+      !we have a stack frame - hence r15 points to return address.
+      lowreglim=-1
+      link=integer(lnb+4*15)&x'7fffffff'
+      %if link>20 {had o'flo on LINK-20 once} %and dvalidate(link-20, 20, 0)=0 %start
+         %for j=link-6, -2, link-20 %cycle
+            %if integer(j)&x'FF00F000'=x'9000B000' {STM_?,?,?(11)} %start
+               reg=(integer(j)>>20)&15;  ! The low-regno in the STM instruction
+               %if shortinteger(j+2)=x'ffffb000'+reg<<2 %then %start
+                  lowreglim=reg
+                  %if shmon#0 %then %start
+                     printstring("lowreglim:")
+                     write(lowreglim, 1)
+                     newline
+                  %finish
+                  stmpc=j; !return pc of stm
+                  %exit
+               %finish
+            %finish
+         %repeat
+      %finish
+      %if lowreglim<0 %then %start
+         %if shmon#0 %then %start
+            printstring("nextlnb:STM not found. R15=")
+            phex(link)
+            newline
+            printstring("Stack regs:")
+            cxdump(lnb, lnb+64-4, 2);      !dumps extra word
+            newline
+         %finish
+         lowreglim=5
+      %finish
+   %finish %else %start
+      !no stack frame..assume reasonable value
+      lowreglim=5
+   %finish
+
+   com36=ssown_sscomreg(36)
+   com36seg=com36>>segshift
+
+   %if type=0 %then stkpt=lnb %else stkpt=integer(lnb+11<<2)
+   %for reg=9, -1, lowreglim %cycle
+      j=integer(lnb+4*reg)
+
+      ! J gets the contents of register 9 to register 5 in successive
+      ! iterations (that is, the registers as stored in the stack frame
+      ! indicated by lnb).
+
+      lnbseg=j>>segshift
+      %exit %if j+min>stkpt
+      %exit %if (lnbseg=com36seg %and j<com36) %or j>>segshift<basestackseg %or %c
+         dvalidate(j+44, 4, 0)#0 %or integer(j+44)#j
+
+      %if byteinteger(gla+16)=3 {IMP} %start
+         ! Check Diag Tables and exit if no good
+         dummy=yes {Regs printed=yes}
+         indiag(0, j{lnb}, gla, quality, dummy)
+         %exit %unless quality=0
+      %finish
+
+      %if j>low {%and j>=stack base} %then low=j
+   %repeat
+   %if shmon#0 %then %start
+      printstring("nextlnb:")
+      phex(low)
+      newline
+   %finish
+   %result=low
+%end;                                    ! of NEXTLNB
+!
+!----------------------------------- ONCOND -----------------------------------
+
+%routine oncond(%integer event, subevent, lnb, gla, prevlnb)
+!***********************************************************************
+!*       UNWIND THE IMP STACK LOOKING FOR ON CONDITIONS                *
+!*       There is only one call of ONCOND - it is in NDIAG.            *
+!***********************************************************************
+%integer lang, bit, onword, i, par1, par2, pc, extramon
+! PAR1 and PAR2 must stay together, because we use *LM_0,1,PAR1 to pick up
+! both of them.
+%integer newregs, dummy
+%integer stmpc
+%string (11) name
+%string (255) t
+
+   %unless ssown_sscomreg(25)&2=0 %start
+      i=aabprintstring("ONTRAP: EVENT=".itos(event).", SUBEVENT=".itos(subevent).", LNB=".htos %c
+         (lnb, 8).", GLA=".htos(gla, 8).snl)
+   %finish
+
+   %return %unless 1<=event<=14
+   bit=1<<(event+17)
+
+   ! VALidate the GLA address.
+   ! Now we check that the GLA is in standard EMAS form.  If it is,
+   ! then we will pick up the language flag from the 17th. byte of
+   ! the GLA.  The test depends on VALidating the third and fourth
+   ! words of the GLA, which should be the addresses of the unshareable and shareable
+   ! symbol tables.  This test cannot be guaranteed, but it should
+   ! make the right decision most of the time.
+
+   extramon=ssown_sscomreg(25)&2
+
+   %if extramon#0 %start
+      printstring("Event, subevent =")
+      write(event, 3); write(subevent, 3)
+      newline
+   %finish
+
+   %cycle
+      lang=byteinteger(gla+16)
+      %return %unless lang=1 %or lang=3
+
+      onword=bit
+      dummy=yes {Regs printed=yes}
+      indiag(1, lnb, gla, onword, dummy)
+      ! This call of INDIAG returns the onword from the the diag tables of current level
+
+      %exit %if onword&bit#0
+
+      gla=integer(lnb+4*13)
+      newregs=nextlnb(lnb, 0, stmpc)
+      %return %if newregs=lnb
+      prevlnb=lnb
+      lnb=newregs
+   %repeat
+
+   ! ON CONDITION found.
+   ! If here and SSOWN_RCODE is 103050709 then we have arrived via the
+   ! ENTERONUSERSTACK trap. Since we have found an %on %event trap prepared
+   ! to deal with the contingency then SSOWN_RCODE can be reset to 0
+
+   pc=integer(gla+onword&x'3FFFF')
+
+   %if extramon#0 %start
+      printline("On event HIT.  Dest LNB, GLA, PC = X".htos(lnb, 8)."
+      ".htos(gla, 8)." ".htos(pc, 8))
+   %finish
+
+   %if ssown_rcode=103050709 %then ssown_rcode=0
+   par1=event<<8!subevent
+   par2=byteinteger(lnb+2)<<8!byteinteger(lnb+3) {the line number}
+   !* eliminate trap(0, id);                ! NDIAG trap no longer required.
+   tidytraps(prevlnb+44<<2); !tidy traps beyond new stack front
+   ssown_active=0
+   *l_15,pc
+   *l_2,prevlnb
+   *lm_0,1,par1;                         ! info for the ON sequence ??
+   *lm_4,14,16(2);                       ! LNB TO RT AFTER EXIT RT
+   *bcr_15,15;                           ! To required environment
+%end;                                    ! of ONCOND
+
+!--------------------------------- CALL DIAGS ---------------------------------
+
+!%routine call diags(%integer oldlnb, pc, asize, %integer %name first, newlnb, %integer lf)
+! This routine simply passes on the parameters (less LANGFLAG) to PDIAG or SDIAG.
+! It is called only with LF=7 (PASCAL) or 8 (SIMULA) - so we need only:
+!%const %string (7) %array ld(7:8)= "S#PDIAG", "S#SDIAG"
+!%integer a, type, i
+!%record (ent4f) ent4
+!   type = 2 {code}
+!   i = lookloaded(ld(lf), type, ent4)
+!   %if i=0 %then %start
+!      printstring(ld(lf)." NOT LOADED")
+!      newline
+!      %stop
+!   %finish
+!   a = addr(ent4)
+!   *MVC_64(24,11),64(10);                ! Move this routine's parameters onto stack for dest routine
+!   *STM_4,14,16(11)
+!   *L_1,A
+!   *LM_12,14,0(1)
+!   *BASR_15,14
+!%end;                                    ! of CALL DIAGS
+
+
+!------------------------------- CALLCGDIAGS -----------------------------------
+
+%routine callcgdiags(%integer langflag, lnb, gla, pc, asize, %integer %name newlnb)
+%integer j, type, lflag
+%record (e4f) e4
+ type=2
+ ssown_loadlevel=ssown_loadlevel+1
+ j=loadep("CCDIAGS", type, lflag, e4, ssown_loadlevel)
+
+ ! This is not strictly the correct way to handle load-level.  In order to
+ ! cancel side effects of a failed load, we need to have put up the loadlevel
+ ! before the LOADEP, and it should be brought down again before the next
+ ! unload.  However, we have no way of remembering that we have done this
+ ! extra increment, so we are doing it immediately here.  This is unlikely to
+ ! have any bad side-effects, since CCDIAGS is not going to do any further
+ ! loading/unloading itself.
+ ! In fact there IS a bad effect, as coded, since if the EP is not found, the
+ ! _LOADINPROGRESS flag is left set.  If re-activating this code, zero this
+ ! flag.  It causes unl;oading of loaded files on TIDYFILES, in a certain
+ ! complex situation (to do with the Glasgow Subsystem).
+ ssown_loadlevel=ssown_loadlevel-1
+
+ %if j=0 %start
+    j=1
+    unload2(ssown_loadlevel, j)
+
+      cgdiags(langflag, lnb, gla, pc, asize, newlnb)
+
+ %finish %else %start
+!    fatality("Procedure ".entry." has wrong parameters") %unless    e4_pword=X'00060018'
+    *mvc_64(24,11),64(10)
+    *stm_4,14,16(11)
+    *la_1,e4
+    *lm_12,14,0(1)
+    *basr_15,14
+ %finish
+%end;                                    ! callcgdiags
+
+!------------------------------ NDIAG ------------------------------------------
+
+%external %routine ndiag %alias "S#NDIAG"(%integer pcount, lnb, fault, inf)
+
+! In calls from IMP code generated by the IMP compiler (i.e., not calls
+! written in explicitly by the programmer), and in calls from IMP PERM,
+! the INF parameter is NOT significant, and the fault parameter is to
+! be interpreted as (EVENT<<16)!SUBEVENT.
+!
+! A call with fault=0 means %monitor - i.e., ndiag is NOT to print any
+! message describing a fault, but is required only to print the trace and
+! values of variables.
+!
+! In a call with FAULT=10, the interrupted code may not have been IMP-compiled,
+! so the value of the lnb parameter may not be correct (since there is no
+! general method for finding the stack frame pointer from the contents of the
+! general registers.  Thus if FAULT=10, ndiag must start by determining the
+! source language of the interrupted code.  If the language is IMP, then ndiag
+! should extract the lnb value from the general registers in
+! SSOWN_INTINFO_GR(0:10) - algorithm appears as a comment at the head of the
+! TRAP code.  If the language is not IMP, then NDIAG must pass the problem
+! on to the appropriate language-specific diagnostic routine, and must pass
+! the general register values to that routine.  Thus language-specific
+! diagnostic routines should accept a set of register values as a parameter,
+! and should not expect to be supplied with a LNB value.
+
+
+%integer langflag, gla, preason, j, lnbhere, display above, test, prevlnb
+%integer i, limit, level, subevent, event, contflag, wi, extramon, lastlang
+%integer cycleno, arraysize, userstk, saveareapointer, progmask, regs printed
+%integer stmpc
+%switch language(0:maxlanguage)
+%string (20) failno
+%const %string (12) %array lt(0:maxlanguage)=" !???! "," IMP "," FORTRAN "," IMP "{was IMPS},
+ " ASMBLR ",
+    " !???! "(2) {5-6}, " OLD PASCAL " {7}, " SIMULA " {8}, " !???! ", " FORTRAN 8X ", " C ",
+ " !???! " (3), " PASCAL (E) "
+
+
+! This array and counter is designed to enable us to suppress the repeated
+! presentation of the same environmental variables for a given call on NDIAG
+
+%integer havepasseduserroutines, rt, newlnb, envarrayad
+
+%integer %array environmentals printed(-1:maxe)
+%const %integer temploaded=0,permloaded=1
+
+%const %integer validlangs=B'1000110100001110'
+!                            1   11
+!                            5   10 8    321
+
+
+   %if ssown_ssmp ctl1&4#0 %then ssown_ssmp ctl1 = ssown_ssmp ctl1!x'80000000'
+   extramon=ssown_sscomreg(25)&2
+
+   regs printed=no {for use when diagnosing Subsystem errors}
+   %unless extramon=0 %start
+      i=aabprintstring("NDIAG entered".snl)
+      i=aabprintstring("P counter = ".htos(pcount, 8).",  LNB = ".htos(lnb,
+         8).",  Fault = ".itos(fault).",  Inf = ".htos(inf, 8).snl)
+   %finish
+
+   environmentals printed(-1)=0 {count of entries in the array}
+   envarrayad=addr(environmentals printed(-1))
+
+   arraysize=ssown_ssarraydiag
+
+   ! Mask maskable interrupts during diag printing, saving the key to restore afterwards
+   *ipm_1; ! *balr_1,0
+   *st_1,progmask
+   *sr_1,1
+   *spm_1
+
+   havepasseduserroutines=0
+   level=0
+   limit=levels limit
+   ssown_active=ssown_active+1
+   failno=" trap stack full"
+
+   %if ssown_active>5 %then ->eout
+   preason=-1
+
+   %if ssown_fulldump#0 %then hashcommand("REGS", "")
+
+   ! Three situations.
+   !    1A.  NDIAG called from run-time system (from PERM or %monitor), to
+   !         diagnose from previous stackframe.  In this case the GLA address is
+   !         in the stackframe above that indicated by paramter LNB (usually
+   !         the stackframe for LNB itself).  We work back from LNBHERE.
+   !    1B.  NDIAG called from the loader DYNREF/UNSATREF routines.  LNB gives the
+   !         address of the display for the routine which was to have been called.
+   !         The GLA address for the calling routine is 4*13 bytes beyond this value.
+   !    2.   NDIAG called by contingency software following interrupt (e.g. address
+   !         error, overflow).  In this case the GLA address is found from the
+   !         registers in SSOWN_INTINFO
+   ! We distinguish these two situations from the value of FAULT (not 10 or 10).
+   ! And between 1A and 1B by pcount being -2 for the latter.
+
+   %if fault#10 %start
+
+      *st_11,userstk;                    !use current stack for %stop
+      %if pcount#-2 %start
+
+         ! Situation 1A.  NDIAG called from run-time system
+         test=0
+         *st_10,j
+         lnbhere=j
+         %if lnb<lnbhere %start
+
+            test=1;                      !do not expect to find STM for %monitor call
+            %cycle
+               display above=j
+               j=nextlnb(j, test, stmpc)
+               test=0;                   !for next call
+            %repeat %until j<=lnb %or j=display above {means NEXTLNB is not progressing further}
+
+            !%if ssown_sscomreg(25)#0 %start
+            !   cxdump(j, lnbhere+64, 2)
+            !%finish
+
+            prevlnb=display above;       ! for ONCOND
+            gla=integer(display above+4*13)
+            test=validate gla(gla)
+         %finish %else %start
+            printstring("LNB HERE ="); phex(lnbhere)
+            newline
+            !* test=0
+            !* This is a failure...if calling NDIAG should have LNB>lnbhere
+            failno=" invalid LNB"
+            ->eout
+         %finish
+
+      %finish %else %start
+
+         ! Situation 1B.  Called from loader
+         display above=lnb
+         prevlnb=display above;          ! for ONCOND
+         gla=integer(lnb+4*13)
+         test=validate gla(gla)
+         lnb=nextlnb(lnb, 0, stmpc)
+      %finish
+   %finish %else %start
+      ! Situation 2.  Call following interrupt
+      %if extramon#0 %start
+         wi=addr(ssown_intinfo_gr(0))
+         cxdump(wi-8, wi-4, 2); newline
+         cxdump(wi, wi+64-4, 2)
+         newline
+      %finish
+      userstk=ssown_intinfo_gr(11)&(-4);  !required for %stop
+      %if (userstk!!ssown_sscomreg(36))>>segshift=0 %or dvalidate(userstk, 64, 1)#0 %then %start
+         !user stack seg same as ssown_sscomreg 36, or invalid
+         userstk=ssown_sscomreg(36)+x'40'
+      %finish
+      prevlnb=addr(ssown_intinfo_gr(0));  ! for ONCOND
+
+      %cycle
+         gla=integer(prevlnb+13<<2)
+         lnb=nextlnb(prevlnb, 1, stmpc);        !special call..not actual lnb
+         %exit %if gla>>segshift#x'043'
+         !* printstring("in director..losing a level..lnb:")
+         !* newline
+         prevlnb=lnb
+      %repeat
+
+      test=validate gla(gla)
+      %if test<=0 %or (1<<byteinteger(gla+16))&validlangs=0 %start
+         ermess(fault, inf)
+         %if test<0 %start
+            printline("First words of GLA:")
+            cxdump(gla, gla+24-4, 2)
+            newlines(2)
+         %finish
+         printstring("Non-standard GLA.  Cannot diagnose.  PC=".htos(ssown_intinfo_psw1, 8))
+         printline("  Registers:")
+         cxdump(addr(ssown_intinfo_class), addr(ssown_intinfo_gr(0))-4, 2)
+         newline
+         cxdump(addr(ssown_intinfo_gr(0)), addr(ssown_intinfo_fr(0))-4, 2)
+         newline
+         ssown_active=0
+         ->quit
+      %finish
+   %finish
+
+   %if extramon#0 %start
+      printstring("LNB = ".htos(lnb, 8))
+      printline("  GLA at ".htos(gla, 8))
+   %finish
+
+   %if dvalidate(lnb, 64, 1 {write access})#0 %start
+      printline("Validate LNB fails")
+      ssown_active=0
+      ->quit
+   %finish
+
+   langflag=byteinteger(gla+16)
+   langflag=0 %if langflag>maxlanguage %or test<=0
+
+   %if preason#0 %then %start
+      preason=0
+      subevent=0; event=fault>>8
+      %if 400<=fault<=500 %then %start
+         ermess(fault, inf)
+      %finish %else %start
+         %if 50<=fault<=76 {Error reported by Maths. function} %then contflag=2 %else %if %c
+            fault=10 {Interrupt} %start
+            ! INF has the "weight" or "class", which is the same as
+            ! the PE number for Program Error interrupts.  Only
+            ! Program Error interrupts are reported by this route -
+            ! others have nothing to do with the program and are
+            ! handled by other parts of the system - but a few other
+            ! faults which do not involve real interrupts are reported
+            ! as "simulated" interrupts with class numbers which are
+            ! impossible as Program Error numbers, and this code can
+            ! cope with those.
+
+            ! Convert "class" or "weight" to a "Fault}  number", which is also the number for
+            ! the appropriate error message.
+            fault=wtfault(inf)
+            contflag=1
+         %finish
+
+         %if langflag#8 %and langflag#11 %and langflag#15 %then %start;  ! i.e., not for SIMULA, C or PASCAL (E)
+            ! If the FAULT parameter is >= 256, it consists of an
+            ! event number in the top 24 bits and a subevent number
+            ! in the bottom eight bits.  We have already extracted
+            ! the event number, so we pick up the subevent number.
+            ! Then we clear FAULT, so that TRANS will convert the
+            ! event and subevent numbers into a 'proper' fault number
+            ! which will yield an appropriate error message.
+            %if fault>=256 %then %start
+               subevent=fault&255
+               fault=0
+            %finish
+
+            trans(fault, event, subevent);  ! Ensures that FAULT, EVENT and SUBEVENT are all set
+            ! to define the same occurrence.
+
+            !----------------------------------- call of ONCOND -------------------------------
+            oncond(event, subevent, lnb, gla, prevlnb)
+            !----------------------------------- call of ONCOND -------------------------------
+
+         %finish
+
+         %unless fault=0=event %then ssown_sscomreg(10)=1;  !FOR USE BY JCL
+
+         %if fault>=0 %then %start
+            %if fault=0 %and event#0 %start
+               newline
+               printline("Monitor entered")
+               printstring("Event"); write(event, 1)
+               printsymbol('/'); write(subevent, 1)
+               newline
+               fault=1;                  ! To cause %stop (rather than %return) at label EXIT:
+            %finish %else %start
+               %if fault#0 %then select output(-99);  !DONT SELECT IF JUST CALL OF %monitor
+               ermess(fault, inf);       ! Output error message
+            %finish
+            newline
+         %finish %else event=0
+      %finish
+   %finish
+   !
+   ! On the first entry to NDIAG, an error message is printed (for non-contingencies)
+   ! and then the selection of language dependent diagnostic traceback procedure
+   ! is made.
+   !
+   ! The message "Monitor entered from ..." is printed out the first time through.
+   ! No message is printed out by NDIAG during the analysis of subsequent stack frames
+   ! unless the language of the stack frame under analysis is different from the
+   ! language of the previous stack frame. In this case the message "Called from ..."
+   ! is displayed before the stack frame analysis.
+   !
+   ! For IMP stack frames, the internal procedure INDIAG is called
+   ! For FORTRAN stack frames, the external procedure FDIAG is called
+   ! For SIMULA, C or PASCAL (E) stack frames, the external procedure CGDIAGS is called
+   ! which controls the language dependent stack frame analysis for those languages.
+   !
+   ! For any other languages that may be implemented in the future, a dynamic call
+   ! to an appropriate language dependent diagnostic procedure would be made in the
+   ! short term, with a view to incorporating such a diagnostic procedure into CGDIAGS
+   ! in the longer term.
+   !
+
+   cycleno=0
+
+   %cycle
+
+      %if cycleno=0 %start
+         printline("Monitor entered from".lt(langflag))
+         saveareapointer=0
+         lastlang=langflag
+         cycleno=1
+      %finish %else %start
+         level=level+1
+
+         %if lastlang=1 %or lastlang=3 {IMP&dialects} %start
+            newlnb=nextlnb(saveareapointer, 0, stmpc)
+            %if newlnb=saveareapointer %then saveareapointer=0
+         %else
+            newlnb=integer(saveareapointer+40);  ! R10
+         %finish
+
+         %if saveareapointer=0 %or level>=limit %then ->exit
+
+         ! Continue to unwind the stack
+         gla=integer(lnb+52)
+         lnb=newlnb
+         langflag=byteinteger(gla+16)
+      %finish
+
+      !AAAAA
+      ! Unless COMREG(25) non-zero (except bit 256), we are going to monitor Subsystem and permanently-loaded
+      ! procedures only if we have failed in same and we have not monitored
+      ! user-level (temp-loaded) procedures earlier in this call on NDIAG.
+      ! (Even for subsys routines, we will only give "Entered from line" for
+      ! these routines (unless COMREG(25)#0), and not the values of variables).
+      !AAAAA
+
+      ! From 18.6.86, the above condition is simplified, and replaced by:
+      !   Do not monitor permanently-loaded procedures if COMREG(25)=0
+      ! NO, not yet !!
+
+      ! In checking whether or not a procedure is permanently-loaded, there are
+      ! two cases to consider:
+      !              (a) unshared basegla     The GLA segment is the #BGLA segment
+      !                                       which is the segment after the
+      !                                       basefile (code) segment.
+      !              (b) shared basegla       The GLA is the GLAP and is in the
+      !                                       basefile (code) segment.
+      ! SSOWN_ABGLA is the segment after the basefile (code) segment always.
+      ! We achieve the required test for permanent-loading by testing whether a
+      ! procedure's GLA is <= to the SSOWN_ABGLA segment.
+
+      %if gla>>segshift>ssown_abgla>>segshift %then rt=temploaded %else rt=permloaded
+
+      %if rt=temploaded %then havepasseduserroutines=1 %else %if %c
+         havepasseduserroutines#0 %and ssown_sscomreg(25)&(\256)=0 %then ->exit
+
+      ! NO !! not yet %if rt=permloaded %and ssown_sscomreg(25)=0 %then ->exit
+
+      %if langflag#lastlang %then %start
+         lastlang=langflag
+         printline("Called from".lt(langflag))
+      %finish
+      ->language(langflag)
+
+language(1):
+language(3):                             ! imp & imps
+      indiag(envarrayad, lnb, gla, saveareapointer, regs printed);  ! imp diags
+      %continue
+
+language(2):                             ! FORTRAN
+language(10):                            ! FORTRAN 8X
+      %if fault=10 %then pcount=ssown_intinfo_psw1;  ! PC for contingency
+      fdiag(lnb, gla, pcount, arraysize, saveareapointer)
+      %continue
+
+language(8):                             ! SIMULA
+language(11):                            ! C
+language(15):                            ! PASCAL (E)
+      call cgdiags(langflag, lnb, gla, pcount, arraysize, saveareapointer)
+      %continue
+
+language(*):                             ! unknown, & assembler
+      print intinfo
+      printline("Code around PC:")
+      ncode(pcount-32, pcount+32, pcount-32)
+      newline
+      printline("Area around LNB:")
+      cxdump(lnb-64, lnb+64-4, 2)
+      newline
+      printline("Dump from GLA:")
+      cxdump(gla, gla+128-4, 2)
+      ->exit;                            ! no way of tracing back
+   %repeat
+
+eout:                                    ! error exit
+   newline
+   printline("NDIAG fails ".failno)
+exit:
+   ssown_active=0
+   *l_1,progmask; *spm_1
+   %if fault=0 %then %return;            ! Call was initiated by %monitor
+
+quit:
+   *l_1,progmask; *spm_1
+   %if ssown_loadinprogress#0 %then %start
+      unload2(1, 1)
+      ssown_loadinprogress=0
+   %finish
+   *l_11,userstk;                        !back to user stack for %stop
+   %stop
+%end;                                    ! of NDIAG
+
+!-------------------------------- INDIAG ---------------------------------------
+
+%routine indiag(%integer action, lnb, gla, %integer %name saveareapointer, regs printed)
+
+! Three actions have been jammed into this procedure, and the parameters are
+! used duplicately (to avoid an excessive parameter list: there would be a fair-
+! sized overhead e.g. during ONCOND).  As follows.
+
+
+! ACTION   =   0     Call from NEXTLNB to validate Diag tables starting at LNB
+!                    Used as part of the ad hoc process to eliminate invalid
+!                    stackframes from consideration.  The result is returned in
+!                    parameter SAVEAREAPOINTER:  zero if valid, one if invalid.
+!
+! ACTION   =   1     Call from ONCOND to return (in SAVEAREAPOINTER) the onword
+!                    from the diag tables of the current level.
+!
+! ACTION   >   1     This is the call for printing diagnostics.  ACTION is the
+!                    address of the array for keeping a note of which environmental
+!                    variables have already been printed.  (Formerly INDIAG was
+!                    internal to NDIAG).
+
+
+! (The following applies to ACTION > 2).
+! Prints diagnostics for one routine level of an IMP program.
+! Set SAVEAREAPOINTER to point to current save area (Normally the same as the
+! save area on entry, = LNB, - it would be different only if %begin-blocks were
+! ever CALLed...)  OR  zero, to terminate diagnostics.
+!
+!
+! Layout of diagnostic tables
+!
+! The first half-word of the stack frame contains a displacement relative to
+! the start of SST of the  diagnostic tables for the block or routine being
+! executed.  A zero value means no diagnostics requested. (NB This may mean a
+! dummy first word in the SST).
+! The address of the SST for the current code segment is at GLA+20 bytes (this
+! word points to the x'C2C2C2C2' word in the SST-area of the object file).
+!
+! Form of the diagnostic tables:-
+!    For each routine/block there is a routine/block record of 20+N bytes, where
+! N is the number by which the routine-identifier including length-byte exceeds
+! four bytes. (Blocks have a null identifier).
+!    Following the routine/block record are IMP-variable records, each comprising
+! one word of type-information followed by the identifier as an IMP string.
+! These variable-records are contiguous and are terminated by a -1 type-information
+! word.
+
+! The routine/block record is as follows:
+!
+! Bytes 0-1  =   line of rt/black heading in source prog
+!       2-3  =   line no posn (from LNB) ??
+!
+! bytes 4-5  =   ??
+!       6-7  =   pointer (relative to the SST for the module) of the routine/block
+!                record for the enclosing block (or zero if none)
+! Word 2     =   display posn (from LNB)<<16 ! rt type info
+! Word 3     =   zero for blocks or string(<=11bytes) being the rt name.
+!                This will take words 4 and 5 if needed
+! Word 6     =   language dependent info . IMP on conditions etc
+!
+! Each variable entry consists of the variable word followed by
+! the variable name as a string. The word consists of
+! bits 2**31 to 2**20 type information (may be language dependent
+! Bit  2**19  =0 under LNB =1 in GLA
+! Bits 2**18 to 2**0 displacement from LNB(GLA) in bytes
+!
+! The environment (bytes 6-7 of the routine/block) is a pointer (relative to SST)
+! of the next outermost block or a pointer to global owns, external or common areas
+! A zero means no enclosing block. Word1=word3=0 is an IMP main program or
+! global owns for a module of external routines and will terminate the diagnostics.
+
+!      0    2    4    6    8...
+!     +----+----+----+----+----- - - ---------+
+!     | FBL|    |    |PREV|  locvars      -1  |  Inner routine or block
+!     +----+----+----+----+----- - - ---------+
+!                      |
+!       +--------------+
+!       |
+!       V     2    4    6    8...
+!       +----+----+----+----+----- - - ---------+
+!       | FBL|    |    |PREV|  locvars       -1 |  Outer begin or ext routine
+!       +----+----+----+----+----- - - ---------+
+!                        |
+!          +-------------+
+!          |
+!          V     2    4    6    8...
+!          +----+----+----+----+----- - - ---------+
+!          |zero|    |    |zero|  locvars       -1 |  Environmental level
+!          +----+----+----+----+----- - - ---------+
+!
+!  FBL       = "from-block line", i.e. starting line-number of this routine/block
+!
+!  PREV      = "previous block" i.e. pointer to diag tables for enclosing (textual) block
+!
+!  locvars   = Diag tables for variables local to this level.
+!
+!  -1          ends the records for the variables of this level.
+
+
+! The scheme of things here is as follows.
+! CYCLE
+!     Have we done all dynamic levels?  EXIT if so.
+!     (This test and this cycle are in routine NDIAG)
+!     CYCLE
+!         (The contents of this cycle comprise routine INDIAG)
+!         Print diagnostics for current level.
+!         Go to next textual level. If the previous block was a begin-block
+!         then diagnose this level, too
+!     REPEAT
+! REPEAT
+
+! In the diagnostic tables, FromBlockLINE (FBLINE) and PREVBLK indicate whether
+! the current diagtable is for
+!      Global owns (Environmental block)             FBLINE=0   PREVBLK=0   BTYPE=0
+!   or outer begin/ext routine/routine/inner begin   FBLINE>0   PREVBLK>0   BTYPE=0{begin} or >0{routine}
+
+
+%routine %spec print locals(%integer locenv)
+%routine %spec print var(%integer type, prec, nam, form, vaddr)
+%routine %spec pscalar(%integer adata)
+%routine %spec parr(%integer adata, asize)
+%integer sst ptr, dtable, fline, fbline, btype, prev blk, old btype, old fbline
+%integer extramon, quality, j, ch, arraysize, bit
+%const %integer %array %format envpf(-1:maxe)
+%integer %array %name environmentals printed
+%integer %name ecounter
+%string (11) name, message
+
+   extramon=ssown_sscomreg(25)&2
+   %if action>1 %start
+      environmentals printed==array(action, envpf)
+      ecounter==environmentals printed(-1)
+      arraysize=ssown_ssarraydiag
+      message="Monitor"
+      action=2
+   %finish %else %if action=1 %start
+      bit=saveareapointer
+      message="Oncond"
+   %finish %else message="Vdiagt" {Validate diag tables}
+
+   %if extramon#0 %then printline(message.": LNB=".htos(lnb, 8)." GLA=".htos(gla, 8))
+
+   sstptr=byteinteger(lnb)<<8!byteinteger(lnb+1);  ! Short(LNB)
+   fline=byteinteger(lnb+2)<<8!byteinteger(lnb+3);  ! Short(LNB+2)
+   old btype=-1
+
+   quality=0 {For Vdiagt - Validate diag tables. 0 = Valid}
+
+   %cycle
+      dtable=integer(gla+20)+sst ptr
+      printline("SSTPTR = ".htos(sst ptr, 4)."  DTABLE at ".htos(dtable, 8)) %if extramon#0
+
+      %if dvalidate(dtable, 20, 0)#0 %start
+         printstring("DTABLE invalid at address ".htos(dtable, 8))
+         printline("  GLA at ".htos(gla, 8))
+         printstring("LNB=".htos(lnb, 8))
+         printstring("  Integer(LNB)=".htos(integer(lnb), 8))
+         printline("  Integer(GLA+20)=".htos(integer(gla+20), 8))
+         quality=1 {Invalid}
+         lnb=0
+         %exit
+      %finish
+
+      fbline=byteinteger(dtable)<<8!byteinteger(dtable+1) {Short(DTABLE)}
+      btype=byteinteger(dtable+12) {name-length, hence blocktype}
+
+      %if btype>11 %start
+         printline("Invalid symbol tables") %if action=2 {%monitor} %or extramon#0
+         %if extramon#0 %start
+            printstring("GLA at ".htos(gla, 8))
+            printstring("   Integer(LNB)=".htos(integer(lnb), 8))
+            printline("   Integer(GLA+20)=".htos(integer(gla+20), 8))
+            printline("FBLINE ="); write(fbline, 1)
+         %finish
+         quality=1
+         lnb=0
+         %exit
+      %finish %else %start
+         prev blk=byteinteger(dtable+6)<<8!byteinteger(dtable+7)
+         name=string(dtable+12) {null if block}
+
+         ! How does the name look?  Should be alpha(lowercase)numeric.
+         %for j=1, 1, length(name) %cycle
+            ch=charno(name, j)
+            %unless 'a'<=ch<='z' %or '0'<=ch<='9' %then quality=1 {Invalid} %and %exit
+         %repeat
+
+         %if quality#0 {invalid} %start
+            %if action=0 {Vdiagt} %then %exit %else printline("Invalid rt name:".name)
+         %finish
+
+      %finish
+
+      %if action=1 {Oncond} %start
+         saveareapointer=integer((dtable+btype+16)&(-4))
+         %if extramon#0 %start
+               %if btype=0 %then printstring(" block") %else print string(" routine/fn/map ".name)
+               printstring(" starting at line")
+               write(fbline, 4)
+               printstring("  Onword=".htos(saveareapointer, 8))
+               newline
+         %finish
+         ! Exit if Oncondition found, or if a rt/fn/map because we need to go to the next dynamic level
+         %exit %if saveareapointer&bit#0 %or btype>0
+         ! Must go to next textual level if begin-block
+      %finish
+
+      %if fbline=0 %start
+         print locals(1) {Environmental block - global owns} %if action=2 {%monitor}
+         %exit {to next dynamic level}
+      %finish %else %if old btype>=0 %start
+         %if old btype=0 %start
+            ! Prev block was a begin-block, so do current level, too
+            fline=old fbline
+         %finish %else %exit {to next dynamic level}
+      %finish
+
+      %if action=2 {%monitor} %start
+         printstring("Entered from")
+         %if byteinteger(gla+19)&2#0 %start
+            ! This byte contains the "IMP PARMS" and bit value 2 is set if line-number
+            ! updating is on
+            printstring(" line")
+            write(fline, 1)
+            printstring(" of")
+         %finish
+
+         %if btype=0 %then printstring(" block") %else print string(" routine/fn/map ".name)
+         printstring(" starting at line")
+         write(fbline, 1)
+         print locals(0)
+      %finish
+
+      ! Go to next textual level.  If this is the environmental block, then
+      ! we shall print the variables therein, else finished.
+      old fbline=fbline
+      old btype=btype
+      sst ptr=prev blk
+   %repeat
+
+   %if action=2 {%monitor} %start
+      newline
+      saveareapointer=lnb
+   %finish %else %if action=0 {Validate diag tables} %then saveareapointer=quality
+
+   %if extramon#0 %then printline(message." ".htos(saveareapointer, 8))
+
+!-------------------------------- print locals --------------------------------
+
+%routine print locals(%integer locenv)
+! Param is  zero  for locals,  one  for environmentals
+%integer num, j, adata, save, oldvalue, com25
+   num=0
+   newline
+   oldvalue=-1
+   com25=ssown_sscomreg(25)
+   %if gla<ssown_sscurbgla %and com25&256#0 %start
+      ! Extra info (to recall only if Interactive) for errors in Subsystem code
+      oldvalue=ssown_suppress terminal output
+      ssown_suppress terminal output=yes
+      %if regs printed=no %start
+         emas3("#REGS", "", 0)
+         emas3("#PVM", "", 0)
+         regs printed=yes
+      %finish
+   %finish
+   newline
+   adata=(dtable+btype+20)&(-4)
+   %if locenv#0 %start
+      %if integer(adata)<0 %then ->printlocout {silent for no environmental variables}
+      ! Have we printed these already?
+      j=0
+      %while j<ecounter %cycle
+         %if environmentals printed(j)=adata %then ->printlocout {Yes: clear off}
+         j=j+1
+      %repeat
+      ! Add to array of ADATA's for which diags have been printed, to avoid
+      ! being tedious and printing the same several times.
+      %if ecounter<=maxe %start
+         environmentals printed(ecounter)=adata
+         ecounter=ecounter+1
+      %finish
+      printstring("Environmental")
+   %finish %else %start
+      %if integer(adata)<0 %then printstring("No l") %else printstring("L")
+      printstring("ocal")
+   %finish
+   printstring(" variables")
+   newlines(2)
+
+   ! First cycle through to ascertain the number of variables
+   save=adata
+   %while integer(adata)>=0 %cycle
+      num=num+1
+
+      ! Have a quick validate to terminate the loop.  This should only occur
+      ! for faulty diag tables, which "should not occur".  But they did.
+
+      %if dvalidate(adata, 8, 0)#0 %start
+         printline("DIAG tables inaccessible ".htos(adata, 8))
+         %exit
+      %finish
+
+      adata=(adata+8+byte integer(adata+4))&(-4)
+   %repeat
+
+   ! Now collect the pointers, sort and print
+%begin
+%integer j
+%integer %array pt, x(0:num-1)
+%routine %spec sort
+   adata=save
+   j=0
+   %while j<num %cycle
+      pt(j)=adata
+      j=j+1
+      adata=(adata+8+byte integer(adata+4))&(-4)
+   %repeat
+   sort
+   ! Print scalars
+   %for j=0, 1, num-1 %cycle
+      adata=pt(x(j))
+      %if integer(adata)>>28&3=0 %then pscalar(adata)
+   %repeat
+   ! Print arrays
+   %if arraysize>0 %start
+      %for j=0, 1, num-1 %cycle
+         adata=pt(x(j))
+         %if integer(adata)>>28&3#0 %then parr(adata, arraysize)
+      %repeat
+   %finish
+
+!------------------------------------ sort ------------------------------------
+
+%routine sort
+! DECLARE INTEGER ARRAY X, BOUNDS 0:NUM-1, IN CALLING ROUTINE
+%integer i, j, hit, n
+   %for i=0, 1, num-1 %cycle
+      x(i)=i
+   %repeat
+   %for i=num-2, -1, 0 %cycle
+      hit=0
+      %for n=0, 1, i %cycle
+         %if string(pt(x(n))+4)>string(pt(x(n+1))+4) %start
+            j=x(n)
+            x(n)=x(n+1)
+            x(n+1)=j
+            hit=1
+         %finish
+      %repeat
+      %if hit=0 %then %exit
+   %repeat
+%end;                                    ! of SORT
+%end;                                    ! begin-block
+printlocout:
+   ssown_suppress terminal output=oldvalue %if oldvalue>=0
+%end;                                    ! of PRINT LOCALS
+
+!--------------------------------- PRINT VAR ---------------------------------
+
+%routine print var(%integer type, prec, nam, form, vaddr)
+!***********************************************************************
+!*       output the next variable in the current block.                *
+!*       a variable entry in the tables is:-                           *
+!*       flag<<20!vbreg<<18!disp                                       *
+!*       where:-                                                       *
+!*         vbreg is variable's base register, disp is it's offset      *
+!*         and flags=nam<<6!prec<<3!type                               *
+!***********************************************************************
+%integer v, len, j
+%byteintegername ch
+%const %integer unassi=x'80808080'
+%string (255) mess
+%switch intv, realv(3:7)
+
+   %if nam#0 %start
+      %if type=0 %or type=5 %then vaddr=vaddr+4 {%name or %stringname}
+      ->invalid %if dvalidate(vaddr, 4, 0)#0
+      vaddr=integer(vaddr)
+      ->not ass %if vaddr=unassi
+   %finish
+   ->ill ent %if prec<3;                 ! bits not implemented
+!*    ->invalid %if dvalidate(vaddr, 4, 0)#0 %and vaddr#x'101234'; !sh..for test
+   ->invalid %if dvalidate(vaddr, 4, 0)#0
+   %if prec>=5 %or type=3 %then v=integer(vaddr)
+
+   %if type=1 %then ->intv(prec)
+   %if type=2 %then ->realv(prec)
+   %if type=3 %start
+      %if ssown_ss record diag = 16 %then len=16 %and ->intv(6)
+      -> rec
+   %finish
+   %if type=5 %then ->str
+
+intv(4):                                 ! 16 bit integer
+   v=byteinteger(vaddr)<<8!byteinteger(vaddr+1)
+   !v=shortinteger(vaddr)
+   mess=itos(v)
+   mess="x'".htos(v, 8)."' ".mess
+   ->omess
+
+intv(7):  mess = "128 bit integer!!!"; -> omess
+realv(3): mess = "8 bit real!!!"; -> omess
+realv(4): mess = "16 bit real!!!"; -> omess
+ill ent:  mess="unknown type of variable"; ->omess
+
+intv(5):                                 ! 32 bit integer
+   ->not ass %if v=un assi
+   mess=itos(v)
+   mess="x'".htos(v, 8)."' ".mess
+   ->omess
+
+intv(3):                                 ! 8 bit integer
+   write(byteinteger(vaddr), 1)
+   %return
+
+realv(5):                                ! 32 bit real
+   ->not ass %if v=un assi
+   print fl(real(vaddr), 7)
+   %return
+
+realv(6):                                ! 64 bit real
+   ->invalid %if dvalidate(vaddr, 8, 0)#0
+   ->not ass %if unassi=integer(vaddr)=integer(vaddr+4)
+   print fl(long real(vaddr), 14)
+   %return
+
+realv(7):                                ! 128 bit real
+   ->invalid %if dvalidate(vaddr, 16, 0)#0
+   ->not ass %if unassi=integer(vaddr)=integer(vaddr+4)
+   print fl(longreal(vaddr), 14)
+   %if form=0 %then %start
+      printstring(" (R'"); phex(integer(vaddr))
+      phex(integer(vaddr+4))
+      space; phex(integer(vaddr+8))
+      phex(integer(vaddr+12))
+      printstring("')")
+   %finish
+   %return
+
+intv(6):                                 ! 64 bit integer
+   len=8
+   ->not ass %if un assi=v
+   ->invalid %if dvalidate(vaddr, len, 0)#0
+   mess="x'".htos(v, 8).htos(integer(vaddr+4), 8)
+   %if prec=7 %or type=3 %then %start
+      mess=mess." ".htos(integer(vaddr+8), 8).htos(integer(vaddr+12), 8)
+   %finish
+   mess=mess."'"; ->omess
+
+rec: {a record}
+   printline("   (dump ".itos(ssown_ss record diag)." bytes)")
+   dump2(vaddr, vaddr + ssown_ss record diag)
+   %return
+
+str:
+   ->not ass %if byteinteger(vaddr+1)=unassi&255=byteinteger(vaddr)
+   printsymbol('"')
+   v = 0
+   mess = string(vaddr)
+   %unless mess = "" %start
+      %cycle j = 1, 1, length(mess)
+         ch == byteinteger(addr(mess)+j)
+         v = 1 %and ch = 32 %unless ch=nl %or (31 < ch < 127)
+      %repeat
+   %finish
+   printstring(mess)
+   printsymbol('"')
+   %unless v = 0 %start
+      printline(" (contains non-printing characters)")
+      spaces(12)
+      %cycle j = 0, 1, length(mess)
+         space %if j & 3 = 0
+         printstring(htos(byteinteger(vaddr+j),2))
+      %repeat
+   %finish
+   %return
+
+invalid:
+   mess=" invalid address ".htos(vaddr, 8)
+   ->omess
+
+not ass:
+   mess=" not assigned"
+omess:
+   printstring(mess)
+%end;                                    ! of PRINT VAR
+!---------------------------------- PSCALAR ----------------------------------
+
+%routine pscalar(%integer adata)
+!***********************************************************************
+!*       OUTPUT THE NEXT VARIABLE IN THE CURRENT BLOCK.                *
+!*       A VARIABLE ENTRY IN THE TABLES IS:-                           *
+!*       FLAG<<20!VBREG<<18!DISP                                       *
+!*       WHERE:-                                                       *
+!*         VBREG IS VARIABLE'S BASE REGISTER, DISP IS IT'S OFFSET      *
+!*         AND FLAGS=NAM<<6!PREC<<3!TYPE                               *
+!***********************************************************************
+%integer i, k, vaddr, type, prec, nam
+%string (11) lname
+   i=integer(adata)
+   k=i>>20
+   type=k&7
+   prec=k>>4&7
+   nam=k>>10&1
+   lname<-string(adata+4)."          "
+   print string(lname."=")
+   %if i&X'40000'=0 %then vaddr=lnb %else vaddr=gla
+   vaddr=vaddr+i&X'3FFFF'
+   print var(type, prec, nam, 1, vaddr)
+   newline
+%end;                                    ! of PSCALAR
+
+!------------------------------------ XDP --------------------------------------
+
+%integer %fn xdp(%integer refaddr, vaddr, elsize, type);  ! CHECK DUPS
+!***********************************************************************
+!*    CHECK IF VAR THE SAME AS PRINTED LAST TIME                       *
+!***********************************************************************
+%integer j
+   j=0
+   %cycle
+      %if byteinteger(refaddr+j)#byteinteger(vaddr+j) %then %result=0 {different}
+      %if j=0 %and type=5 {string} %then elsize=byteinteger(refaddr)+1
+      j=j+1
+   %repeat %until j=elsize
+   %result=1 {same}
+%end;                                    ! of XDP
+
+!------------------------------------ DDV ------------------------------------
+
+%routine ddv(%integer dvad, %integer %array %name lb, ub, stride)
+!***********************************************************************
+!*    DECODE DOPE VECTOR.                                              *
+!*    WORK DOWN A DOPE VECTOR DESCRIBED BY WORD DESCRIPTOR DV AND      *
+!*    RETURN SIZE,DIMENSIONALITY AND SUBSCRIPT RANGES IN DATA          *
+!***********************************************************************
+%integer i, nd
+   nd=integer(dvad)
+   lb(0)=nd; ub(0)=nd
+   %for i=1, 1, nd %cycle
+      dvad=dvad+12;                      ! Points to lb/ub/stride for current dimension
+      lb(i)=integer(dvad)
+      ub(i)=integer(dvad+4)
+      stride(i)=integer(dvad+8)
+   %repeat
+   ub(nd+1)=0
+   lb(nd+1)=0
+%end;                                    ! of DDV
+
+!------------------------------------ PARR ------------------------------------
+
+%routine parr(%integer adata, asize)
+!***********************************************************************
+!*    PRINT THE FIRST ASIZE ELEMENTS OF THE ARRAY DEFINED BY VAR       *
+!*    ARRAYNAMES PRINTED ALSO AT PRESENT. UP TO COMPILERS TO AVOID THIS*
+!***********************************************************************
+%integer i, j, k, type, prec, els, nd, vaddr, hdaddr, afirst, elsp
+%integer refaddr, elsl, dupseen, dvad, azeroth
+%integer %array lbs, ubs, stride, subs(0:13)
+   i=integer(adata)
+   k=i>>20
+   prec=k>>4&7
+   type=k&7
+   newline
+   printstring("Array ".string(adata+4))
+   %if i&X'40000'#0 %then vaddr=gla %else vaddr=lnb
+   hdaddr=vaddr+i&X'FFFF'
+   ! VALIDATE HEADER AND THE 2 DESCRIPTORS
+   %if dvalidate(hdaddr, 12, 0)#0 %then ->hinv
+   dvad=integer(hdaddr+8)
+   %if dvalidate(dvad, 16, 0)#0 %then ->hinv
+   ! Check the dope vector: length is (3 + (3 * No. of dimensions)) words.
+   ! The number of dimensions must be greater than zero and not greater than 12
+   nd=integer(dvad)
+   %unless 0<nd<=12 %then ->hinv
+   afirst=integer(hdaddr+4)
+   azeroth=integer(hdaddr)
+   ddv(dvad, lbs, ubs, stride);          ! decode dope vector.
+   %if dvalidate(afirst, 16, 0)#0 %then ->hinv
+   ! ELS = ELement Size
+   els=integer(dvad+8)
+
+   ! Print out and check bound pair list
+   print symbol('(')
+   j=0
+   %for i=1, 1, nd %cycle
+      subs(i)=lbs(i);                    ! SET UP SUBS TO FIRST EL
+      write(lbs(i), 1)
+      print symbol(':')
+      write(ubs(i), 1)
+      print symbol(',') %unless i=nd
+      j=1 %if lbs(i)>ubs(i)
+   %repeat
+   printline(")")
+   %if j#0 %then printstring("Bound pairs invalid") %and %return
+
+   ! Work out how many elements to print on a line
+   %if type=5 %then elsp=1 %else %if els<=4 %then elsp=6 %else elsp=4
+
+   %cycle {through all the columns}
+      ! Print column header except for 1-dimensional arrays
+      %if nd>1 %then %start
+         print string("
+Column (*,")
+         %for i=2, 1, nd %cycle
+            write(subs(i), 1)
+            print symbol(',') %unless i=nd
+         %repeat
+         print symbol(')')
+      %finish
+
+      ! Compute the address of first element of the column (*, b2, b3,... bn)
+      vaddr=azeroth+subs(1)*stride(1)
+      %for j=2, 1, nd %cycle
+         vaddr=vaddr+subs(j)*stride(j)
+      %repeat
+
+      refaddr=0;                         ! ADDR OF LAST ACTUALLY PRINTED
+      dupseen=0; elsl=99;                ! FORCE FIRST EL ONTO NEW LINE
+
+      ! Cycle down the column and print the elements. sequences of repeated
+      ! elements are replaced by "(Rpt)". at the start of each line the
+      ! current value of the first subscript is printed followed by a right parenthesis
+
+      %for i=lbs(1), 1, ubs(1) %cycle
+         %if refaddr#0 %then %start;     ! CHK LAST PRINTED IN THIS COL
+            k=xdp(refaddr, vaddr, els, type);  ! CHECK DUPS
+            %if k#0 %then %start
+               print string("(Rpt)") %if dupseen=0
+               dupseen=dupseen+1
+               ->skip
+            %finish
+         %finish
+
+         ! Start a new line and print subscript value if needed
+         %if dupseen#0 %or elsl>=elsp %start
+            newline; write(i, 3); print string(")")
+            dupseen=0; elsl=0
+         %finish
+         space
+         print var(type, prec, 0, 0, vaddr)
+         elsl=elsl+1
+         refaddr=vaddr
+skip:
+         vaddr=vaddr+els
+         asize=asize-1
+         %exit %if asize<=0
+      %repeat {UNTIL COLUMN FINISHED}
+      newline
+      %exit %if asize<=0 %or nd=1
+
+      ! Update second subscript to next column. Check for and deal with overflow
+      ! into next or further cloumns
+      i=2; subs(1)=lbs(1)
+      %cycle
+         subs(i)=subs(i)+1
+         %exit %unless subs(i)>ubs(i)
+         subs(i)=lbs(i);                 ! RESET TO LOWER BOUND
+         i=i+1
+      %repeat
+      %exit %if i>nd;                    ! ALL DONE
+   %repeat;                              ! FOR FURTHER COLUMNS
+   %return
+hinv:
+   printstring(" has invalid header
+")
+%end;                                    ! of PARR
+%end;                                    ! of INDIAG
+
+!---------------------------------- WTFAULT ----------------------------------
+
+%external %integer %fn wtfault %alias "S#WTFAULT"(%integer inf)
+!***********************************************************************
+!*    TURNS INTERRUPT WT INTO PROPER FAULT FOR COMMON CASES            *
+!***********************************************************************
+%const %byte %integer %array tr(0:17)= 1,2,3,4,5,6,7,3,
+                                9,9,7,7,8,10,11,12,13,12
+%integer n
+   n=10;                                 ! DEFAULT FOR UNUSUAL CASE
+   %if inf=32 %then n=9;                 ! VSI MSG=ADDRESS ERROR
+   %if inf=64 %then n=211;               ! CPU TIME EXCEEDED
+   %if inf=65 %then n=213;               ! TERMINATION REQUESTED
+   %if inf<=17 %then n=tr(inf)
+   %if inf=136 %then n=13;               ! OUTPUT EXCEEDED
+   %if inf=140 %then n=25;               ! INPUT ENDED
+   %result=n
+! Equiv m/c code (?)
+!%const %integer n= 23
+!%const %byte %integer %array v(0:2*n+2)= !  0,1,2,3,4,5,6,7,8,9,10,11,12,13,16,18,19,20,21,32, 64, 65,136,140,
+!  1,2,3,4,5,6,7,3,9,9, 7, 7, 8,10,39,40,40,41,39, 9,211,213, 13, 25,10
+!  %if 0<=inf<256 %then %start
+!     *ld_v
+!     *lb_inf
+!     *swne_ %l =24;                     ! Should be N+1.
+!     *lss_(%dr +24);                    ! Should be N+1.
+!     *exit_-64
+!  %finish
+!  %result=10
+! **** End of machine code. ****
+%end;                                    ! of WTFAULT
+
+!----------------------------------- ermess -----------------------------------
+
+%routine ermess(%integer n, inf)
+!***********************************************************************
+!*       OUTPUTS AN ERROR MESSAGE STORED IN A COMPRESSED FORMAT        *
+!***********************************************************************
+   %return %if n<=0
+   printstring(failuremessage(n))
+   %if n=26 %or n=34 %then print symbol(next symbol)
+   %if n=10 %then write(inf, 1);         ! GIVE WT FOR FUNNY INTS
+   newline
+%end;                                    ! of ERMESS
+
+!-------------------------------- VALIDATE GLA --------------------------------
+
+%integer %fn validate gla(%integer address)
+!  Result   =   1 if OK (standard format)
+!               0   if not
+!              -1   if not, but first five words are accessible (to dump)
+%integer valmode
+
+   ! UST are not writeable in the shared bgla Subsystem, but we apply the most
+   ! stringent reasonable test all the same:
+
+   %if ssown_unsharedbgla=0 %and address>>segshift=base seg %then valmode=0 {read} %else %c
+      valmode=1 {write}
+
+   %if dvalidate(address, 20, 0)#0 %then %result=0
+
+!  First words of GLA should be:
+!   Word 0
+!   Word 1    Address of head of code
+!   Word 2    Address of GLA symbol tables (UST)
+!   Word 3    Address of shared symbol tables (SST)
+!   Word 4    Language flag and compiler versions
+!   Word 5    Address of diagnostic tables
+
+   %if address&3#0 %or dvalidate(integer(address+8), 1, valmode)#0 %or %c
+      dvalidate(integer(address+12), 1, 0)#0 %or byteinteger(address+16)>maxlanguage %then %c
+      %result=-1
+   %result=1 {OK}
+%end;                                    ! of VALIDATE GLA
+
+!----------------------------------- TRANS -----------------------------------
+
+%routine trans(%integer %name fault, event, subevent)
+!***********************************************************************
+!*       TRANSLATE FAULT TO EVENT & VICE VERSA                         *
+!*   The fault numbers and messages are in file subarc:errortexts      *
+!*   and also the event/subevent codes (%SIGNAL ev,subev) which can    *
+!*   be used to provoke them.                                          *
+!*   Diagnostics can also be provoked by EMAS3SIGNAL(class,subclass),  *
+!*   where the CLASS involved is translated in our function WTFAULT.   *
+!***********************************************************************
+%const %integer maxfaults=77
+%const %byte %integer %array ftoe(0:maxfaults)= %c
+                           0,X'12',0,X'11',0,X'13',X'62',X'61',0(3),
+                             X'81',X'F1',X'F2',X'F3',X'55',X'54',
+                             0,X'51',X'17',X'56',0(2),X'21',0,
+                             X'91',X'41',0,X'31',0,X'B1',0,X'71',
+                             0,X'42',0(3),X'82',0(11),X'52',X'53',X'53',X'16',
+                             X'14'(4),0(8),X'14'(2),0(2),
+                             X'A6',X'A3',X'A1',X'A2',X'A4',X'A5',X'A7',X'83';
+%integer k, j
+   %if fault=0 %then %start;             ! EVENT-SUBEVENT GIVEN
+      j=event<<4+subevent
+      %return %if j=0;                   ! %monitor
+      %for k=maxfaults, -1, 1 %cycle
+         %if j=ftoe(k) %then fault=k %and %return
+      %repeat
+   %finish %else %start
+      %if 1<=fault<=maxfaults %start
+         k=ftoe(fault)
+         event=k>>4; subevent=k&15
+      %finish
+   %finish
+%end;                                    ! of TRANS
+
+
+
+!***********************************************************************
+!*                                                                     *
+!*                              Constants                              *
+!*                                                                     *
+!***********************************************************************
+
+%const %integer c1len= X'4000'
+%const %integer c3len= X'4000'
+!* %const %record (comf) %name com= com seg << seg shift
+!* %const %record (uinff) %name uinf= uinf seg << seg shift
+!* %const %integer batchreason= 2
+%const %real timefactor= 1000.0;         ! SECONDS = DCPUTIME/TIMEFACTOR.
+
+!***********************************************************************
+!*                                                                     *
+!*             DIRECTOR and SUPERVISOR Routine/fn/map spec             *
+!*                                                                     *
+!***********************************************************************
+!
+!* %external %integer %fn %spec dmessage(%string %name user, %integer %name len, act, invoc, fsys, adr)
+%external %string %fn %spec confile %alias "S#CONFILE"(%integer ad)
+%external %routine %spec allow interrupts %alias "S#ALLOWINTERRUPTS"
+%external %routine %spec mon params %alias "s#monparams"(%string (255) template)
+%external %routine %spec move %alias "S#MOVE"(%integer nlength, nfrom, nto)
+%external %routine %spec set ssinhibit %alias "S#SETSSINHIBIT"
+%external %routine %spec tojournal %alias "s#tojournal"(%integer from, len)
+!***********************************************************************
+!*                                                                     *
+!*               External/internal routine/fn/map specs                *
+!*                                                                     *
+!***********************************************************************
+!
+!
+!
+!
+!* %external %integer %fn %spec pageturns %alias "s#pageturns"
+!
+!
+!***********************************************************************
+!*                                                                     *
+!*                         End of declarations                         *
+!*                                                                     *
+!***********************************************************************
+! In the %record %format INTINFOF, the PC (program counter) is found
+! in the field PSW1:  PC = intinfo_PSW1&X'7FFFFFFF'.  The LNB (local name
+! base, or stack frame pointer) is found by inspection of the general
+! registers which are stored in the field GR(0:15).  For IMP code only,
+! the procedure for finding the LNB is given below:
+!
+! %external %routine givelnb (%integer %name lnb, basereg, lineno)
+!
+! Looks at registers (5-10) in SSOWN_INTINFO_GR(5:10).
+! Tries to deduce the LNB value, the BASEREG number, and the line number
+!
+! %integer j, regm, gb
+!    %if (ssown_intinfo_gr(10)!!ssown_intinfo_gr(11))>>segshift#0 !    %or ssown_intinfo_gr(10)=x'83838383' %then%c
+%start
+!       lnb = -1
+!       basereg = -1
+!       lineno = -1
+!       %return
+!    %finish
+!    basereg = 10
+!    lnb = ssown_intinfo_gr (10)
+!    %cycle
+!       regm = basereg - 1
+!       gb = ssown_intinfo_gr (regm)
+!    %exit %if gb>ssown_intinfo_gr(11) %or gb<=lnb %or gb#integer(gb+44)
+!       lnb = gb
+!    %exit %if basereg=5
+!       basereg = regm
+!    %repeat
+!    lineno = byteinteger(lnb+2)<<8!byteinteger(lnb+3)
+! %end of GIVELNB
+!
+!-----------------------------------------------------------------------
+!
+%routine whocalled
+%integer i, lnb, codebase, pc, sf, gla, ptr
+%string (255) mess, w
+   *ST_10,LNB
+   mess=""
+   %for i=0, 1, 1 %cycle
+      ptr=lnb+48
+      codebase=integer(ptr)
+      w=htos(codebase, 8)
+      mess=mess."Code:".w."   "
+      ptr=lnb+60
+      pc=integer(ptr)
+      w=htos(pc, 8)
+      mess=mess."PC:".w."   "
+      ptr=lnb+52
+      gla=integer(ptr)
+      w=htos(gla, 8)
+      mess=mess."GLA:".w."   "
+      ptr=lnb+44
+      sf=integer(ptr)
+      w=htos(sf, 8)
+      mess=mess."SF:".w
+      lnb=integer(lnb+40)
+      %if i=0 %then mess=mess."
+called by " %else mess=mess."
+"
+   %repeat
+   i=aabprintstring(mess)
+%end;                                    ! of WHOCALLED
+!
+!-----------------------------------------------------------------------
+!
+!
+!-----------------------------------------------------------------------
+!
+! %external %routine %spec STACKANDGLA(%integer FROMLNB)
+!
+!
+%integer %fn validate trap(%integer p, stkfront)
+! This function checks the trap LOC to see whether it is still
+! sensible.
+!
+! VALIDATE TRAP is called from NEW TRAP, FIND TRAP, SET TRAP, UNSET TRAP
+! and DISCARD TRAP.  VALIDATE TRAP is not itself called directly by user
+! programs, but user programs can make calls on SET TRAP, UNSET TRAP and
+! DISCARD TRAP.  Hence VALIDATE TRAP can assume that its own stack frame,
+! and the stack frame of the routine which called VALIDATE TRAP, should be
+! clear of the stack frame for the trap being validated.
+%record (trapf) %name loc
+%string (11) itosp
+%integer j, bad
+%string (255) v1, v2
+   itosp=itos(p)
+   loc==ssown_traps(p)
+!*    *ST_10,stkfront
+!*    stkfront = integer(stkfront+40);                ! Points to the stack frame of the routine
+   ! called VALIDATE TRAP.
+!*    *ST_11,SF;                            ! Current stack front
+!*    %if stkfront>=loc_gr(11) %or ssown_c1base<=stkfront<=ssown_c1lim %then bad = 0 %else bad = -1
+   bad=0
+   %unless stkfront>=loc_gr(11) %then bad=1
+   ! Stack has collapsed since
+   ! the trap was set up - therefore the stack frame to which we would return
+   ! when the trap is sprung no longer exists - so the trap is useless.
+   !
+   ! That test is only effective if the stack is all in one file: 370
+   ! architecture allows stacks to be non-contiguous, and to spread from
+   ! segment to segment and even from file to file.  So we had better
+   ! check for that.
+   %if (stkfront!!loc_gr(11))>>seg shift#0 %then %start
+      ! Stack frames are in different segments.  Are they in the same file?
+      j=stkfront&((-1)<<seg shift)
+      v1=confile(j)
+      j=(loc_gr(11)-64)&((-1)<<seg shift)
+      v2=confile(j)
+      ! If the stack frames are in different files, then all we need check
+      ! is that the saved stack frame is writable.
+      %if v1#v2 %then bad=dvalidate(loc_gr(11)-64, 64, 1)
+   %finish
+   ->duff %if bad#0
+!
+! Validate PC. This should be a read only address
+   j=0
+   ->duff %unless dvalidate(loc_gr(15)&x'7fffffff', 2, j)=0 %and j=1
+   ! Only any good if read only
+! Here we should apply any other test that we can think of to ensure
+! that the trap is still fit to be sprung.
+   %if monitoring possible=yes %and ssown_ssnote&8#0 %then monparams("=jb*ok")
+   %result=0
+duff:
+   %if monitoring possible=yes %and ssown_ssnote&8#0 %then monparams("=jb*duff")
+   %result=-1
+%end;                                    ! of VALIDATE TRAP
+!
+!-----------------------------------------------------------------------
+!
+%external %routine eliminate trap %alias "s#eliminatetrap" (%integer p, id)
+!**********************************************
+!** this routine also called from context 3 in ssinit
+!******************************************************
+! This routine removes all trace of trap P from the trap tables and
+! ensures consistency between them.
+! P is the actual position of the trap in the trap stack.
+! ID is the position in the stack pointer array.
+! We might know both but we must at least know one of them.
+! A value of 0 means we don't know.
+%integer i, type
+%string (11) itosp, itosid
+%integer %name stktop
+%record (trapf) %array %name traps
+%record (settrapf) %array %name trset
+%byte %integer %array %name stkptr
+   %if monitoring possible=yes %and ssown_ssnote&8#0 %then monparams("=jbjb")
+   traps==ssown_traps
+   trset==ssown_trset
+   stkptr==ssown_tstkptr
+   stktop==ssown_trap stk top
+   %if p=0=id %then %start
+!*    shout("**ELIMINATE TRAP - Bad call 0,0")
+      %return
+   %finish
+   %if p=0 %then p=stkptr(id) %else %start
+      %for i=1, 1, maxtraps %cycle
+         %if stkptr(i)=p %then id=i %and %exit
+      %repeat
+   %finish
+   {Temp}
+   itosp=itos(p)
+   itosid=itos(id)
+   %unless p#0#id %then %start
+!*    shout("**ELIMINATE TRAP - Bad call ".itosp.",".itosid)
+      %return
+   %finish
+   {Temp}
+   %if p=1 %then %start
+      !*    shout("**ELIMINATE TRAP - Attempt on prime trap")
+      %return
+   %finish
+   type=traps(p)_type
+   stktop=stktop-1
+! If the trap to be eliminated is currently top of stack then all
+! that is required is to reset STKPTR(ID) to zero and TRAPS(STKTOP) to zero.
+! However if the trap to go is not on top of stack then it is more complex.
+! The procedure is as follows:
+! Collapse the trap stack to fill the hole, reduce the value of P by 1 in
+! any members of STKPTR which have values >P then reset STKPTR(ID) and
+! TRAPS(STKTOP) to zero as above.
+   %if p#stktop %then %start
+      traps(i-1)=traps(i) %for i=p+1, 1, stktop
+      %for i=1, 1, maxtraps %cycle
+         %if 0#stkptr(i)>p %then stkptr(i)=stkptr(i)-1
+      %repeat
+   %finish
+   stkptr(id)=0
+   traps(stktop)=0
+! Check if we have anything in TRSET with this ID
+! .... But only necessary if it's a user trap.
+   %if type#0 %then %start
+      %for i=1, 1, maxsetr %cycle
+         %if trset(i)_id=id %then trset(i)=0
+      %repeat
+   %finish
+   %return
+%end;                                    ! of ELIMINATE TRAP
+!
+!-----------------------------------------------------------------------
+!
+%external %routine tidy traps %alias "s#tidytraps"(%integer stkfront)
+! This routine is used to ensure that the trap info is as up to date as
+! possible. When called it checks all the currently defined traps to see
+! if they are still valid. Any which are no longer valid are cleared out.
+!
+%integer p, j
+%integer %name stktop
+%record (trapf) %array %name traps
+   traps==ssown_traps
+   stktop==ssown_trap stk top
+   %if monitoring possible=yes %and ssown_ssnote&8#0 %then monparams("=")
+! Can ignore the prime trap, it must always be valid.
+   %if stktop>2 %then %start
+      set ssinhibit
+      %for p=stktop-1, -1, 2 %cycle
+         j=validate trap(p, stkfront)
+         %if j#0 %then %start
+            eliminate trap(p, 0)
+         %finish
+      %repeat
+      allow interrupts
+   %finish
+   %return
+%end;                                    ! of TIDY TRAPS
+!
+!-----------------------------------------------------------------------
+!
+%routine new trap(%integer %name id, prot, type, resflg)
+! This function defines a new trap. The result is always 0.
+! PROT and TYPE are supplied to the function and ID is returned.
+! PROT should be given the value 0 if the trap is unprotected
+! otherwise the trap is protected.
+! TYPE is 0 for a default trap and #0 for a user trap.
+! If the call is successful then the index of SSOWN_TRAPS used is returned
+! through ID otherwise ID is set to -1.
+! For users a call of NEW TRAP is made through %external %routine
+! EMAS3 TRAP.
+! The equivalent call for subsystem default traps is made through
+! DEFAULT TRAP. This routine, however, is not available outwith the
+! Subsystem.
+! When a trap is defined, we have to store away enough information to
+! resume at the call of TRAP in the user program as though
+! TRAP had just been called and returned a non zero result.
+! (Note that the treatment of Subsystem default traps is the same.
+! The difference comes in the way they are forced.)
+! The problem is simplified by the fact that TRAP is a piece of
+! external software to the program which calls it, so the calling program
+! cannot make any assumptions about the state of the registers. What we
+! need to save about the state of the user program when TRAP is
+! called is simply the contents of general registers 0 to 15.
+! From these general registers, we try to extract two pieces of information
+! to help in validating traps (i.e., making sure they are still plausible before
+! springing them).
+!
+!
+!    1. Stack front SF (register 11 of calling routine) - This is used solely
+!       for trap validation to give some confidence that the desired stack
+!       frame still exists.
+!    2. GLA - Pointer to gla of calling routine - This is obtained from
+!       register 13 of the calling routine. This information is dual purpose.
+!       The first is in validating the trap to ensure that it is still active
+!       and the second is that it allows the loader to clear invalid traps at
+!       unload time by checking this value against its list of discarded gla
+!       ranges.
+!
+%integer mylnb, ml, mt, i, p, stkfront
+%record (trapf) %name loc
+%integer %name stktop
+%byte %integer %array %name stkptr
+%record (trapf) %array %name traps
+
+   %if monitoring possible=yes %and ssown_ssnote&8#0 %then monparams(">iwirir")
+   resflg=0;                             !validate resflg address
+   traps==ssown_traps
+   stktop==ssown_trap stk top
+   stkptr==ssown_tstkptr
+   *st_10,stkfront;                      !stkfront of routine which called us
+   tidy traps(stkfront)
+   id=-1
+   p=-1 {this to assign P for the SHOUT near end}
+   set ssinhibit
+! Make sure that there is always room for an NDIAG trap by not allowing
+! user traps to claim TRAPS(MAXTRAPS).
+   %if stktop>maxtraps %or (type#0 %and stktop=maxtraps) %then ->out %else %start
+      p=stktop
+      ! Find free slot in STKPTR array
+      %for i=1, 1, maxtraps %cycle
+         id=i %and %exit %if stkptr(i)=0
+      %repeat
+      %if id<0 %then %start
+         ! This should never happen
+         terminalprint("**NEW TRAP - Inconsistent STKPTR table")
+         ->out
+      %finish
+      stktop=stktop+1
+      stkptr(id)=p
+   %finish
+   loc==traps(p);                        ! LOC is a null record
+   *ST_10,MYLNB;                         ! LNB of NEW TRAP.
+   mylnb=integer(mylnb+40);              ! MYLNB is now LNB of TRAP or DEFAULT TRAP resp.
+   ml=64
+   mt=addr(loc_gr(0))
+   move(ml, mylnb, mt)
+!
+   loc_prot=prot
+   loc_type=type
+   loc_com36=ssown_sscomreg(36)
+   loc_saveby=ssown_who set comreg36
+   loc_loadlevel=ssown_loadlevel
+!*    loc_resflg = addr(resflg)
+   loc_gr(3)=addr(resflg);               !use trap register 3
+! STACKANDGLA(LNB)
+!*    printstring("gr3:")
+!*    phex(loc_gr(3))
+!*    printstring(" gr15:")
+!*    phex(loc_gr(15))
+!*    newline
+out:
+   allow interrupts
+   %if monitoring possible=yes %and ssown_ssnote&8#0 %then monparams("<iwirir")
+   resflg=0
+%end;                                    ! of NEW TRAP
+!
+!-----------------------------------------------------------------------
+!
+%external %routine default trap %alias "s#defaulttrap" (%integer %name id, %integer prot, %integer %name flag)
+! This can only be used from within the subsystem itself. The
+! entry point is SUPPRESSed while making a subsystem.
+   new trap(id, prot, 0, flag)
+%end;                                    ! of DEFAULT TRAP
+!
+!-----------------------------------------------------------------------
+!
+%external %routine force trap %alias "s#forcetrap"(%integer p)
+! called from bci in s01....SH 03 oct 85
+
+%record (trapf) %name loc
+%integer i
+%integer %name stktop
+%record (trapf) %array %name traps
+
+   %if monitoring possible=yes %and ssown_ssnote&8#0 %then monparams("=jb") %and whocalled
+   traps==ssown_traps
+   stktop==ssown_trap stk top
+   loc==traps(p)
+! cannot eliminate traps here - as we may want to resume
+! following traps - e.g. %onevent 9 resumption.
+! ! Eliminate any traps higher up the stack which have been invalidated
+! ! by selecting this trap to force.
+! ! Note that any traps higher up the traps list with the SAME LNB as
+! ! TRAPS(P) will remain valid.
+!    i=stktop-1
+! ! The test in the next line is inadequate if we get involved with
+! ! split stacks which spread from one file to another.
+!    %while p<i %and traps(p)_gr(11)<traps(i)_gr(11) %cycle
+!       eliminate trap(i, 0)
+!       i=i-1
+!    %repeat
+! on 370 architecture, we can use a reserved area of stack for NDIAG
+! etc. Default traps are now sprung in the same way as user traps.
+! (SH 03-oct-85)
+   i=addr(loc_gr(0))
+! If it's an unprotected trap then allow further interruption.
+   %if loc_prot=0 %then allow interrupts
+   *L_1,I
+   *LM_3,15,12(1);                       !reg 3=resflg address, rest as req
+   *LA_1,1
+   *ST_1,0(3);                           !set resflg=1
+   *BCR_15,15
+%end;                                    ! of FORCE TRAP
+!
+!-----------------------------------------------------------------------
+!
+%external %routine find trap %alias "s#findtrap"(%integer class, subclass, %integer %name up, dp,
+   %integer stkfront)
+!************************************************
+! This routine is called in context 3 from ssinit
+!************************************************
+! Returns the locations of the youngest user and default traps - through
+! UP and DP respectively -  prepared to handle CLASS/SUBCLASS
+! A returned value of UP=0 means there is no user trap for this event.
+! N.B. There will always be a default trap.
+%integer i, int, pos, j, p
+%record (settrapf) %name loctr
+%integer %name stktop
+%record (trapf) %array %name traps
+%record (settrapf) %array %name trset
+%byte %integer %array %name stkptr
+   traps==ssown_traps
+   trset==ssown_trset
+   stkptr==ssown_tstkptr
+   stktop==ssown_trap stk top
+   tidy traps(stkfront)
+! Look for a user trap.
+   p=0
+   %for i=maxsetr, -1, 1 %cycle
+      loctr==trset(i)
+      %if loctr_class=class %then %start
+         ! It's promising
+         int=subclass>>5
+         pos=subclass-int<<5
+         %if loctr_sub(int)&(X'80000000'>>pos)#0 %then %start
+            ! Found a trap. Now check whether it is higher up the stack
+            ! than any already found.
+            j=stkptr(loctr_id);          ! Actual pos on the trap stack
+            %if j>p %then p=j
+         %finish
+      %finish
+   %repeat
+   up=p
+! Now a default trap.
+   %for i=stktop-1, -1, 1 %cycle
+      %if traps(i)_type=0 %then dp=i %and %exit
+   %repeat
+! However if it is INT: A,C,V,W,X,Y then we must call the prime
+! trap.
+   %if class=65 %then %start
+      %if 'a'<=subclass<='z' %then subclass=subclass-32
+      %if 'A'<=subclass<='Z' %then %start
+         i=subclass-'A'
+         %if (X'80000000'>>i)&X'A0000780'#0 %then dp=1
+      %finish
+   %finish
+   %if monitoring possible=yes %and ssown_ssnote&8#0 %then monparams("=jbjbibib")
+%end;                                    ! of FIND TRAP
+!
+!-----------------------------------------------------------------------
+!
+!*** all this following code redundant..done in context 3
+!*** sh 03 oct 85
+!*** %routine lay traps
+!***    %integer num, utrapno, dtrapno, j
+!***    j = addr(ssown_anytrapregs(1))
+!***    *L_4,J
+!***    *STM_0,15,0(4)
+!***    *BAS_4,<DRES>
+!***    ->ftr1
+!*** dres:
+!***    *ST_4,J;                              ! points in effect to FTR1:
+!***    ssown_anytrapregs(0) = j
+!***    j = addr(ssown_primetrapregs(1))
+!***    *L_4,J
+!***    *STM_0,15,0(4)
+!***    *BAS_4,<DRET>
+!***    ->ftr2
+!*** dret:
+!***    *ST_4,J;                              ! points in effect to FTR2:
+!***    ssown_primetrapregs(0) = j
+!***    %return
+!***
+!*** ftr1:
+!***    find trap(ssown_intinfo_class, ssown_intinfo_subclass, utrapno, dtrapno)
+!***    num = utrapno
+!***    ! If there is both a valid user trap and a valid default trap
+!***    ! and the default trap is younger than the user trap then we must be
+!***    ! in the NDIAG trap and we have been interrupted during diagnostics.
+!***    ! In these circumstances only do we prefer the default to the user trap.
+!***    ! ....But what about a user trap defined in the subsystem eh?
+!***    %if num=0 %or (num#0 %and utrapno<dtrapno) %then num = dtrapno
+!***    force trap(num)
+!***    ! No return from here
+!*** ftr2:
+!***    force trap(1)
+!*** %end;                                    ! of LAY TRAPS
+!*** !
+!*** !-----------------------------------------------------------------------
+!*** !
+!*** %external %routine init trap code %alias "S#INITTRAPCODE"
+!*** ! Called from SSINIT once only
+!***    %integer pos, up, dp, class
+!***    %record (conff) %name cur
+!***    ssown_trap stk top = 1
+!***    ! Get #STK address
+!***    pos = -1
+!***    class = findfn(ssown_ssowner.":#STK".ssown_sssuffix, pos)
+!***    cur == ssown_conf(pos)
+!***    up = cur_conad+cur_size-32768
+!***    *ST_11,DP
+!***    *L_11,UP
+!***    lay traps
+!***    *L_11,DP
+!*** !    I don't think the rest of this routine is required any more.
+!*** !    Set up jump to magic exit.
+!*** !    *BAS_1,<GOTIT>
+!*** !    Pretend to be a function returning the value -1.
+!*** !    *SR_1,1, *BCTR_1,0: Register 0 gets -1.
+!*** !    %return
+!*** ! GOTIT: *ST_1,PC
+!*** !    SSOWN_MAGICPC=PC
+!*** %end;                                    ! of INIT TRAP CODE
+!
+!-----------------------------------------------------------------------
+!
+!***********************************************************************
+!*                                                                     *
+!*                           User Interface                            *
+!*                                                                     *
+!***********************************************************************
+!
+!
+%external %routine emas3 trap(%integer %name nid, nprot, flag)
+
+! The user interface to NEW TRAP
+
+%integer id, prot
+
+!* ******* We need the address of flag, for use after a trap
+!* ******* has occurred.
+!* ******* Please do not muck with this code, or it won't work. ******
+!* *******      SH.
+   ssenter("", id, "iwir")
+   new trap(id, prot, 1, flag)
+   ssexit("", id, "iwir")
+%end;                                    ! of TRAP
+!
+!-----------------------------------------------------------------------
+!
+%external %routine emas3 set trap(%integer %name nid, nclass, nsubclass, nflag)
+
+%integer id, class, subclass, flag
+%record (trapf) %name loc
+%record (settrapf) %name loctr
+%integer %name stktop
+%integer i, empty, setid, int, pos, p, stkfront
+%record (trapf) %array %name traps
+%record (settrapf) %array %name trset
+%byte %integer %array %name stkptr
+
+   ssenter("", id, "iriririw")
+   traps==ssown_traps
+   trset==ssown_trset
+   stkptr==ssown_tstkptr
+   stktop==ssown_trap stk top
+   *st_10,stkfront;                      !stack front of routine which called us
+   tidy traps(stkfront)
+   flag=1
+   ->out %unless 1<=id<=maxtraps;        ! Illegal ID value
+   p=stkptr(id);                         ! Actual position on trap stack
+   flag=2
+   ->out %if p=0 %or p>=stktop;          ! No trap
+   loc==traps(p)
+   flag=4
+   %if loc_gr(11)=0 %then %start;        !no trap
+      terminalprint("**SET TRAP - Inconsistent STKPTR")
+      ->out
+   %finish
+   flag=5
+   %if loc_type=0 %then %start
+      terminalprint("**SET TRAP - Default trap!")
+      ->out
+   %finish
+! Check if we already have anything with this ID and CLASS
+   i=1
+   empty=0
+   setid=0
+   %while i<=maxsetr %cycle
+      %if trset(i)_id=id %and trset(i)_class=class %then setid=i %and %exit
+      %if trset(i)_id=0=empty %then empty=i
+      i=i+1
+   %repeat
+   %if empty=0=setid %then flag=3 %and ->out{TRSET full} %else %start
+      set ssinhibit
+      %if setid=0#empty %then %start
+         ! New record required
+         trset(empty)_id=id
+         trset(empty)_class=class
+         setid=empty
+      %finish
+      loctr==trset(setid)
+      %if subclass<0 %then %start
+         ! Set all subclasses
+         %if loctr_l1=0=loctr_l2 %then loctr_l1=-1 %and loctr_l2=-1 %else %c
+            allow interrupts %and flag=6 %and ->out
+         {This trap already set for at least 1 of the SUBCLASSes}
+      %finish %else %start
+         ! Check the requested SUBCLASS in the bitmap
+         int=subclass>>5
+         pos=subclass-int<<5
+         %if loctr_sub(int)&(X'80000000'>>pos)#0 %then %c
+            allow interrupts %and flag=7 %and ->out %else %c
+            loctr_sub(int)=loctr_sub(int)!(X'80000000'>>pos)
+      %finish
+   %finish
+   allow interrupts
+   flag=0
+
+out:
+   ssexit("", id, "iriririw")
+%end;                                    ! of SET TRAP
+!
+!-----------------------------------------------------------------------
+!
+%external %routine emas3 unset trap(%integer %name nid, nclass, nsubclass, nflag)
+
+%integer id, class, subclass, flag
+%record (trapf) %name loc
+%record (settrapf) %name loctr
+%integer i, setid, int, pos, p, stkfront
+%integer %name stktop
+%record (trapf) %array %name traps
+%record (settrapf) %array %name trset
+%byte %integer %array %name stkptr
+
+   ssenter("", id, "iriririw")
+   traps==ssown_traps
+   trset==ssown_trset
+   stkptr==ssown_tstkptr
+   stktop==ssown_trap stk top
+   *st_10,stkfront;                      !stack front of routine which called us
+   tidy traps(stkfront)
+   flag=1
+   ->out %unless 1<=id<=maxtraps;        ! Illegal ID value
+   p=stkptr(id);                         ! Actual position on trap stack
+   flag=2
+   ->out %if p=0 %or p>=stktop;          ! No trap
+   loc==traps(p)
+   flag=4
+   terminalprint("**UNSET TRAP - Inconsisent STKPTR") %and ->out %if loc_gr(11)=0;  ! No trap
+   flag=5
+   terminalprint("**UNSET TRAP - Default trap!") %and ->out %if loc_type=0
+! Check if we already have anything with this ID and CLASS
+   i=1
+   setid=0
+   %while i<=maxsetr %cycle
+      %if trset(i)_id=id %and trset(i)_class=class %then setid=i %and %exit
+      i=i+1
+   %repeat
+   flag=3
+   ->out %if setid=0 {Trap not set for this CLASS}
+   loctr==trset(setid)
+   set ssinhibit
+   %if subclass<0 %then loctr_l1=0 %and loctr_l2=0 %else %start
+      ! Check the requested SUBCLASS in the bitmap
+      int=subclass>>5
+      pos=subclass-int<<5
+      flag=6
+      %if loctr_sub(int)&(X'80000000'>>pos)=0 %then allow interrupts %and ->out %else %c
+         loctr_sub(int)=loctr_sub(int)!!(X'80000000'>>pos) {Remove SUBCLASS}
+   %finish
+   allow interrupts
+   flag=0
+out:
+
+   ssexit("", id, "iriririw")
+%end;                                    ! of UNSET TRAP
+!
+!-----------------------------------------------------------------------
+!
+%external %routine emas3 discard trap(%integer %name nid, nflag)
+
+! Remove all information about trap ID
+
+%integer id, flag
+%record (trapf) %name loc
+%integer p, stkfront
+%integer %name stktop
+%record (trapf) %array %name traps
+%byte %integer %array %name stkptr
+
+   ssenter("", id, "iriw")
+   traps==ssown_traps
+   stkptr==ssown_tstkptr
+   stktop==ssown_trap stk top
+   flag=1
+   ->out %unless 1<=id<=maxtraps;        ! Illegal ID value
+   p=stkptr(id);                         ! Actual position on trap stack
+   flag=2
+   ->out %if p=0 %or p>=stktop;          ! No trap
+   loc==traps(p)
+   flag=3
+   terminalprint("**DISCARD TRAP - Inconsisent STKPTR") %and ->out %if loc_gr(11)=0;  ! No trap
+   flag=4
+   %if loc_type=0 {Default trap} %then terminalprint("**Attempt to discard default trap") %and ->out
+   set ssinhibit
+   eliminate trap(p, id)
+   allow interrupts
+   *st_10,stkfront;                      !lnb of routine which called us
+   tidy traps(stkfront)
+   flag=0
+out:
+   ssexit("", id, "iriw")
+%end;                                    ! of DISCARD TRAP
+!
+!-----------------------------------------------------------------------
+!
+%routine fill intinfo(%integer class, subclass)
+%integer lnb
+%record (intinfof) %name intinfo
+%integer j,link,lowreglim,reg
+
+   *ST_10,LNB;                           ! LNB (stack frame pointer) for FILL INTINFO is in register 10
+   ! provided that FILL INTINFO is declared at the top level.
+   lnb=integer(lnb+40);                  ! LNB for TRIGGER TRAP or SIGNAL is in register 10
+   ! of the registers dumped at the start of the stack frame of
+   ! FILL INTINFO (provided that TRIGGER TRAP and FILL INTINFO
+   ! are declared at the top level).
+   intinfo==ssown_intinfo
+   intinfo=0
+   intinfo_class=class
+   intinfo_subclass=subclass
+! INTINFO_LNB=INTEGER(LNB) - LNB of calling routine
+! INTINFO_PC=INTEGER(LNB+8) - PC of calling routine
+! Here we should fill in the PSW0, PSW1, GR and FR of the calling
+! routine, but the only ones that are essential are (?) the general
+! registers.  For the time being, that is all we will do, but it would
+! be a good idea to do something about the others, if only for form's
+! sake.
+   move(64, lnb, addr(intinfo_gr(0)))
+   lowreglim=-1
+   link=integer(lnb+4*15)&x'7fffffff'; !return address
+   %if link>20 %and dvalidate(link-20,20,0)=0 %thenstart
+      %for j=link-6,-2,link-20 %cycle
+         %if integer(j)&x'ff00f000'=x'9000b000' {STM_?,?,?(11)} %start
+            reg=(integer(j)>>20)&15; !the low regno in the STM
+            %if shortinteger(j+2)=x'ffffb000'+reg<<2 %thenstart
+               lowreglim=reg
+               %exit
+            %finish
+         %finish
+      %repeat
+   %finish
+   %if lowreglim<0 %thenstart
+      ! This code not executed
+      shout("FILLINTINFO..cannot find STM")
+      lowreglim=4
+   %finish
+   %cycle j=0,4,(lowreglim-1)<<2
+      integer(addr(intinfo_gr(0))+j)=0; !clear other regs
+   %repeat
+%end;                                    ! of FILL INTINFO
+!
+!-----------------------------------------------------------------------
+!
+%external %routine emas3 trigger trap(%integer %name nclass, nsubclass)
+
+%integer class, subclass
+%integer up, dp, stkfront
+
+   ssenter("", class, "irir")
+   dp=0
+! Look for a user trap
+!   %if monitoring possible=yes %and ssown_ssnote&8#0 %then monparams("=ibib")
+   *st_10,stkfront;                      !stack front of routine which called us
+   find trap(class, subclass, up, dp, stkfront)
+   %if up=0 %then %return
+   set ssinhibit {Matched in FORCE TRAP or the trap itself}
+!*    *xc_0(40,11),0(11); !clear out register save area
+   fill intinfo(class, subclass)
+   force trap(up)
+%end;                                    ! of TRIGGER TRAP
+!
+!-----------------------------------------------------------------------
+!
+%external %routine emas3 signal(%integer %name nclass, nsubclass)
+
+! This routine will call the youngest user trap prepared to handle
+! an event of CLASS/SUBCLASS or failing that the appropriate default
+! trap.
+
+%integer class, subclass
+%integer i, up, dp, stkfront
+
+   ssenter("", class, "irir")
+! shout("EMAS3 Signal ".itos(class)." ".itos(subclass)." ".ssown_ssfname)
+! printfd(addr(ssown_inf), 1)
+   %if monitoring possible=yes %and ssown_ssnote&8#0 %then monparams("=ibib")
+   *st_10,stkfront;                      !stack front of routine which called us
+   find trap(class, subclass, up, dp, stkfront)
+   i=up
+! If there is both a valid user trap and a valid default trap
+! and the default trap is younger than the user trap then we must be
+! in the NDIAG trap and we have been interrupted during diagnostics.
+! In these circumstances only do we prefer the default to the user trap.
+! ....But what about a user trap defined in the subsystem eh?
+   %if i=0 %or (i#0 %and up<dp) %then i=dp
+   !if user has already inhibited, then clean up count, otherwise
+   !we must inhibit until after the trap is sprung
+   %if ssown_ssinhibit#0 %then %start
+      ssown_ssinhibit=1
+   %finish %else %start
+      set ssinhibit
+   %finish
+!*    *xc_0(40,11),0(11); !clear out register save area
+   fill intinfo(class, subclass)
+   force trap(i)
+! No return from here
+%end;                                    ! of SIGNAL
+!
+!-----------------------------------------------------------------------
+!
+!***********************************************************************
+!*                                                                     *
+!*                          Info about EVENTs                          *
+!*                                                                     *
+!***********************************************************************
+!
+!
+%external %routine emas3 give event(%integer %name nclass, nsubclass)
+%integer class, subclass
+
+   ssenter("", class, "iwiw")
+   class=ssown_intinfo_class
+   subclass=ssown_intinfo_subclass
+   ssexit("", class, "iwiw")
+%end;                                    ! of GIVE EVENT
+!
+!-----------------------------------------------------------------------
+!
+%external %integer %fn event data %alias "s#eventdata"(%integer ad50)
+
+! Return a copy of SSOWN_INTINFO to AD50 supplied by caller.
+
+%integer flag
+   flag=dvalidate(ad50, 200, 1);         ! 50 integers, read/write access
+   %result=0 %unless flag=0
+   move(200, addr(ssown_intinfo_class), ad50)
+   %result=1
+%end;                                    ! of EVENT DATA
+!
+! RESET CONTEXT
+!
+%externalroutine resetcontext %alias "emas3resetcontext" %c
+   (%integername xtrapid,xflag)
+%integer trapid,flag
+%integer stkfront,p
+%constinteger shmon=0; !1..monitor
+%record (trapf) %name loc
+   ssenter("", trapid, "iriw")
+   *st_10,stkfront
+   tidytraps(stkfront)
+   flag=1
+   ->out %unless 1<=trapid<=maxtraps; !illegal id value
+   p=ssown_tstkptr(trapid); !actual position on trap stack
+   flag=2
+   ->out %if p=0 %or p>=ssown_trap stk top; !no trap
+   loc==ssown_traps(p)
+   %if ssown_loadlevel#loc_loadlevel %thenstart
+      %if shmon#0 %thenstart
+         printstring("loadlevel reset from:")
+         write(ssown_loadlevel,1)
+         printstring(" to:")
+         write(loc_loadlevel,1)
+         newline
+      %finish
+      %cycle
+         unload2(ssown_loadlevel,0)
+         tidyfiles(1)
+         ssown_loadlevel=ssown_loadlevel-1
+         %exitif ssown_loadlevel=loc_loadlevel
+      %repeat
+   %finish
+   %if ssown_sscomreg(36)#loc_com36 %thenstart
+      %if shmon#0 %thenstart
+         printstring("Comreg36 reset from x")
+         phex(ssown_sscomreg(36))
+         printstring(" to x")
+         phex(loc_com36)
+         newline
+      %finish
+      setcomreg36(loc_com36,-loc_saveby)
+   %finish
+   flag=0; !ok
+out:
+   ssexit("", trapid, "iriw")
+%end; !of resetcontext
+!
+!-----------------------------------------------------------------------
+!
+%external %routine modpdfile %alias "s#modpdfile"(%integer ep, %string (255) pdfile,
+   %string (11) member, %string (255) infile, %integer %name flag)
+
+!  This routine provides services for modifying PD files.
+!        EP = 1  INSERT  (i.e. "COPY" from INFILE to PDFILE_MEMBER)
+!        EP = 2  REMOVE
+!        EP = 3  RENAME
+!        EP = 4  CREATE PDFILE
+!        EP = 5  TIDY PDFILE
+!
+!
+!  Structure of Partitioned files
+!  ------------------------------
+!
+!   Starts of members may be 8-byte-aligned (e.g. from 2900), but are created 16-byte aligned.
+!   The index is always 16-byte-aligned.
+!
+!   The  seventh  word of the partitioned file's header points to the index.
+!   The eighth word indicates how many members there  are.   The  index  has
+!   exactly   one   entry   for  each  member.  The  entries  are  laid  out
+!   consecutively.  There can be null entries  both  within  and  after  the
+!   index.  The number of free entries is not recorded.
+!
+!   Each member of a partitioned file is laid out exactly like a file,  with
+!   a  header  (in  the  format already defined) in its first bytes.  In the
+!   header of a member, offsets are given  relative  to  the  start  of  the
+!   header  of  the  member,  not  relative  to  the start of the containing
+!   partitioned file.  Space is allocated for members  in  small  units,  so
+!   that  they  do  not  have to occupy a multiple of 4096 bytes.  The third
+!   word in the header of a member is not significant and does not  indicate
+!   the size of the member.
+!
+!   Each entry in the index is 32 bytes long and can be expressed by the
+!   record format:
+!
+!   %recordformat INDEXF (%integer START, %string (11) NAME,
+!                         %integer HOLE, SPARE1, SPARE2, SPARE3)
+!
+!   The meanings of the fields are as follows.
+!
+!      START  -  This is an offset in bytes, releative to the first byte of
+!                the (header of the) file of the start of the member.
+!
+!      NAME   -  This is the member name. The complete entry is currently
+!                considered blank if the length of this string is zero.
+!
+!      HOLE   -  This is the size in bytes of the space between the end of
+!                the current member and the start of the next member. In
+!                a tidy partitioned file this field will be zero.
+!                N.B. The hole does NOT take the size of the index into
+!                account if the index resides within the hole.  That is, the HOLE
+!                field is the same whether or not the index resides in the hole.
+!                We rely on special code to detect the presence of the index
+!                whenever we want to use the hole.
+!
+!      The remaining fields are not used and are set to zero.
+!
+!
+!
+!  Changes to MODPDFILE (July 1983)
+!  --------------------------------
+!    The software has been extended to:
+!       1.  Make less assumptions about the structure of a partitioned file.
+!       2.  Reduce the chances of corruption of the pdfile from machine failure.
+!       3.  Decrease the work involved.
+!
+!    Assumptions about structure of pdfile
+!    -------------------------------------
+!          The index may reside in any position within the file.
+!          If it is in a hole between members, it is at the start of the hole
+!          (or up to 15 bytes from the start, to get its 16-byte alignment) OR
+!          it may be midway between members after deletion of a file immediately
+!          below it.  However, in the latter case the index is moved to the
+!          start of a hole (aligned), or to the start of the current hole, by
+!          the preliminary code for INSERT member.
+!          MEM_HOLE, in an index entry, may historically be a multiple of 8 bytes
+!          but latterly is being rounded down to a multiple of 16 bytes. [A bug
+!          was detected involving these different roundings, to 8 vs. 16 bytes].
+!          The addresses of the members need not be in ascending order of
+!          memory addresses. (Will be sorted into order)
+!          Spaces are allowed between the entries within the index.
+!          Space is permitted, and  (and utilised and created) Between members
+!          of the paritioned file. A new field in the index has been
+!          created to keep a record of the space after each member.
+!
+!    Protection against system failure
+!    ---------------------------------
+!          The problem is the protection of data againt a system crash while
+!       data is being moved.  In the case of a partitioned file, the data may
+!       be considered as one of two classed.s - either members of the partitioned
+!       file or the index for the file.  Two different methods of protection
+!       are used.
+!          a)  Members are not moved unless the old and new positions do not
+!              overlap. In this way the critical period now becomes the time
+!              when the pointer to the member is being updated in the index.
+!          b)  A duplicate index is maintained when carrying out operations
+!              on the main index (such as sorting or removeiving space
+!              occupied by a deleted member). Again the only susceptible point
+!              is the updating of the index pointer.
+!
+!   Decreasing work involved
+!   ------------------------
+!          The software makes a choice of strategy dependent on the initial
+!          layout of the pd file. The algorithms for the various service routines
+!          are outlined below:
+!      a)  Delete member.
+!          1. Find member name in index and delete entry in table.
+!          2. If the size of the member is appreciably large compared to
+!             the remainder of the file after the member, then shift the
+!             remaining members into the hole without changing their order,
+!             removing any space between the members which are moved.
+!             If the member is small in comparision with the remainder of the
+!             file, then the hole is filled by copying members from the end of
+!             the file into the hole (starting with the last member). This
+!             method inevitably leads to some waste of space after the deleted member.
+!             Both strategies have the advantage of moving the minimum amount
+!             of data necessary and does not cause any overlap when shifting
+!             the data.
+!          3. Trim the file length.
+!
+!      b)  Insert Member.
+!          1. Find position of index with respect to the members of the
+!             pd file.
+!          2. If there is not enough space in the index for a new member
+!             then find a suitable space for the index (reserving space
+!             for future members).
+!          3. Find a space for the new member.
+!          4. Copy in new member.
+!
+!      c)  Rename Member.
+!          1. Find member name in index.
+!          2. Change member name.
+!
+!      d)  Tidy Pd file.
+!          This essentially removes all unused space from the file, although
+!          it does reserve room for future members in the index.
+!          The index and members are copied to a new file and the old
+!          file is then newgened.
+!          It may be useful to include an option to 'epage' align the
+!          members for greater accessing efficiency.
+!-----------------------------------------------------------------------------
+
+
+
+%const %integer margin= 32*10  { space for 10 more index entries }
+%record %format pdindexf(%integer start, %string (11) name, %integer end, top, hole, s7)
+%record (pdindexf) %array %format indexaf(0:16384)
+%record %format pdheaderf(%integer dataend, datastart, size, filetype, sum, datetime, adir, count)
+
+%external %integer %fn %spec s11ok %alias "s#s11ok"(%string %name s11)
+%external %routine %spec connect %alias "s#connect"(%string (255) file, %integer mode, hole,
+   prot, %integer %name adr, type, start, end, flag)
+%external %routine %spec uctranslate %alias "s#uctranslate"(%integer adr, len)
+%external %routine %spec fill %alias "s#fill"(%integer len, from, filler)
+%external %routine %spec finfo %alias "s#finfo"(%string (255) file, %integer mode,
+   %record (frf) %name fr, %integer %name flag)
+%external %integer %fn %spec roundup %alias "s#roundup"(%integer n, round)
+%externalstringfnspec suffixed %alias "s#suffixed" (%stringname file)
+%external %integer %fn %spec dchsize(%string %name index, file, %integer %name fsys, nkb)
+%external %integer %fn %spec dirtoss %alias "s#dirtoss"(%integer n)
+%external %routine %spec outfile %alias "s#outfile"(%string (255) file, %integer size, hole,
+   prot, %integer %name conad, flag)
+%external %routine %spec newgen %alias "s#newgen"(%string (255) file1, file2, %integer %name flag)
+%external %routine %spec changefilesize %alias "s#changefilesize"(%string (255) file,
+   %integer nkb, %integer %name flag)
+%external %routine %spec disconnect %alias "s#disconnect"(%string (255) file, %integer %name flag)
+%externalroutinespec changeaccess %alias "s#changeaccess" (%string(255)file,
+   %integer mode, %integername flag)
+
+
+%integer modmon, dirsize, to, memsize, decr
+%integer jx, x, insize, insize16, base, newsize, adir, oldsize
+%integer dataend, hole, top, left, right, size, memstart, memhole
+%integer len, dirpos, holestart
+%integer adircopy, tidy pd file, newdirsize, dirspace, copybase
+%integer mvl, mvf, delpt, outerfile is a pd
+%integer inhib, curfsys
+%record (conff) %name cur
+%string (31) work file
+%string(19)curindex
+%string(255)curfname, outerfile
+%switch sw(1:5)
+
+
+%record (reportf) pdr, fr;               ! for connect details
+%record (pd index f) %name mem, newmem;  ! Maps to index elements
+%record (pdindexf) %array %name index, copyindex
+%record (pd header f) %name pdh, copypdh;  ! Maps to PD file header
+
+
+%routine %spec extend file(%integer newlength, %integer %name flag)
+%routine %spec compress index
+%routine %spec map
+%routine %spec sort addresses
+%routine %spec validate holes
+
+
+!******************************************************************************
+!
+!      Body of routine MODPDFILE
+!
+!******************************************************************************
+
+
+
+   %if ssown_ssnote&4#0 %then monparams(">jrtrvrtriw")
+   modmon=ssown_sscomreg(25)&8
+   dirpos = 0
+   inhib=0
+   base=0
+   tidy pd file=yes { by default, after delete member }
+
+   %if ep=-2 %start
+      ep=2
+      tidy pd file=no { presumably if about to insert a member }
+   %finish
+
+   %unless 1<=ep<=5 %then flag=202 %and ->err
+   ssown_ssfname=pdfile
+
+   %if pdfile -> outerfile . ("_") %start
+      outerfile is a pd = yes
+      tidy pd file = no
+   %else
+      outerfile is a pd = no
+      outerfile = pdfile 
+   %finish
+   uctranslate(addr(member)+1, length(member))
+
+   %unless ep=4 %start
+      %if outerfile is a pd = no %start
+         connect(pdfile, 3, 0, 0, pdr_conad, pdr_filetype, pdr_datastart,
+            pdr_dataend, flag)
+         ->err %if flag#0
+         pdfile = ssown_shortname  { use short name henceforth }
+      %finish %else %start
+         connect(pdfile, 1, 0, 0, pdr_conad, pdr_filetype, pdr_datastart,
+            pdr_dataend, flag)
+         changeaccess(outerfile, 3, flag) %if flag = 0
+         -> err %unless flag = 0
+      %finish
+      cur==record(ssown_conf(ssown_confpos))
+      cur_file -> curindex . (":") . curfname
+      curfsys = cur_fsys
+      base=pdr_conad
+      %if pdr_filetype#sspdfiletype %then flag=286 {not a pdfile} %and ->err
+
+      %unless ep=6 %start;               ! Exclude info as file may be in use
+         %if 0<cur_conlevel<ssown_loadlevel %then flag=266 {in use} %and ->err
+      %finish
+
+      map
+
+      ! Note the two folowing lines are not very safe from a system
+      ! crash if the index is not in a compressed state, or the
+      ! index is not ordered.  The index should never be in
+      ! a non compressed state, and should only rarely be unsorted.
+      ! It would not seem too dangerous to leave the code as it is.
+
+      compress index
+! dump(adir, adir+(pdh_count)*32-4)
+      sort addresses
+! dump(adir, adir+(pdh_count)*32-4)
+      validate holes
+
+   %finish
+
+   ->sw(ep)
+
+
+!*******************************************************************************
+!*
+!*                   Insert  File
+!*
+!*******************************************************************************
+!     To insert member into pd file, the code does the following:
+!
+!     1.  Check that the member does not already exist.
+!     2.  Connect the input file, which may be a member of a pd file.
+!     3.  Find the position of the index relative to the existing members.
+!     4.  See if there is space in the index for a new entry - if there
+!         isn't, then will have to find a space where a larger index will
+!         fit (making the index generously bigger).
+!     5.  Find a space for a new member. Try first between the existing members
+!         or at the end, if there is not a large enough hole between the members.
+!     6.  Copy in the new member.
+!******************************************************************************
+
+
+sw(1):
+   printline("Insert ".member." into ".pdfile) %if modmon>0
+
+   flag=s11ok(member)
+   ->err %if flag#0
+
+   !  Check that member is not already there
+
+   %for jx=pdh_count-1, -1, 0 %cycle
+      %if index(jx)_name=member %then flag=287 {already there} %and ->err
+   %repeat
+
+
+   ! ------------------------------------  SECTION 1:  Find start address of the input file--------------------------
+
+   connect(infile, 0, 0, 0, fr_conad, fr_filetype, fr_datastart, fr_dataend, flag)
+   ->err %if flag#0
+   infile = ssown_shortname
+   %if fr_dataend<32 %or fr_dataend<fr_datastart %then flag=311 {corrupt} %and ->err
+
+   copybase=fr_conad
+   copypdh==record(copybase);            ! Map to header of input file
+   insize=copypdh_dataend
+   insize16=(insize+15)&(-16)
+
+
+   ! ----------------------------------------  SECTION 2: Check existing index ---------------------------------------
+
+   ! Dirpos is the number of the member immediately AFTER the index.
+   ! Dirspace is how many more entries it can take  -----
+
+   %if dirpos<pdh_count %then top=index(dirpos)_start %else top=pdh_size
+   dirspace=(top-pdh_adir)//32-pdh_count
+   printline("Dirspace=".itos(dirspace)) %if modmon>0
+
+   ! ------------------------------------  SECTION 3: Find, or make space for, a free index record ------------------
+
+   inhib=1
+   setssinhibit;                         !*******  DISABLE INTERRUPTS  ******
+
+   %if dirspace=0 %start;                ! No space in dir - must find some
+      mvl=pdh_count*32 { current dirsize }
+      newdirsize=mvl+margin { space for 10 more entries }
+
+
+      !  First look to see if there is space before first member
+
+      %if pdh_count#0#dirpos %start
+         mem==index(0);                  ! Map to index record for first member
+         %if mem_start-pdh_datastart>=newdirsize %start
+            ! Move index in before first member
+            adircopy=base+pdh_datastart
+            move(mvl, adir, adircopy)
+            pdh_adir=pdh_datastart
+            map
+            dirpos=0 { index now before first mem }
+            printline("index moved to before first member") %if modmon>0
+            ->found1
+         %finish
+      %finish
+
+      ! Space not found before first member, so now look at HOLE size following
+      ! each member to see if the new index can fit between members.
+
+      jx=0
+      %while jx<pdh_count %cycle
+         mem==index(jx)
+         %if mem_hole>=newdirsize %and jx+1#dirpos %start;  ! Have found big enough hole for new index
+            ! and the index is not already in it
+            adircopy=base+mem_top { start of hole }
+            move(mvl, adir, adircopy)
+            pdh_adir=adircopy-base
+            map
+            dirpos=jx+1
+            printline("index moved to after mem ".itos(jx)) %if modmon>0
+            ->found1
+         %finish
+         jx=jx+1
+      %repeat
+
+      !  Have not found big enough hole for new index
+      ! will have to extend file therefore
+      ! if the index is already at the end, just one more page will
+      ! suffice and then let index expand in situ.  If its not at
+      ! the end extend file enough to take a copy of the index at
+      ! the end, potentially quite a lot more space.
+
+      x=4096
+      x=newdirsize %if dirpos<pdh_count
+      extend file(pdh_size+x, flag)
+      ->err %unless flag=0
+      printstring("file extended by ".itos(x)." and index ") %if modmon>0
+      mem==index(pdh_count-1) { last index record }
+      mem_hole=pdh_size-mem_top { now has a bigger hole }
+      %if dirpos<pdh_count %start { index not at end, so put it there }
+         adircopy=base+mem_top
+         move(mvl, adir, adircopy)
+         pdh_adir=mem_top
+         map
+         dirpos=pdh_count
+         printline("moved to end") %if modmon>0
+      %else
+         printline("left at end") %if modmon>0
+      %finish
+
+   %finish
+
+found1:
+
+
+   ! -----------------------------------  SECTION 4: Find place in the PDfile for the new member ---------------------
+
+   jx=0 { new member to go before this one }
+   %if pdh_count=0 %start { file currently empty }
+      dataend=pdh_datastart+margin+insize16
+      extend file(dataend, flag)
+      ->err %unless flag=0
+      pdh_adir=pdh_datastart { (re)postion index at front }
+      map
+      memstart=pdh_adir+margin
+      memhole=pdh_size-memstart-insize16
+      ->place member
+   %finish
+
+   %if dirpos < pdh_count %c
+   %then dataend = index(pdh_count-1)_top %c
+   %else dataend = pdh_adir + 32*(pdh_count + 1)
+
+   hole=index(0)_start-pdh_datastart { hole before first member }
+   top=pdh_datastart { top of 'previous' member }
+   %cycle
+      %if hole>=insize %start { possible candidate }
+         %if jx#dirpos %start { great!, a clear hole }
+            dataend=top+insize16 %if jx=pdh_count { new last mem }
+            memstart=top
+            memhole=hole-insize16
+            ->place member
+         %finish %else %start { index resides in hole, beware }
+            left=pdh_adir-top { space in hole before index }
+            %if left>=insize16 %start { it'll do }
+               memstart=top
+               memhole=hole-insize16
+               ->place member
+            %finish
+            right=hole-left-pdh_count*32
+            { max space we can use in hole after index }
+            %if right>=insize16+margin %start { enough }
+               %if right>insize16+4096 %start
+                  { a big hole so put mem near index }
+                  memstart=pdh_adir+pdh_count*32+margin
+                  memhole=hole-(memstart-top)-insize16
+               %else
+                  { leave more space for index }
+                  memstart=top+hole-insize16
+                  memhole=0
+               %finish
+               dataend=memstart+insize16 %if jx=pdh_count
+               ->place member
+            %finish { right > ... }
+         %finish
+      %finish { possible candidate }
+      %exit %if jx=pdh_count { no suitable hole }
+      hole=index(jx)_hole
+      top=index(jx)_top
+      jx=jx+1
+   %repeat
+
+   { nae luck so far, extend and place member at end }
+   size=top { ie top of last member }
+   size=pdh_adir+jx*32+margin %if dirpos=jx
+   dataend=size+insize16
+   extend file(dataend, flag)
+   ->err %unless flag=0
+   memstart=size
+   memhole=pdh_size-memstart-insize16
+   { -> place member }
+
+place member:
+   connect(infile, 0, 0, 0, copybase, fr_filetype, fr_datastart,
+      fr_dataend, flag)
+   -> err %unless flag = 0  { this for case of copying members within the PD file }
+   move(insize, copybase, base+memstart)
+   mem==index(pdh_count)
+   mem=0
+   mem_start=memstart
+   mem_name=member
+   mem_hole=memhole
+   mem_top=memstart+insize16
+   pdh_count=pdh_count+1
+   index(jx-1)_hole=memstart-index(jx-1)_top %if jx>0
+!printline("Dataend=".itos(dataend))
+   pdh_dataend=dataend
+
+   ->err
+
+
+!******************************************************************************
+!*
+!*                           Delete Member
+!*
+!******************************************************************************
+
+
+sw(2):
+   printline("Delete ".member." from ".pdfile) %if modmon>0
+   delpt=0
+   %while delpt<pdh_count %cycle
+      mem==index(delpt)
+      %if mem_name=member %then ->member found
+      delpt=delpt+1
+   %repeat
+   ssown_ssfname=member
+   flag=288;                             !MEMBER NOT FOUND
+   ->err
+
+
+
+member found:
+
+!  DELPT points to member's record.
+!  Delete the member-name from the index
+
+   inhib=1
+   setssinhibit
+   length(mem_name)=0;                   ! delete entry
+   pdh_count=pdh_count-1;                ! one less member
+   %if delpt>0 %start { adjust hole of previous member if this is not first }
+      index(delpt-1)_hole=mem_top+mem_hole-index(delpt-1)_top
+   %finish
+   compress index %if delpt<pdh_count
+   printline("Delpt=".itos(delpt)) %if modmon>0
+
+   %if pdh_count=0 %start { file now empty }
+      pdh_dataend=pdh_datastart
+      pdh_adir=pdh_datastart
+      ->err %if tidy pd file=no
+      ->trim
+   %finish
+
+   ->err %if tidy pd file=no
+
+   dirpos=dirpos-1 %if dirpos>delpt
+   dirsize=pdh_count*32
+
+   ! Before trying anything subtle, check gross limits
+   size=pdh_datastart+dirsize+margin
+   jx=0
+   %cycle
+      size=size+(index(jx)_end+15)&(-16)
+      jx=jx+1
+      %exit %if jx>=pdh_count
+   %repeat
+   left=pdh_size-size
+   ->sw(5) %if left>4096 %and left>(size>>3)
+
+   %if dirpos>0 %start { index not at front, can we move it down? }
+      to=pdh_datastart
+      top=index(0)_start
+      jx=0
+      %cycle
+         %if top>=to+dirsize+margin %start { yes! }
+            move(dirsize, adir, base+to)
+            pdh_adir=to
+            map
+            dirpos=jx
+            printline("Index repositioned to before member ".itos(jx)) %if modmon>0
+            %exit
+         %finish
+         to=index(jx)_top
+         top=to+index(jx)_hole
+         jx=jx+1
+         %exit %if jx=dirpos
+      %repeat
+   %finish
+
+   { having done the best we can for the index, can we move any members }
+   { down the way? }
+   to=pdh_datastart
+   top=index(0)_start
+   jx=0
+   %cycle
+      %if jx=dirpos %start { this hole contains the index }
+         %if pdh_adir>to %start { index not at front of hole }
+            %if pdh_adir>=to+dirsize %start { enough space for a complete copy }
+               move(dirsize, adir, base+to)
+               pdh_adir=to
+               map
+               printline("Index moved in hole before member ".itos(jx)) %if modmon>0
+            %else
+               decr=pdh_adir-to
+               fill(decr, base+to, 0) { clear space before index }
+               decr=decr&(-32)
+               %if decr>0 %start
+                  pdh_adir=pdh_adir-decr { must do this in multiples of 32 }
+                  map
+                  compress index
+                  printline("Index prefilled before member ".itos(jx)) %if modmon>0
+               %finish
+            %finish
+         %finish
+         to=pdh_adir+dirsize+margin { start of hole - adjusted for index }
+      %finish
+
+      %exit %if jx>=pdh_count { with mem mapped to last index entry }
+
+      mem==index(jx)
+      memsize=mem_end
+      %if to+memsize<=top %start
+         move(memsize, base+mem_start, base+to)
+         top=mem_top+mem_hole
+         mem_start=to
+         mem_top=(to+memsize+15)&(-16)
+         mem_hole=top-mem_top
+         index(jx-1)_hole=mem_start-index(jx-1)_top %if jx>0
+         printline("Member ".itos(jx)." moved down") %if modmon>0
+      %finish
+      to=mem_top
+      top=to+mem_hole
+      jx=jx+1
+   %repeat
+
+   %if dirpos=pdh_count %start { index at end }
+      pdh_dataend=pdh_adir+dirsize+margin;  ! New length
+   %finish %else %start
+      pdh_dataend=mem_top
+   %finish
+
+
+! Now Trim the file length
+trim:
+   size=(pdh_dataend+4095)&(-4096)
+   %if size#pdh_size %start
+      printline("Change size from ".itos(pdh_size)." to ".itos(size)) %if modmon>0
+      flag=dchsize(curindex, suffixed(curfname), curfsys, size>>10)
+      %if flag=0 %then cur_size=size %and pdh_size=size %else flag=dirtoss(flag)
+   %finish
+
+   ->err
+
+
+!*****************************************************************************
+!
+!        Rename Member
+!
+!*****************************************************************************
+
+sw(3):
+   flag=s11ok(infile)
+   ->err %if flag#0
+   jx=0
+   %while jx<pdh_count %cycle
+      mem==record(adir+jx*32)
+      %if mem_name=infile %then flag=290 %and ->err
+      jx=jx+1
+   %repeat
+   jx=0
+   %while jx<pdh_count %cycle
+      mem==record(adir+jx*32)
+      %if mem_name=member %then mem_name=infile %and ->err
+      jx=jx+1
+   %repeat
+   ssown_ssfname=member
+   flag=288;                             !member not found
+   ->err
+
+
+!*****************************************************************************
+!
+!       Create New pdfile
+!
+!*****************************************************************************
+
+
+sw(4):                                   !CREATE EMPTY PDFILE
+   outfile(pdfile, 4096, 4096, 2, base, flag)
+   ->err %if flag#0
+   pdh==record(base)
+   pdh_filetype=ss pd file type
+   pdh_adir=32;                          !start of index
+   pdh_count=0;                          !no members
+   ->err
+
+!*******************************************************************************
+!*            Tidy  PD File
+!*******************************************************************************
+
+!  Possible extensions : 1.  Allow option for EPAGE alignment.
+!                        2.  Check that no code crosses segment boundary.
+
+
+
+sw(5):
+
+
+   work file = curindex . ":T#PDWORK"
+   out file(work file, pdh_size, pdh_size, 0, copybase, flag)
+   ->err %if flag#0
+   cur==record(ssown_conf(ssown_confpos))
+   cur_file -> curindex . (":") . curfname
+
+   copypdh==record(copybase)
+   move(pdh_datastart, base, copybase) { copy (header and) anything before datastart }
+   copypdh_adir=copypdh_datastart { going to put index at front }
+   top=copypdh_datastart { relative addr of next bit to write }
+   jx=0
+   ->close file %if pdh_count=0 { no members }
+
+   dirsize=pdh_count*32
+   move(dirsize, adir, copybase+copypdh_adir)
+   copyindex==array(copybase+copypdh_adir, indexaf)
+   top=top+dirsize+margin { space for 10 more entries }
+
+   %cycle
+      mem==index(jx)
+      move(mem_end, base+mem_start, copybase+top)
+      copyindex(jx)_start=top
+      top=(top+mem_end+15)&(-16)
+      copyindex(jx)_top=top
+      copyindex(jx-1)_hole=0 %if jx>0 { members now compacted }
+      jx=jx+1
+      %exit %if jx>=pdh_count
+   %repeat
+
+close file:
+
+   copypdh_dataend=top
+   size=(top+4095)&(-4096)
+   copyindex(jx-1)_hole=size-top %if jx>0
+
+   %if size#copypdh_size %start
+      printline("Tidy PD file changes size from ".itos(copypdh_size)." to ".itos(size)) %if %c
+         modmon>0
+      flag=dchsize(curindex, suffixed(curfname), curfsys, size>>10)
+      flag=dirtoss(flag) %and ->err %unless flag=0
+      cur_size=size
+      copypdh_size=size
+   %finish
+
+   newgen(work file, pd file, flag)
+   {->err}
+
+
+
+err:
+   %if inhib>0 %then allow interrupts
+!   %if flag=0 %start
+!      pdfile=last %if 2<=ep<=3
+!      disconnect(pdfile, 0) %if 1<=ep<=3
+!   %finish
+
+   %if ssown_ssnote&4#0 %then monparams("<jrtrvrtriw")
+   { %return }
+
+!-----------------------------------------------------------------------
+
+
+%routine map
+
+! Given 'base' maps the important variables
+
+   pdh==record(base)
+   adir=base+pdh_adir
+   index==array(adir, indexaf)
+%end;                                    ! map
+
+
+!-----------------------------------------------------------------------
+
+
+%routine extend file(%integer newlength, %integer %name flag)
+
+!  Extends file 'PDFILE' to length specified, may or may not
+!  need to change file size.
+
+   oldsize=pdh_size
+
+   %if newlength>oldsize %start;         !GREATER THAN PHYSICAL SIZE
+      disconnect(pdfile, flag) { so not restricted to current hole }
+      changefilesize(pdfile, newlength, flag)
+      base=0
+      %if flag#0 %then %return
+      connect(pdfile, 3, 0, 0, pdr_conad, pdr_filetype, pdr_datastart, pdr_dataend, flag)
+      %if flag#0 %then %return
+      base=pdr_conad
+      map
+      newsize=(newlength+4095)&(-4096)
+      pdh_size=newsize;                  !new physical size
+   %finish
+%end;                                    ! of EXTEND FILE
+
+!-----------------------------------------------------------
+
+%routine compress index
+
+! Removes entries with null names, also ones with names > 11 or whose
+! start address is outwith the file ( happens when index gets overwritten
+! with text or whatever and leads to address errors)
+
+%integer non null, n, j, errs, lo, hi, k
+%record (pdindexf) %name ind
+
+   %if pdh_count=0 %start { nothing to do }
+      pdh_dataend = 32
+      pdh_datastart = 32
+      pdh_adir = 32
+      -> out
+   %finish
+
+   errs=0 { number of errors detected }
+   lo=pdh_datastart { bounds for starts of members }
+   hi=pdh_size - 32
+   j=0 { number of entries surviving }
+   n=0 { next index entry to examine }
+   non null=0 { number of non null entries found }
+
+   %cycle
+      %exit %if non null>=pdh_count { examined enough }
+      ind==index(n)
+      n=n+1
+      %continue %if ind_name="" { ignore null entry }
+      non null=non null+1
+      %if length(ind_name)<12 %and lo<=ind_start<=hi %start
+         { looks good so save }
+         index(j)=ind %and ind=0 %if j<n-1
+         j=j+1
+         %continue
+      %finish
+      printline("Compress index encounters errors") %if errs=0
+      errs=errs+1
+      printstring("bad entry:")
+      %cycle k=0, 4, 28
+         printstring(" ".htos(integer(addr(ind)+k), 8))
+      %repeat
+      newline
+   %repeat
+   pdh_count=j { survivors }
+   printline(itos(errs)." member(s) lost") %if errs>0
+out:
+   printline("Index compressed" . %c
+      " " . htos(pdh_dataend,8) . %c
+      " " . htos(pdh_datastart,8) . %c
+      " " . htos(pdh_size,8)) %if modmon > 0
+%end;                                    ! compress index
+
+!-----------------------------------------------------------
+
+%routine sort addresses
+
+%integer count, n, m, inorder
+%record (pdindexf) w
+
+   count=pdh_count-1
+   %return %if count<1 { zero or one member }
+   %cycle n=1, 1, count
+      inorder=yes
+      %cycle m=count, -1, n
+         %if index(m)_start<index(m-1)_start %start
+            w=index(m)
+            index(m)=index(m-1)
+            index(m-1)=w
+            inorder=no
+         %finish
+      %repeat
+      %return %if inorder=yes
+   %repeat
+%end;                                    ! sort addresses
+
+!-----------------------------------------------------------------------
+
+%routine validate holes
+
+! To be called after the index has been compacted and sorted into
+! address order
+
+%integer errs, n, top, hole, start
+
+   n=pdh_count { number of members }
+   %return %unless n>0
+   errs=0
+   top=pdh_size
+   %cycle
+      top=top&(-16) { rounded down }
+      n=n-1
+      start=index(n)_start
+      index(n)_end=integer(base+start)
+      index(n)_top=(start+index(n)_end+15)&(-16)
+      hole=top-index(n)_top
+      hole=0 %if hole<0 { possible with non 8-aligned members ??? }
+      %unless index(n)_hole=hole %start
+         printline("Hole validation fails:") %if errs=0<modmon
+         errs=errs+1
+         printline(" hole ".itos(n)." is ".itos(index(n)_hole)." and should be ".itos(hole)) %if %c
+            modmon>0
+         index(n)_hole=hole
+      %finish
+      %exit %if n=0
+      top=start
+   %repeat
+
+   %if modmon > 0 %start
+      printline("Index:")
+      printline("memb start    end      top      hole     name")
+   %finish
+   dirpos=-1 { now compute dirpos }
+   n=0
+   %cycle
+      %if dirpos<0 %and (n>=pdh_count %or pdh_adir<index(n)_start) %start
+         printline("---> index here") %if modmon>0
+         dirpos=n
+         %if n >= pdh_count %c
+         %then pdh_dataend = pdh_adir + (32 * pdh_count) %c
+         %else pdh_dataend = index(pdh_count-1)_top
+      %finish
+      %exit %if n>=pdh_count
+      %if modmon>0 %start
+         write(n, 3); space
+         phex(index(n)_start); space
+         phex(index(n)_end); space
+         phex(index(n)_top); space
+         phex(index(n)_hole); space
+         printline(index(n)_name)
+      %finish
+      n=n+1
+   %repeat
+   printline("Dataend " . htos(pdh_dataend,8)) %if modmon > 0
+%end;                                    ! validate holes
+
+
+!-----------------------------------------------------------------------
+
+%end;                                    ! of MODPDFILE
+
+!-----------------------------------------------------------------------
+
+
+%end %of %file

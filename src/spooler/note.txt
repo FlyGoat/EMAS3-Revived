@@ -1,0 +1,6 @@
+
+The following modules are conditional compilation ones for 2900 and AMDAHL:
+
+SP     READC    IOCP
+
+NEWSTDIAG  REMOTE are not.

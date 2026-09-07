@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Jiaxun Yang <jiaxun.yang@flygoat.com>
+
+build/
+__pycache__/
+images/
+.venv/
+
+tnz.log

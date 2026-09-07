@@ -1,0 +1,18 @@
+!
+%recordformat PAGE0F((%longinteger IPL PSW,IPL CCW1 %or  %c
+                                 %longinteger RESTART NEW PSW,RESTART OLD PSW),
+   %longinteger IPL CCW2,EXT OLD PSW,SVC OLD PSW,PE OLD PSW,MC OLD PSW,IO OLD PSW,
+   (%longinteger CSW %or %integer CSW1,CSW2), %integer CAW,SP1,SP2,TTABLE DES,
+   %longinteger EXT NEW PSW,SVC NEW PSW,PE NEW PSW,MC NEW PSW,IO NEW PSW,
+   %integer EXT PARM, %shortinteger EXT CPU,EXT CODE,SVC ILC,SVC CODE,
+   PE ILC,PE CODE, %integer TRANS EXC ADDR, %shortinteger MCLASS NO,PER CODE,
+   %integer PER ADDR,MON CODE,SP3,MAPL ADDR,CHAN ID,IOEL ADDR,LCL,SP4,
+   (%byteinteger BSP1,MBYTE, %shortinteger IO ADDR, %integer SP5 %or %integer XASIW,XAIOIP),
+     %integerarray ISP1(1:6),
+   %longinteger CPU TIMER,CLOCK COMP,MC CODE, %integer SP6,EXT DCODE,
+   FSTORE ADDR,REG CODE, %longinteger PSW SAVE, %integer PREFIX SAVE,
+   MODEL SAVE,LOGOUT { etc.....})
+!
+%constrecord (PAGE0F) %name PAGE0=PAGE0 VA
+!
+%endoffile

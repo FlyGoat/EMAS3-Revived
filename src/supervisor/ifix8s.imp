@@ -1,0 +1,553 @@
+
+%const %string (20) version= "IFIX 8  11/1/88"
+%constantinteger XIMPLP64=0
+%const %integer segsize= X'00040000'
+%const %integer iput=0,lput=1
+!**** RECORD FORMATS ****
+%record %format dirinff(%string (6) user, %string (31) batchfile, %integer mark, fsys, procno, isuff, reason,
+   batchid, sessiclim, scidensad, scidens, operno, msgfad, scdate, sync1dest, sync2dest, asyncdest)
+%record %format tabf(%string (31) name, %integer i, j)
+%record %format rf(%integer arealoc, baseloc)
+%record %format relf(%integer link, n, %record (rf) %array r(1:4000))
+%record %format ofmf(%integer start, l, prop)
+%if XIMPLP64=1 %start
+%record %format rrf(%longinteger conad,%integer filetype,datastart,dataend)
+%finish %else %start
+%record %format rrf(%integer conad, filetype, datastart, dataend)
+%finish
+%record %format centf(%integer link, (%integer loc, %string (31) iden %or %integer code offset, gla offset,
+   ep offset, pword, %string (31) iden2))
+%record %format dentf(%integer link, disp, l, a, %string (31) iden)
+%record %format creff(%integer link, refloc, %string (31) iden)
+%record %format dreff(%integer link, refarray, l, %string (31) iden)
+!**** SYSTEM AND EXTERNAL SPECS******
+!%dynamicintegerfnspec BUILDSCT(%integer OUTBASE, INBASE)
+%external %integer %fn %spec outstream %alias "S#OUTSTREAM"
+%external %string (8) %fn %spec time %alias "S#TIME"
+%external %string (8) %fn %spec date %alias "S#DATE"
+
+
+%external %integer %function %spec uinfi %alias "S#UINFI"(%integer entry)
+
+
+%external %routine %spec emas3(%string %name cmd, param, %integer %name i)
+!%systemroutinespec PSYSMES(%integer ROOT, FLAG)
+
+%external %routine %spec trim %alias "EMAS3TRIM"(%string %name nfile, %integer %name flag)
+!%systemroutinespec DISCONNECT(%string (31) S, %integername FLAG)
+
+%external %integer %fn %spec current packed dt %alias "S#CURRENTPACKEDDT"
+
+%external %routine %spec disconnect %alias "EMAS3DISCONNECT"(%string %name nfile, %integer %name flag)
+
+%external %routine %spec emas3string(%string %name qualifier, value)
+
+%record %format chdrform(%integer conad, filetype, datastart, dataend)
+%if XIMPLP64=1 %start
+%external%routine%spec connect %alias "EMAS3CONNECT"(%string(*)%name s,%integer%name a,%integer%name m,%integer%name p,%long%integer%name r1,%integer%name r2,%integer%name r3,%integer%name r4,%integer%name flag)
+%finish %else %start
+%external %routine %spec connect %alias "EMAS3CONNECT"(%string %name s, %integer %name a, m, p, r1, r2, r3, r4, flag)
+%finish
+!%systemroutinespec OUTFILE(%string (31) FILE,        %c
+!   %integer SIZE, HOLE, PROT, %integername CONAD, FLAG)
+
+
+%if XIMPLP64=1 %start
+%external%routine%spec outfile %alias "EMAS3OUTFILE"(%string(*)%name nfile,%integer%name nfilesize,%integer%name nhole,%integer%name nprot,%long%integer%name conad,%integer%name flag)
+%finish %else %start
+%external %routine %spec outfile %alias "EMAS3OUTFILE"(%string %name nfile, %integer %name nfilesize, nhole, nprot,
+   conad, flag)
+%finish
+
+%if XIMPLP64=1 %start
+%external%routine%spec move %alias "EMAS3MOVE"(%integer%name nlength,%long%integer%name nfrom,%long%integer%name nto)
+%finish %else %start
+%external %routine %spec move %alias "EMAS3MOVE"(%integer %name nlength, nfrom, nto)
+%finish
+
+%external %routine %spec phex %alias "EMAS3PHEX"(%integer %name ni)
+%external %string %fn %spec htos %alias "S#HTOS"(%integer val, places)
+%const %integer areas=10
+%string %fn itos(%integer n)
+   !RETURNS STRING CONTAINING
+   ! CHARACTER VALUE OF N WITH
+   ! NO LEADING SPACE
+   !N SHOULD BE POSITIVE OR
+   ! NEGATIVE INTEGER
+   %const %integer %array tens(0:9)= %c
+ 1, 10, 100, 1000, 10000, 100000 %c
+        , 1000000, 10000000, 100000000, 1000000000
+   %string (11) res
+   %integer m, r, i, started
+   %if n=0 %then %result = "0";          !SPECIAL CASE
+   %if n<0 %then n = -n %and res = "-" %else res = ""
+   started = 0;                          !INDICATES THAT NO CHAS PUT
+   ! OUT SO FAR
+   %for i = 9, -1, 0 %cycle
+      r = tens(i)
+      %if n>=r %or started#0 %start
+         started = 1;                    !TO INDICATE THAT CHAR
+         ! ALREADY FOUND
+         m = n//r
+         res = res.tostring(m+'0')
+         n = n-m*r
+      %finish
+   %repeat
+   %result = res
+%end;                                    !OF ITOS
+
+%if XIMPLP64=1 %start
+%longintegerfn roundup(%longinteger n,%integer round)
+   round=round-1
+   %result=(n+round)&(\round)
+%end
+%finish %else %start
+%integer %fn roundup(%integer n, round)
+   !RESULT IS N ROUNDED UP TO
+   ! MULTIPLE OF ROUND >=N
+   round = round-1
+   %result = (n+round)&(\round);         ! AND WITH NOT ROUND
+%end;                                    !OF ROUNDUP
+%finish
+
+%routine analyse(%record (centf) %name cent, %integer %name lput type, %string %name iden, %integer link)
+   %if 0<length(cent_iden)<32 %start
+      lput type = lput
+      iden = cent_iden
+   %finish %else %if 0<length(cent_iden2)<32 %start
+      lput type = iput
+      iden = cent_iden2
+   %else
+      select output(0)
+      printstring("Invalid load data entry at offset ")
+      phex(link)
+      newline
+      %stop
+   %finish
+%end
+%routine fix(%string (31) in, out, list, %integer mode, codestart, glastart)
+!BITS IN MODE -
+!2**0 COPY LOAD DATA
+!2**1 FILL REFS FROM CURRECT SC TABLE
+!2**2 SUPERVISOR - PUT DESCRIPTOR TO "ENTER" ADDRESS IN WORD 8 OF HEADER
+!    ALSO ALIGN GLAP ON PAGE BOUNDARY
+!2**3 PUT JUMP IN WORD 5 OF HEADER - TEMPORARY ARRANGEMENT TILL
+!SUPERVISOR AND DIRECTOR CHANGED
+!2**5 Fix up subsystem dynamic refs (shareable basegla)
+   %integer areacode, areadisp, basecode, basedisp, n, co, gl, pword, entp
+   %integer unsatcode, unsatdata, curoutstream, blocks, glen
+   %integer flag, i, link, len, outlen, ad, lput type, dtword
+
+   %integer rlink
+%if XIMPLP64=1 %start
+   %longinteger inbase,outbase,loc,oldstart,newstart,refarray,scanad
+   %longintegerarray base(1:areas)
+%finish %else %start
+   %integer inbase,outbase,loc,oldstart,newstart,refarray,scanad
+   %integer %array base(1:areas);        !AREA START ADDRESSES IN  FILE 'OUT'
+%finish
+   %integer %array lbase(1:areas);       !AREA START ADDRESSES WHEN LOADED
+   %integer %array %format ldataaf(0:14)
+   %integer %array %format reflocaf(1:1000)
+   %integer %array %name ldata, refloc
+   %record (centf) %name cent
+   %record (dentf) %name dent
+   %record (ofmf) %array %format ofmaf(1:areas)
+   %record (ofmf) %array %name ofm
+   %record (creff) %name cref
+   %record (dreff) %name dref
+   %record (relf) %name rel
+   %record (rrf) rr
+   %string (31) iden
+   %string (8) dt, t
+   %string (3) supvsn
+
+   %routine printboth(%string (255) s)
+!PRINTS MESSAGE TERMINATED BY NEWLINE ON BOTH STREAMS CUROUTSTREAM AND 1
+      printstring(s)
+      newline
+      selectoutput(curoutstream)
+      printstring(s)
+      newline
+      selectoutput(1)
+   %end;                                 !OF PRINT BOTH
+
+   %routine fail(%string (100) s)
+      selectoutput(0)
+      printstring("FAILURE IN FIX - ".s)
+      %stop
+   %end;                                 !OF FAIL
+
+   %routine findcodeep(%string (31) entry, %integer %name co, gl, ep, pword, flag)
+      %integer link, lput type
+      %record (centf) %name cent
+      %string (31) iden
+      link = ldata(1)
+      %while link#0 %cycle
+         cent == record(inbase+link)
+         analyse(cent, lput type, iden, link)
+         %if entry=iden %start
+            co = lbase(1)
+            gl = lbase(2)
+            %if lput type=iput %start
+               ep = lbase(1)+cent_ep offset
+               co = co+cent_code offset
+               gl = gl+cent_gla offset
+            %finish %else ep = lbase(1)+cent_loc&x'ffffff'
+            flag = 0; pword = cent_pword
+            %return
+         %finish
+         link = cent_link
+      %repeat
+      co = 0
+      gl = 0
+      ep = 0
+      printstring("unsat ref ".entry)
+      newline
+      unsatcode = unsatcode+1
+      flag = 1
+   %end;                                 ! findcodeep
+   %routine finddataep(%string (31) entry, %integer %name ad, flag)
+      %integer link
+      %record (dentf) %name dent
+      link = ldata(4)
+      %while link#0 %cycle
+         dent == record(inbase+link)
+         %if entry=dent_iden %start
+            ad = lbase(dent_a)+dent_disp
+            flag = 0
+            %return
+         %finish
+         link = dent_link
+      %repeat
+!      %if entry=tops %start
+!         ad=load address+8
+!         flag=0
+!         %return
+!      %finish
+      printstring("unsat data ref ".entry)
+      newline
+      ad = 0;                            !null value
+      flag = 1
+      unsatdata = unsatdata+1
+   %end;                                 !of finddataep
+   %if list="" %then list = "T#LIST";    !DEFAULT LISTING FILE
+   curoutstream = outstream
+   emas3("DEFINE", "1,".list, flag)
+   selectoutput(1)
+   printboth(version)
+   newlines(2)
+   dt = date
+   t = time
+   printstring("FIX CALLED AT ".t." ON ".dt)
+   newlines(2)
+   printstring("INPUT: ".in)
+   newline
+   printstring("OUTPUT: ".out)
+   newline
+   printstring("CODESTART: ")
+   phex(codestart)
+   newline
+   printstring("GLASTART: ")
+   phex(glastart)
+   newlines(2)
+   unsatcode = 0
+   unsatdata = 0
+   connect(in, 0, 0, 0, rr_conad, rr_filetype, rr_datastart, rr_dataend, flag)
+   !CONNECT INPUT FILE - READ
+   ->err %if flag#0
+   %if integer(rr_conad+12)#1 %then fail("INVALID FILETYPE")
+   inbase = rr_conad
+   ldata == array(inbase+integer(inbase+24), ldataaf)
+   !LOAD DATA
+   ofm == array(inbase+integer(inbase+28)+4, ofmaf)
+   !OBJECT FILE MAP
+   len = rr_dataend+ofm(9)_l;            ! add the zust size
+   %if mode&16=16 %then outlen = len+8192 %else outlen = len
+   !DIRECTOR NEEDS ROOM FOR SC TABLE
+   outfile(out, outlen+4096, 0, 0, outbase, flag); !ALLOW FOR ALIGNMENT IN SUPERVISOR - A BIT GENEROUS
+   ->err %if flag#0
+   move(ofm(9)_start, inbase, outbase);  !COPY FILE but not ofm or ldata TO 'OUT'
+   %for i = 1, 1, integer(inbase+integer(inbase+28)) %cycle
+      base(i) = outbase+ofm(i)_start
+   %repeat
+   lbase(1) = ofm(1)_start+codestart;    !START OF LOADED CODE
+   lbase(2) = glastart;                  !START OF LOADED GLA
+   lbase(4) = ofm(4)_start+codestart;    !START OF LOADED SST
+   lbase(5) = ofm(2)_l+glastart;         !START OF LOADED UST
+   lbase(6) = ofm(6)_start+codestart;    ! start of loaded diag tables
+   lbase(7) = lbase(5)+ofm(5)_l;         ! Start of statics
+   lbase(8) = lbase(7)+ofm(7)_l;         ! Start of ioarea
+   lbase(9) = lbase(8)+ofm(8)_l;         ! Start of Zeroed UST
+   lbase(10) = ofm(10)_start+codestart;  ! loaded constant area
+!NOW GO THROUGH CODE REFS FILLING IN INFO
+   link = ldata(7);                      !STATIC CODE REFS
+   %while link#0 %cycle
+      cref == record(link+inbase)
+      findcodeep(cref_iden, co, gl, entp, pword, flag)
+      loc = base(cref_refloc>>24)+cref_refloc&X'FFFFFF'
+      %if co#0 {found} %and pword#-1 %and integer(loc+12)#-1 %and integer(loc+12)#pword %then %c
+         printboth("Warning param mismatch 0n: ".cref_iden." ".htos(pword, 8)." ".htos(integer(loc+12), 8))
+      integer(loc) = integer(loc)+co
+      integer(loc+4) = integer(loc+4)+gl
+      integer(loc+8) = entp
+      integer(loc+12) = gl
+      link = cref_link
+   %repeat
+   ! Subsystem dynamic refs.
+   ! If we want a shareable basegla then must fix up ss dynamic refs with
+   ! escape descriptors to escape tables on the unshared basegla. The escape
+   ! tables are located at known addresses at the start of T#BGLA and constructed
+   ! at ss startup
+   %if mode&32#0 %start
+      link = ldata(8)
+      ad = X'00880000';                  ! Start of basegla
+      %while link#0 %cycle
+         cref == record(link+inbase)
+         loc = base(cref_refloc>>24)+cref_refloc&X'00FFFFFF'
+         integer(loc) = X'E5000000';     ! Escape descriptor
+         integer(loc+4) = ad
+         link = cref_link
+         ad = ad+16
+      %repeat
+   %finish
+!NOW DEAL WITH DATA REFS
+   link = ldata(9)
+   %while link#0 %cycle
+      dref == record(link+inbase)
+      refarray = (dref_refarray&X'7FFFFFFF')+inbase
+      !AND OFF COMMON BIT
+      n = integer(refarray)
+      refloc == array(refarray+4, reflocaf)
+      finddataep(dref_iden, ad, flag)
+      %for n = 1, 1, n %cycle
+         loc = base(refloc(n)>>24)+refloc(n)&X'FFFFFF'
+         integer(loc) = integer(loc)+ad
+      %repeat
+      link = dref_link
+   %repeat
+! NOW DEAL WITH RELOCATION REQUESTS
+   link = ldata(14)
+   %while link#0 %cycle
+      rel == record(link+inbase)
+      %for n = 1, 1, rel_n %cycle;       !NO OF RELOCATION ENTRIES IN THIS BLOCK
+         areacode = rel_r(n)_arealoc>>24
+         areadisp = rel_r(n)_arealoc&X'FFFFFF'
+         basecode = rel_r(n)_baseloc>>24
+         basedisp = rel_r(n)_baseloc&X'FFFFFF'
+         loc = base(areacode)+areadisp
+         %if basedisp&x'00800000'#0 %then basedisp = basedisp!x'ff000000'
+         integer(loc) = integer(loc)+lbase(basecode)+basedisp
+      %repeat
+      link = rel_link
+   %repeat
+!NOW FILL IN JUMP TO BYTE 32 BECAUSE DIRECTOR ALWAYS SET
+!PC TO 16
+   %if mode&8=8 %then integer(outbase+16) = X'1B800008'
+   !JUMP 8 HALF WORDS(16 BYTES)
+!NOW PRINT MAP OF ENTRY POINTS
+   newlines(2)
+   printstring("NAME                          ENTRY POINT")
+   newlines(2)
+   link = ldata(1);                      !HEAD OF CODE EP LIST
+   %while link#0 %cycle
+      cent == record(inbase+link)
+      analyse(cent, lput type, iden, link)
+      printstring(iden)
+      spaces(32-length(iden))
+      %if lput type=iput %then loc = lbase(1)+cent_ep offset %else loc = lbase((cent_loc>>24)&x'f')+cent_loc&x'ffffff'
+      phex(loc)
+      newline
+      link = cent_link
+   %repeat
+!NOW PRINT MAP OF DATA ENTRIES IF ANY
+   link = ldata(4);                      !HEAD OF DATA EP LIST
+   %if link#0 %start
+      newlines(2)
+      printstring("NAME                        LENGTH              ADDRESS")
+      newlines(2)
+      %while link#0 %cycle
+         dent == record(inbase+link)
+         printstring(dent_iden)
+         spaces(32-length(dent_iden))
+         write(dent_l, 10)
+         spaces(5)
+         phex(lbase(dent_a)+dent_disp)
+         newline
+         link = dent_link
+      %repeat
+   %finish
+   %if mode&16=16 %start;                !SPECIAL ACTIONS FOR DIRECTOR
+      integer(outbase+24) = ofm(2)_start; !START OF GLAP
+      integer(outbase+8) = integer(outbase+24); !TEMP
+      integer(outbase) = roundup(integer(inbase+24), 4096)
+      !ALLOW ROM FOR CODE AND GLA AND THEN ROUND UP TO PAGE BOUNDARY
+      integer(outbase+28) = integer(outbase); !START OF SC TABLE
+      integer(outbase+12) = integer(outbase); !TEMPORARY UNTIL DIRECTOR CORRECTED
+!      FLAG = BUILDSCT(OUTBASE,INBASE);  !NEED INBASE TO GET AT LOAD DATA
+      %if flag#0 %start
+         printboth("NUMBER OF SCT FAULTS: ".itos(flag))
+      %finish
+   %finish;                              !END OF DIRECTOR SECTION
+   %if mode&4=4 %start;                  !SPECIAL ACTIONS FOR SUPERVISORS
+      findcodeep("ENTER", co, gl, entp, pword, flag)
+      %if flag#0 %then fail("NO ENTRY POINT ""ENTER"" FOR SUPERVISOR")
+      integer(outbase+12) = co
+      integer(outbase+16) = gl
+      integer(outbase+28) = entp
+      oldstart = base(2)
+      newstart = roundup(base(2), 4096); !ROUND UP TO NEXT PAGE
+      glen = ofm(2)_l+ofm(5)_l+ofm(7)_l+ofm(8)_l+ofm(9)_l; !TOTAL LENGTH OF GLAP
+      %if newstart#oldstart %start;      !DONT MOVE IF ALREADY ALIGNED
+         %for i = glen-1, -1, 0 %cycle;  !FIELDS MIGHT OVERLAP - DONT USE MOVE
+            byteinteger(newstart+i) = byteinteger(oldstart+i)
+         %repeat
+      %finish
+      integer(outbase) = newstart+glen-outbase; !NEW LENGTH OF FILE
+      integer(outbase+24) = newstart-outbase
+!NOW CHECK FOR UN-USED ENTRIES
+      link = ldata(1);                   !LIST HEAD OF CODE ENTRIES
+      %while link#0 %cycle
+         cent == record(inbase+link)
+         analyse(cent, lput type, iden, link)
+         rlink = ldata(7);               !HEAD OF CODE REF LIST
+         %while rlink#0 %cycle
+            cref == record(inbase+rlink)
+            %exit %if iden=cref_iden;    !ENTRY IS USED
+            rlink = cref_link
+         %repeat
+         %if rlink=0 %and iden#"ENTER" %start; !ENTRY IS NOT REFERENCED
+            printboth("**WARNING - PROCEDURE ".iden." NOT USED")
+         %finish
+         link = cent_link
+      %repeat
+!NOW CHECK FOR UNUSED DATA ENTRIES
+      link = ldata(4);                   !HEAD OF DATA ENTRY LIST
+      %while link#0 %cycle
+         dent == record(inbase+link)
+         iden = dent_iden
+         rlink = ldata(9);               !HEAD OF DATA REF LIST
+         %while rlink#0 %cycle
+            dref == record(inbase+rlink)
+            %exit %if iden=dref_iden
+            rlink = dref_link
+         %repeat
+         %if rlink=0 %start
+            printboth("**WARNING - DATA ENTRY ".iden." NOT USED")
+         %finish
+         link = dent_link
+      %repeat
+   %finish
+   blocks = roundup(integer(outbase), 4096)>>12; !NO OF 4K BLOCKS
+   dtword = current packed dt
+   integer(outbase+20) = dtword
+   disconnect(out, flag)
+   trim(out, flag)
+   %unless flag=0 %then printboth("Trim flag = ".itos(flag))
+   newline
+   %if unsatcode=0=unsatdata %start
+      printboth("ALL REFS FILLED")
+   %else
+      %if unsatcode>0 %start
+         printboth(itos(unsatcode)."  UNSATISFIED CODE REFERENCES")
+      %finish
+      %if unsatdata>0 %start
+         printboth(itos(unsatdata)."  UNSATISFIED DATA REFERENCES")
+      %finish
+   %finish
+   newline
+   t = itos(blocks)
+   %if blocks>64 %then t <- t.tostring(7)." !!!"
+   printboth("NUMBER OF 4K BLOCKS: ".t)
+   supvsn = ""
+   scanad = inbase+ofm(2)_start
+   %for scanad = scanad, 4, scanad+ofm(2)_l %cycle
+      %if byteinteger(scanad)=3 %and '0'<=byteinteger(scanad+1)<='9' %and '0'<=byteinteger(scanad+2)<='9' %and %c
+         'A'<=byteinteger(scanad+3)&x'df'<='Z' %then supvsn = string(scanad) %and %exit
+   %repeat
+   emas3("analyse", in.",h,t#fixlog", flag)
+   emas3("msg", "fixlog,t#fixlog,supervisor ".supvsn." ".htos(dtword, 8), flag)
+   %return
+err:
+
+   selectoutput(0)
+   %unless flag=0 %then printstring("flag =") %and write(flag, 1)
+%end;                                    !OF FIX
+
+! %externalroutine SJFIX(%string (255) S)
+! !FIX FOR SCIENTIFIC JOBBER
+! %record(RRF) RR
+! %string (31) IN, OUT, LIST
+! %constinteger CODESTART = X'00800000'
+! %integer FLAG, GLASTART
+!    SETPAR(S)
+!    IN = SPAR(1)
+!    OUT = SPAR(2)
+!    LIST = SPAR(3)
+!    CONNECT(IN,0,0,0,RR,FLAG)
+!    %if FLAG = 0 %start
+!       GLASTART = ROUNDUP(CODESTART+RR_DATAEND,SEGSIZE)
+!                                         !GLA STARTS AT NEXT FREE SEGMENT AFTER BASEFILE
+!    %finish %else GLASTART = 0;          !FIX WILL PRODUCE FAILURE MESSAGE
+!    FIX(IN,OUT,LIST,11,CODESTART,GLASTART)
+! %end;                                   !OF SJFIX
+!
+%external %routine issfix15(%string (255) s)
+   %record (rrf) rr
+   %string (31) in, out, list
+   %record (ofmf) %array %format ofmaf(1:areas)
+   %record (ofmf) %array %name ofm
+   %const %integer codestart= X'00800020'
+   %integer flag, glastart
+!      SETPAR(S)
+!      IN=SPAR(1)
+!      OUT=SPAR(2)
+!      LIST=SPAR(3)
+!      CONNECT(IN,0,0,0,RR_CONAD,RR_FILETYPE,RR_DATASTART,RR_DATAEND,FLAG)
+!      %if FLAG=0 %start
+!         OFM==ARRAY(RR_CONAD+INTEGER(RR_CONAD+28)+4,OFMAF)
+!         GLASTART=CODESTART+OFM(2)_START
+!      %finishelse GLASTART=0;           !FIX WILL PRODUCE FAILURE MESSAGE
+!      FIX(IN,OUT,LIST,43,CODESTART,GLASTART)
+%end;                                    !OF SSFIX
+
+! %externalroutine SPFIX(%string (255) S)
+! %record(RRF) RR
+! %constinteger CODESTART = X'00800000'
+! %string (31) IN, OUT, LIST
+! %integer GLASTART, FLAG
+!    SETPAR(S)
+!    IN = SPAR(1)
+!    OUT = SPAR(2)
+!    LIST = SPAR(3)
+!    CONNECT(IN,0,0,0,RR,FLAG)
+!    %if FLAG = 0 %start
+!       GLASTART = ROUNDUP(CODESTART+RR_DATAEND,SEGSIZE)
+!                                         !ALLOWS FOR MORE THAN 1 SEGMENT
+!    %finish %else GLASTART = 0
+!    FIX(IN,OUT,LIST,9,CODESTART,GLASTART)
+! %end;                                   !OF SPFIX
+!
+! %externalroutine DIRFIX(%string (255) S)
+! %string (31) IN, OUT, LIST
+! %constinteger CODESTART = X'00080000'
+! %constinteger GLASTART = X'000C0000'
+!    SETPAR(S)
+!    IN = SPAR(1)
+!    OUT = SPAR(2)
+!    LIST = SPAR(3)
+!    FIX(IN,OUT,LIST,24,CODESTART,GLASTART)
+! %end;                                   !OF DIRFIX
+!
+%external %routine isupfix %alias "C#ISUPFIX"
+   %integer sshift
+   %const %integer code seg=4, gla seg=8
+   %string (31) in, out, list, p4
+   emas3string("From;file,exist,object;?;FIle to be Fixed", in)
+   emas3string("To;file,write;?;FIle for Supervisor", out)
+   emas3string("Listing;file,write;T#LIST;FIle for error messages", list)
+   emas3string("Target;;amdahl; Amdahl or 370", p4)
+   %if p4="370" %then sshift = 16 %else sshift = 20; ! 24 or 31 bit addrs
+   fix(in, out, list, 4, code seg<<sshift, gla seg<<sshift)
+%end;                                    !OF SUPFIX
+%end %of %file

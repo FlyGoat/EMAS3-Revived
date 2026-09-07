@@ -1,0 +1,1523 @@
+%constinteger XIMPLP64=0
+!
+! 25Sep90   Correction to base adjust array in ctop which was wrong
+!
+!
+! Warning this module has the revised triples spec.
+!
+! In first attempt at Triple Imp considerable use was made of constant operands
+! to pass information from Pass2 to GEN. Although for specialised operations like
+! passing Labels this still applies, this adhocery has caused problems with arrays
+! and pointers particularly in mapped records. The operands for four triples
+! have thus been redefined in a more standard way.
+!
+! GETPTR    X1 is now (ptype of passed)<<16! DIMENSION
+!           Opnd2 is either a 32 bit const with the size (ACC) as value or
+!           the ptr or arrayhead as normal operand.
+!
+! VMY       X1 is now dim<<28!maxdim<<24!array name(where known)
+!           Opnd2 is either a 32 bit const with DV offset into const area or
+!           the arrayhead as a standard operand
+!
+! AINDX     X1 is ELSIZE<<20 !spare
+!           Opnd2 is arrayhead as standard operand
+!           NOTE:- The Operands have been swopped for consistency with norm.
+!
+! BADJ      X1 is arrayptype<<16!no of Dimensions (latter in case of backward dvs)
+!           Opnd2 exactly as for VMY
+!
+
+%INCLUDE "ERCC07:itrimp_TFORM2S"
+%INCLUDE "ERCC07:TRIPCNSTS"
+%EXTRINSIC %RECORD (WORKAF) WORKA
+%EXTRINSIC %RECORD (PARMF) PARM
+%EXTERNAL %ROUTINE %SPEC IMPABORT
+      %IF HOST#TARGET %START
+      %EXTERNAL %ROUTINE %SPEC REFORMATC(%RECORD (RD) %NAME OPND)
+      %FINISH
+%if XIMPLP64=1 %start
+%external%routine%spec movebytes(%integer l,%long%integer fb,%integer fo,%long%integer tb,%integer to)
+%finish %else %start
+%EXTERNAL %ROUTINE %SPEC MOVE BYTES(%INTEGER L,FB,FO,TB,TO)
+%finish
+%EXTERNAL %ROUTINE %SPEC FAULT(%INTEGER N,DATA,IDENT)
+%EXTERNAL %ROUTINE %SPEC PRINT TRIPS(%RECORD (TRIPF) %ARRAY %NAME TRIPLES)
+%CONST %BYTE %INTEGER %ARRAY BYTES(0:7)=0(3),1,2,4,8,16;
+%CONST %BYTE %INTEGER %ARRAY WORDS(0:7)=0(3),1,1,1,2,4;
+%EXTERNAL %ROUTINE CTOP(%INTEGER %NAME FLAG,MASK, %INTEGER XTRA, %RECORD (RD) %NAME OPND1,OPND2)
+!***********************************************************************
+!*    AN OPERATION HAS BEEN FOUND WHERE BOTH OPERANDS ARE              *
+!*    CONSTANTS OR KNOWN AT COMPILE TIME. THIS ROUTINE INTERPRETS      *
+!*    THE OPERATION                                                    *
+!*    ON EXIT FLAG=0 IF INTERPRETED. REFRAINS FROM INTERPRETING        *
+!*    X=1/0 FOR EXAMPLE. CODE IS PLANTED FOR THESE FUNNIES             *
+!***********************************************************************
+%ROUTINE %SPEC EXTRACT(%RECORD (RD) %NAME OPND)
+%INTEGER %FN %SPEC DEBYTESWOP(%INTEGER VAL)
+%CONST %INTEGER UTRUNCMASK=X'00000800',BTRUNCMASK=X'00000013'
+%INTEGER K,TYPEP,PRECP,OP,MAXD,SVAL,SVAL1,SVAL2,C,D,JJ,KK,TRUNCMASK,LB,UB,MP
+%STRING (255) STRVAL,STRVAL1,STRVAL2
+%LONG %REAL LR
+      %IF 1<<HOST&LINTAVAIL#0 %THEN %START
+      %LONG %INTEGER VAL,VAL1,VAL2
+      %FINISH %ELSE %START
+      %INTEGER VAL,VAL1,VAL2
+      %FINISH
+      %IF 1<<HOST&LLREALAVAIL#0 %THEN %START
+      %LONG %LONG %REAL RVAL,RVAL1,RVAL2
+      %FINISH %ELSE %START
+      %LONG %REAL RVAL,RVAL1,RVAL2
+      %FINISH
+%SWITCH UISW,URSW(10:48),BISW,BRSW(0:47)
+      %ON %EVENT 1,2 %START
+         %RETURN
+      %FINISH
+      TYPEP=OPND1_PTYPE&7; PRECP=OPND1_PTYPE>>4&15; OP=FLAG
+      %RETURN %IF 1<<HOST&LINTAVAIL=0 %AND OPND1_PTYPE=X'61'
+      %RETURN %IF 1<<HOST&LLREALAVAIL=0 %AND OPND1_PTYPE=X'72'
+      %if opnd1_ptype&x'8'#0 %then %return; ! Foreign constants can not be folded
+      EXTRACT(OPND1)
+      VAL1=VAL; RVAL1=RVAL; STRVAL1=STRVAL
+      SVAL1<-VAL1
+      %IF OP<128 %START;                 ! UNARY
+         %RETURN %UNLESS 10<=OP<=48
+         TRUNCMASK=UTRUNCMASK
+         %IF TYPEP=2 %THEN ->URSW(OP) %ELSE ->UISW(OP)
+      %FINISH
+      OP=OP-128
+      %RETURN %IF OP>47
+      %if opnd2_ptype&8#0 %then %return
+      EXTRACT(OPND2)
+      VAL2=VAL; RVAL2=RVAL; STRVAL2=STRVAL
+      SVAL2<-VAL2
+      TRUNCMASK=BTRUNCMASK
+      %IF TYPEP=2 %THEN ->BRSW(OP) %ELSE ->BISW(OP)
+UISW(10):                                ! \
+      VAL1=\VAL1
+INTEND:
+      %IF 1<<HOST&LINTAVAIL#0 %AND PRECP=6 %THEN %START
+%if XIMPLITTLEENDIAN=1 %start
+         OPND1_D<-VAL1
+         OPND1_XTRA<-VAL1>>32
+%finishelseStart
+         OPND1_D<-VAL1>>32
+         OPND1_XTRA<-VAL1
+%finish
+         FLAG=0
+      %FINISH %ELSE %START
+         SVAL<-VAL1
+         %IF SVAL=VAL1 %OR 1<<OP&TRUNCMASK=0 %THEN FLAG=0 %AND OPND1_D=SVAL
+                                         ! NO ARITH OFLOW CONDITION
+      %FINISH
+      %IF FLAG=0 %START
+         OPND1_PTYPE=PRECP<<4!1
+         OPND1_FLAG=0
+      %FINISH
+      %RETURN
+UISW(11):                                ! INTEGER NEGATE
+      VAL1=-VAL1; ->INT END
+UISW(13):                                ! INTEGER ABS
+      VAL1=IMOD(VAL1); ->INT END
+UISW(12):                                ! INTEGER FLOAT
+      RVAL1=VAL1; PRECP=PRECP+1
+      ->REAL END
+URSW(15):                                ! STRETCH REAL
+      PRECP=PRECP+1
+REAL END:OPND1_FLAG=SCONST
+      %IF PRECP=5 %THEN OPND1_R=RVAL1 %ELSE %IF PRECP=6 %THEN %START
+         LR=RVAL1;                       ! may be rounding
+         MOVE BYTES(8,ADDR(LR),0,ADDR(OPND1_D),0)
+      %FINISH %ELSE %START
+         OPND1_FLAG=LCONST
+         OPND1_D=WORKA_ARTOP
+         OPND1_XTRA=INTEGER(ADDR(RVAL1))
+         WORKA_ARTOP=WORKA_ARTOP+16
+         %if 1<<HOST&LLREALAVAIL=0 %and IEEEFPFORMAT>>HOST&1=1 %start
+            ! The host accumulator is a double, even for a widened constant.
+            MOVE BYTES(8,ADDR(RVAL1),0,ADDR(WORKA_A(0)),OPND1_D)
+            %for JJ=8,1,15 %cycle
+               WORKA_A(OPND1_D+JJ)=0
+            %repeat
+         %finish %else %start
+         MOVE BYTES(16,ADDR(RVAL1),0,ADDR(WORKA_A(0)),OPND1_D)
+         %finish
+      %FINISH
+      FLAG=0; OPND1_PTYPE=16*PRECP+2
+      %RETURN
+UISW(15):                                ! STRETCH INTEGER
+      %IF 1<<HOST&LINTAVAIL#0 %AND PRECP=5 %THEN PRECP=6 %AND ->INT END
+      %IF PRECP=4 %THEN PRECP=5 %AND ->INT END
+      %RETURN
+UISW(14):                                ! SHORTEN INTEGER
+      %if precp=4 %and 0<=val1<=255 %then precp=3 %and ->int end
+      %IF PRECP=5 %and IMOD(VAL1)<=X'7FFF' %THEN PRECP=4 %AND ->INT END
+      %IF PRECP=6 %AND VAL1=SVAL1 %THEN PRECP=5 %AND ->INT END
+      %RETURN
+URSW(14):                                ! SHORTEN REAL
+      PRECP=PRECP-1
+      ->REAL END
+URSW(12):                                ! FLOAT REAL
+      IMPABORT
+UISW(16):                                ! SHORTEN FOR <-
+      %IF PRECP=5 %THEN VAL1=VAL1&X'FFFF' %AND PRECP=4 %AND ->INTEND
+      %RETURN
+URSW(36):                                ! INT
+      %RETURN %UNLESS MOD(RVAL1)<X'7FFFFFFE'
+      VAL1=INT(RVAL1)
+      PRECP=5
+      ->INTEND
+URSW(37):                                ! INTPT
+      %RETURN %UNLESS MOD(RVAL1)<X'7FFFFFFE'
+      VAL1=INTPT(RVAL1)
+      PRECP=5
+      ->INTEND
+UISW(38):                                ! TOSTRING
+      STRVAL1=TOSTRING(VAL1)
+      ->STREND
+URSW(48):                                ! TRUNC coded without using itself as it
+                                         ! it is not provided in the older compilers
+      %RETURN %UNLESS MOD(RVAL1)<x'7ffffffe'
+      %IF RVAL>=0 %THEN VAL1=INTPT(RVAL1) %ELSE VAL1=-INTPT(MOD(RVAL1))
+      PRECP=5
+      ->INTEND
+BISW(0):                                 ! ADD
+BISW(14):                                ! COMBINE VMY RESULTS
+      VAL1=VAL1+VAL2; ->INT END
+BISW(1):                                 ! MINUS
+      VAL1=VAL1-VAL2; ->INT END
+BISW(2):                                 ! EXCLUSIVE OR
+      VAL1=VAL1!!VAL2; ->INT END
+BISW(3):                                 ! OR
+      VAL1=VAL1!VAL2; ->INT END
+BISW(4):                                 ! MULT
+      VAL1=VAL1*VAL2; ->INT END
+BISW(6):%RETURN;                         ! / DIVISION
+BISW(5):%RETURN %IF VAL2=0;              ! // DIVISION
+      VAL1=VAL1//VAL2; ->INT END
+BISW(7):                                 ! AND
+      VAL1=VAL1&VAL2; ->INT END
+BISW(9):                                 ! SLL
+      %IF PRECP=6 %THEN VAL1=VAL1<<SVAL2 %ELSE VAL1=SVAL1<<SVAL2
+      ->INT END
+BISW(8):                                 ! SRL
+      %IF PRECP=6 %THEN VAL1=VAL1>>SVAL2 %ELSE VAL1=SVAL1>>SVAL2
+      ->INT END
+BISW(13):                                ! VMY & CHK BOUNDS
+      MAXD=XTRA>>24&15;                  ! MAX DIMENSION
+      C=XTRA>>28;                        ! DIMENSION
+      D=OPND2_D&X'FFFF';                 ! DV POINTER
+      %IF TARGET=PNX %OR TARGET=PERQ %OR TARGET=ACCENT %OR 1<<TARGET&EMACHINE#0 %START
+         LB=DEBYTESWOP(WORKA_CTABLE(D+3*C+1))
+         UB=DEBYTESWOP(WORKA_CTABLE(D+3*C))
+         MP=DEBYTESWOP(WORKA_CTABLE(D+3*C-1))
+         %IF VAL1<LB %OR VAL1>UB %THEN FAULT(50,VAL1,XTRA&X'FFFF')
+         VAL1=VAL1*MP %UNLESS C=1
+         ->INT END
+      %FINISH
+      %IF TARGET=EMAS %START
+         C=3*(MAXD+1-C)
+         JJ=(VAL1-WORKA_CTABLE(D+C))*WORKA_CTABLE(D+C+1)
+         %IF JJ<0 %OR JJ>WORKA_CTABLE(D+C+2) %THEN FAULT(50,VAL1,XTRA&X'FFFF')
+         VAL1=JJ
+         ->INT END
+      %FINISH
+      %IF TARGET=IBM %OR TARGET=AMDAHL %OR TARGET=IBMXA %START
+         %IF VAL1<WORKA_CTABLE(D+3*C) %OR VAL1>WORKA_CTABLE(D+3*C+1) %THEN FAULT(50,VAL1,XTRA&X'FFFF')
+         VAL1=VAL1*WORKA_CTABLE(D+3*C+2)
+         ->INTEND
+      %FINISH
+      %RETURN
+BISW(18):                                ! BADJ ADUST ARRAY BASE
+      %IF TARGET=PERQ %OR 1<<TARGET&EMACHINE#0 %OR TARGET=ACCENT %OR TARGET=PNX %START
+         D=XTRA>>24&15;                  ! TOTAL NO OF DIMENSIONS
+         KK=VAL2;                        ! DV DISP
+         %RETURN %UNLESS KK>0
+         JJ=WORKA_CTABLE(KK);          ! adjustment
+         VAL1=VAL1+JJ
+      %FINISH
+      ->INT END
+BISW(46):
+BISW(47):                                ! scomp & sdcomp
+BRSW(46):
+BRSW(47):                                ! scomp & sdcomp
+BISW(11):
+BISW(12):                                ! COMPARISONS
+BRSW(11):
+BRSW(12):                                ! REAL COMPARISONS
+      MASK=XTRA;                         ! XTRA HAS IBM TYPE MASK
+                                         ! RETURN MASK AS 15(=JUMP) OR 0 (IGNORE)
+      FLAG=0
+      %IF TYPEP=2 %THEN ->RCOMP
+      %IF TYPEP=5 %THEN ->SCOMP
+      %IF (MASK&8#0 %AND VAL1=VAL2) %OR (MASK&4#0 %AND VAL1<VAL2) %OR (MASK&2#0 %AND VAL1>VAL2) %THEN MASK=15 %ELSE %C
+         MASK=0
+      %if op=12{dsided} %then opnd1=opnd2
+      %RETURN
+RCOMP:
+      %IF (MASK&8#0 %AND RVAL1=RVAL2) %OR (MASK&4#0 %AND RVAL1<RVAL2) %OR (MASK&2#0 %AND RVAL1>RVAL2) %THEN %C
+         MASK=15 %ELSE MASK=0
+      %if op=12{dsided} %then opnd1=opnd2
+      %RETURN
+SCOMP:
+      %IF (MASK&8#0 %AND STRVAL1=STRVAL2) %OR (MASK&4#0 %AND STRVAL1<STRVAL2) %OR (MASK&2#0 %AND %C
+         STRVAL1>STRVAL2) %THEN MASK=15 %ELSE MASK=0
+      %if op=47{dsided} %then opnd1=opnd2
+      %RETURN
+URSW(11):                                ! NEGATE
+      RVAL1=-RVAL1; ->REAL END
+BRSW(13):                                ! ABS
+      RVAL1=MOD(RVAL1); ->REAL END
+BRSW(0):                                 ! ADD
+      RVAL1=RVAL1+RVAL2; ->REAL END
+BRSW(1):                                 ! SUBTRACT
+      RVAL1=RVAL1-RVAL2; ->REAL END
+BRSW(4):                                 ! MULT
+      RVAL1=RVAL1*RVAL2; ->REAL END
+BRSW(6):                                 ! DIVISION
+      %RETURN %IF RVAL2=0;               ! AVOID DIV BY ZERO
+      RVAL1=RVAL1/RVAL2; ->REAL END
+BISW(10):                                ! '**' WITH 2 INTEGER OPERANDS
+BRSW(10):                                ! '**' WITH AT LEAST 1 REAL
+      %RETURN %UNLESS OPND2_PTYPE&7=1 %AND-77<=VAL2<=75
+!      RVAL1=RVAL1**VAL2
+!
+! avoid exponentiation in case a support routine reqd
+!
+      RVAL2=1
+         rval2=rval2*rval1 %for jj=1,1,imod(val2)
+      %if val2<0 %then rval1=1.0/rval2 %else rval1=rval2
+      ->REALEND
+BISW(17):                                ! '****' WITH 2 INTEGER OPERAND
+      %RETURN %UNLESS 0<=VAL2<=63
+      VAL2=1
+      %WHILE SVAL2>0 %CYCLE
+         VAL2=VAL2*VAL1
+         SVAL2=SVAL2-1
+      %REPEAT
+      VAL1=VAL2; ->INT END
+BISW(24):                                ! CONCAT
+      %RETURN %IF LENGTH(STRVAL1)+LENGTH(STRVAL2)>255
+      STRVAL1=STRVAL1.STRVAL2
+STREND:                                  ! RETURN VALUE
+      OPND1_PTYPE=X'35'
+      OPND1_FLAG=LCONST
+      OPND1_XTRA=LENGTH(STRVAL1)
+      JJ=WORKA_ARTOP
+      WORKA_A(JJ)=OPND1_XTRA
+      %FOR K=1,1,OPND1_XTRA %CYCLE
+         WORKA_A(JJ+K)=CHARNO(STRVAL1,K)
+      %REPEAT
+      OPND1_D=JJ
+      WORKA_ARTOP=(JJ+OPND1_XTRA+2)&(-2);  ! PERQ KEEP 16 BIT ALIGNED
+      FLAG=0
+      %RETURN
+URSW(*):
+UISW(*):
+BRSW(*):
+BISW(*):
+      %RETURN
+%ROUTINE EXTRACT(%RECORD (RD) %NAME OPND)
+!***********************************************************************
+!*    EXTRACTS A CONTANT OPERAND RETURNING REAL &INT VALUES           *
+!***********************************************************************
+%INTEGER TYPE,PREC,I,AD
+      TYPE=OPND_PTYPE; PREC=TYPE>>4
+      TYPE=TYPE&15
+      VAL=0; RVAL=0; STRVAL=""
+      %IF TYPE=5 %START
+         LENGTH(STRVAL)=WORKA_A(OPND_D)
+         %FOR I=1,1,OPND_XTRA %CYCLE
+            CHARNO(STRVAL,I)=WORKA_A(OPND_D+I)
+         %REPEAT
+      %FINISH %ELSE %IF TYPE=1 %THEN %START
+         %IF 1<<HOST&LINTAVAIL#0 %AND PREC=6 %THEN %START
+%if XIMPLITTLEENDIAN=1 %start
+            VAL=LENGTHENI(OPND_XTRA)<<32!(OPND_D&(LENGTHENI(-1)>>32))
+%finishelseStart
+            VAL=LENGTHENI(OPND_D)<<32!(OPND_XTRA&(LENGTHENI(-1)>>32))
+%finish
+         %FINISH %ELSE VAL=OPND_D
+         RVAL=VAL
+      %FINISH %ELSE %START
+         %IF PREC=5 %THEN RVAL=OPND_R %ELSE %IF PREC=6 %THEN %START
+            MOVE BYTES(8,ADDR(OPND_D),0,ADDR(LR),0)
+            RVAL=LR
+         %FINISH %ELSE MOVE BYTES(16,ADDR(WORKA_A(0)),OPND_D,ADDR(RVAL),0)
+      %FINISH
+%END
+%INTEGER %FN DEBYTESWOP(%INTEGER VAL)
+!***********************************************************************
+!*    ITEMS IN THE THE CONST TABLE MAY BE BYTE SWOPPED. DEBYTESWOP BY  *
+!*    BYTE SWOPPING AGAIN. PDS PRAYS THERE WILL NEVER BE ARCHITECTURE  *
+!*    WHERE THIS IS NOT TRUE!                                          *
+!***********************************************************************
+%RECORD (RD) OPND
+      OPND=0
+      OPND_PTYPE=X'51'
+      OPND_D=VAL
+      %IF HOST#TARGET %THEN REFORMATC(OPND)
+      %RESULT=OPND_D
+%END
+%END
+%ROUTINE NOOP(%RECORD (TRIPF) %ARRAY %NAME TRIPLES, %INTEGER TRIPLE NO, %RECORD (RD) %NAME ROPND)
+!***********************************************************************
+!*    THIS TRIPLE HAS BECOME A NOOP.DELETE IT AND PASS  ROPND          *
+!*    FORWARD TO ANY WHO USE IT                                        *
+!*   Ropnd is normally a constant or a different triple ref but can    *
+!*   be anything. Since we can indirect thro triples but not via const **
+!*   it is sometimes necessary to preload Ropnd and leave backrefs     *
+!***********************************************************************
+%RECORD (TRIPF) %NAME CURRT,NOOPT
+%RECORD (RD) %NAME OPND1,OPND2
+%INTEGER PTR,CNT
+      NOOPT==TRIPLES(TRIPLE NO);         ! THIS ONE TO BECOME NOOP
+      CNT=NOOPT_CNT;                     ! HOW MANY TIMES USED
+!      print trips(triples) %AND IMPABORT %UNLESS CNT<=1;           ! NO OPS ELIMINATED BEFORE DUPS
+      PTR=NOOPT_FLINK
+      %CYCLE
+         CURRT==TRIPLES(PTR)
+         PTR=CURRT_FLINK
+         %CONTINUE %IF CURRT_OPERN=NULLT
+         OPND1==CURRT_OPND1
+         OPND2==CURRT_OPND2
+         %IF 1<<OPND1_FLAG&BTREFMASK#0 %AND OPND1_D=TRIPLE NO %THEN %START
+            %IF OPND1_FLAG#REFTRIP %and Ropnd_flag#REFTRIP %THEN ->PRE;  ! CANT OPTIMISE AT PRESESNT
+            CNT=CNT-1
+            %IF ROPND_FLAG=REFTRIP %THEN Opnd1_D=Ropnd_d %else %start
+               OPND1=ROPND
+               CURRT_FLAGS=CURRT_FLAGS!LOAD OP1
+            %finish
+         %FINISH
+         %IF CURRT_OPERN>=128 %AND OPND2_D=TRIPLE NO %AND 1<<OPND2_FLAG&BTREFMASK#0 %START
+            %IF OPND2_FLAG#REFTRIP  %and Ropnd_Flag#REFTRIP %THEN ->PRE
+            CNT=CNT-1
+            %IF ROPND_FLAG=REFTRIP %THEN OPND2_D=Ropnd_d %else %start
+               OPND2=ROPND
+               CURRT_FLAGS=CURRT_FLAGS!LOAD OP2
+            %finish
+         %FINISH
+         %IF CNT=0 %OR PTR=0 %THEN %EXIT
+         %IF 1<<NOOPT_OPND1_FLAG&BTREFMASK=0 %AND (TARGET=PERQ %OR TARGET=ACCENT %OR (TARGET=PNX %AND %C
+            NOOPT_OPTYPE&7#2)) %THEN CURRT_DPTH<-CURRT_DPTH-WORDS(NOOPT_OPTYPE>>4)
+      %REPEAT
+      PTR=NOOPT_BLINK
+      %WHILE PTR>0 %CYCLE
+         CURRT==TRIPLES(PTR)
+         %IF CURRT_PUSE=TRIPLE NO %THEN CURRT_PUSE=NOOPT_PUSE
+         PTR=CURRT_BLINK
+      %REPEAT
+      NOOPT_X1=NOOPT_OPERN;              ! FOR DEBUGGING
+      NOOPT_OPERN=NULLT;                 ! SET AS NOOP
+      NOOPT_PUSE=0
+      NOOPT_CNT=0;                       ! for emachine estack counting
+      NOOPT_FLAGS<-NOOPT_FLAGS!DONT OPT;  ! SKIP DUP CHECKING
+      %RETURN
+PRE:                                     ! FORCE IN A PRELOAD
+      NOOPT_X1=NOOPT_OPERN
+      NOOPT_OPERN=PRELOAD
+      NOOPT_OPND1=ROPND
+      NOOPT_FLAGS=0
+      %IF ROPND_FLAG#REFTRIP %THEN NOOPT_FLAGS=LOADOP1
+%END
+%EXTERNAL %ROUTINE FLAG AND FOLD(%RECORD (TRIPF) %ARRAY %NAME TRIPLES)
+!***********************************************************************
+!*    WORKS DOWN AN ARRAY OF TRIPLES SETTING BITS FOR CODE GENERATOR   *
+!*    ALSO FOLDS OUT ANY REMAINING CONSTANT OPERATIONS                 *
+!***********************************************************************
+%INTEGER STPTR,CURRTRIPNO,I,J,DEPTH,COP
+%CONST %INTEGER FOLDI=X'1C00007F';       ! FOLD 10-16 & 36-38
+%CONST %INTEGER FOLDR=X'0107FFFF';       ! FOLD 128-146 &152
+%RECORD (TRIPF) %NAME CURRT,REFT,NEXTT
+%ROUTINE %SPEC BACKTRACK(%RECORD (TRIPF) %NAME CURRT)
+%ROUTINE %SPEC INSPECT OPND(%INTEGER NO)
+%ROUTINE %SPEC REPLACE TRIPREF(%INTEGER TRIP, %RECORD (RD) %NAME OPND)
+      STPTR=TRIPLES(0)_FLINK
+      DEPTH=0
+!
+      %WHILE STPTR>0 %CYCLE
+         CURRT==TRIPLES(STPTR)
+         CURRTRIPNO=STPTR
+         STPTR=CURRT_FLINK
+         COP=CURRT_OPERN;                ! CURRENT OPERATION
+         INSPECT OPND(1)
+         %IF COP>=128 %THEN INSPECT OPND(2)
+!
+         %IF CURRT_FLAGS&CONSTANTOP#0 %AND ((10<=COP<128 %AND (FOLDI&1<<(COP-10)#0 %OR COP=48)) %OR %C
+            (CURRT_OPND1_FLAG<=1 %AND CURRT_OPND2_FLAG<=1 %AND FOLDR&1<<(COP&31)#0)) %START
+            I=COP; J=-1
+            CTOP(I,J,CURRT_X1,CURRT_OPND1,CURRT_OPND2)
+            %IF I=0 %THEN %START
+               %IF J#-1 %START;          ! a mask returned
+                  NEXTT==TRIPLES(STPTR)
+                  %IF NEXTT_OPERN=FJUMP %OR NEXTT_OPERN=BJUMP %START
+                     %IF NEXTT_X1&x'80'#0 %THEN J=J!!15
+                     %IF J=0 %THEN NEXTT_OPERN=NULLT
+                     %IF J=15 %THEN NEXTT_X1=NEXTT_X1!15
+                  %FINISH
+               %FINISH
+               NOOP(TRIPLES,CURR TRIPNO,CURRT_OPND1)
+            %FINISH
+         %FINISH
+         %IF COP=LASS %AND CURRT_FLAGS&CONSTANTOP#0 %AND CURRT_CNT>0 %THEN REPLACE TRIPREF(CURRTRIPNO,CURRT_OPND2)
+         %IF TARGET=PNX %OR TARGET=PERQ %OR 1<<TARGET&EMACHINE#0 %OR TARGET=ACCENT %START
+            CURRT_DPTH<-DEPTH
+            %IF CURRT_CNT>0 %AND (TARGET=PERQ %OR 1<<TARGET&EMACHINE#0 %OR TARGET=ACCENT %OR CURRT_OPTYPE&7#2) %THEN %C
+               DEPTH=DEPTH+WORDS(CURRT_OPTYPE>>4)
+         %FINISH
+         %IF TARGET=EMAS %START;         ! DO SOME CRUDE REGISTER ALLOCATION
+            %IF COP=VMY %OR COP=COMB %OR COP=BADJ %OR COP=FORPRE %OR COP=FORPR2 %OR COP=FOREND %THEN CURRT_DPTH=7
+                                         ! USE BREG
+            %IF CURRT_OPTYPE=X'35' %AND COP=PRELOAD %THEN CURRT_DPTH=1;  ! USE DR
+                                         ! ARRANGE TO USE DR TO PASS ARRAY ELEAMNTS
+                                         ! AND MAPS BY NAME
+            %IF COP=GETPTR %AND 1<<CURRT_OPND1_FLAG&BTREFMASK#0 %AND TRIPLES(STPTR)_OPERN=PASS2 %THEN %C
+               CURRT_DPTH=1 %AND TRIPLES(STPTR)_DPTH=1
+            %IF COP=VMY %THEN BACK TRACK(CURRT)
+         %FINISH
+      %REPEAT
+      %RETURN
+%ROUTINE BACKTRACK(%RECORD (TRIPF) %NAME CURRT)
+!***********************************************************************
+!*    TRIES TO GET ALL OPERANDS OF A VMY EVALUATED IN B                *
+!***********************************************************************
+%INTEGER I
+%RECORD (RD) %NAME OPND
+%RECORD (TRIPF) %NAME REFT
+      %IF TARGET=EMAS %START;            ! EMAS ONLY OPTIMISATION
+         %FOR I=1,1,2 %CYCLE
+            %IF I=1 %THEN OPND==CURRT_OPND1 %ELSE OPND==CURRT_OPND2
+            %IF OPND_FLAG=REFTRIP %AND (CURRT_OPERN#SUB %OR I=1) %START
+               REFT==TRIPLES(OPND_D)
+               %IF (REFT_OPERN=ADD %OR REFT_OPERN=MULT %OR REFT_OPERN=SUB) %AND REFT_OPND1_FLAG#INDIRECT %AND %C
+                  REFT_OPND2_FLAG#INDIRECT %THEN %START
+                  REFT_DPTH=7
+                  BACK TRACK(REFT)
+               %FINISH
+            %FINISH
+            %EXIT %IF CURRT_OPERN<128
+         %REPEAT
+      %FINISH
+%END
+%ROUTINE INSPECT OPND(%INTEGER NO)
+%RECORD (TRIPF) %NAME RTRIP
+%RECORD (RD) %NAME OPND
+%CONST %BYTE %INTEGER %ARRAY LOAD ALLOW(0:199)=LOAD OP1(128){UNARY},
+                                        LOADOP1!LOADOP2(10),
+                                        LOADOP1{**},
+                                        LOADOP1!LOADOP2(2),
+                                        LOADOP1{VMY},
+                                        LOADOP1!LOADOP2,
+                                        LOADOP2(2){ASS AND JAM ASS},
+                                        LOADOP1{****},
+                                        LOADOP1{BADJ},
+                                        LOADOP1!LOADOP2,
+                                        LOADOP2{INDEXED FETCH},
+                                        LOADOP2{LASS},
+                                        LOADOP1!LOADOP2(3),
+                                        LOADOP2{IOCP DONT LOAD EPNO},
+                                        LOADOP2(6){P PASSING},
+                                        0(6){LABELS AND SWITCH DECLS},
+                                        LOADOP2{GOTO SW LOAD OPERAND},
+                                        LOADOP2(7){STR,PTR&RESULT ASSMNT},
+                                        LOADOP1!LOADOP2(2){STR COMP&DCOMP},
+                                        LOADOP2(2){PRE RES DONT LD WKAREA},
+                                        LOADOP1{RESLN DONT LOAD LABEL},
+                                        LOADOP2{RES FINALE DONT LOAD WKAREA},
+                                        LOADOP1!LOADOP2{SIG EVNT UNUSED},
+                                        LOADOP1!LOADOP2{REC ASSNMNT},
+                                        LOADOP1!LOADOP2(*)
+
+%INTEGER I,LOADOP,OPERN
+      OPND==CURRT_OPND1
+      LOADOP=LOAD OP1
+      %IF NO=2 %THEN OPND==CURRT_OPND2 %AND LOADOP=LOAD OP2
+      LOADOP=LOADOP&LOAD ALLOW(CURRT_OPERN)
+      %IF OPND_FLAG<=1 %THEN CURRT_FLAGS=CURRT_FLAGS!CONSTANTOP
+      %IF OPND_FLAG<8 %THEN CURRT_FLAGS=CURRT_FLAGS!LOADOP
+      %IF 1<<OPND_FLAG&BTREFMASK#0 %START
+         RTRIP==TRIPLES(OPND_D)
+         OPERN=RTRIP_OPERN
+         %IF RTRIP_PUSE#CURRTRIPNO %OR OPERN=PRECC %OR (OPERN=LASS %AND RTRIP_FLINK#CURRTRIPNO) %OR OPERN=CONCAT %OR %C
+            OPERN=ITOS1 %THEN CURRT_FLAGS=CURRT_FLAGS!LOADOP
+         %IF TARGET=PNX %AND RTRIP_PUSE=CURRTRIPNO %AND RTRIP_OPTYPE&7#2 %THEN DEPTH=DEPTH-WORDS(RTRIP_OPTYPE>>4)
+         %IF (TARGET=PERQ %OR TARGET=ACCENT) %AND RTRIP_PUSE=CURRTRIPNO %THEN DEPTH=DEPTH-WORDS(RTRIP_OPTYPE>>4)
+         %IF TARGET=EMAS %AND OPND_FLAG=INDIRECT %AND RTRIP_DPTH=0 %AND (OPERN=ADD %OR OPERN=SUB %OR %C
+            OPERN=MULT) %THEN RTRIP_DPTH=7 %AND BACKTRACK(RTRIP)
+! USE BREG FOR EXPRESSION
+      %FINISH
+%END
+%ROUTINE REPLACE TRIPREF(%INTEGER TRIP, %RECORD (RD) %NAME OPND)
+%INTEGER PTR,COUNT
+%RECORD (TRIPF) %NAME RTRIP
+      PTR=STPTR
+      COUNT=TRIPLES(TRIP)_CNT
+      TRIPLES(TRIP)_CNT=0
+      %WHILE COUNT>0 %AND PTR>0 %CYCLE
+         RTRIP==TRIPLES(PTR)
+         PTR=RTRIP_FLINK
+         %IF RTRIP_OPND1_FLAG=REFTRIP %AND RTRIP_OPND1_D=TRIP %START
+            RTRIP_OPND1=OPND
+            COUNT=COUNT-1
+         %FINISH
+         %IF RTRIP_OPERN>=128 %AND RTRIP_OPND2_FLAG=REFTRIP %AND RTRIP_OPND2_D=TRIP %START
+            RTRIP_OPND2=OPND
+            COUNT=COUNT-1
+         %FINISH
+      %REPEAT
+%END
+%END
+%EXTERNAL %ROUTINE TRIP OPT(%RECORD (TRIPF) %ARRAY %NAME TRIPLES, %INTEGER %NAME NEXT TRIP)
+!***********************************************************************
+!*    SCANS A TRIPLES LIST FOR POSSIBLE OPTIMISATIONS                  *
+!***********************************************************************
+%INTEGER CHANGES,DUPS,DUPTNO,PTR,I,J,K,VAL,XVAL,CURR,NEXT,OP1,OP2,CTOPOP,REVOP,APTYPE,FOLD AGAIN
+%BYTE %INTEGER %ARRAY %NAME A
+%RECORD (TRIPF) %NAME CURRT,NEWT,NEXTT
+%RECORD (RD) %NAME OPND1,OPND2,POPND,ROPND
+%ROUTINE %SPEC SWOP OPERANDS(%RECORD (TRIPF) %NAME CURRT)
+%INTEGER %FN %SPEC POWEROF2(%INTEGER VAL)
+%INTEGER %FN %SPEC PRELOAD PLACE(%INTEGER TRIP)
+%ROUTINE %SPEC INDOPT(%RECORD (RD) %NAME OPND)
+%ROUTINE %SPEC VMYOPT(%INTEGER CURR)
+%ROUTINE %SPEC IBMVMY(%INTEGER N)
+%INTEGER %FN %SPEC SAME OPND(%RECORD (RD) %NAME OPND1,OPND2,%integer ASSN)
+%ROUTINE %SPEC INVERT DIV(%RECORD (TRIPF) %NAME CURRT)
+%ROUTINE %SPEC CHECK DUPS(%INTEGER STRIPNO,STRIPNO)
+%ROUTINE %SPEC PROPAGATE CASS(%INTEGER STRIPNO, %RECORD (RD) %NAME N,C)
+%ROUTINE %SPEC DUPLICATE TRIP(%INTEGER TRIPNO,DTRIPNO,FLAGBITS)
+%ROUTINE %SPEC DEC USE(%INTEGER TRIPLE NO)
+%ROUTINE %SPEC DELETE TRIPLE(%INTEGER TRIPLE NO)
+      %IF TARGET=AMDAHL %OR TARGET=IBM %OR TARGET=IBMXA %START
+
+                                         ! ON IBM VMY OF 0 ALWAYS ZERO
+      %CONST %BYTE %INTEGER %ARRAY FOLD NOOP INFO(0:199)= 0(128),
+                    X'89',X'41',X'89',X'89',X'B6',{+,-,!!,!,*} %C
+                    2,0,X'A4',1,1,{//,/,&,>>,<<} %C
+                    2,0,0,32,X'89',{**,COMP,DCOMP,VMY,COMB} %C
+                    0,0,2,0,0,{=,<-,****,BADJ,INDEX} %C
+                    0{IFETCH},0(3),
+                    X'40'{CONCAT},0(*)
+      %FINISH %ELSE %IF TARGET=EMAS %START
+                                         ! INDEX IS NOT NECESSARILY A NOOP WHEN INDEX IS 0
+!
+      %CONST %BYTE %INTEGER %ARRAY FOLD NOOP INFO(0:199)= 0(128),
+                    X'89',X'41',X'89',X'89',X'B6',{+,-,!!,!,*} %C
+                    2,0,X'A4',1,1,{//,/,&,>>,<<} %C
+                    2,0,0,3,X'89',{**,COMP,DCOMP,VMY,COMB} %C
+                    0,0,2,0,0,{=,<-,****,BADJ,INDEX} %C
+                    0{IFETCH},0(3),
+                    X'40'{CONCAT},0(*)
+      %FINISH %ELSE %START
+      %CONST %BYTE %INTEGER %ARRAY FOLD NOOP INFO(0:199)= 0(128),
+                    X'89',X'41',X'89',X'89',X'B6',{+,-,!!,!,*} %C
+                    2,0,X'A4',1,1,{//,/,&,>>,<<} %C
+                    2,0,0,3,X'89',{**,COMP,DCOMP,VMY,COMB} %C
+                    0,0,2,0,1,{=,<-,****,BADJ,INDEX} %C
+                    0{IFETCH},0(3),
+                    X'40'{CONCAT},0(*)
+      %FINISH
+
+! 2**0 SET IF SECOND OPERAND ZERO IS NOOP
+! 2**1 SET IF SECOND OPERAND 1 IS A NOOP
+! 2**2 SET IF SECOND OPERAND 0 MEANS RESULT=0
+! 2**3 SET IF FIRST OPERAND ZERO IS NOOP
+! 2**4 SET IF FIRST OPERAND 1 IS A NOOP
+! 2**5 SET IF  FIRST OPERAND ZERO MEANS RESULT=0
+! 2**6 SET IF FOLDING WITH ITSELF POSSIBLE BUT NOT SIMPE
+! 2**7 SET FOR NORMAL FOLDING
+!
+      A==WORKA_A
+      CHANGES=0;                         ! NO CHANGES AS YET
+      DUPS=0;                            ! NO DUPLICATES YET
+      %if parm_dcomp#0 %then print trips(triples)
+
+      %CYCLE
+         FOLD AGAIN=NO
+         FLAG AND FOLD(TRIPLES)
+!
+! ADVANCED FOLDING FACTOR CONSTANTS OUT OF 2 OR MORE TRIPLES
+! TO SAVE AN OPERATION. ONLY MORE USUSAL CASE CATERED FOR AS IN
+! VAR+CONST+CONST.
+!
+         PTR=TRIPLES(0)_FLINK
+         %WHILE PTR>0 %CYCLE
+            CURRT==TRIPLES(PTR)
+            NEXT=CURRT_FLINK
+            %EXIT %IF NEXT<=0
+            NEXTT==TRIPLES(NEXT)
+            %WHILE NEXTT_OPERN=NULLT %AND NEXTT_FLINK>0 %CYCLE
+               NEXT=NEXTT_FLINK;         ! SKIP OVER ANY NOOPS
+               NEXTT==TRIPLES(NEXT)
+            %REPEAT
+!
+! DISCARD ANY DEAD CODE BEFORE FOLDING
+!
+            %IF CURRT_OPERN=XSTOP %OR CURRT_OPERN=RTXIT %OR CURRT_OPERN=GOTOSW %OR (CURRT_X1&15=15 %AND %C
+               BJUMP<=CURRT_OPERN<=FJUMP) %START
+               %WHILE NEXTT_OPERN#TLAB %AND NEXTT_OPERN#SETSW %AND NEXTT_OPERN#DCLSW %AND NEXTT_OPERN#RTHD %AND %C
+                  NEXTT_OPERN#ONEV2 %AND NEXTT_FLAGS&ASSLEVEL=0 %CYCLE
+                  %UNLESS NEXTT_OPERN=NULLT %START
+                     DELETE TRIPLE(NEXT)
+                     NEXTT_X1=X'DEADC0DE'
+                  %FINISH
+                  %EXIT %IF NEXTT_FLINK=0
+                  NEXT=NEXTT_FLINK
+                  NEXTT==TRIPLES(NEXT)
+               %REPEAT
+            %FINISH
+            PTR=NEXT %AND %CONTINUE %UNLESS CURRT_FLAGS&(DONT OPT!CONSTANTOP)=CONSTANT OP
+            J=CURRT_OPERN
+            %IF (J=VASS %OR J=STRASS2) %AND (CURRT_OPND1_FLAG=DNAME %OR CURRT_OPND1_FLAG=INDNAME) %THEN %C
+               PROPAGATE CASS(NEXT,CURRT_OPND1,CURRT_OPND2)
+            %UNLESS CURRT_CNT=1 %AND NEXTT_CNT=1 %AND NEXTT_FLAGS&CONSTANTOP#0 %AND CURRT_PUSE=NEXT %THEN %C
+               PTR=NEXT %AND %CONTINUE
+            PTR=NEXT %AND %CONTINUE %UNLESS NEXTT_FLAGS&DONT OPT=0
+            K=NEXTT_OPERN
+            %UNLESS FOLD NOOP INFO(J)>>6#0 %AND FOLD NOOP INFO(K)>>6#0 %THEN PTR=NEXT %AND %CONTINUE
+            %IF CURRT_OPND1_FLAG<=1 %THEN OP1=1 %AND OPND1==CURRT_OPND1 %ELSE OP1=2 %AND OPND1==CURRT_OPND2
+            %IF NEXTT_OPND1_FLAG<=1 %THEN %START
+               OP2=1
+               OPND2==NEXTT_OPND1
+               ROPND==NEXTT_OPND2
+            %ELSE
+               OP2=2
+               OPND2==NEXTT_OPND2
+               ROPND==NEXTT_OPND1
+            %FINISH
+            %UNLESS ROPND_FLAG=REFTRIP %AND ROPND_D=PTR %THEN PTR=NEXT %AND %CONTINUE
+            CTOPOP=0; REVOP=0
+            %IF J=K %AND FOLD NOOP INFO(J)&X'80'#0 %THEN CTOPOP=J
+            %IF J=K=SUB %START
+               %IF OP2=2 %START
+                  %IF OP1=2 %THEN CTOPOP=ADD %ELSE CTOPOP=SUB
+               %FINISH %ELSE %START;     ! OP2=1 CASE
+                  %IF OP1=1 %THEN CTOPOP=-SUB %AND REVOP=ADD %ELSE CTOPOP=ADD
+               %FINISH
+            %FINISH
+            %IF J=ADD %AND K=SUB %AND OP2=2 %THEN CTOPOP=SUB
+            %IF J=SUB %AND K=ADD %THEN %START
+               %IF OP1=1 %THEN CTOPOP=ADD %ELSE CTOPOP=SUB
+            %FINISH
+            %IF J=K=CONCAT %AND OP1=OP2=2 %THEN CTOPOP=CONCAT
+            %IF CTOPOP#0 %START
+               %IF CTOPOP<0 %THEN %START;  ! PERFORM THE REVERSE OPERATION WITH DIFFICULTY
+                  CTOPOP=-CTOPOP
+                  CTOP(CTOPOP,K,0,OPND2,OPND1)
+                  %IF CTOPOP=0 %THEN OPND1=OPND2
+               %FINISH %ELSE CTOP(CTOPOP,K,0,OPND1,OPND2)
+               %IF CTOPOP=0 %THEN %START
+                  %IF OP2=2 %THEN OPND2==NEXTT_OPND1 %ELSE OPND2==NEXTT_OPND2
+                  NOOP(TRIPLES,NEXT,OPND2)
+                  CHANGES=CHANGES+1
+                  %IF REVOP#0 %THEN CURRT_OPERN=REVOP
+                  %CONTINUE
+               %FINISH
+            %FINISH
+            PTR=NEXT
+         %REPEAT
+         %IF CHANGES>0 %AND PARM_DCOMP#0 %THEN %C
+            WORKA_OPTCNT=WORKA_OPTCNT+CHANGES %AND CHANGES=0 %AND PRINT TRIPS(TRIPLES)
+      %REPEAT %UNTIL FOLD AGAIN=NO
+!
+! NOW A BACKWARD PASS TO DO A FEW ODDS AND ENDS. A BACK PASS WILL
+! ENABLE DEAD ASSIGNMENTS TO LOCALS TO BE STRIPPED OUT BEFORE A RETURN
+!
+      PTR=TRIPLES(0)_BLINK
+      %WHILE PTR>0 %CYCLE
+         CURRT==TRIPLES(PTR)
+         CURR=PTR; PTR=CURRT_BLINK
+         %CONTINUE %IF CURRT_FLAGS&DONT OPT#0
+         I=CURRT_OPERN
+         %IF (TARGET=EMAS %OR TARGET=IBMXA %OR TARGET=AMDAHL) %AND I=MULT %AND CURRT_CNT=1 %START
+            NEXTT==TRIPLES(CURRT_PUSE)
+            %IF NEXTT_OPERN=LNGTHN %START
+               CURRT_OPTYPE=CURRT_OPTYPE+X'10'
+               NEXTT_OPND1_PTYPE=NEXTT_OPND1_PTYPE+X'10'
+               I=MULTX
+               CURRT_OPERN=MULTX
+               NOOP(TRIPLES,CURRT_PUSE,NEXTT_OPND1)
+               CHANGES=CHANGES+1
+            %FINISH
+         %FINISH
+         OPND1==CURRT_OPND1
+         OPND2==CURRT_OPND2
+         %IF I=REALDIV %AND OPND2_FLAG<=LCONST %THEN INVERTDIV(CURRT) %AND I=CURRT_OPERN
+         %IF TARGET=IBM %OR TARGET=AMDAHL %OR TARGET=IBMXA %START
+                                         ! REARRANGE COMMUTABLES TO MAXIMISE
+                                         ! USE OF LA FOR SHORT CONSTS
+            %IF CURRT_FLAGS&COMMUTABLE#0 %AND CURRT_OPTYPE=X'51' %AND OPND2_FLAG=SCONST %AND %C
+               OPND1_PTYPE&255=X'51' %AND (CURRT_OPERN#COMP %OR 7<=CURRT_X1<=8) %AND 1<=OPND2_D<=4095 %THEN %C
+               SWOP OPERANDS(CURRT)
+         %FINISH
+         %IF I=VMY %THEN VMYOPT(CURR) %AND I=CURRT_OPERN
+         %IF OPND1_FLAG=INDIRECT %THEN INDOPT(OPND1)
+         %IF I>=128 %AND OPND2_FLAG=INDIRECT %THEN INDOPT(OPND2)
+      %REPEAT
+!
+! FIRST REAL OPTIMISATION IS TO SEARCH FOR AND REMOVE NOPS
+! LIKE *1 OR <<0 OR +0 ETC. THESE ARE SURPRISINGLY COMMON
+! IN PROGRAMS MADE MACHINE INDEPENDENT BY LIBERAL USE
+! OF CONSTANT VARIABLES
+!
+! ALSO DOES A FEW REARRANGEMENTS OF SIMPLE COMPARISONS AND ARITHMETICS
+!
+      PTR=TRIPLES(0)_FLINK
+      %WHILE PTR>0 %CYCLE
+         CURRT==TRIPLES(PTR);            ! EXAMINE EACH TRIPLE
+         CURR=PTR
+         PTR=CURRT_FLINK
+         %CONTINUE %IF CURRT_FLAGS&DONT OPT#0
+         I=CURRT_OPERN
+         OPND1==CURRT_OPND1
+         OPND2==CURRT_OPND2
+         %CONTINUE %IF CURRT_FLAGS&CONSTANTOP=0
+         %IF OPND1_FLAG<=1 %THEN OP1=1 %AND VAL=OPND1_D %AND XVAL=OPND1_XTRA %ELSE %C
+            OP1=2 %AND VAL=OPND2_D %AND XVAL=OPND2_XTRA
+         %IF I=DCOMP %AND OP1=2 %START;  ! EXPAND I=0=J ETC
+            I=COMP; CURRT_OPERN=COMP
+            NEXTT==TRIPLES(CURRT_PUSE)
+            NEXTT_OPND1=OPND2
+            NEXTT_FLAGS=NEXTT_FLAGS!LOADOP1
+            CURRT_CNT=CURRT_CNT-1
+            CHANGES=CHANGES+1
+         %FINISH
+         %IF I=COMP %START
+            J=CURRT_X1&15;               ! IBM COND MASK
+            NEXTT==TRIPLES(CURRT_FLINK)
+            %IF CURRT_OPTYPE<=X'51' %START;  ! TRANSFORM I>=1 TO I>0 ETC
+               %IF (OP1=2 %AND ((VAL=1 %AND (J=4 %OR J=10)) %OR (VAL=-1 %AND (J=2 %OR J=12)))) %OR (OP1=1 %AND %C
+                  ((VAL=1 %AND (J=2 %OR J=12)) %OR (VAL=-1 %AND (J=4 %OR J=10)))) %START
+                  J=J!!8
+                  CURRT_X1=CURRT_X1!!8
+                  NEXTT_X1=NEXTT_X1!!8;  ! ALSO ALTER MASK IN THE JUMP
+                  VAL=0
+                  %IF OP1=2 %THEN OPND2_D=0 %ELSE OPND1_D=0
+                  CHANGES=CHANGES+1
+               %FINISH
+            %FINISH
+            %IF VAL=0 %AND (XVAL=0 %OR CURRT_OPTYPE>>4<=5) %AND (TARGET=EMAS %OR TARGET=IBM %OR TARGET=AMDAHL %OR %C
+               TARGET=IBMXA %OR 1<<TARGET&EMACHINE#0 %OR 7<=J<=8) %START
+               %IF OP1=1 %THEN %START
+                  SWOP OPERANDS(CURRT)
+                  %IF J&6=2 %OR J&6=4 %THEN CURRT_X1=CURRT_X1!!6 %AND NEXTT_X1=NEXTT_X1!!6
+               %FINISH
+               %UNLESS (TARGET=IBM %OR TARGET=AMDAHL %OR TARGET=IBMXA) %AND OPND1_PTYPE&255=X'31' %START
+                  CURRT_OPERN=ZCOMP
+                  CURRT_FLAGS<-CURRT_FLAGS&(\LOADOP2)!DONT OPT
+               %FINISH
+            %FINISH
+         %FINISH
+         %IF (TARGET=PNX %OR TARGET=EMAS %OR TARGET=IBMXA %OR TARGET=AMDAHL) %AND (I=LSHIFT %OR I=RSHIFT) %AND %C
+            1<=VAL<=31 %AND OP1=2 %START
+                                         ! <<CONST AND >> CONST
+            CURRT_OPERN=CLSHIFT
+            %IF I=RSHIFT %THEN VAL=-VAL %AND OPND2_D=VAL
+            I=CLSHIFT
+            CURRT_FLAGS=CURRT_FLAGS&(\LOADOP2)
+            CHANGES=CHANGES+1
+         %FINISH
+!
+         %UNLESS TARGET=PERQ %OR TARGET=ACCENT %START
+                                         ! THESE HAVE NO ARITHMETIC SHIFT
+            %IF I=MULT %AND VAL>1 %AND CURRT_OPTYPE<=X'51' %START
+               J=POWEROF2(VAL)
+               %IF J>0 %START
+                  %IF OP1=1 %THEN SWOP OPERANDS(CURRT)
+                  CURRT_OPERN=CASHIFT
+                  I=CASHIFT
+                  OPND2_D=J
+                  CURRT_FLAGS=CURRT_FLAGS&(\LOADOP2)
+                  CHANGES=CHANGES+1
+               %FINISH
+            %FINISH
+         %FINISH
+         %IF I>=128 %THEN %START;        ! BINARY OPERATIONS
+            J=FOLD NOOP INFO(I)&X'3F'
+            %IF CURRT_OPTYPE>>4=6 %START
+               %IF VAL=0 %THEN VAL=XVAL %ELSE %CONTINUE
+            %FINISH
+            %CONTINUE %UNLESS VAL<=1 %AND J#0 %AND CURRT_OPTYPE&7=1
+            POPND==OPND1;                ! FOR PASSING FORWARD
+            %IF OP1=1 %THEN K=3 %AND POPND==OPND2 %ELSE K=0
+! BIT SHIFT FOR MASK
+            %IF (J&(1<<K)#0 %AND VAL=0) %OR (J&(2<<K)#0 %AND VAL=1) %START
+               NOOP(TRIPLES,CURR,POPND);  ! THIS IS NOOP
+               CHANGES=CHANGES+1
+               %CONTINUE
+            %FINISH
+            %IF J&(4<<K)#0 %AND VAL=0 %THEN %START
+               %IF OPND1_FLAG=REFTRIP %THEN DEC USE(OPND1_D)
+               %IF OP1=2 %THEN OPND1=OPND2;  ! RESULT IS ZERO
+               NOOP(TRIPLES,CURR,OPND1)
+               CHANGES=CHANGES+1
+                                         ! MAY CAUSE OTHER NOOPS
+                                         ! EG I=(A+B)*0
+            %FINISH
+            %IF VAL=0 %AND OP1=1 %AND CURRT_OPERN=SUB %THEN %START
+               OPND1=OPND2
+               CURRT_OPERN=LNEG
+               CHANGES=CHANGES+1
+            %FINISH
+                                         ! OPTIMISE"0-X"
+         %FINISH %ELSE %START;           ! UNARY OPERATORS
+                                         ! CAN OPTIMISE LOAD DOUBLE & SHRINK
+                                         ! FOR PERQ & ACCENT
+         %FINISH
+
+      %REPEAT
+      %IF CHANGES>0 %AND PARM_DCOMP#0 %THEN WORKA_OPTCNT=WORKA_OPTCNT+CHANGES %AND CHANGES=0 %AND PRINT TRIPS(TRIPLES)
+!
+! LOOK FOR REGISTER TO STORE OPERATIONS ON  EMACHINES (xcept VNS and risk)
+!
+      %IF 1<<TARGET&EMACHINE#0 %and 1<<target&riskmc=0 %AND TARGET#VNS %START
+         PTR=TRIPLES(0)_FLINK
+         %WHILE PTR>0 %CYCLE
+            CURRT==TRIPLES(PTR)
+            PTR=CURRT_FLINK
+            NEXTT==TRIPLES(PTR)
+            %EXIT %IF PTR=0;             ! THE END
+            %UNLESS NEXTT_OPERN=VASS %AND NEXTT_OPTYPE=X'51'=CURRT_OPTYPE %AND (NEXTT_OPND1_FLAG=DNAME %OR %C
+               NEXTT_OPND1_FLAG=INDNAME) %AND NEXTT_OPND2_FLAG=REFTRIP %AND CURRT_PUSE=PTR %AND CURRT_CNT=1 %THEN %C
+               %CONTINUE
+            %CONTINUE %UNLESS ADD<=CURRT_OPERN<=ANDL;  ! lshift & rshift also possible on pnx
+            %IF CURRT_FLAGS&COMMUTABLE#0 %AND SAME OPND(CURRT_OPND2,NEXTT_OPND1,NO)=YES %THEN %C
+               SWOP OPERANDS(CURRT) %ELSE %START
+               %CONTINUE %UNLESS SAME OPND(CURRT_OPND1,NEXTT_OPND1,NO)=YES
+            %FINISH
+            CURRT_X1=CURRT_OPERN
+            CURRT_OPERN=RSTORE
+            CURRT_PUSE=0
+            CURRT_FLAGS<-DONT OPT!CURRT_FLAGS&(\LOAD OP1);  ! THIS AVOIDS A USELESS PRELOAD
+            DELETE TRIPLE(PTR)
+         %REPEAT
+      %FINISH
+!
+! LOOK FOR STORE TO STORE OPERATIONS ON IBM ranges
+!
+      %IF TARGET=IBM %OR TARGET=IBMXA %OR TARGET=AMDAHL %START
+         PTR=TRIPLES(0)_FLINK
+         %WHILE PTR>0 %CYCLE
+            CURRT==TRIPLES(PTR)
+            PTR=CURRT_FLINK
+            %EXIT %IF PTR=0;             ! THE END
+            NEXTT==TRIPLES(PTR)
+            PTR=NEXTT_FLINK %AND NEXTT==TRIPLES(PTR) %WHILE NEXTT_OPERN=SHRTN %AND NEXTT_PUSE=NEXTT_FLINK
+            %UNLESS NEXTT_OPERN=VASS %AND NEXTT_OPTYPE&7=1=CURRT_OPTYPE&7 %AND %C
+               (CURRT_OPND1_PTYPE&x'f0'=CURRT_OPND2_PTYPE&x'f0' %OR CURRT_OPND2_FLAG=SCONST) %AND %C
+               (NEXTT_OPND1_FLAG=DNAME %OR NEXTT_OPND1_FLAG=INDNAME) %AND NEXTT_OPND2_FLAG=REFTRIP %AND %C
+               CURRT_PUSE=CURRT_FLINK %AND CURRT_CNT=1 %THEN %CONTINUE
+            %CONTINUE %UNLESS CURRT_OPERN=NONEQ %OR CURRT_OPERN=ORL %OR CURRT_OPERN=ANDL
+            %IF SAME OPND(CURRT_OPND2,NEXTT_OPND1,NO)=YES %THEN SWOP OPERANDS(CURRT) %ELSE %START
+               %CONTINUE %UNLESS SAME OPND(CURRT_OPND1,NEXTT_OPND1,NO)=YES
+            %FINISH
+            %CONTINUE %IF CURRT_OPND2_FLAG>=REFTRIP
+            CURRT_X1=CURRT_OPERN
+            CURRT_OPERN=RSTORE
+            CURRT_PUSE=0
+            CURRT_FLAGS<-DONT OPT!CURRT_FLAGS&(\LOAD OP1);  ! THIS AVOIDS A USELESS PRELOAD
+            DELETE TRIPLE(PTR)
+         %REPEAT
+      %FINISH
+!
+! PASS TO CHECK FOR COMMON SUBEXPRESSIONS. DONE IN SUCH A WAY THAT
+! SEQUENCES ARE DETECTED AND COMBINED
+!
+      PTR=TRIPLES(0)_FLINK
+      %WHILE PTR>0 %CYCLE
+         CURRT==TRIPLES(PTR)
+         %IF CURRT_FLAGS&DONT OPT=0 %THEN CHECK DUPS(PTR,CURRT_FLINK)
+         PTR=CURRT_FLINK
+      %REPEAT
+!
+! NESTED ACCUMULATOR PASS. AVOID EXCHANGES BY ARRANGING EARLY LOADS
+! OF OPERANDS FOR NON COMMUTABLE OPERATIONS
+!
+      %IF TARGET=PNX %OR TARGET=PERQ %OR TARGET=ACCENT %START
+         PTR=TRIPLES(0)_FLINK
+         %WHILE PTR>0 %CYCLE
+            CURRT==TRIPLES(PTR)
+            %IF CURRT_OPERN>=128 %AND CURRT_OPERN#VASS %AND CURRT_OPERN#VJASS %AND (TARGET=PERQ %OR TARGET=ACCENT %OR %C
+               (CURRT_OPTYPE&7=1 %AND CURRT_OPTYPE&x'f0'<x'60')) %AND %C
+               CURRT_FLAGS&(LOADOP1!LOADOP2!COMMUTABLE)=LOADOP1 %AND CURRT_OPND2_FLAG=REFTRIP %AND %C
+               1<<CURRT_OPND1_FLAG&BTREFMASK=0 %START
+               J=PRELOAD PLACE(CURRT_OPND2_D)
+               %IF J>=0 %AND CURRT_DPTH=TRIPLES(J)_DPTH %START
+                                         ! PLACE ACCESSIBLE
+                  I=J; K=0
+                  %WHILE I#PTR %CYCLE;   ! CHECK FOR DEPTH OF NESTING
+                     NEXTT==TRIPLES(I)
+!                  PRINTSTRING("TRIPLE EXAMINED")
+!               WRITE(I,5); WRITE(OP1,5)
+!                  NEWLINE
+                     %IF NEXTT_DPTH<CURRT_DPTH %THEN K=999 %AND %EXIT
+                                         ! LOWER ESTACK ITEMS WILL BE USED
+                                         ! CANOT PRELOAD THIS ITEM
+                     OP1=NEXTT_OPERN
+                     %IF OP1=IOCPC %OR OP1=PRECL %OR OP1=RCALL %OR OP1=RCRFR %OR OP1=RCRMR %THEN K=999 %AND %EXIT
+                     %IF K<NEXTT_DPTH %THEN K=NEXTT_DPTH
+                     I=NEXTT_FLINK
+                  %REPEAT
+                  %IF K+WORDS(CURRT_OPTYPE>>4)>=6 %THEN PTR=CURRT_FLINK %AND %CONTINUE
+                  NEXTT==TRIPLES(J)
+                  NEWT==TRIPLES(NEXT TRIP)
+                  NEWT=0
+                  NEWT_OPERN=PRELOAD;    ! PRELOAD
+                  NEWT_CNT=1
+                  NEWT_OPTYPE=CURRT_OPTYPE
+                  NEWT_FLAGS=LOADOP1!LEAVE STACKED
+                  NEWT_PUSE=PTR
+                  NEWT_OPND1=CURRT_OPND1
+                  CURRT_FLAGS=CURRT_FLAGS&(\LOAD OP1);  ! OP1 DOES NOT NEED LOAD
+                  CURRT_OPND1_FLAG=REFTRIP
+                  CURRT_OPND1_D=NEXT TRIP
+                  CURRT_OPND1_XTRA=0
+                                         ! LINK IN NEW TRIPLE
+                  NEWT_FLINK=J
+                  NEWT_BLINK=NEXTT_BLINK
+                  NEXTT_BLINK=NEXT TRIP
+                  TRIPLES(NEWT_BLINK)_FLINK=NEXT TRIP
+                  NEXT TRIP=NEXT TRIP+1
+!
+! CORRECT DEPTH OF NESTING FIELD
+!
+                  NEWT_DPTH=NEXTT_DPTH
+                  %WHILE J#PTR %CYCLE
+                     NEXTT_DPTH=NEXTT_DPTH+WORDS(NEWT_OPTYPE>>4)
+                     J=NEXTT_FLINK
+                     NEXTT==TRIPLES(J)
+                  %REPEAT
+                  CHANGES=CHANGES+1
+               %FINISH
+            %FINISH
+            PTR=CURRT_FLINK
+         %REPEAT
+      %FINISH
+!
+! PASS TO TRY TO KEEP DUPLICTE TRIPLES IN ESTACK. THE SAVING
+! HERE IS SO LARGE THAT IT IS WORTH THE EFFORT TO FIND THESE
+! RATHER RARE CASES. OFTEN THE FORM IS A(I)=A(I)+B.
+!
+      %IF (TARGET=PNX %OR TARGET=PERQ %OR TARGET=ACCENT) %AND DUPS>0 %START
+                                         ! THERE IS AT LEST ONE
+         PTR=TRIPLES(0)_FLINK
+         %WHILE PTR>0 %CYCLE
+            CURRT==TRIPLES(PTR)
+            NEXTT==CURRT
+            %CYCLE
+               NEXT=NEXTT_FLINK
+               NEXTT==TRIPLES(NEXT)
+            %REPEAT %UNTIL NEXTT_OPERN#NULLT
+            %IF CURRT_CNT=2 %AND (TARGET=PERQ %OR TARGET=ACCENT %OR CURRT_OPTYPE&7=1) %START
+                                         ! ONLY DUPILCATES POSSIBLE
+               %IF CURRT_PUSE#NEXT %AND ((NEXTT_OPND1_FLAG=REFTRIP %AND NEXTT_OPND1_D=PTR) %OR %C
+                  (NEXTT_OPND2_FLAG=REFTRIP %AND NEXTT_FLAGS&(COMMUTABLE!LOADOP1)=COMMUTABLE!LOADOP1 %AND %C
+                  NEXTT_OPND2_D=PTR)) %START
+                  CURRT_FLAGS=CURRT_FLAGS!USE ESTACK
+                  CHANGES=CHANGES+1
+                  PTR=NEXT
+                  %CONTINUE
+               %FINISH
+               %IF CURRT_PUSE=NEXT %AND NEXTT_OPND1_FLAG=REFTRIP=NEXTT_OPND2_FLAG %AND %C
+                  NEXTT_OPND1_D=PTR=NEXTT_OPND2_D %THEN %START
+                  CURRT_FLAGS=CURRT_FLAGS!USE ESTACK
+                  CHANGES=CHANGES+1
+                  PTR=NEXT; %CONTINUE
+               %FINISH
+               %IF CURRT_PUSE=NEXT %AND NEXTT_FLINK=NEXTT_PUSE#0 %AND (NEXTT_FLAGS&COMMUTABLE#0 %OR %C
+                  (NEXTT_OPND1_FLAG=REFTRIP %AND NEXTT_OPND1_D=PTR)) %START
+                  NEWT==TRIPLES(NEXTT_FLINK)
+                  NEWT==TRIPLES(NEWT_FLINK) %WHILE NEWT_OPERN=NULLT
+                  %IF (NEWT_OPND2_FLAG=REFTRIP %AND NEWT_OPND2_D=PTR) %OR (NEWT_FLAGS&COMMUTABLE#0 %AND %C
+                     NEWT_OPND1_FLAG=REFTRIP %AND NEWT_OPND1_D=PTR) %START
+                     CURRT_FLAGS=CURRT_FLAGS!USE ESTACK
+                     CHANGES=CHANGES+1
+                     PTR=NEXT
+                     %CONTINUE
+                  %FINISH
+               %FINISH
+            %FINISH
+            PTR=NEXT
+         %REPEAT
+      %FINISH
+      %IF CHANGES>0 %AND PARM_DCOMP#0 %THEN PRINT TRIPS(TRIPLES)
+      WORKA_OPTCNT=WORKA_OPTCNT+CHANGES
+      %RETURN
+%INTEGER %FN POWEROF2(%INTEGER VAL)
+!***********************************************************************
+!*    CHECKS IF VAL IS A POWER OF 2                                    *
+!***********************************************************************
+%INTEGER I,J
+      %FOR I=1,1,30 %CYCLE
+         J=1<<I
+         %IF J=VAL %THEN %RESULT=I
+         %IF J>VAL %THEN %RESULT=0
+      %REPEAT
+      %RESULT=0
+%END
+%ROUTINE SWOP OPERANDS(%RECORD (TRIPF) %NAME CURRT)
+!***********************************************************************
+!*    EXCHANGE OPND1&OPND2 KEEPING THE FLAGS CORRECT                   *
+!***********************************************************************
+%RECORD (RD) TOPND
+%INTEGER FLAGS,NEWFLAGS
+      TOPND=CURRT_OPND1
+      CURRT_OPND1=CURRT_OPND2
+      CURRT_OPND2=TOPND
+      FLAGS=CURRT_FLAGS
+      NEWFLAGS=FLAGS&(\(LOADOP1+LOADOP2))
+      %IF FLAGS&LOADOP1#0 %THEN NEWFLAGS=NEWFLAGS!LOADOP2
+      %IF FLAGS&LOADOP2#0 %THEN NEWFLAGS=NEWFLAGS!LOADOP1
+      CURRT_FLAGS=NEWFLAGS
+      CHANGES=CHANGES+1
+%END
+%INTEGER %FN PRELOAD PLACE(%INTEGER TRIP)
+!***********************************************************************
+!*    LOOK FOR FIRST TRIPLE IN THE CHAIN THAT LEADS TO TRIP            *
+!*    CAN BE VERY COMPILCATED. RETURN -1 IF NOT SIMPLE                 *
+!***********************************************************************
+%CONST %INTEGER TRIPREFS=X'140';         ! BITMASK OF OPERAND FORMATS
+%RECORD (RD) %NAME OPND1,OPND2
+%RECORD (TRIPF) %NAME CURRT
+      CURRT==TRIPLES(TRIP)
+      OPND1==CURRT_OPND1
+      OPND2==CURRT_OPND2
+      %IF CURRT_OPERN<128 %OR 1<<CURRT_OPND2_FLAG&TRIPREFS=0 %START
+                                         ! BACK VIA OPND1
+         %IF 1<<CURRT_OPND1_FLAG&TRIPREFS=0 %THEN %RESULT=TRIP
+         %RESULT=PRELOAD PLACE(OPND1_D)
+      %FINISH
+      %IF 1<<CURRT_OPND1_FLAG&TRIPREFS=0 %OR OPND1_D=CURRT_BLINK %THEN %RESULT=PRELOAD PLACE(OPND2_D)
+!
+! BOTH OPERANDS ARE LOADED TRIPLES
+!
+      %IF CURRT_BLINK=OPND2_D %THEN %RESULT=PRELOADPLACE(OPND1_D)
+      %RESULT=-1;                        ! TOO COMPLICATED
+%END
+%ROUTINE IBMVMY(%INTEGER CURRN)
+!***********************************************************************
+!*    DESIGNED FOR IBM TYPE TARGETS WHERE THERE IS A DISPLACEMENT      *
+!*    IN THE INSTRUCTIONS. THIS ROUTINE WORKS ON A(I+4) BY REMOVING    *
+!*    THE CONST OUT INTO AN AAINC TRIPLE. IT IS THEN TRIVIAL FOR GEN   *
+!*    TO SAVE AN ORDER AN OPTIMISE ACCESS TO SAY A(I) & A(I+1).        *
+!***********************************************************************
+%INTEGER ADDN,INDN,NEWTN,VAL
+%RECORD (TRIPF) %NAME ADDOP,INDOP,VMYOP,NEWT
+%RECORD (RD) %NAME AOPND1,AOPND2,VOPND1,VOPND2,IOPND1,IOPND2,NOPND1,NOPND2
+      VMYOP==TRIPLES(CURRN);             ! ONTO THE VMY
+      VOPND1==VMYOP_OPND1
+      ADDN=VOPND1_D;                     ! ADDN IS NO OF THETRIPLE PASSED TO VMY
+      ADDOP==TRIPLES(ADDN)
+      %RETURN %UNLESS ADDOP_OPERN=ADD;   ! UNLESS AN ADDITION
+      AOPND1==ADDOP_OPND1
+      AOPND2==ADDOP_OPND2
+      %IF AOPND1_FLAG#SCONST %AND AOPND2_FLAG=SCONST %THEN SWOP OPERANDS(ADDOP)
+      %RETURN %UNLESS AOPND1_FLAG=SCONST
+      INDN=VMYOP_PUSE;                   ! ONTO AIND OR COMBS LEADING TO AIND
+      INDOP==TRIPLES(INDN)
+      VAL=INDOP_X1>>20;                  ! ELSIZE IN BYTES 0=UNKNOWN
+      %RETURN %IF VAL=0 %OR INDOP_OPERN#AINDX
+      VAL=VAL*AOPND1_D
+      %RETURN %IF VAL>4095;              ! IBM MAX DISPLACEMENT
+      IOPND1==INDOP_OPND1
+      IOPND2==INDOP_OPND2
+!
+! LINK IN A NEW TRIPLE BEFORE AIND AND COPY AIND INTO THE NEW ONE
+! CHANGE THE OLD AIND TO AAINC. THIS AVOIDS CAHSING ON TO RESET
+! BACK POINTERS TO THE OLD AIND
+!
+      NEWTN=NEXT TRIP
+      NEXT TRIP=NEXT TRIP+1
+      NEWT==TRIPLES(NEWTN)
+      NEWT_BLINK=INDOP_BLINK
+      TRIPLES(NEWT_BLINK)_FLINK=NEWTN
+      NEWT_FLINK=INDN
+      INDOP_BLINK=NEWTN;                 ! END OF RELINKING
+      NEWT_OPTYPE=INDOP_OPTYPE
+      NEWT_CNT=1
+      NEWT_X1=INDOP_X1
+      NEWT_PUSE=INDN
+      NEWT_OPERN=AINDX
+      NEWT_FLAGS=INDOP_FLAGS
+      NEWT_OPND1=IOPND1
+      NEWT_OPND2=IOPND2
+      VMYOP_PUSE=NEWTN
+      INDOP_OPERN=AAINC
+      INDOP_X1=0
+      INDOP_FLAGS=LOADOP2!CONSTANTOP
+      IOPND2_PTYPE=IOPND1_PTYPE;         ! OPND1 CONTROLL OUT PTYPE
+      IOPND2_FLAG=REFTRIP
+      IOPND2_D=NEWTN
+      IOPND1_FLAG=SCONST
+      IOPND1_PTYPE=X'51'
+      IOPND1_D=VAL
+      NOOP(TRIPLES,ADDN,AOPND2)
+      CHANGES=CHANGES+1
+%END
+%ROUTINE INDOPT(%RECORD (RD) %NAME OPND)
+!***********************************************************************
+!*    OPND IS AN INDIRECT OFFSET. TRY TO SUBSUME PART OF THE EXPRESSION*
+!*    INTO THE OFFSET, REALLY GUNNING FOR IMP REFERENCES TO PAG0 ON IBM*
+!***********************************************************************
+%INTEGER COP,X,VAL,OP,LIMIT
+%RECORD (TRIPF) %NAME RTRIP
+%RECORD (RD) %NAME COPND
+      %IF TARGET=IBM %OR TARGET=AMDAHL %OR TARGET=IBMXA %THEN LIMIT=4096 %ELSE %IF TARGET=EMAS %THEN %C
+         LIMIT=X'7FFFFFFF' %ELSE LIMIT=1<<16
+      RTRIP==TRIPLES(OPND_D)
+      %RETURN %UNLESS RTRIP_CNT=1 %AND RTRIP_FLAGS&CONSTANTOP#0
+      OP=RTRIP_OPERN
+      %RETURN %UNLESS OP=ADD %OR OP=SUB
+      %RETURN %UNLESS RTRIP_OPTYPE&7=1 %AND RTRIP_OPTYPE>>4<6
+      %IF RTRIP_OPND1_FLAG<=1 %THEN %START
+         COP=1;                          ! CONSTANT IS OP 1
+         COPND==RTRIP_OPND1;             ! DEFINED BY COPND
+      %ELSE
+         COP=2;                          ! CONSTANT IS OPERAND 2
+         COPND==RTRIP_OPND2
+      %FINISH
+      X=OPND_XTRA;                       ! CURRENT OFFSET
+      %IF X<0 %THEN X=0
+      VAL=COPND_D
+      %IF OP=ADD %AND LIMIT>X+VAL>=0 %THEN COPND_D=0 %AND OPND_XTRA=X+VAL %AND %RETURN
+                                         ! THE ZERO ADD WILL BE ELAIMINATED
+      %IF OP=SUB %AND LIMIT>X-VAL>=0 %AND COP=2 %THEN COPND_D=0 %AND OPND_XTRA=X-VAL
+%END
+%ROUTINE VMYOPT(%INTEGER CURR)
+!***********************************************************************
+!*    ANALYSES A VMY AND REPACES WITH A CONSTANT MULTIPLY IF POSSIBLE  *
+!***********************************************************************
+%RECORD (TRIPF) %NAME CURRT
+%RECORD (RD) %NAME OPND2
+%INTEGER C,D,VALUE,APTYPE,DV,I,J,DVNAME
+      CURRT==TRIPLES(CURR)
+      OPND2==CURRT_OPND2
+      C=CURRT_X1>>28;                    ! CURRENT DIMENSION
+      D=CURRT_X1>>24&15;                 ! MAX DIMENSION
+      DV=0
+      %IF OPND2_FLAG=SCONST %THEN DV=OPND2_D;  ! DOPE VECTOR IF CONST
+      %IF (TARGET=PNX %OR TARGET=PERQ %OR TARGET=ACCENT) %AND C=1 %THEN VALUE=1 %AND ->TOMULT
+      APTYPE=-1;                         ! ARRAY PTYPE
+      DVNAME=CURRT_X1&X'FFFF'
+      %IF DVNAME>0 %THEN APTYPE=WORKA_ASLIST(WORKA_TAGS(DVNAME))_PTYPE
+      %IF TARGET=EMAS %START
+         %IF DV>0 %START
+            I=3*(D+1-C)
+            %IF WORKA_CTABLE(DV+I)=0 %THEN VALUE=WORKA_CTABLE(DV+I+1) %AND ->TOMULT
+         %FINISH
+         %IF APTYPE>>8=2 {ARR=2,NAM=0} %AND C=1 %AND APTYPE&7<=2 %AND APTYPE&255#X'41' %THEN VALUE=1 %AND ->TOMULT
+      %FINISH
+      %IF TARGET=IBM %OR TARGET=AMDAHL %OR TARGET=IBMXA %START
+         %IF C=1=D %AND CURRT_OPND1_FLAG=REFTRIP %THEN IBMVMY(CURR)
+         %IF OPND1_FLAG=SCONST %AND OPND1_D=0 %THEN VALUE=1 %AND ->TOMULT
+                                         ! ANY VMY OF 0 =0 ON IBMS
+         %IF DV>0 %THEN VALUE=WORKA_CTABLE(DV+3*C+2) %AND ->TOMULT
+         %IF C=1 %START
+            %IF APTYPE&7<=2 %THEN VALUE=BYTES(APTYPE>>4&7) %AND ->TOMULT
+            %IF APTYPE&X'0C00'=0 %START;  ! NAM=0
+               %IF DVNAME>0 %THEN VALUE=WORKA_ASLIST(WORKA_TAGS(DVNAME))_ACC %AND ->TOMULT
+            %FINISH
+         %FINISH
+      %FINISH
+      %RETURN
+TOMULT:                                  ! CHANGE VMY TO INTEGER MULT
+      CURRT_OPERN=MULT
+      CURRT_FLAGS=CURRT_FLAGS!CONSTANT OP
+      OPND2_PTYPE=CURRT_OPTYPE;          ! SOME M-CS HAVE 16 BIT OPERATIONS
+      OPND2_FLAG=SCONST
+      OPND2_D=VALUE
+      CHANGES=CHANGES+1
+%END
+%ROUTINE DEC USE(%INTEGER TRIPLE NO)
+!***********************************************************************
+!*    A TRIPLE HAS BEEN PASSED INTO 'DEAD' CODE. DECREMENT ITS USE     *
+!*    AND IF RELEVANT DELETE OPERATIONS LEADING TO IT                  *
+!***********************************************************************
+%RECORD (TRIPF) %NAME CURRT
+      CURRT==TRIPLES(TRIPLE NO)
+      %IF CURRT_CNT=0 %START
+         PRINTSTRING("dec use???
+")
+         PRINT TRIPS(TRIPLES)
+         %MONITOR
+      %FINISH
+      CURRT_CNT<-CURRT_CNT-1
+      %IF CURRT_CNT=1 %THEN DUPS=DUPS-1
+      %IF CURRT_CNT=0 %AND CURRT_OPERN#RSTORE %AND CURRT_OPERN#NULLT %THEN DELETE TRIPLE(TRIPLE NO)
+%END
+%ROUTINE DELETE TRIPLE(%INTEGER TRIPLE NO)
+%RECORD (TRIPF) %NAME DELT
+      DELT==TRIPLES(TRIPLE NO)
+      %IF 1<<DELT_OPND1_FLAG&BTREFMASK#0 %THEN DEC USE(DELT_OPND1_D)
+      %IF DELT_OPERN>=128 %AND 1<<DELT_OPND2_FLAG&BTREFMASK#0 %THEN DEC USE(DELT_OPND2_D)
+      DELT_X1=DELT_OPERN;                ! FOR DEBUGGING
+      DELT_OPERN=NULLT;                  ! NO OP
+      CHANGES=CHANGES+1
+      DELT_FLAGS<-DELT_FLAGS!DONT OPT
+%END
+%ROUTINE DUPLICATE TRIP(%INTEGER TRIPNO,DTRIPNO,FLAGBITS)
+!***********************************************************************
+!*    DTRIPNO IS A DUPLICATE OF TRIPNO. CHANGE ALL REFERENCES          *
+!*    AND DELETE IT                                                    *
+!***********************************************************************
+%RECORD (RD) %NAME OPND1,OPND2
+%RECORD (TRIPF) %NAME MASTER,CURRT,DUPT
+%INTEGER CNT,PTR
+      DUPS=DUPS+1
+      DUPTNO=TRIPNO
+      MASTER==TRIPLES(TRIPNO)
+      DUPT==TRIPLES(DTRIPNO)
+      MASTER_FLAGS=MASTER_FLAGS!FLAGBITS
+      CNT=DUPT_CNT
+      PTR=DUPT_FLINK
+!
+      %WHILE CNT>0 %AND PTR>0 %CYCLE
+         CURRT==TRIPLES(PTR)
+         PTR=CURRT_FLINK
+         %IF CURRT_OPERN=NULLT %THEN %CONTINUE
+         OPND1==CURRT_OPND1
+         OPND2==CURRT_OPND2
+         %IF OPND1_D=DTRIPNO %AND 1<<OPND1_FLAG&BTREFMASK#0 %START
+            MASTER_CNT=MASTER_CNT+1
+            OPND1_D=TRIPNO
+            CURRT_FLAGS=CURRT_FLAGS!LOAD OP1
+            CNT=CNT-1
+         %FINISH
+         %IF CURRT_OPERN>=128 %AND OPND2_D=DTRIPNO %AND 1<<OPND2_FLAG&BTREFMASK#0 %START
+            MASTER_CNT=MASTER_CNT+1
+            OPND2_D=TRIPNO
+            CURRT_FLAGS=CURRT_FLAGS!LOAD OP2
+            CNT=CNT-1
+         %FINISH
+      %REPEAT
+      DELETE TRIPLE(DTRIPNO)
+%END
+%ROUTINE INVERT DIV(%RECORD (TRIPF) %NAME CURRT)
+!***********************************************************************
+!*    DIVISION BY A REAL CONSTANT HAS BEEN FOUND                       *
+!*    SO INVERT IT AND CHANGE TO MULTIPLY. USE CTOP FOR OPERATIONS     *
+!*    THIS WILL FAIL IF NOT ENOUGH PRECISION ON HOST FOR TARGET        *
+!***********************************************************************
+%INTEGER OP,PREC,FLAG,J
+%RECORD (RD) WOPND,COPND
+%LONG %REAL LR
+      COPND=CURRT_OPND2;                 ! THE CONST TO BE INVERTED
+      PREC=CURRT_OPTYPE>>4;              ! PRECISION
+      WOPND_S1=COPND_S1
+!
+! SET UP WOPND AS REAL ONE IN GIGTH PRECISION
+!
+      %IF PREC=5 %THEN WOPND_R=1.0 %ELSE %IF PREC=6 %THEN %START
+         LR=1.0
+         MOVE BYTES(8,ADDR(LR),0,ADDR(WOPND_D),0)
+      %FINISH %ELSE %START
+         WOPND_PTYPE=X'61'
+         WOPND_D=0
+         WOPND_XTRA=1
+         OP=IFLOAT
+         CTOP(OP,J,0,WOPND,COPND);       ! FLOAT LONG 1 TO REAL
+         %RETURN %IF OP#0;               ! NO CAN DO
+      %FINISH
+      OP=REAL DIV
+      CTOP(OP,J,0,WOPND,COPND)
+      %RETURN %IF OP#0
+      CURRT_OPERN=MULT
+      CURRT_OPND2=WOPND
+%END
+%ROUTINE CHECK DUPS(%INTEGER TRIPNO,STRIPNO)
+!***********************************************************************
+!*    CHECK STARTING FROM STRIPNO FOR DUPLICATES OF TRIPNO             *
+!*    MAY BE MORE THAN ONE                                             *
+!***********************************************************************
+%RECORD (TRIPF) %NAME CURRT,DUPT,WORKT
+%RECORD (RD) AOPND,DOPND1,DOPND2,WOPND1,WOPND2
+%CONST %INTEGER LMAX=4
+%INTEGER %ARRAY LABS(0:LMAX)
+%INTEGER OP,NEXT,LPTR,I,J,CTRIPNO,OPERN,F,C11,C12,C21,C22,W12,W22,LABP
+      DUPT==TRIPLES(TRIPNO)
+      DOPND1=DUPT_OPND1; DOPND2=DUPT_OPND2
+      OPERN=DUPT_OPERN
+                                         ! COMPARISONS ARE IMPOSSIBLE TO OPTIMISE
+                                         ! ON CONDITION CODE MACHINES
+                                         ! POSSIBLE BUT DIFFICULT ON TRUE FLAG MCS
+      %IF OPERN=COMP %OR OPERN=DCOMP %OR OPERN=SCOMP %OR OPERN=SDCMP %THEN %RETURN
+      %IF OPERN=PRECC %OR OPERN=CONCAT %OR OPERN=PRES1 %OR OPERN=PRES2 %THEN %RETURN
+      %IF OPERN=PRECL %OR PASS1<=OPERN<=PASS6 %THEN %RETURN
+      %if opern=getptr %and dupt_optype=X'61' %then %return
+                                        ! two word pointers are tricky things to store and pickup
+      F=DUPT_FLAGS
+      LPTR=0; LABP=0
+      %WHILE STRIPNO>0 %CYCLE
+         CURRT==TRIPLES(STRIPNO)
+         %EXIT %IF CURRT_FLAGS&ASS LEVEL#0
+         OP=CURRT_OPERN
+         %IF OP=FJUMP %AND LPTR<=LMAX %START
+            J=CURRT_OPND1_D
+            I=J&X'FFFF';                 ! THE LAB NO
+            %IF J<0 %AND I>WORKA_NNAMES %THEN LABS(LPTR)=I %AND LPTR=LPTR+1
+         %FINISH
+         %IF OP=TLAB %START
+            LABP=USED LATE;              ! FLAG OPERAND IF DUPLICATE FOUND
+            J=CURRT_OPND1_D&X'FFFF';     ! THE LAB NO
+            %FOR I=0,1,LPTR-1 %CYCLE
+               ->JSEEN %IF J=LABS(I)
+            %REPEAT
+            %EXIT;                       ! CAN NOT NORMALLY PASS LABES
+JSEEN:                                   ! THE FIRST JUMP TO THIS LAB HAS
+                                         ! BEEN PASSED. THERE ARE NO BACK JUMPS
+                                         ! TO INTERNAL LABELS FIRST REFERENCED
+                                         ! VIA A FORWARD JUMP
+         %FINISH
+         %EXIT %IF OP=RTXIT %OR OP=RCALL
+         %EXIT %IF OP=SETSW %OR OP=AHASS %OR OP=PTRAS %OR OP=LASS
+         %IF OP=VASS %OR OP=VJASS %or strass1<=op<=strjt %OR OP=DMASS %OR OP=RSTORE %START;  ! ASSIGNMENT
+            AOPND=CURRT_OPND1;           ! DEST OF ASSIGNMENT
+            %IF AOPND_FLAG=INDIRECT %AND (DOPND1_FLAG=INDIRECT %OR DOPND2_FLAG=INDIRECT) %START
+                                         ! MAPPED ARRAYS MAKE AY ARRAY OR MAP ASSIGNMENT
+                                         ! DIFFICULT TO CHECK OUT. ONLY SAFE CASE
+                                         ! IS TO DIFFERENT ARRAYS BUT NOT
+                                         ! IF EITHER ARE ARRAYNAMES
+               %EXIT
+            %FINISH %ELSE %START
+               %EXIT %IF SAME OPND(AOPND,DOPND1,yes)=YES
+               %EXIT %IF OPERN>=128 %AND SAME OPND(AOPND,DOPND2,yes)=YES
+            %FINISH
+         %FINISH
+         %if op=getad %or op=getptr %Start
+            aopnd=currt_opnd1
+            %if same opnd(aopnd,dopnd1,yes)=yes %then %exit
+            %if opern>=128 %and same opnd(aopnd,dopnd2,yes)=yes %then %exit
+         %finish
+         CTRIPNO=STRIPNO
+         STRIPNO=CURRT_FLINK
+         %IF OP=OPERN %AND (OP#VMY %OR DUPT_X1=CURRT_X1) %START
+            C11=SAME OPND(DOPND1,CURRT_OPND1,NO)
+            %IF OPERN<128 %START
+               %IF C11=YES %THEN DUPLICATE TRIP(TRIPNO,CTRIPNO,LABP)
+               %CONTINUE
+            %FINISH
+                                         ! NOW BINARY ONES
+            C22=SAME OPND(DOPND2,CURRT_OPND2,NO)
+            C12=NO; C21=NO
+            %IF F&COMMUTABLE#0 %START
+               C12=SAME OPND(DOPND1,CURRT_OPND2,NO)
+               C21=SAME OPND(DOPND2,CURRT_OPND1,NO)
+            %FINISH
+            %IF C11=YES=C22 %OR C21=YES=C12 %START
+               DUPLICATE TRIP(TRIPNO,CTRIPNO,LABP)
+               %CONTINUE
+            %FINISH
+!
+! now check for distributed common expressions ie (a+b) %AND (a+x+b). The latter
+! is changes to (a+b+x) and the common element eliminated
+!
+            %IF C12!C11!C22!C21=YES %START
+               WORKT==TRIPLES(CURRT_PUSE)
+               WOPND1=WORKT_OPND1; WOPND2=WORKT_OPND2
+               %IF OP=WORKT_OPERN %AND WORKT_CNT=1 %AND F&COMMUTABLE#0 %START
+                  W22=SAME OPND(DOPND2,WOPND2,NO)
+                  W12=SAME OPND(DOPND1,WOPND2,NO)
+                  %IF C12=YES=W22 %OR C22=YES=W12 %OR C21=YES=W12 %OR C11=YES=W22 %START
+                     %IF C12=YES %OR C22=YES %START
+                        WORKT_OPND2=CURRT_OPND1
+                        CURRT_OPND1=WOPND2
+                     %FINISH %ELSE %START
+                        WORKT_OPND2=CURRT_OPND2
+                        CURRT_OPND2=WOPND2
+                     %FINISH
+                     DUPLICATE TRIP(TRIPNO,CTRIPNO,LABP)
+                     %CONTINUE
+                  %FINISH
+               %FINISH
+            %FINISH
+         %FINISH
+      %REPEAT
+%END
+%ROUTINE PROPAGATE CASS(%INTEGER STRIPNO, %RECORD (RD) %NAME NOPND,COPND)
+!***********************************************************************
+!*    CHECK STARTING FROM STRIPNO FOR DUPLICATES OF TRIPNO             *
+!*    MAY BE MORE THAN ONE                                             *
+!***********************************************************************
+%RECORD (TRIPF) %NAME CURRT
+%RECORD (RD) AOPND
+%CONST %INTEGER LMAX=4
+%INTEGER %ARRAY LABS(0:LMAX)
+%INTEGER OP,NEXT,LPTR,I,J,CTRIPNO,LABP
+      LPTR=0;
+      %WHILE STRIPNO>0 %CYCLE
+         CURRT==TRIPLES(STRIPNO)
+         %EXIT %IF CURRT_FLAGS&ASS LEVEL#0
+         OP=CURRT_OPERN
+         %IF OP=FJUMP %AND LPTR<=LMAX %START
+            J=CURRT_OPND1_D
+            I=J&X'FFFF';                 ! THE LAB NO
+            %IF J<0 %AND I>WORKA_NNAMES %THEN LABS(LPTR)=I %AND LPTR=LPTR+1
+         %FINISH
+         %IF OP=TLAB %START
+            J=CURRT_OPND1_D&X'FFFF';     ! THE LAB NO
+            %FOR I=0,1,LPTR-1 %CYCLE
+               ->JSEEN %IF J=LABS(I)
+            %REPEAT
+            %EXIT;                       ! CAN NOT NORMALLY PASS LABES
+JSEEN:                                   ! THE FIRST JUMP TO THIS LAB HAS
+                                         ! BEEN PASSED. THERE ARE NO BACK JUMPS
+                                         ! TO INTERNAL LABELS FIRST REFERENCED
+                                         ! VIA A FORWARD JUMP
+         %FINISH
+         %EXIT %IF OP=RTXIT %OR OP=RCALL
+         %EXIT %IF OP=SETSW %OR OP=PTRAS
+         %IF OP=VASS %OR OP=STRASS2 %OR OP=VJASS %OR OP=DMASS %OR OP=RSTORE %OR OP=GETAD %OR OP=GETPTR %START
+                                         ! ASSIGNMENT
+            AOPND=CURRT_OPND1;           ! DEST OF ASSIGNMENT
+            %EXIT %IF SAME OPND(AOPND,NOPND,yes)=YES
+         %FINISH
+         %IF SAME OPND(CURRT_OPND1,NOPND,NO)=YES %START
+            CHANGES=CHANGES+1
+            %IF OP<128 %OR CURRT_FLAGS&CONSTANTOP#0 %THEN FOLD AGAIN=YES
+            CURRT_FLAGS=CURRT_FLAGS!CONSTANTOP
+            CURRT_OPND1=COPND
+         %FINISH
+         %IF OP>=128 %AND SAME OPND(CURRT_OPND2,NOPND,NO)=YES %START
+            CHANGES=CHANGES+1
+            %IF CURRT_FLAGS&CONSTANTOP#0 %THEN FOLD AGAIN=YES
+            CURRT_FLAGS=CURRT_FLAGS!CONSTANTOP
+            CURRT_OPND2=COPND
+         %FINISH
+         STRIPNO=CURRT_FLINK
+      %REPEAT
+%END
+%INTEGER %FN SAME OPND(%RECORD (RD) %NAME OPND1,OPND2,%integer ASSN)
+!***********************************************************************
+!*    ARE THESE OPERANDS THE SAME ?                                    *
+!*    If assn=yes then allow for possible overlapping assignments      *
+!*    in variant records                                               *
+!***********************************************************************
+%INTEGER F,I,B1,B2
+      F=OPND1_FLAG
+      %IF F=2 %OR F=5 %START
+           %result=no %unless f=opnd2_flag
+         %RESULT=NO %UNLESS OPND1_D=OPND2_D %AND OPND1_PTYPE&X'3000'=0
+         %IF ASSN=NO %AND OPND1_PTYPE#OPND2_PTYPE %THEN %RESULT=NO
+         %IF OPND1_XTRA=OPND2_XTRA %THEN %RESULT=YES
+         B1=BYTES(OPND1_PTYPE>>4&15)
+         B2=BYTES(OPND2_PTYPE>>4&15)
+         i=IMOD(OPND1_XTRA&X'FFFF'-OPND2_XTRA&X'FFFF')
+         %IF ASSN=YES %AND (i<=B1 %or i<=B2) %THEN %RESULT=YES
+         %RESULT=NO
+      %FINISH
+      %RESULT=NO %UNLESS OPND1_S1&X'FFFF00FF'=OPND2_S1&X'FFFF00FF'
+      %IF F<=1 %START;                   ! CONSTANTS
+         %IF OPND1_PTYPE=X'35' %START
+            %RESULT=NO %UNLESS OPND1_XTRA=OPND2_XTRA
+            %FOR I=1,1,OPND1_XTRA %CYCLE
+               %RESULT=NO %UNLESS A(OPND1_D+I)=A(OPND2_D+I)
+            %REPEAT
+            %RESULT=YES
+         %FINISH
+         %RESULT=YES %IF OPND1_D=OPND2_D %AND (OPND1_XTRA=OPND2_XTRA %OR OPND1_PTYPE&X'F0'<=X'50')
+         %RESULT=NO
+      %FINISH
+      %RESULT=YES %IF OPND1_D=OPND2_D %AND OPND1_XTRA=OPND2_XTRA
+      %RESULT=NO
+%END
+%END
+%END %OF %FILE

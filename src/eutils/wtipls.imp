@@ -1,0 +1,70 @@
+%externalroutine wtipl %alias "C#WTIPL" (%string(63)s)
+
+%externalroutinespec emas3string(%stringname vector,value)
+%externalroutinespec set return code %alias"emas3setreturncode"(%integername value)
+%externalroutinespec openmag %alias "S#OPENMAG" (%integer chan,%string (7) vol)
+%externalroutinespec skipmag %alias "S#SKIPMAG" (%integer chan,blocks)
+%externalroutinespec writemag %alias "S#WRITEMAG" (%integer chan,ad, len,  %c
+         %integername flag)
+%externalroutinespec writetmmag %alias "S#WRITETMMAG" (%integer chan,%integername flag)
+%externalroutinespec unloadmag %alias "S#UNLOADMAG" (%integer chan)
+%externalintegerfnspec rdfilead(%string (255) file)
+%ownintegerarray ipl rec(0:5)=%c
+      x'000C0000',x'00001800',          { PSW }
+      x'02002000',x'60001000',          { CCW block to x2000 }
+      x'08002000',x'00000000'           { TIC to x2000 }
+%constinteger ccwlen=136
+%ownintegerarray ccws(1:ccwlen)=%C
+      x'3f000000',x'60000001',          { skip over TM }
+      x'02001000',x'70001000',          { read & skip data IPL block }
+      x'02001000',x'40001000',          { CCWs & entry code }
+      x'02008000',x'40001000',          { Chopsupe page 1 }
+      0(*)                              { ..pages 2 - 64.. }
+%ownbyteintegerarray zero(0:4095)=0(*)
+%integer i,j,flag, conad, len, ptr
+%string(63)tape,file
+%constinteger xtra=3
+      emas3string("Tape;any,uc,despce;?;The Chopsupe ipl tape;;",tape)
+      %unless length(tape)=6 %then printstring("Tape??") %and %return
+      emas3string("Chopsupe;file,exist;(ercc08:ichopt);Chopsupe file;",file)
+      conad=rdfilead(file)
+      %return %if conad<=0
+      openmag(1,tape."*")
+      skipmag(1,1);                     ! over VOL1 label
+      writemag(1,addr(ipl rec(0)),24,flag)
+      ->fail %unless flag=0
+      ptr=X'8000'
+      %for i=0,2,63*2 %cycle;           ! 64 blocks
+         ccws(7+I)=x'02000000'!ptr
+         ccws(8+I)=x'40001000'
+         ptr=ptr+4096
+         %if ptr=x'20000' %then ptr=x'21000';    ! gap for VM ipl simulator
+      %repeat
+      ccws(i+9)=x'07000000';            ! rewind
+      ccws(i+10)=x'20000001'
+      writemag(1,addr(ccws(1)),ccwlen*4,flag)
+      ->fail %unless flag=0
+      writetmmag(1,flag)
+      ->fail %unless flag=0
+      ptr=conad+integer(conad+4)
+      j=(integer(conad)-integer(conad+4)+4095)>>12;  ! Chopsupe blocks
+      %for i=1,1,64 %cycle
+         len=4096
+         writemag(1,ptr,len,flag)
+         ->fail %unless flag=0
+         %if i<j %then ptr=ptr+len %else ptr=addr(zero(0))
+      %repeat
+      writetmmag(1,flag)
+      writetmmag(1,flag)
+      unloadmag(1)
+      printstring("IBM/CHOPSUPE ipl tape written ok  
+")
+      set return code(flag)
+      %return
+fail:
+      printstring("Write IPL tape fails.....")
+      %monitor
+      set return code(flag)
+%end
+%endoffile
+

@@ -1,0 +1,6301 @@
+!TITLE Creating and Connecting Files
+
+!>
+%end %oflist
+%include "dirarc:d.c03FORMATS"
+
+
+
+%external %integer emas3topstk= X'0FF70000'  { for when we compile 'defaults' }
+%external %routine %spec ddump(%integer first, last, c, d)
+%external %integer %fn %spec ddelay(%integer %name n)
+%external %string %fn %spec derrs(%integer n)
+%external %integer %fn %spec dlock(%integer %name adr, len, stb0, stb1)
+%external %integer %fn %spec dmagclaim(%string %name tsn, %integer %name sno, type, mode)
+%integer %fn %spec dstop(%integer %name n)
+%external %integer %fn %spec dunlock(%integer %name adr)
+
+
+
+%external %integer %fn %spec adestroy(%string (19) index, %string (255) file, %string (8) date,
+   %integer fsys, type)
+%external %integer %fn %spec ainda(%string (19) index, %integer fsys, %integer %name afindad)
+%external %routine %spec commsclosedown
+%external %routine %spec derr2(%string (31) s, %integer fn, err)
+%external %routine %spec doper2(%string (255) s)
+%external %integer %fn %spec douti(%record (parmf) %name p)
+%external %integer %fn %spec dpon3i(%string (6) user, %record (parmf) %name p, %integer invoc,
+   msgtype, outno)
+%external %integer %fn %spec dponi(%record (parmf) %name p)
+%integer %fn %spec fbase2(%integer fsys, adr)
+%external %integer %fn %spec file index perm(%string (19) index, %integer fsys)
+%integer %fn %spec hinda(%string (6) user, %integer %name fsys, indad, %integer type)
+%integer %fn %spec deallocate inactive(%integer act, segs)
+%integer %fn %spec allocate cbt(%integer vsparm)
+%external %integer %fn %spec movesection(%integer fsys1, startp1, fsys2, startp2, epgs)
+%external %routine %spec printstring(%string (255) s)
+%external %routine %spec printsymbol(%integer symbol)
+%external %integer %fn %spec stoi(%string (255) s)
+%external %routine %spec stop feps
+%external %routine %spec symbols(%integer n, symbol)
+%external %integer %fn %spec val(%integer adr, len, rw, psr)
+%external %routine %spec write(%integer n, places)
+
+%external %routine %spec wrsnt(%string (255) s, %integer n, type)
+%external %routine %spec wrsn(%string (255) s, %integer n)
+%external %routine %spec wrs3n(%string (255) s1, s2, s3, %integer n)
+%external %routine %spec prhex(%integer n)
+%external %routine %spec prx(%integer n, places)
+%external %integer %fn %spec into(%integer fn, %string (11) template)
+%external %integer %fn %spec outof(%integer flag)
+%external %string %fn %spec htos(%integer value, places)
+%external %string %fn %spec itos(%integer value)
+%routinespec monitor connect(%stringname index, file, txt)
+
+
+
+
+
+
+!-----------------------------------------------------------------------
+
+%routine abort director
+%integer j
+   j = integer(-1)
+%end; ! abort director
+
+!-----------------------------------------------------------------------
+
+%routine dmonw(%integer flag, seg, %string (255) file)
+%integer j
+%record (fhdrf) %name h
+   %return %if d_page mon=0
+   h==record(d_page mon)
+   j=h_next free byte
+   %return %unless j+23<h_max bytes;     ! not enough for 3 long ints
+   h_next free byte=j+24
+   j=d_page mon+j
+   byteinteger(j) <- flag
+   shortinteger(j+1) <- seg
+   length(file)=20 %if length(file)>20
+   string(j+3)=file
+%end
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn getbit(%integer adr, n)
+%integer x, y, w
+   x=(n>>5)<<2
+   y=31-(n&31)
+   w=integer(adr+x)
+   %result=(w>>y)&1
+%end;                                    ! GETBIT
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn setbit(%integer adr, n, value)
+%integer x, y, original
+%integer %name w
+   x=(n>>5)<<2
+   y=31-(n&31)
+   w==integer(adr+x)
+   original=(w>>y)&1
+
+   %if value=0 %then w=w&(\(1<<y)) %else w=w!(1<<y)
+
+   %result=original
+%end;                                    ! SETBIT
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn equal(%string %name name1, name2)
+%integer l, a1, a2
+!     result is 1 if equivalent else 0
+
+   l=length(name1)
+   %result=0 %unless l=length(name2)
+   %result=1 %if l=0;                    ! used to compare index names which are ususally 0
+
+%integer i
+   %cycle i=1, 1, l
+      a1=charno(name1, i)
+      a1=a1-32 %if 'a'<=a1<='z'
+      a2=charno(name2, i)
+      a2=a2-32 %if 'a'<=a2<='z'
+      %result=0 %unless a1=a2
+   %repeat
+   %result=1
+%end;                                    ! EQUAL
+
+!-----------------------------------------------------------------------
+
+%external %routine uctranslate(%integer adr, len)
+%byte %integer %name c
+   %while len>0 %cycle
+      len=len-1
+      c==byteinteger(adr+len)
+      c=c-32 %if 'a'<=c<='z'
+   %repeat
+%end;                                    ! UCTRANSLATE
+
+!-----------------------------------------------------------------------
+
+%external %routine wrs(%string (255) s)
+   printstring(s)
+   printsymbol(nl)
+%end;                                    ! WRS
+
+!-----------------------------------------------------------------------
+
+%external %routine monitors(%string (255) text)
+   wrs(text) %unless d_dirmon=0
+%end;                                    ! MONITORS
+
+!-----------------------------------------------------------------------
+
+%external %routine wrss(%string (255) s1, s2)
+   printstring(s1)
+   printstring(s2)
+   printsymbol(nl)
+%end;                                    ! WRSS
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn s11ok(%string %name s11)
+%integer j, ch, l
+
+! RESULT = 0 GOOD
+!          18 BAD
+
+   l=length(s11)
+   %result=18 %unless 0<l<12
+   %cycle j=1, 1, l
+      ch=charno(s11, j)
+      %result=18 %unless ch='#' %or 'A'<=ch<='Z' %or 'a'<=ch<='z' %or '0'<=ch<='9'
+   %repeat
+   %result=0
+%end;                                    ! S11OK
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn inok(%string %name index)
+%integer ch, j, l, alpha
+   l=length(index)
+   %result=30 %unless 0<l<12 {invalid index name}
+   alpha=30
+   %cycle j=1, 1, l
+      ch=charno(index, j)
+      %if ch='#' %or 'A'<=ch<='Z' %or 'a'<=ch<='z' %then alpha=0 %else %start
+         %result=30 %unless '0'<=ch<='9'
+      %finish
+   %repeat
+   %result=alpha {purely numeric names are rejected}
+%end;                                    ! INOK
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn unok(%string %name user)
+%integer j, ch, len
+   len = length(user)
+   -> res11 %unless len=6
+   uctranslate(addr(user)+1, 6)
+   %cycle j=1, 1, 6
+      ch=charno(user, j)
+      -> res11a %unless 'A'<=ch<='Z' %or '0'<=ch<='9'
+   %repeat
+   %result=0
+res11:
+wrsn("UNOK ".user." length", len); %result = 11
+res11a:
+wrsn("UNOK ".user." character ".itos(j), ch); %result = 11
+%end;                                    ! UNOK
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn ui(%string %name s, %string %name uname, iname)
+%integer j
+%string (255) u, i, w
+   u=s %and i="" %unless s->u.(isepl).i.(isepr).w %and w=""
+   j=unok(u)
+   ->out %unless j=0
+
+   uname=u
+   iname=""
+   %unless i="" %start
+      j=inok(i)
+      ->out %unless j=0
+      iname=i
+   %finish
+out:
+   %result=j
+%end;                                    ! UI
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn forgok(%string %name s, terminal)
+%integer j
+%string (255) w, s11
+   %result = 44 %if length(s) = 255
+   w=s.gsep
+   %cycle
+      w->s11.(gsep).w
+      j=s11ok(s11)
+      ->out %unless j=0
+      %exit %if length(w)<2
+   %repeat
+   terminal=s11
+   %result=0
+out:
+   j=44 %unless w=""
+   %result=j
+%end;                                    ! FORGOK
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn fnok(%string %name f, terminal)
+%integer j
+%string (255) w, s11
+   %result = 44 %if length(f) = 255
+   w=f.gsep
+
+   %cycle
+      w->s11.(gsep).w
+      j=s11ok(s11)
+      ->out %unless j=0
+      %exit %if w=""
+   %repeat
+   terminal=s11
+   %result=0
+out:
+   j=44 %unless w=""
+   %result=j
+%end;                                    ! FNOK
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn uif(%string %name index, file, uname, iname, full)
+%integer j
+%string (255) terminal
+   j=ui(index, uname, iname)
+   ->out %unless j=0
+
+   j=fnok(file, terminal)
+   ->out %unless j=0
+   full=index.usep.terminal
+out:
+   %result=j
+%end;                                    ! UIF
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn uiforg(%string %name index, file, uname)
+%integer j
+%string (255) w
+   j=ui(index, uname, w)
+   ->out %unless j=0
+
+   ->out %if file=""
+   j=forgok(file, w)
+out:
+   %result=j
+%end;                                    ! UIFORG
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn uig(%string %name s, uname, index, group)
+   {called only by DFILENAMES}
+%integer j
+%string (255) g, w
+   index=s %and g="" %unless s->index.(usep).g
+
+   j=ui(index, uname, w)
+   ->out %unless j=0
+
+   ->out %if g=""
+
+   g=g.gsep %unless charno(g, length(g))=gsepch
+
+   j=forgok(g, w)
+out:
+   group=g %if j=0
+   %result=j
+%end;                                    ! UIG
+
+!-----------------------------------------------------------------------
+
+%external %routine active block(%string (31) fn, full, %integer fsys)
+   wrs3n(fn, " BLOCK STILL ACTIVE ", full, fsys)
+!      DIRMON = -1
+%end;                                    ! ACTIVE BLOCK
+
+
+!-----------------------------------------------------------------------
+
+   %if target=amdahl %or target=xa %start
+      !     these have 'big' segments, 1 meg, which can therefore require
+      !     up to 8 CBT entries.  Arrange the CBT with single entries first
+      !     ie 0, 1, etc
+
+      !     D_CBT1 is the highest used single entry
+      !     D_CBT2 is the lowest used multiple entry
+
+
+%integer %fn getn(%integer n)
+
+%integer c, q, jx, savekey
+%record(parmf)%name p
+
+   %for jx=1, 1, 10 %cycle
+      %if n=1 %start {single entry reqd}
+         c=2 {start here because            }
+         %cycle
+            %if cbta(c)_da=0 %start {found a free entry}
+               %result=c
+            %finish
+            c=c+1
+            %exit %unless c<d_cbtop {ie full}
+         %repeat
+      %finish %else %start
+         c=d_cbtop
+         %cycle
+            q=n {want N consecutive free entries}
+            %cycle
+               %exit %unless cbta(c)_da=0 {wont do}
+               q=q-1
+               %if q=0 %start {got enough}
+                  %result=c
+               %finish
+               c=c-1
+            %repeat
+            %exit %if {c-n<=d_cbt1 %or} c-n<20 {not enough free space}
+            c=c-1
+         %repeat
+      %finish
+
+      ! No CBT left.  Recover some.  This should always succeed provided that
+      ! the total comfortably exceeds that required to support the largest
+      ! working set.
+      wrsn("Out of CBT, size=", n)
+!      d_dirmon=20
+
+      %if jx > 2 %start
+
+         wrsn("JX=", jx)
+         ddump(addr(cbta(0)), addr(cbta(cbtlen)), -1, -1)
+      %finish
+      c=deallocate inactive(1, 100)
+   %repeat
+      %result=-1
+   %end;                                 ! GETN
+
+
+
+   %routine recover cbt(%integer c, n)
+   %integer j, savekey
+      ! wrs("Recover CBT ".itos(c)." ".itos(n))
+      j=c
+      *IPK_0(0)
+      *ST_2,SAVEKEY
+      *SPKA_0(0)
+      cbta(c)=0
+
+      -> out %if n = 1
+
+      %cycle {was two or more, do the rest}
+         n=n-1
+         %exit %if n=0
+         j=j+1
+         cbta(j)=0
+      %repeat
+
+out:
+      *L_2,SAVEKEY
+      *SPKA_0(2)
+   %end;                                 ! RECOVER CBT
+
+
+
+   %finish {AMDAHL and XA}
+
+!-----------------------------------------------------------------------
+
+   %if target=370 %start
+
+
+
+   %integer %fn get370
+   %integer c
+      {only one block/seg so all a bit trivial}
+      %cycle c=2, 1, d_cbtop
+         %result=c %if cbta(c)_da=0
+      %repeat
+      %result=-1
+   %end;                                 ! GET370
+
+
+
+   %routine recover cbt(%integer c)
+   %integer savekey
+      *ipk_0(0); *st_2,savekey; *spka_0(0)
+      cbta(c)=0
+      *l_2,savekey; *spka_0(2)
+   %end;                                 ! RECOVER CBT
+
+
+
+   %finish {370}
+
+!=======================================================================
+
+%external %routine fill(%integer length, from, filler)
+   %return %unless length>0
+
+   %while length>0 %cycle
+      length=length-1
+      byteinteger(from+length)=filler
+   %repeat
+%end;                                    ! FILL
+
+!-----------------------------------------------------------------------
+
+%external %routine move(%integer length, from, to)
+%integer j
+   %return %unless length>0
+
+   j=0
+   %cycle
+      byteinteger(to+j)=byteinteger(from+j)
+      j=j+1
+      %exit %if j=length
+   %repeat
+%end;                                    ! MOVE
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn packdt
+   ! Result is DATE and TIME packed
+   ! into a word :
+   ! Y-70(6)M(4)D(5)H(5)M(6)S(6)
+%byte %integer %array %name x
+   x==array(addr(com_date1), bift)
+
+   %result=(10*x(6)+x(7)-86)<<26!(10*(x(3)&15)+(x(4)&15))<<22!(10*(x(0)&15)+(x(1)&15))<<17!(10* %c
+      (x(12)&15)+(x(13)&15))<<12!(10*(x(15)&15)+(x(16)&15))<<6!(10*(x(18)&15)+(x(19)&15))
+%end;                                    ! PACKDT
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn packd(%string (8) date)
+%string (3) y, m, d
+%integer yi, mi, di
+   %result=0 %unless date->d.("/").m.("/").y
+   yi=stoi(y)-70
+   mi=stoi(m)
+   di=stoi(d)
+   %result=yi<<9!mi<<5!di
+%end;                                    ! PACKD
+
+!-----------------------------------------------------------------------
+
+%external %string %fn unpackd(%integer i)
+%string (3) d, m
+   d=itos(i&31)
+   d="0".d %if length(d)=1
+   m=itos((i>>5)&15)
+   m="0".m %if length(m)=1
+   %result=d."/".m."/".itos(70+(i>>9)&63)
+%end;                                    ! UNPACKD
+
+!-----------------------------------------------------------------------
+
+%external %string %fn unpackdt(%integer dt)
+%integer d, t, j
+%string (31) s
+   d=dt>>17
+   t=dt&X'1FFFF'
+   s=""
+   %cycle
+      j=t&63
+      s=itos(j).s
+      s="0".s %if j<10
+      %result=unpackd(d)." ".s %if length(s)=8
+      t=t>>6
+      s=":".s
+   %repeat
+%end;                                    ! UNPACKDT
+
+!-----------------------------------------------------------------------
+
+%integer %fn drandom(%integer n)
+   ! PRODUCES A RANDOM NUMBER IN RANGE 0-N
+   ! WHERE N IS 2**M - 1
+%integer w0, w1, w2
+   *LA_2,W1
+   *SRL_2,3
+   *SLL_2,3
+   *STCK_0(2)
+   *LM_0,1,0(2)
+   *SRDL_0,24
+   *ST_1,W0
+   %result=w0&n
+%end;                                    ! DRANDOM
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn hash(%string (6) user, %integer nnthash)
+%integer a, j, w
+%const %integer %array p(1:6)= 157, 257, 367, 599, 467, 709
+   a=addr(user)
+   w=0
+   %cycle j=1, 1, 6
+      w=w+(byteinteger(a+j)-47)*p(j)
+   %repeat
+   w=w-(w//nnthash)*nnthash
+   w=w+nnthash %if w<0;                  ! just in case gash characters get through
+   %result=w
+%end;                                    ! HASH
+
+!-----------------------------------------------------------------------
+
+!<DMOVETOFILE
+!%external %integer %fn d move to file(%integer %name xlen, xfrom, xto)
+!
+!
+!%integer j, seg, savekey
+!%record (ctf) %name ct
+!   j=into(7, "III")
+!   ->out %unless j=0
+!
+!   j=93
+!   ->out %unless d_dtrying<<18<0
+!
+!   j=45
+!   ->out %unless val(i(1) {from}, i(0) {len}, 0, 1)=0
+!   ->out %unless val(i(2) {to}, i(0) {len}, 0, 1)=0
+!
+!   %if string(addr(com_supvsn))>"11A" %start
+!      doper2("DMTF called !!")
+!      j=93
+!      ->out
+!   %finish
+!
+!   seg=i(2) {to}>>seg shift
+!   ct==d_conlist(d_cpoint(seg))
+!
+!   *ipk_0(0); *st_2,savekey; *spka_0(0)  { 'ON' }
+!   move(i(0) {len}, i(1) {from}, i(2) {to})
+!   *l_2,savekey; *spka_0(2)  { 'OFF' }
+!   j=0
+!
+!out:
+!   %result=outof(j)
+!%end;                                    ! D MOVE TO FILE
+
+!-----------------------------------------------------------------------
+
+!<DVALIDATE
+%external %integer %fn dvalidate(%integer %name adr, len, rw)
+!>
+%integer j, r, w
+%const %string (23) %array texts(1:8)= %c
+{1} "adr < 0",
+{2} "len<=0",
+{3} "seg not connected",
+{4} "read only",
+{5} "not a user seg",
+{6} "beyond end of seg",
+{7} "seg too high",
+{8} "area spans files"
+
+   j=into(-1, "III")
+   ->out %unless j=0
+
+   j=val(addr(rw), 4, 1, 1) {can he write to RW ?}
+   %if j=0 %start
+      r=val(i(0), i(1), 0, 1)
+      w=val(i(0), i(1), 1, 1)
+      %if i(2)=0 %then j=r %else j=w
+      rw=0
+      rw=1 %if r=0
+      rw=rw!2 %if w=0
+   %finish %else %start
+      j=val(i(0), i(1), i(2), 1)
+   %finish
+out:
+   %if d_dirmon#0 %start
+      wrs("validate fails: ".texts(j)) %if 1<=j<=8
+   %finish
+   j=45 %unless j=0
+   %result=outof(j)
+%end;                                    ! DVALIDATE
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn ddaynumber
+! gives a number which increases by 1 each day.  mod 7 -> mon=0 etc
+%const %integer jms= X'141DD76'
+%integer w0, w1, w2
+   *LA_2,W1
+   *SRL_2,3
+   *SLL_2,3
+   *STCK_0(2)
+   *LM_0,1,0(2)
+   *SRDL_0,24
+   *D_0,JMS
+   *ST_1,W0
+   %result=w0
+%end;                                    ! DDAYNUMBER
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn funds(%integer %name gpindad, %integer indad)
+! This function delivers the no of resource units to which the user owning
+! index at INDAD has access. If the user has a "group resource-unit" holder,
+! the parameter GPINDAD is set to the address of the group-holder's index
+! (else to the value of INDAD).
+%integer fsys, j, iad, gpiad, nuts, count
+%string (31) gph
+%record (hf) %name nh
+   count=0
+   iad=indad
+l:
+   nh==record(iad)
+   nuts=nh_inuts
+   ->out %if nh_gpholdr=""
+   nuts=0
+   gph<-nh_gpholdr
+   fsys=nh_gpfsys
+   j=hinda(gph, fsys, gpiad, 0)
+   %unless j=0 %start
+      fsys=-1
+      j=hinda(gph, fsys, gpiad, 0)
+      nh_gpfsys=fsys %if j=0
+   %finish
+
+   ->out %if j>0
+   iad=gpiad
+
+   count=count+1
+   ->l %if count<8
+out:
+   gpindad=iad
+   %result=nuts
+%end;                                    ! FUNDS
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn ddt entry(%integer %name entad, %integer fsys)
+%integer j, fs, dlvn
+%integer %array %name dit
+%byte %integer %array %name dlvna
+%record (ddtf) %name ddt
+%integer %array %format ditf(0:com_ndiscs-1)
+   dlvna==array(com_dlvnaddr, dlvnaf)
+   dit==array(com_ditaddr, ditf)
+   %if 0<=fsys<=99 %start
+      j=dlvna(fsys);                     ! pick up DIT entry number for FSYS
+      %if j<=250 %start
+         ddt==record(dit(j))
+         dlvn=ddt_dlvn
+         fs=dlvn<<2>>2
+         %if (1<<ddt_state)&ddtstates>0 %and fsys=fs %start
+            entad=addr(ddt)
+            %result=0
+         %finish
+      %finish
+   %finish
+   %result=23
+%end;                                    ! DDT ENTRY
+
+!-----------------------------------------------------------------------
+
+%integer %fn fsys use count(%integer fsys, incr)
+
+! Called by SCONNECT and DCHAIN to increment and decrement the count for
+! an fsys.  #SIGSTK is an exception and no increment is made for it
+! since it is never disconnected ( see code of SCONNECT)
+
+!     2**31  0=cck'd         1=not checked
+!     2**30  0=available     1=closing
+
+%integer adr, j, c, savekey
+%integer %name n
+%record (ddtf) %name ddt
+   n==integer(addr(c))
+   c=99
+
+   j=e+146
+   ->out %unless incr=1 %or incr=-1
+
+   j=ddt entry(adr, fsys)
+   ->out %unless j=0
+
+   ddt==record(adr)
+   adr=addr(ddt_concount) {system count}
+   n==d_fsysusecount(fsys) {local count}
+
+   !{!!Te!mp} %if d_dirmon#0 %and fsys=17 %start
+   !            doper2("Inc".itos(incr)." loc/glob=".itos(n)."/".itos %c
+   !               (integer(adr)))
+   !      %finish
+
+   %if incr=1 %start
+      n=n+1
+      *IPK_0(0)
+      *ST_2,SAVEKEY
+      *SPKA_0(0)
+      *LA_0,1 {useful const}
+      *L_1,ADR
+      *L_2,0(1) {value of sema}
+      *BASR_4,0
+      *LR_3,2
+      *AR_3,0 {increment value by one}
+      *CS_2,3,0(1) {store 3 if 2 still valid else reload 2}
+      *BCR_4,4 {not done, try again}
+      *ST_3,C
+      *L_2,SAVEKEY
+      *SPKA_0(2)
+      ->out {J still zero}
+   %finish
+
+   %if n=0 %start;                       ! !OOPS
+      doper2("Negative count on ".itos(fsys))
+      j=6
+      ->out
+   %finish
+
+   n=n-1
+   *IPK_0(0)
+   *ST_2,SAVEKEY
+   *SPKA_0(0)
+   *LA_0,1
+   *L_1,ADR
+   *L_2,0(1)
+   *BASR_4,0
+   *LR_3,2
+   *SR_3,0
+   *CS_2,3,0(1)
+   *BCR_4,4
+   *ST_2,C {original value}
+   *L_2,SAVEKEY
+   *SPKA_0(2)
+   %if c>0 %start;                       ! we haven't made it negative
+      %if c=1 %and ddt_dlvn<<1<0 %start;  ! count now zero and
+         ! fsys closing
+         doper2("Disc ".itos(fsys)." now free")
+         ddt_dlvn=(ddt_dlvn<<2>>2)!(1<<31);  ! disc reverts to
+         ! 'not-checked',
+         ! 'available'
+      %finish
+      c=c-1 {updated value}
+      ->out {J still zero}
+   %finish
+
+   doper2("Negative sys count on ".itos(fsys))
+   *IPK_0(0)
+   *ST_2,SAVEKEY
+   *SPKA_0(0)
+   *LA_0,1 {useful const}
+   *L_1,ADR
+   *L_2,0(1) {value of sema}
+   *BASR_4,0
+   *LR_3,2
+   *AR_3,0 {increment value by one}
+   *CS_2,3,0(1) {store 3 if 2 still valid else reload 2}
+   *BCR_4,4 {not done, try again}
+   *ST_3,C {new value}
+   *L_2,SAVEKEY
+   *SPKA_0(2)
+   j=6 {use count negative}
+out:
+!      MONITORS("Use count fsys:".itos(fsys)." local:".itos(n)." system:".itos(c))
+   %result=j
+%end;                                    ! FSYS USE COUNT
+
+!-----------------------------------------------------------------------
+
+%integer %fn remove amt entries(%integer seg, dstry)
+! REQUESTS THE LOCAL CONTROLLER TO REMOVE ACTIVE MEMORY
+! TABLE ENTRIES FOR SEGMENT SEG
+%record (parmf) %name p
+%integer j, savekey
+
+   p==outp(curcontext)
+   *IPK_0(0); *ST_2,SAVEKEY; *SPKA_0(0)
+   p=0
+   p_p1=seg
+   p_p2=dstry
+   *L_2,SAVEKEY; *SPKA_0(2)
+   *MC_3(0),0
+   j=p_dest
+   %if j=-1 %then wrsn("REMOVE AMT ENTRIES".itos(seg), dstry)
+   %result=j
+%end;                                    ! REMOVE AMT ENTRIES
+
+!-----------------------------------------------------------------------
+
+%external %routine dchain(%integer seg, dstry)
+! Removes blocks for segment SEG from active memory and de-chains the
+! CBT entries (putting them on the free list).
+%integer cell, j, savekey, n
+
+   ! %if d_dirmon#0 %then wrsnt("DCHAIN SEG", seg, 5) %and wrsn("  dstry", dstry)
+   cell=sst(seg)
+
+   %if cell&cbt not available#0 %start
+      *ipk_0(0); *st_2,savekey; *spka_0(0)
+      sst(seg)=dendsst
+      *l_2,savekey; *spka_0(2)
+      %return
+   %finish
+
+   j=fsys use count(cbta(cell)_da>>24, -1)
+   j=remove amt entries(seg, dstry)
+   %if j=-1 %start
+      wrsnt("DCHAIN SEG", seg, 5)
+      wrsn(" CELL", cell)
+   %finish
+
+   %if target=amdahl %start
+      n=(segment table(seg)>>29)+1
+   %finish
+
+   %if target=xa %start
+      n=((segment table(seg)&14)>>1)+1
+   %finish
+
+   ! CBT ENTRIES BACK TO FREE LIST
+   *IPK_0(0); *ST_2,SAVEKEY; *SPKA_0(0)
+
+   sst(seg)=dendsst
+
+   *L_2,SAVEKEY; *SPKA_0(2)
+
+   %if target=amdahl %or target=xa %start
+      recover cbt(cell, n)
+   %finish %else %start
+      recover cbt(cell)
+   %finish
+   ! %if d_dirmon#0 %then wrsn("DCHAIN exit", seg)
+
+%end;                                    ! DCHAIN
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn sysbase(%integer %name system start, %integer fsys)
+%integer j, entad
+%record (ddtf) %name ddt
+   j=ddt entry(entad, fsys)
+   %if j=0 %start
+      ddt==record(entad)
+      system start=ddt_sbase;            ! this is the origin of 'fixed' sites for Supervisor etc
+   %finish
+   %result=j
+%end;                                    ! SYSBASE
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn pp(%integer semaddr, semano, %string (63) s)
+!   Four things get semaphored:
+!        file indexes/bitmap
+!        arch index
+!        #MSG
+!        #DIRLOG
+
+! PP is called from
+
+! CONN
+!     DGETDA
+!     DCHACCESS
+!     DCONNECTI
+!     DDDISCONNECTI
+!     DCHSIZE
+!     SMALLOC
+!     DEAL
+!     RETLIST
+!     DCREATEF
+!     DDESTROYF
+!     DRENAME
+!     DNEWGEN
+! DIRECT
+!     TXTMESS
+!     DPERMISSIONI
+!     DFINFO
+!     DFSTATUS
+!     DSFI
+!     DOFFER
+!     DTRANSFER
+!     ARCHRECORD
+!     OFILES
+! XOP
+!     D/PP
+! MAG
+!     DPRGP
+!     GIVENEWSECTION
+!     DSYSAD
+!     DINDEX2
+!     DINDEX (OBSOLETE)
+!     PRINTSTRING
+%integer savekey, j
+%record (parmf) p
+   %if d_gotsema#0 %start
+
+      doper2("PP ERROR")
+      wrs(d_sema holder." HAS: ".htos(d_semanoheld, 8)."@".htos(d_semaddrheld, 8))
+      wrs(s." WANTS: ".htos(semano, 8)."@".htos(semaddr, 8))
+!         PRINTMP(0, 0)
+      d_dirmon=50
+      %result=94
+   %finish
+
+   d_gotsema=1
+   d_sema holder=s
+   d_semanoheld=semano
+   d_semaddrheld=semaddr
+
+   *ipk_0(0); *st_2,savekey; *spka_0(0)  { 'ON' }
+   lctables_semaheld=semano
+   *l_2,savekey; *spka_0(2)  { 'OFF' }
+
+   *LA_0,1 {useful const}
+   *L_1,SEMADDR
+   *L_2,0(1) {value of sema}
+   *BASR_4,0
+   *USING_4
+   *LR_3,2
+   *AR_3,0 {increment value by one}
+   *CS_2,3,0(1) {store 3 if 2 still valid else reload 2}
+   *BCR_4,4 {not done, try again}
+
+   *LTR_3,3
+   *BC_8,<GOT> {now zero so must have been -1}
+   *BC_2,<NOTGOT> {positive - other users}
+   *DROP_4
+
+   doper2("SEMAP ".htos(semano, 8)."=".htos(integer(semaddr), 8));  ! disaster, sema -1 or less
+   integer(semaddr)=0
+   ->got
+notgot:
+   *ipk_0(0); *st_2,savekey; *spka_0(0)   { ON }
+   lctables_semaheld = x'80000000' ! semano  { top bit means 'waiting' }
+   *l_2,savekey; *spka_0(2)   { OFF }
+
+   p=0 {other users so call SUPRVS}
+   p_dest=X'70001'
+   p_p1=semano
+   j=douti(p)
+   integer(semaddr)=0 %if p_srce=X'70004';  ! Sema was forced free
+got:
+   %result=0
+%end;                                    ! PP
+
+!-----------------------------------------------------------------------
+
+%external %routine vv(%integer semaddr, semano)
+%integer sem, savekey, j
+%record (parmf) p
+   %if d_gotsema=0 %start
+
+      doper2("VV ERROR")
+      wrs("TRY TO FREE: ".htos(semano, 8)."@".htos(semaddr, 8))
+!         PRINTMP(0, 0)
+      d_dirmon=50
+      %return
+   %finish
+
+   %if semano#d_semanoheld %start
+      doper2("VV ERROR")
+      wrs(d_sema holder." HAS: ".htos(d_semanoheld, 8)."@".htos(d_semaddrheld, 8))
+      wrs(" VRIJ: ".htos(semano, 8)."@".htos(semaddr, 8))
+      %return
+   %finish
+
+   *LA_0,1
+   *L_1,SEMADDR
+   *L_2,0(1)
+   *BASR_4,0
+   *USING_4
+   *LR_3,2
+   *SR_3,0
+   *CS_2,3,0(1)
+   *BCR_4,4
+
+   *LTR_2,2
+   *BC_8,<NOQ>
+   *BC_2,<SOMEWAITING>
+   *ST_2,SEM
+   *DROP_4
+
+   integer(semaddr)=-1
+   doper2("VV ERROR")
+   wrs(d_semaholder." frees ".htos(d_semanoheld, 8)."=".htos(sem, 8));  ! bad error, sema was -1 or less
+   d_dirmon=50
+   ->noq
+some waiting:
+   p=0
+   p_dest=X'70002'
+   p_p1=d_semanoheld
+   j=dponi(p)
+noq:
+   *ipk_0(0); *st_2,savekey; *spka_0(0)  { 'ON' }
+   lctables_semaheld=0
+   *l_2,savekey; *spka_0(2)  { 'OFF' }
+
+   d_gotsema=0
+%end;                                    ! VV
+
+!-----------------------------------------------------------------------
+
+%external %routine get av fsys2(%integer type, %integer %name n, %integer %array %name a)
+! ARRAY A IS FILLED WITH N FSYS NUMBERS (AS MANY AS ARE ON-LINE)
+!       TYPE  0   only discs which are consistency-checked and not closing
+!             1   all on-line discs, checked or not, closing or not
+!             2   only checked discs, but may be closing.
+%integer j, ndiscs, ditaddr, sload fsys, fs
+%record (ddtf) %name ddt
+   sload fsys=d_ipl fsys
+   a(0)=sload fsys
+   ditaddr=com_ditaddr
+   ndiscs=com_ndiscs
+   n=1
+   %cycle j=0, 1, ndiscs-1
+      ddt==record(integer(ditaddr+j<<2))
+      %if (1<<ddt_state)&ddtstates>0 %and (type=1 %or (type=0 %and ddt_dlvn>>30=0) %or %c
+         (type=2 %and ddt_dlvn>=0)) %start
+         fs=ddt_dlvn<<2>>2
+         %unless fs=sload fsys %start
+            a(n)=fs
+            n=n+1
+         %finish
+      %finish
+   %repeat
+%end;                                    ! GET AV FSYS2
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn av(%integer fsys, type)
+! TYPE = 0 Only discs for which CCK has been done
+! TYPE = 1 All on-line EMAS discs, whether consistency-checked or not and
+!          whether closing or not.
+!        2 Only consistency-checked discs, but they may be closing
+! RESULT 1 IF FSYS AVAILABLE
+!        0 IF NOT
+%integer dlvn, j
+%byte %integer %array %name dlvna
+%integer %array %name dit
+%record (ddtf) %name ddt
+%integer %array %format ditf(0:com_ndiscs-1)
+   dlvna==array(com_dlvnaddr, dlvnaf)
+   dit==array(com_ditaddr, ditf)
+   %result=0 %unless 0<=fsys<=99
+   j=dlvna(fsys);                        ! pick up DIT entry number for FSYS
+   %if j>250 %then %result=0;            ! off-line
+   ddt==record(dit(j))
+   dlvn=ddt_dlvn
+   %if fsys=dlvn<<2>>2 %start
+      %if (1<<ddt_state)&ddtstates>0 %start
+         %if type=1 %or (type=0 %and dlvn>>30=0) %or (type=2 %and dlvn>=0) %then %result=1
+      %finish
+   %finish
+   %result=0
+%end;                                    ! AV
+
+!=======================================================================
+
+%external %integer %fn sconnect(%integer seg, startp, pgs, newcopy, flags)
+
+! This function either adds one or more blocks to the specified segment
+! or allocates blocks to a new segment. It can add an arbitrary
+! number of epages (up to the segment max). The only proviso is that
+! the current last block (if any) should be full.  Thus SCONNECT does not add to
+! an existing block, but only connects new blocks.
+
+! Param PGS is the number of epages being added.
+
+! Param STARTP is the start page of the first block being added and
+! must have FSYS no. in LH byte.
+
+! FLAGS
+!        2**4  16  Read only
+!        2**5  32  advisory 'multiple use'
+!                  set for the following
+!                    file use count > 1
+!                    an index/bitmap segment
+!                    subsys basefile
+!        2**6  64  advisory sequential
+!           7 128  continuation
+
+
+
+%integer secs, w, c1, c, j, old pgs, old secs, k, np, savekey, top seg, startp0
+%record (cbtf) %name cbt
+%record (cbtf) %array save old cbt entries(0:secs per seg-1)
+
+   top seg=ownseg - 1
+
+   j=e+132
+   ->res %unless 0<seg<=top seg
+   j=e+129
+   ->res %unless 0<pgs<=seg pgs
+
+   startp0=startp
+   secs=(pgs+sec pgs-1)>>sec p shift
+
+
+
+   %if target=370 %start
+      flags=flags!cbt new block %unless newcopy=0
+      %result=35 {seg in use} %unless sst(seg)=dendsst
+
+      j=28
+      c=get370
+      ->res %if c<0
+
+      *IPK_0(0)
+      *ST_2,SAVEKEY
+      *SPKA_0(0)
+      cbt==cbta(c)
+      cbt=0
+      cbt_da=startp
+      cbt_length=pgs-1
+      cbt_flags=flags
+
+      sst(seg)=c
+      segment table(seg)=((pgs-1)<<28)!1
+      *L_2,SAVEKEY
+      *SPKA_0(2)
+      %if seg=sig seg %then j=0 %else j=fsys use count(startp0>>24, 1)
+      ->res
+   %finish {370}
+
+
+
+   %if target=amdahl %or target=xa %start
+      flags=flags!cbt new block %unless newcopy=0
+      old pgs=0
+      old secs=0
+      w=segment table(seg)
+      %if target=amdahl %start
+         w=w>>28
+      %finish
+      w=((w&15)+2)>>1 {number of sections (if exists)}
+      c1=sst(seg)
+
+      %if c1#dendsst %start {extending an existing seg}
+         old secs=w
+         old pgs=old secs<<sec p shift {existing sections have to be full}
+
+         %if c1&not alloc=0 %start
+            ! Save existing CBT entries and free the CBT.  We used to recover CBT
+            ! near the end of SCONNECT, after getting the new CBT and altering
+            ! the SST and segment table entries.  This must have been WRONG: GETN
+            ! may cause deallocation of CBT, and a RECOVER CBT thereafter could
+            ! deallocate the newly-allocated entries!
+            *ipk_0(0); *st_2,savekey; *spka_0(0)
+            k=0
+            %while k<old secs %cycle
+               save old cbt entries(k)=cbta(c1+k)
+               k=k+1
+            %repeat
+            ! Must not leave SST entry pointing to a zero CBT entry, however briefly.
+            ! Local controller may need it (e.g. for a strobe).
+            sst(seg)<-cbt not available
+            *l_2,savekey; *spka_0(2)
+            recover cbt(c1, old secs)
+         %finish
+      %else
+         ! ensure seg marked "in use"
+         d_cpoint(seg) = 2 {discsite} %if d_cpoint(seg) < 2
+      %finish
+
+      ! CBT alterations
+      %if c1&not alloc mask#not alloc %start
+         !  Either   (a)   C1 = ENDSST  (no existing blocks)
+         !      or   (b)   C1 is a CBT pointer (there are existing blocks and they
+         !                 have got CBT allocated)
+
+         j=28
+         c=getn(old secs+secs)
+         ->res %if c<0
+
+         j=c
+         k=0
+
+         *ipk_0(0); *st_2,savekey; *spka_0(0)
+
+         %while k<old secs %cycle {copy any existing entries}
+            cbta(j)=save old cbt entries(k)
+            j=j+1
+            k=k+1
+         %repeat
+
+         np=sec pgs
+         flags=flags!cbt continuation %if j>c {all new blks will be conts.}
+         k=0
+         %while k<secs %cycle
+            k=k+1
+            np=pgs-((secs-1)*sec pgs) %if k=secs
+            cbt==cbta(j)
+            j=j+1
+            cbt_da=startp
+            startp=startp+np
+            abort director %if np > secpgs
+            cbt_length=np-1
+            cbt_flags=flags
+            flags=flags!cbt continuation
+         %repeat
+
+         sst(seg)=c
+         *l_2,savekey; *spka_0(2)
+      %finish
+
+      ! Segment table alterations
+
+      *ipk_0(0); *st_2,savekey; *spka_0(0)
+
+      w=((old pgs+pgs+(sec pgs>>1)-1)>>(sec p shift-1))-1
+      %if target=xa %start
+         segment table(seg)=(segment table(seg)>>4<<4)!w
+      %finish
+      %if target=amdahl %start
+         segment table(seg)=(segment table(seg)<<4>>4)!(w<<28)
+      %finish
+
+      *l_2,savekey; *spka_0(2)
+
+      ! Adjust disc usecount
+      %if c1=dendsst %start
+         ! WRS("Sconnect seg ".itos(seg)." startp X".htos(startp0,8)) %unless d_dirmon = 0
+         j=fsys use count(startp0>>24, 1) %unless seg=sig seg
+      %finish
+      j=0
+   %finish {XA and AMDAHL}
+
+res:
+! monitors("sconnect ".itos(seg)." ".itos(j))
+   %result=j
+%end;                                    ! SCONNECT
+
+!=======================================================================
+
+%integer %fn alloc dseg(%integer pgno, %integer %name dseg)
+
+! THE PARAM PGNO SHOULD BE "SEGMENT-ALIGNED" ON THE DISC
+
+%integer seg, ent, min, use seg, su, j, da, found
+%record (cbtf) %name cbt
+
+   found=0
+   d_alloc dseg n=d_alloc dseg n+1 {count number of times called}
+   min=d_alloc dseg n {MIN used to select seg not used for longest time}
+printstring("Alloc(".itos(min).") ".htos(pgno,8)) %if d_sigmon&2>0
+   j=0
+   use seg=-1
+   %cycle seg=lo d seg, 1, hi d seg
+      ent=sst(seg)
+      su=d_seguse(seg)
+      %if ent#dendsst %start
+         cbt==cbta(ent)
+         da=cbt_da
+         found=1 %and ->already conn %if da=pgno
+      %finish
+
+      ->got hole %if su=-2 {free}
+
+      %continue %if su=-1 {locked}
+
+      min=su %and use seg=seg %if su<min
+   %repeat
+
+   j=3 %and ->out %if use seg=-1 {impossible !}
+
+   seg=use seg
+   dchain(seg, 0) {drop existing seg}
+printstring(" dchain ".itos(seg)) %if d_sigmon&2>0
+
+got hole:
+   j=sconnect(seg, pgno, sec pgs<<1, 0, cbt multiple)
+   ! anticipate multiple use
+printstring(" conn ".itos(seg)) %if d_sigmon&2>0
+
+already conn:
+   d_seguse(seg)=d_alloc dseg n %if d_seguse(seg)#-1;  !  unless fixed
+printstring(" use ".itos(seg)) %if d_sigmon&2>0
+   dseg=seg
+out:
+printsymbol(nl) %if d_sigmon&2>0
+   %result=j
+%end;                                    ! ALLOC DSEG
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn sysad(%integer key, fsys)
+
+! Use of first few words of bitmap (at least 40 bytes available)
+
+! adr use          semano
+!   0 bitmap sema  fsys<<16
+!   4 cck'd by 'A', 'B' or 'C'
+!   8 fsys
+!  16 time of CCK
+!  20 date
+!  24 nnt sema     2-----4        (one day)
+! On the IPL disc, the next 248 bytes are also available - see
+! record format DIRCOMF above.
+! Note: the semanos used for DIRLOG and FEP are X8-----1 and x4-----2
+
+! KEY = 0 BIT MAP
+!       1 NNT
+!       3 NNT SEMA
+!       4 DATE WORD
+!       5 DIRCOM
+!       6 BAD PAGES BIT MAP
+
+%integer j, seg, bb, bit
+%record (discdataf) data
+   fsys=d_ipl fsys %if fsys<0 %or key=5
+
+   j=fbase2(fsys, addr(data))
+   ->out %unless j=0
+
+   bit=-1
+   bit=0 %if key=0
+   bit=data_nntstart %if key=1
+   bit=4 %if key=3
+   bit=16 %if key=4
+   bit=40 %if key=5
+   bit=X'5000' %if key=6
+   j=-1 %and ->out %if bit<0
+
+   bb=fsys<<24!data_start
+   j=alloc dseg(bb, seg)
+   %result=seg<<seg shift+bit %if j=0
+out:
+   doper2("SYSAD ".itos(j)." KEY ".itos(key)." FSYS ".itos(fsys))
+   %result=-1
+%end;                                    ! SYSAD
+
+!-----------------------------------------------------------------------
+
+!<BADPAGE
+%external %integer %fn bad page(%integer type, fsys, bitno)
+
+! This can be called by a privileged process with TYPE = 4 to clear bit
+! BITNO in the bad pages list on fsys FSYS.  The result returned is the
+! original value of the bit.
+!>
+
+!     TYPE = 0    CLEAR BAD PAGES LIST FOR FSYS
+!            1    NEW BAD PAGE, BITNO IN FSYS
+!            2    GOOD PAGE, BITNO IN FSYS
+!            3    IS BITNO IN FSYS A BAD PAGE? (RESULT 1 IF SO, 0 IF NOT)
+!            4    LIKE 2 BUT CALLED FROM A PROGRAM
+! When a new bad page is recorded, we want the bitmap bit to be set. But
+! not in this routine, because it may be executed on the signal stack
+! and we need totake the bitmap semaphore. (Still, when it's executed
+! on the signal stack (progerr 18) the page belongs to a file anyway).
+! The bit is set in fn MOVE SECTION on getting a flag from the bulk mover.
+%integer j, b, bitsinbitmap
+%record (discdataf) data
+   %if 0<type<3 %start
+      %if fsys<0 %then fsys=bitno>>24
+      bit no=(bit no<<8)>>8
+   %finish
+
+   %result=93 %if type&1=0 %and 0<=d_dtrying<<11;  ! ie types 1 and 3 not priv Good enough????
+
+   j=av(fsys, 1)
+   %result=23 %if j=0
+
+   j=fbase2(fsys, addr(data))
+   %result=23 %unless j=0
+
+   b=sysad(badkey, fsys)
+
+   %if type=0 %start
+      ! CLEAR BAD PAGES LIST
+      fill(data_bitsize, b, 0)
+      %result=0
+   %finish
+
+   bits in bitmap=data_bitsize<<3
+
+   %if type=1 %start
+      ! NEW BAD PAGE
+      j=setbit(b, bitno, 1)
+      ->set %if j=1
+      doper2("BAD PAGE ".htos(fsys<<24!bitno, 8)." RECORDED")
+      %result=0
+   %finish
+
+   %if type=2 %start
+      ! MAKE A BAD PAGE GOOD
+      j=setbit(b, bitno, 0)
+      ->not set %if j=0
+      doper2("CLEARED")
+      %result=0
+   %finish
+
+   %if type=3 %start
+      ! TEST BIT
+      %result=getbit(b, bitno)
+   %finish
+
+   %if type=4 %start
+      ! EXTERNAL CALL TO CLEAR BIT
+      %result=setbit(b, bitno, 0)
+   %finish
+
+   %result=e+124;                        ! INVALID TYPE
+
+set:
+   doper2("ALREADY SET"); %result=0
+not set:
+   doper2("ALREADY CLEAR"); %result=0
+%end;                                    ! BAD PAGE
+
+
+
+%external %integer %fn dbadpage(%integer %name xtype, xfsys, xbitno)
+%integer j
+   j=into(7, "III")
+   ->out %unless j=0
+
+   j=badpage(i(0) {TYPE}, i(1) {FSYS}, i(2) {BITNO})
+out:
+   %result=outof(j)
+%end;                                    ! DBADPAGE
+
+
+!-----------------------------------------------------------------------
+
+%integer %fn deal(%integer fsys, startp, page, pages)
+! Can de-allocate pages comprising the whole or the
+! last part of the section.
+%integer j, mask, word, within, bits, bads, savekey
+%record (parmf) %name p
+   startp=page %if startp=0;             ! same most of the time
+   within=page&((1<<sec p shift)-1)
+
+   j=e+147;                              ! BAD PARAM
+   ->out %unless pages>0
+   ->out %unless page>=startp
+   ->out %unless (startp>>sec p shift)=(page>>sec p shift)
+   ->out %unless within+pages<=1<<sec p shift
+
+   bits=sysad(bitkey, fsys)
+   bads=sysad(badkey, fsys);             ! BAD PAGES BIT LIST
+   word=(page>>3)&(\3)
+
+   mask=((-1)<<(32-pages))>>(page&31) {32 here is to do with no of bits in an integer}
+
+   j=22;                                 ! bits already clear flag
+   %if integer(bits+word)&mask#mask %start
+      doper2("DEAL fails - See Dirlog")
+      wrsnt("DEAL: B+W", bits+word, 2)
+      wrsnt("INTG(B+W)", integer(bits+word), 2)
+      wrsnt("MASK     ", mask, 2)
+      ->out
+   %finish
+! OUT to local controller to check that the block whose start page is
+! STARTP is not still active. This is because an ordinary disconnect does
+! not wait until all page-outs are complete.
+   j=91
+   p==outp(curcontext)
+   *IPK_0(0)
+   *ST_2,SAVEKEY
+   *SPKA_0(0)
+   p=0
+   p_dest=(fsys<<24)!startp
+   *L_2,SAVEKEY
+   *SPKA_0(2)
+   *MC_17(0),0
+   ->out %if p_dest=-1;                  ! P_DEST=-1 IS ERROR RESULT
+
+   %if integer(bits+8)#fsys %start
+      wrs("BITMAP/FSYS2")
+      d_dirmon=20
+   %finish
+
+   ! Clear the bits
+   j=pp(bits, fsys<<16, "DEAL")
+   %if j=0 %start
+      ! ENSURE THAT ANY BAD PAGES JUST DETECTED ARE PUT INTO BITLIST
+      integer(bits+word)=(integer(bits+word)&(\mask))!integer(bads+word)
+      vv(bits, fsys<<16)
+   %finish
+out:
+   %result=j
+%end;                                    ! DEAL
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn ninda(%integer fsys, indno, %integer %name indad)
+! TO BE USED ONLY BY
+!     CINDA
+!     NEWUSER
+!     CLEAR FSYS
+!     CCK
+! POSSIBLE ERROR RESULTS :
+!     28    CBT FREELIST EMPTY
+!     26    SCONNECT - INVALID PARAMS ("SHOULD NOT OCCUR")
+
+%integer j, dseg, pgno
+%record (discdataf) data
+%const %integer mask= sec mask
+   j=fbase2(fsys, addr(data))
+   ->out %unless j=0
+
+   pgno=indno>>2;                        ! index numbers are 1K's
+   j=alloc dseg((fsys<<24)!(data_start+(pgno&(\(mask>>12)))), dseg)
+   ->out %unless j=0
+
+   indad=dseg<<seg shift+((indno<<10)&mask)
+
+   j=97
+   ->out %if badpage(3, fsys, data_start+pgno)=yes
+
+   j=0
+out:
+!       MONITORS("Ninda" . ITOS(J))
+   %result=j
+%end;                                    ! NINDA
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn find nnt entry(%string (19) index, %integer %name fsys, nnad, %integer type)
+   ! SEARCHES NNT OF ONE OR MORE FSYS'S FOR AN ENTRY
+   ! HOLDING USER. IF FOUND, RETURNS FSYS AND ADDR OF NNT ENTRY
+   !     POSSIBLE ERRORS
+   !     23 FSYS NOT AVAILABLE
+   !     37 USER NOT FOUND
+   ! THE SEARCH IS SPEEDED UP (USUALLY) BY MAINTAINING A
+   ! COLLECTION OF UP TO 16 USER+FSYS+NNTI COMBINATIONS
+!       TYPE is set 0 or 2, in calls of this function.
+!          0   when only consistency-checked and not-closing discs are to be
+!              searched,
+!          2   when only consistency-checked discs are to be searched and we
+!              don't mind if they are closing (calls originating from
+!              DDISCONNECT, DDESTROY and PROCESS STOPS(call of DINDA)
+
+%integer hti, fsys given, findad, ptrns
+%integer pt, n, i, j, flag, nna, stop
+%integer %array a(0:99)
+%string(1)s1
+%string (6) uname
+%string (11) iname
+%record (ff) %name f
+%record (nnf) %array %format nntf(0:16384)
+%record (nnf) %array %name nnt
+%record (nnf) %name nn
+%record (hottopf) %name ht
+%record (discdataf) data
+%record (hottopf) %array %name hottopw
+
+%integerfnspec look in nnt
+%integerfnspec lookupi(%integer seg, %string(6)user)
+
+   ptrns = accts_aptrns
+   fsys given=fsys
+   flag=ui(index, uname, iname)
+   ->out %unless flag=0
+
+   d_find nnt times=d_find nnt times+1
+
+   %if fsys=-1 %start
+      %cycle j=2, 1, top exec
+         %if uname=exec(j) %start
+            fsys=d_ipl fsys
+            %exit
+         %finish
+      %repeat
+   %finish
+
+
+   ->invalid %if d_hottopn=0;            ! hot top not yet initialised
+
+   %unless d_hottopadr=d_hottopa %start;  ! new address specified, remap
+      d_find nnt times=1
+      d_find nnt saves=0
+      d_hottopadr=d_hottopa
+      hottopw==array(d_hottopadr, hottopfs)
+      d_hottop==hottopw
+      %cycle i=0, 1, d_hottopn; d_hottop(i)=0; %repeat
+   %finish
+
+   flag=85
+   %cycle i=0, 1, d_hottopn
+      hti=i
+      ht==d_hottop(i)
+      ->invalid %if ht_index="";         ! Examined all used entries
+      %if equal(index, ht_index)=yes %and (fsys=-1 %or fsys=ht_fsys) %start
+         ! FOUND, BUT CHECK JUST IN CASE
+         nna=sysad(nntkey, ht_fsys)
+         nnt==array(nna, nntf)
+         pt=ht_pt
+         nn==nnt(pt)
+         ->invalid %unless nn_name=uname;  ! reuse this entry
+         fsys=ht_fsys
+         ! give 'not found' for TYPE=0 when the FSYS is closing
+         ->out %if type=0=av(fsys, 0)
+         flag=0
+         nnad=addr(nn)
+         ->out
+      %finish
+   %repeat
+
+   ! Hot top is full and didnt find reqd entry, pick
+   ! one at random to re-use
+   hti=drandom(d_hottopn)
+   ht==d_hottop(hti)
+invalid:
+   ! either now HOTTOPN = 0 or HT is mapped to record in which
+   ! to save user/fsys/pt
+
+   flag=23;                              ! DISC N/A
+   %if fsys=-1 %start;                   ! LOOK IN ALL AVAILABLE FILE SYSTEMS
+
+      %if d_facilitya > 0 %and iname = "" %start  { try fast search }
+         fsys = lookupi(d_facilitya, uname)
+         %unless fsys < 0 %start  { found something }
+            flag = look in nnt
+            %if flag = 0 %start
+               s1 = "*"
+               -> found
+            %finish
+         %finish
+      %finish
+      get av fsys2(type, n, a)
+      n=n-1
+   %finish %else %start;                 ! LOOK ONLY IN "FSYS"
+      %if av(fsys, type)=0 %then ->out  { with flag=23 }
+      a(0)=fsys
+      n=0
+   %finish
+
+   %for j=0, 1, n %cycle
+      fsys=a(j)
+      flag = look in nnt
+      %exit %unless flag = 37  { found or error }
+   %repeat
+
+   -> out %unless flag = 0
+   s1 = " "
+found:
+   nnad=addr(nn)
+   %unless d_hottopn=0 %start
+      d_find nnt saves=d_find nnt saves+1
+      ht_index=index
+      ht_fsys=fsys
+      ht_pt=pt
+!         MONITORS("HOTTOP " . INDEX . " " . ITOS((D_FIND NNT SAVES*100)//D_FIND NNT TIMES)."% " . ITOS(HTI))
+   %finish
+   wrs(s1."Find nnt ".index." pt=".itos(accts_aptrns-ptrns)."(".itos(d_find nnt times).")") %if d_sigmon & 1 > 0
+out:
+   fsys = fsys given %unless flag = 0
+   %result=flag
+
+%integerfn look in nnt
+      flag=fbase2(fsys, addr(data))
+      %result = flag %unless flag=0
+
+      nna=sysad(nntkey, fsys)
+      nnt==array(nna, nntf)
+      pt=hash(uname, data_nnthash)
+      stop=pt
+      %until pt=stop %cycle
+         nn==nnt(pt)
+         %if nn_name=uname %start
+            %if iname="" %start;         ! looking for a process index
+               %result = 0 %if nn_tag=0
+            %finish %else %start;        ! looking for a file index
+               %if nn_tag>0 %start
+                  i=nn_indno
+                  flag=ninda(fsys, i, findad)
+                  %result = flag %unless flag=0
+                  f==record(findad)
+                  %result = 87 %unless f_owner=uname
+                  %result = 0 %if equal(f_name, iname)=yes
+               %finish
+            %finish
+         %finish
+         %result = 37 %if nn_name=""
+         pt=pt+1
+         pt=0 %if pt>data_nnttop
+      %repeat
+%end; ! look in nnt
+
+%integerfn lookupi(%integer seg, %string(6)user)
+
+! result < 0 if not found
+
+%integer adr, last page, last entry, p, p0, p1, inc
+%longinteger cw
+%longintegerarrayformat liaf(0:16000)
+%longintegerarrayname c
+%constlonginteger mask = x'ffffffffffffff00'
+
+   adr = seg << 20
+   c == array(adr, liaf)
+   last page = integer(adr+32)
+   last entry = integer(adr+36)
+   cw = 0
+   string(addr(cw)) = user
+   %result = -1 %if cw < (c(40) & mask)  { before first entry }
+   %result = -2 %if cw > c(last page)    { after last }
+   { now know its in range, which page? }
+   %cycle p = 8, 1, last page
+      %exit %if cw <= c(p)
+   %repeat
+   p0 = (p-8) << 9
+   p1 = p0 + 511
+   p0 = 40 %if p0 = 0
+   p1 = last entry %if p1 > last entry
+   { now have the bounds for the search within one page }
+   inc = 512
+   %cycle
+      inc = inc >> 1
+      p = p0 + inc
+      %continue %if p > p1
+      %result = c(p) & 255 %if cw = (c(p) & mask)
+      %result = -3 %if inc = 0
+      p0 = p %if cw > (c(p) & mask)
+   %repeat
+%end; ! lookupi
+
+%end;                                    ! FIND NNT ENTRY
+
+!-----------------------------------------------------------------------
+
+%external %routine empty dvm
+! Used to disconnect the index area of the VM and to empty the HOTTOP
+%integer seg, i
+   %cycle seg=hidseg, -1, lodseg
+      %if d_seguse(seg)#-1 %start
+         dchain(seg, 0)
+         d_seguse(seg)=-2
+      %finish
+   %repeat
+
+   %if d_hottopn>0 {in use} %and d_hottopa=d_hottopadr {and mapped} %start
+      %cycle i=d_hottopn, -1, 0
+         d_hottop(i)_index=""
+      %repeat
+   %finish
+%end;                                    ! EMPTY DVM
+
+!-----------------------------------------------------------------------
+
+%integer %fn closing bit(%integer fsys)
+%integer entad, j
+%record (ddtf) %name ddt
+   j=ddt entry(entad, fsys)
+   %result=0 %unless j=0
+   ddt==record(entad)
+   %result=(ddt_dlvn>>30)&1;             ! pass back bit 1 of DLVN
+%end;                                    ! CLOSING BIT
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn set closing bit(%integer fsys)
+%integer entad, savekey
+%record (ddtf) %name ddt
+   ! Give "not available if SLOAD disc specified.
+   %result=23 %if ddtentry(entad, fsys)#0 %or av(fsys, 0)=0 %or fsys=d_ipl fsys
+   ddt==record(entad)
+   *ipk_0(0); *st_2,savekey; *spka_0(0)  { 'ON' }
+   ddt_dlvn=ddt_dlvn!(1<<30)
+   *l_2,savekey; *spka_0(2)  { 'OFF' }
+   %result=0
+%end;                                    ! SET CLOSING BIT
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn conseg(%string (31) full, %integer prefix, fsys, %integer %name a, firstfree)
+
+! a is
+!     first seg << 20 ! last seg << 8 ! ct
+! Result is 1 if connected
+! Result is zero if the file is not connected.
+
+%integer w, w0, q
+%integer seg, lseg, n, ct, lct, j
+%record (ctf) %name c
+%const %integer %array p(1:6)= 157, 257, 367, 599, 467, 709
+   n=0 {no of fragments found}
+   w=0 { compute hash value }
+   q=1
+   %cycle j=1, 1, length(full)
+      w=w+(charno(full, j)-'#')*p(q)
+      %if q=6 %then q=1 %else q=q+1
+   %repeat
+   w=w-(w//181)*181
+   w0=w
+   firstfree=0
+
+   %cycle
+      c==d_conlist(w+5) { first 5 entries special }
+      firstfree=w+5 %if firstfree=0 %and (c_full="" %or c_full=".free")
+      %exit %if c_full="" { no need to go further }
+      %if c_full=full %and c_prefix=prefix %and c_fsys=fsys %start
+         a=(c_seg<<20)!((c_seg+c_gap-1)<<8)!(w+5)
+         n=n+1
+         %exit
+      %finish
+      %if w=180 %then w=0 %else w=w+1
+      %exit %if w=w0 { examined all }
+   %repeat
+   wrs(full." w0=".itos(w0)." w=".itos(w)." ff=".itos(firstfree)) %if d_dirmon > 100
+   %result=n
+%end;                                    ! CONSEG
+
+!-----------------------------------------------------------------------
+
+%routine reset seg lock bits
+%integer seg
+   %cycle seg=hi d seg, -1, lo d seg
+      %if d_seguse(seg)=-1 %start {was 'locked'}
+         wrs("Reset ".itos(seg))
+         d_seguse(seg)=-2 {make it 'free' again}
+      %finish
+   %repeat
+   d_ownind=0
+%end;                                    ! RESET SEG LOCK BITS
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn hinda(%string (6) uname, %integer %name fsys, indad, %integer type)
+! Called to get the address of a 'process index' NOT a file index
+! UNAME must be a 6 ch name
+! FSYS may be specific or -1 (-1 means IPL disc for executives else first found)
+! TYPE 0: flag 85 is returned if fsys found is closing and procuser himself
+!         is on a closing disc
+!      2: disc may be closing
+
+%integer j, nnad, dseg, saveseg, lindad
+%record (hf) %name h
+%record (nnf) %name nn
+%string (12) w
+   type=2 %if type=0#closing bit(d_procfsys)
+
+   j=0
+   saveseg=0
+   %if uname=d_procuser %and (fsys=d_procfsys %or fsys=-1) %start
+      %if d_ownind#0 %start;             ! have already found (and locked) procuser
+         indad=d_ownind
+         fsys=d_procfsys
+         h==record(indad)
+         %result=0 %if h_owner=uname {as it should be}
+         wrs3n("HINDA******", uname, h_owner, 87)
+         reset seg lock bits
+         {and drop through to re calculate}
+      %finish
+      saveseg=1
+   %finish
+
+   j=find nnt entry(uname, fsys, nnad, type)
+   ->out %unless j=0
+
+   nn==record(nnad)
+   j=ninda(fsys, nn_indno, lindad)
+   ->out %unless j=0
+
+   dseg=lindad>>seg shift
+   %if saveseg=1 %start
+      d_seguse(dseg)=-1
+      d_seguse(sysad(bitkey, fsys)>>seg shift)=-1
+      d_ownind=lindad
+   %finish
+
+   h==record(lindad)
+   %unless h_owner=uname %start
+      wrs3n("HINDA", uname, h_owner, 87)
+      j=87;                              ! wrong index found
+   %finish
+   j=99 %if h_mark=0
+   indad=lindad %if j=0
+out:
+   %result=j
+%end;                                    ! HINDA
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn finda(%string (19) index, %integer %name fsys, findad, %integer type)
+%integer j, nnad
+%string (6) wowner, uname
+%string (11) wname, iname
+%string (18) wfull
+%record (nnf) %name nn
+%record (ff) %name f
+   j=ui(index, uname, iname)
+   ->out %unless j=0
+
+   type=2 %if type=0#closing bit(d_procfsys)
+
+   j=0
+   %if index=d_procuser %and (fsys=d_procfsys %or fsys=-1) %and d_ownind#0 %start
+      findad=d_ownind
+      fsys=d_procfsys
+      findad=findad+512
+      f==record(findad)
+      %result=0 %if f_owner=uname %and f_name="" {expected}
+      wrs3n("FINDA******", index, f_owner, 87)
+      reset seg lock bits
+      {drop through}
+   %finish
+
+   j=find nnt entry(index, fsys, nnad, type)
+   ->out %unless j=0
+
+   nn==record(nnad)
+   j=ninda(fsys, nn_indno, findad)
+   ->out %unless j=0
+
+   findad=findad+512 %if iname=""
+   f==record(findad)
+   %unless uname=f_owner %and equal(iname, f_name)=yes %start
+      j=87
+      wowner<-f_owner
+      wname<-f_name
+      wfull=wowner
+      wfull=wowner.isepl.wname.isepr %unless wname=""
+      wrs3n("FINDA", index, wfull, 87)
+   %finish
+out:
+   %result=j
+%end;                                    ! FINDA
+
+!-----------------------------------------------------------------------
+
+%external %string (255) %fn prefixs(%string %name index, %integer fsys, prefix)
+%integer j, findad
+%string (255) p
+%record (ff) %name f
+%record (fdf) %array %name fds
+%record (fdf) %name fd
+   p=""
+   j=finda(index, fsys, findad, 2)
+   %if j=0 %start
+      f==record(findad)
+      fds==array(findad+f_fdstart, fdsf)
+      %while prefix>0 %cycle
+         fd==fds(prefix)
+         p=fd_name.gsep.p
+         prefix=fd_prefix
+      %repeat
+   %finish
+   %result=p
+%end;                                    ! PREFIXS
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn map file index(%string %name index, %integer %name fsys, findad,
+   %string (63) txt)
+%integer j
+%record (ff) %name f
+   j=finda(index, fsys, findad, 0)
+   %result=j %unless j=0
+
+   f==record(findad)
+   %result=pp(addr(f_sema), f_semano, txt)
+%end;                                    ! MAP FILE INDEX
+
+!-----------------------------------------------------------------------
+
+%integer %fn file deal(%integer findad, sd, pages)
+%integer nsd, fsys, np, da, link, j
+%record (ff) %name f
+%integer %array %name sds
+   f==record(findad)
+   sds==array(findad+f_sdstart, sdsf)
+   nsd=(f_fdstart-f_sdstart)>>2
+   fsys=f_fsys
+   j=0
+   %while pages>0 %cycle
+      np=pages
+      np=sec pgs %if np>sec pgs
+      pages=pages-np
+      da=sd<<13>>13
+      link=sd>>19
+      !wrs("file deal SD X'" . htos(sd,8)) %unless d_dirmon = 0
+      j=j!deal(fsys, 0, da, np) %unless da=X'7FFFF'
+      %exit %unless 1<=link<=nsd
+      sd=sds(link)
+      sds(link)=0
+   %repeat
+   j=87 %unless pages=0=link
+   %result=j
+%end;                                    ! FILE DEAL
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn find(%integer findad, %string %name file, %integer %name index)
+
+! Searches the file index at the specified address for
+! the file or group of the given name, ignoring old gens. If found,
+! returns index (>0) into array of FDs
+
+! Some flags:
+!    16 exists
+!    32 does not exist or no access
+!    24 intermediate group does not exist (or is actually a file)
+!    26 found a file but wanted a group
+!     2 found a group but wanted a file
+
+%integer j, flag
+%integer i, nfd
+%string (11) s11
+%string (255) w
+%record (fdf) %name fd
+%record (ff) %name f
+%record (fdf) %array %name fds
+
+   f==record(findad)
+   fds==array(findad+f_fdstart, fdsf)
+   nfd=(f_size<<9-f_fdstart)//fdsize;    ! NO OF FDS IN INDEX
+   w=file.gsep
+   d_prefix=0
+   flag=16
+
+   %cycle
+      w->s11.(gsep).w
+      j=0
+      %cycle i=1, 1, nfd
+         fd==fds(i)
+         %if fd_name="" %start;          ! reached a never-used entry
+            %if length(w)<2 %then ->res32 {does not exist}
+            ->res24 {intermediate group does not exist}
+         %finish
+         %if equal(fd_name, s11)=yes %and d_prefix=fd_prefix %start
+            %if fd_sd=0 %start {this is a group}
+               ->out %if w=gsep;         ! found terminal group
+               flag=2 %and ->out %if w="" {found a group and wanted a file}
+               j=i %and %exit {found intermediate group}
+            %finish %else %start {this is a file}
+               %if fd_codes2&oldge=0 %start
+                  ->out %if w="" {wanted a file}
+                  %if w="." %then flag=26 %else flag=24
+                  ->out {found a file but wanted a group}
+               %finish
+            %finish
+         %finish
+      %repeat
+
+      ->res32 %if length(w)<2
+      ->res24 %if j=0
+      d_prefix=j
+   %repeat
+out:
+   index=i
+   d_last fd=fd
+   ->res16
+res32:flag=flag+8
+res24:flag=flag+8
+res16:
+   %result=flag
+%end;                                    ! FIND
+
+!-----------------------------------------------------------------------
+
+%external %routine fill stack ents(%integer indad, %string (3) suff)
+
+! The theory here is that Supervisor connects only the first section of
+! the #STK file.  For a 256K file, that's one more section on 2900 and
+! XA and 3 more secs and segs on 370.
+
+%integer sectlen, relseg, nsects, s, k, n
+%integer findad, nfd, nsd, j, cell, da, pgs
+%integer %name sd
+%string (11) file
+%record (ff) %name f
+%record (fdf) %array %name fds
+%record (fdf) %name fd
+%integer %array %name sds
+
+   file="#STK".suff
+   findad=indad+512
+   f==record(findad)
+   fds==array(findad+f_fdstart, fdsf)
+   sds==array(findad+f_sdstart, sdsf)
+   nsd=(f_fdstart-f_sdstart)>>2
+   nfd=(f_size<<9-f_fdstart)//fdsize
+
+   %cycle j=1, 1, nfd
+      fd==fds(j)
+      %if equal(fd_name, file)=yes %start
+         pgs=fd_pgs
+         sectlen=sec pgs
+         sd==fd_sd
+         %cycle
+            pgs=pgs-sec pgs {how many more to go}
+            %return %if pgs<=0 {finished}
+            s=sd>>19
+            j=99 %and %exit %unless 1<=s<=nsd {SD chain screwed}
+            sd==sds(s) {move on to next section}
+            sect len=pgs %if sect len>pgs
+            da=(f_fsys<<24)!(sd<<13>>13)
+            j=sconnect(stack seg, da, sectlen, 1, cbt continuation)
+            %exit %unless j=0
+         %repeat
+         doper2("FILL STACK ".itos(j))
+         %return
+      %finish
+   %repeat
+   wrs("Fill stack ents: No #STK !!")
+%end;                                    ! FILL STACK ENTS
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn fileperm(%integer findad, %record (fdf) %name fd, %string (6) user)
+%record (ff) %name f
+%record (fdf) %array %name fds
+%record (pdf) %array %name pds
+%record (pdf) %name pd
+%integer link, j, ch, npd, n, p, type, linkstart, ownp
+
+!                   gives USER's permitted access modes to FILE
+
+   p=7
+   %result = 7 %if user="DIRECT" %or user="FCHECK"
+
+   f==record(findad)
+   ownp=fd_ownp
+   p = ownp %and ->out %if user=f_owner
+
+   fds==array(findad+f_fdstart, fdsf)
+   pds==array(findad+f_pdstart, pdsf)
+   npd=(f_sdstart-f_pdstart)//pdsize
+   type=0 {file permissions}
+   linkstart=fd_phead
+loop:
+   link=linkstart
+   n=0
+   %while npd>=link>0 %cycle;            ! explicit permission
+      pd==pds(link)
+      p=(pd_bp)&15
+      ->out %if user=pd_name
+      link=pd_bl
+      n=n+1
+      %exit %if n>15
+   %repeat
+
+   link=linkstart
+   n=0
+   %while npd>=link>0 %cycle;            ! implicit permission
+      pd==pds(link)
+      %cycle j=1, 1, 6
+         ch=charno(pd_name, j)
+         ->no %unless ch='?' %or ch=charno(user, j)
+      %repeat
+      p=(pd_bp)&15
+      ->out
+no:
+      link=pd_bl
+      n=n+1
+      %exit %if n>15
+   %repeat
+
+   %if type=0 %start
+      p=fd_eep
+      ->out %if p>0
+
+      %if fd_prefix>0 %start
+         fd==fds(fd_prefix)
+         linkstart=fd_phead
+         ->loop
+      %finish
+
+      linkstart=f_fiphead
+      type=1 {index permissions}
+      ->loop
+   %finish
+
+   p=f_eep
+out:
+   p=p&7
+   p=p!1 %if p&6>0
+   p = p & 5 %if ownp & 8 > 0  { remove W if protected }
+   %result=p
+%end;                                    ! FILEPERM
+
+!-----------------------------------------------------------------------
+
+%externalintegerfn encode pgs(%integer pgs)
+
+! if > 64 Mbyte, change units to Mbytes. Limit then 15000Mb
+
+   %result = pgs %if pgs >> 14 = 0
+   %result = x'4000' ! (pgs >> 8)
+%end; ! encode pgs
+
+!-----------------------------------------------------------------------
+
+%externalintegerfn decode pgs(%integer code)
+
+   %result = code %if code >> 14 = 0
+   %result = (code & x'3FFF') << 8
+%end; ! decode pgs
+
+!--------------------------------- ALLOCATE CBT -------------------------------
+
+%external %integer %fn allocate cbt(%integer vsparm)
+
+! Called from SIGNAL.  Using VSPARM, work out Seg/Page numbers for recent VS
+! error.  If Seg has been connected but has no CBT allocation, allocate same
+
+! Also called by DDISCONNECT, DCHACCESS and DCHSIZE in order to allocate CBT
+! for newcopy segments so that they can be referenced and hence zeroed.
+
+!    Result   =   0   if successful
+!                 8   segment not in non-cllocatable range
+!                 9   No filename in CONLIST for this segment
+!                10   segment does have CBT allocated already and so the VS
+!                     error must be "genuine"
+!                28   no free CBT entries
+
+!    These flags are pretty arbitrary.  SIGNAL simply has to check for success.
+
+
+%integer j, n, link, nsd, nsects, segno, seg, page, flag, savekey, sections in seg, bit
+%integer findad, fi, nfd, pages in last sect, fsys, relblockno, cc, file base seg
+%integer pags, pages in last seg, cbtflags, file segments, requested seg, ent
+%integer sst req
+%integer %name sd
+%integer %array %name sds
+
+%record (cbtf) %name cbt
+
+%record (ctf) %name ct
+
+%string (6) uname
+%string (11) iname, fname
+%string (19) index
+%string (31) full, s31
+%string (255) file
+%record (ff) %name f
+%record (fdf) %name fd
+%record (fdf) %array %name fds
+
+   seg=vsparm>>seg shift
+   page=vsparm<<(32-seg shift)>>(32-segshift+12)
+
+   wrs("Seg = ".htos(seg, 8)) %if d_dirmon#0
+   flag=8 %and ->out %unless lo cbtdealseg<=seg<=hi cbtdealseg
+   n=d_cpoint(seg)
+   flag=9 %and ->out %if n<5  { rubbish, reserved, discsite etc }
+
+   %if sst(seg)&cbt not available=0 %then flag=10 %and ->out;  ! Has CBT allocated
+
+   requested seg=seg;                    ! Save segment number requested
+   j=seg
+   j=j-1 %while d_cpoint(j-1)=n;         ! Go back to first seg of file
+   seg=seg-j;                            ! becomes relative segment number within file
+   file base seg=j
+
+   ct==d_conlist(n)
+   ct_full->index.(usep).fname
+
+   fsys=ct_fsys
+
+   flag=finda(index, ct_fsys, findad, 0)
+   ->out %unless flag=0
+
+   f==record(findad)
+   fds==array(findad+f_fdstart, fdsf)
+   sds==array(findad+f_sdstart, sdsf)
+   nsd=(f_fdstart-f_sdstart)>>2
+
+   nfd=(f_size<<9-f_fdstart)//fdsize
+
+   %if d_dirmon#0 %then wrs("Fname=".fname."  Relseg=".itos(seg))
+
+   fd==fds(ct_fdx)
+   %unless equal(fd_name, fname)#0 %and fd_prefix=ct_prefix %then flag=32 %and ->out
+
+   pags=decode pgs(fd_pgs)
+   flag=87
+   ->out %unless pags>0
+
+   ! Check that seg/page address given by the VSPARM is within the file
+   %if seg*seg pgs+page>=pags %then flag=88 %and ->out
+
+   nsects=(pags+sec pgs-1)>>(sec p shift)
+   pages in last sect=pags-(nsects-1)<<(sec p shift)
+
+   sd==fd_sd;                            ! proceed down sections chain
+
+   cbtflags=0
+   cbtflags=cbt read only %if ct_flags&2=0
+   %if seg>0 %and sst(file base seg+seg-1)&cbt not available=0 %start
+      ! Previous seg belongs to same file and has CBT allocated.  It must be a
+      ! full segment, and therefore the current segment needs the continuation bit to be set
+      cbtflags=cbtflags!cbt continuation
+   %finish
+
+   %if ct_flags&64#0 %then cbtflags=cbtflags!cbt sequential
+   sst req = sst(requested seg)
+   bit = sst req&255  { bits are set in this byte for 'newcopy' sections }
+
+   ! Are we allocating CBT for the last segment (which may require 1 to 8 CBT
+   ! entries) or for a non-last segment, which will require eight?
+
+   file segments=(pags+seg pgs)//seg pgs
+
+   ! SEG is relative segno within file
+   %if seg=file segments-1 %start
+      ! SEG is the last segment.  How many blocks has it got?
+      pages in last seg=pags-(file segments-1)*seg pgs
+      sections in seg=(pages in last seg+sec pgs-1)//sec pgs
+   %finish %else sections in seg=secs per seg
+
+   cc=getn(sections in seg)
+   %if cc<0 %then flag=28 %and ->out
+
+   %if d_dirmon#0 %start
+      wrs("sst req ".htos(sst req, 4))
+      wrs("File segments  Filebase  Seg  Sectsinseg  Pgsinlastseg CBTflags")
+      wrs("        ".itos(file segments)."       ".itos(file base seg)."   ".itos(seg)."       ". %c
+         itos(sections in seg)."       ".itos(pages in last seg)."  ".itos(cbtflags))
+   %finish
+
+   ! Now go down sections list looking for the disc addresses for SEG
+
+   relblockno=0
+   n=0;                                  ! counts number of sections
+   %while n<nsects %cycle
+      segno=n>>3;                        ! at 8 sections per segment
+
+      %if segno=seg %start
+
+         ! We have found the one we want
+         flag=0
+
+         *ipk_0(0); *st_2,savekey; *spka_0(0)
+         cbt==cbta(cc+relblockno); cbt=0
+
+         cbt_da=(fsys<<24)!(sd<<13>>13)
+         %if n<nsects-1 %then j=sec pgs-1 %else j=pages in last sect-1
+         abort director %if j >= secpgs
+         cbt_length = j
+         cbt_flags=cbtflags ! (bit&cbt new block)  { x80 }
+         bit = bit << 1
+         j=addr(cbt_da)
+         %if d_dirmon#0 %then wrs(itos(relblockno)." ".htos(integer(j), 8)." ".htos(integer(j+4),
+            8))
+
+         cbtflags=cbtflags!cbt continuation
+         *l_2,savekey; *spka_0(2)
+         relblockno=relblockno+1
+
+      %finish %else %if segno>seg %then %start
+
+         ! Put continuation bit into the first block of the following segment if
+         ! necessary/possible.  SEGNO points to seg after the one for which CBT
+         ! has just been allocated.
+
+         ent=sst(file base seg+segno)
+         %if ent&cbt not available=0 %start
+            ! We know this segment must belong to the same file, because we are
+            ! going down its sections list
+            *ipk_0(0); *st_2,savekey; *spka_0(0)
+            cbt==cbta(ent)
+            cbt_flags=cbt_flags!cbt continuation
+            *l_2,savekey; *spka_0(2)
+         %finish
+         %exit
+      %finish
+
+      n=n+1
+      link=sd>>19
+      %exit %unless 1<=link<=nsd
+      sd==sds(link)
+   %repeat
+
+out:
+   %if flag=0 %start
+      *ipk_0(0); *st_2,savekey; *spka_0(0)
+      sst(requested seg)=cc
+      *l_2,savekey; *spka_0(2)
+   %finish
+
+   wrs("Alloc CBT ".htos(vsparm, 8)." Flag=".itos(flag)) %if flag#0
+   %result=flag
+%end;                                    ! allocate cbt
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn deallocate inactive(%integer action, segs)
+
+!   Action   =   0   do a count
+!                1   in addition actually deallocate
+
+! LO, HI give segment range in which to try (temp) and SEGS speicifies number
+! of segs required (i.e. finish when we have got this number
+
+%integer seg, ent, nsecs, nnotposs, nposs, nfull, nnotfull, nunalloc, newcopy
+%integer j, pagetablelength, blocksactive, flag, savekey, nsects, not this seg
+%integer bit
+%string (19) index
+%string (11) fname
+%string (255) full
+%record (ctf) %name ct
+%record (cbtf) %name cbt
+
+   flag=into(9, "")
+   %if flag#0 %then ->out
+   ! doper2{wrs}("Deallocate CBT for inactive blocks")
+
+   nnotposs=0; nposs=0
+   nfull=0; nnotfull=0
+   nunalloc=0
+
+   ! We need to be a bit carefule not to deallocate CBT for the stack segment (if any)
+   ! above the current stack segment, if Stack Top (R11) is getting close to the
+   ! top of its current segment.
+
+   *st_11,j
+   not this seg=j>>segshift
+   %if not this seg<<segshift-j>4096 %then not this seg=0;  ! Not to worry if difference > 4096
+   not this seg=not this seg+1;          ! It's the following segment we are interested in
+
+   flag=0
+
+   %for seg=hi cbtdealseg, -1, lo cbtdealseg %cycle
+      %if seg#not this seg %start
+         %continue %if d_cpoint(seg) < 5  { only files }
+         ent=sst(seg)
+         %if ent&cbt not available=0 %start
+            ! Segment is connected in the VM and CBT is allocated
+            %if target=amdahl %start
+               pagetablelength=segment table(seg)>>28
+            %finish
+
+            %if target=xa %start
+               pagetablelength=segment table(seg)&15
+            %finish
+
+            nsects=(pagetablelength+2)>>1
+
+            ! Look down all the CBT entries to see if any one is active. If so, cannot deallocate.
+            blocksactive=0; newcopy=0; bit = cbt new block  { x80 }
+            %for j=0, 1, nsects-1 %cycle
+               %if cbta(ent+j)_flags&cbt active#0 %then blocksactive=blocksactive+1
+               %if cbta(ent+j)_flags&cbt new block#0 %then newcopy=newcopy ! bit
+               bit = bit >> 1
+            %repeat
+
+            %if blocksactive=0 %and action=1 %start
+               ! Can deallocate the CBT entries.  Newcopy blocks are not really
+               ! active, and CBT ACTIVE and CBT NEW COPY cannot be set together.
+               recover cbt(ent, nsects)
+               *ipk_0(0); *st_2,savekey; *spka_0(0)
+               sst(seg)<-not alloc
+               %if newcopy # 0 %then sst(seg)=sst(seg)!newcopy seg ! newcopy
+
+               ! Remove continuation bit from following segment if necessary/possible
+               ! The following segment may belong to a different file, or indeed
+               ! it may be above segment HI DEALSEG.  But then the continuation
+               ! bit in its first block should not be set anyway
+               ent=sst(seg+1)
+               %if ent&cbt not available=0 %start
+                  cbt==cbta(ent)
+                  cbt_flags=cbt_flags&(\cbt continuation)
+               %finish
+               *l_2,savekey; *spka_0(2)
+               nposs=nposs+1
+               wrs("Dealloc CBT for seg ".itos(seg)." X".htos(seg, 3)) %if d_dirmon#0
+               segs=segs-1
+               %exit %if segs=0
+            %finish %else nnotposs=nnotposs+1
+
+         %finish {connected seg with allocated CBT} %else %start
+
+            %if sst(seg)&not alloc mask=not alloc %then nunalloc=nunalloc+1
+
+         %finish
+      %finish
+   %repeat
+   ! wrsn("Deallocated=", nposs); wrsn("Active=", nnotposs)
+
+out:
+   %result=outof(flag)
+%end;                                    ! deallocate inactive
+
+!-----------------------------------------------------------------------
+
+%externalinteger %fn dconnecti(%string (19) findex, %string (255) file, %integer fsys,
+   mode, %integer %name seg, gap)
+
+%external %routine %spec printmp(%integer x, y)
+
+!  ORDER OF MODE BITS:         EXECUTE      WRITE      READ
+! BITS IN MODE MAY BE SET AS FOLLOWS:
+!     2**0  READ
+!        1  WRITE
+!        2  EXECUTE
+!        3  WRITE-SHARED ALLOW
+!        4  NEW-COPY
+!        5  COMMS MODE
+!        6  DISC-ONLY
+!        7  NEW STACK SEGMENT
+!        8  DISCONNECT, CHANGE ACCESS, CHANGE SIZE NOT ALLOWED
+!        9  (advisory) sequential file
+!       31  NON-SLAVED SEGMENT
+%const %integer %array mg(0:7)= %c
+      B'01111101011100000011000000000000',
+      B'01110000000000000000000000000000',
+      B'01111100011100000011000000000000',
+      B'01110000000000000000000000000000',
+      B'00010000000000000001000000000000',
+      B'00000000000000000000000000000000',
+      B'00010000000000000001000000000000',
+      B'00000000000000000000000000000000'
+%integer findad, fi, previous mode, fiw, monitor, bits
+%integer j, conent, allocatecbt
+%integer sectlen, relseg, nsd, s, da, nsects, n
+%integer k, prm, newcopy, wsa, newstack, adr, nonslaved
+%integer topseg, fsegs, topfseg, xseg, xgap, is room, totsegs
+%integer pags, codes, codes2, notdrum
+%integer cbt flags, ct flags, c0
+%string (6) uname, to
+%string (11) iname
+%string (31) full, s31
+%record (ctf) %name ct
+%record (ff) %name f
+%record (fdf) %array %name fds
+%integer %array %name sds
+%integer a
+%integer %name sd
+%record (fdf) %name fl, flw
+%integer c, cbt da, savekey
+%record (cbtf) %name cbt
+%const %string (9) fn= "DCONNECT "
+
+   %if d_dirmon>100 %start
+      printstring("Dconnecti ".findex.":".file)
+      wrs(" seg".itos(seg)." gap".itos(gap))
+   %finish
+
+
+   j=8;                                  ! BAD PARAM
+   ct flags=((mode&x'200')>>3)!((mode&X'100')>>1)!(mode&15)!1 {NQ--SEWR}
+   !                                     where  N = disconnect, chsize etc not allowed
+   !                                            Q = advisory sequential
+   !                                            S = shared-write allowed
+   !                                            E = execute
+   !                                            W = write-acces
+   !                                            R = read access
+
+   cbt flags=0
+   cbt flags=cbt sequential %unless mode&X'200'=0
+   mode=mode&(\(X'300'))
+   nonslaved=mode>>31
+   monitor = (mode >> 30) & 1  { set only by 'monitor connect' q.v. }
+   %if monitor = 0 %then to = d_procuser %else to = "MONITR"
+   mode = mode <<2 >> 2
+   %unless 0<=mode<=255 %then ->out
+
+   adr=addr(mg(0))
+   ->out %if getbit(adr, mode)=0
+
+   j=uif(findex, file, uname, iname, full)
+   ->out %unless j=0
+   uctranslate(addr(full)+1, length(full))
+
+   s31<-file
+   j=map file index(findex, fsys, findad, fn.s31);  ! to get fsys
+   ->out %unless j=0
+
+   f==record(findad)
+
+   j=find(findad, file, fi)
+   ->vout %unless j=16
+
+   fds==array(findad+f_fdstart, fdsf)
+   sds==array(findad+f_sdstart, sdsf)
+   nsd=(f_fdstart-f_sdstart)>>2
+   fl==fds(fi)
+
+   j=32
+   prm=file perm(findad, fl, to)
+   ->vout %if mode&prm<mode&7;           ! what you can have < what wanted
+
+   j = 20  { reject connect if file itself is on offer }
+   -> vout %if fl_codes & offer > 0
+
+   j=87 {index corrupt}
+   pags=decode pgs(fl_pgs)
+   ->vout %if pags<=0
+   nsects=(pags+sec pgs-1)>>sec p shift
+
+   sd==fl_sd
+
+   n=conseg(full, fl_prefix, fsys, a, conent);  ! check if file already connected
+   %if n>0 %start
+      ct==d_conlist(a&255)
+         xseg=a>>20
+         xgap=((a>>8)&x'FFF')+1-xseg
+         k=ct_flags
+         j=e+153 {File already connected at different seg}
+         ->give %if seg#0 %and xseg#seg
+
+         j=e+154 {File already connected in smaller gap}
+         ->give %if gap#0 %and xgap<gap
+
+         j=e+155 {Wanted it NEWCOPY}
+         ->give %unless mode&B'10000'=0
+
+         j=e+156 {Connected in different mode}
+         ->give %unless ct flags=k
+
+         j=34 {Already connected OK}
+give:
+         seg=xseg
+         gap=xgap
+         ->vout
+      %finish
+
+   codes=fl_codes;                       ! make local copies
+   codes2=fl_codes2
+
+   j=5;                                  ! NOT READY
+   ->vout %if codes&unava#0
+
+   j=33;                                 ! conflicting mode
+   newcopy=codes&violat
+   ! Reject WS-ALLOW for VIOLAT file
+   wsa=mode&B'1000'
+   mode=mode!1 %if mode&6#0;             ! add R if X or W set
+   ->vout %if wsa#0 %and newcopy#0
+
+   notdrum=mode&B'01000000'
+   newcopy=newcopy!(mode&B'00010000');   ! INCLUDE SPECIFIC RQ FOR NEWCOPY
+
+   -> vout %if fl_ownp&8>0 { no destroy } %and newcopy # 0
+
+   %if fl_usecount#0 %start
+      ! Does requested mode conflict with existing mode?
+
+      !previous mode=1
+      !%if codes2&wrconn>0 %start
+      !   ->vout %if wsa=0
+      !   previous mode=3
+      !%finish
+      !previous mode=previous mode!8 %if wsa>0
+      !->vout %unless mode&11=previous mode {1, 9, 11}
+
+      ! Reject WRITE connection or WS-ALLOW connection if WS-Allow bit not set in file descriptor
+      %if mode&b'1010'#0 %and codes2&wsallow=0 %then ->vout
+
+      ! If already connect WS-ALLOW, then this request must also have it
+      %if mode&b'1000'=0 %and codes2&wsallow#0 %then ->vout
+
+      ! Reject any further connection if already connected W-mode and WS-ALLOW not set
+      %if codes&wrconn#0 %and codes2&wsallow=0 %then ->vout
+
+      ! Reject NEW-COPY connection if already connected at all
+      ! and reject any further connection for a VIOLAT file.
+      ->vout %if newcopy#0
+   %finish
+
+   mode=mode&7
+
+
+   j=29;                                 ! no free CONLIST entry
+   ->vout %if conent=0
+   ct==d_conlist(conent)
+   ct_prefix=fl_prefix
+   ct_fsys=fsys
+   ct_flags=ct flags
+   ct_fdx=fi
+
+   j=35
+   fsegs=(pags<<12+segmask)>>seg shift;  ! set SEG and GAP if req
+   xgap=gap
+   %if xgap<fsegs %start
+      ! -> VOUT %if XGAP > 0; ! too small a GAP specified - BUT SS CAN'T COPE !!!!!
+      xgap=fsegs
+      gap=fsegs
+   %finish
+   totsegs=xgap
+
+   xseg=seg
+   %if xseg=0 %start
+      xseg=louseg
+      %while xseg<=d_hiseg %cycle
+         is room=1
+         %cycle k=0, 1, gap-1
+            ! First condition below checks that we're not going beyond
+            ! the VM limit.
+            %if xseg+k>d_hiseg %or d_cpoint(xseg+k)#0 %then is room=0 %and %exit
+         %repeat
+         %exit %if is room#0;            ! FOUND HOLE
+         xseg=xseg+1
+      %repeat
+      ->vout %if is room=0
+      seg=xseg
+   %finish
+   topfseg=xseg+fsegs-1
+   topseg=xseg+totsegs-1
+
+   !----------------- SEG & GAP SELECTED AND SET UP ---------------------------
+
+   ! VALID SEG NOS, START AND FINISH ?
+   ->vout %if topseg>d_hiseg
+   ->vout %unless xseg>=louseg %or xseg=sig seg %or (lo vss seg<=xseg<=hi vss seg %and %c
+      lo vss seg<=topseg<=hi vss seg)
+
+   ! CHECK THESE SEGMENTS ARE FREE
+   %cycle k=xseg, 1, topseg
+      ->vout %unless d_cpoint(k)=0;      ! VM GAP TOO SMALL
+   %repeat
+
+   cbt flags=cbt flags!cbt read only %if mode&2=0
+
+   %if lo cbtdealseg<=xseg<=hi cbtdealseg %and fsegs>8 %then allocatecbt=no %else allocatecbt=yes
+
+   cbt flags=cbt flags!cbt new block %unless newcopy=0
+   k=0 {to count secs in a seg}
+   rel seg=xseg {current seg}
+   sect len=sec pgs {pgs in this sec}
+
+   %cycle
+      %if k=0 %start {start of new seg, get suitable CBT entry}
+         j=28
+         n=nsects {number of secs still to do}
+         n=secs per seg %if n>secs per seg
+         bits = ((255>>(8-n))<<(8-n))  { ie i bit/section }
+
+         %if allocatecbt=yes %or rel seg=xseg %start
+            ! Always allocate for the FIRST segment, even if we are not planning to allocate all
+            c=getn(n)
+            ->vout %if c<0
+            c0=c
+         %finish %else %start
+            c0=not alloc
+            %if newcopy#0 %then c0=c0!newcopy seg!bits
+         %finish
+
+      %finish
+
+      k=k+1
+      nsects=nsects-1
+      sect len=pags %if nsects=0 {last section may not be full}
+      da=(sd<<13)>>13
+      j=87 %and ->vout %if da=(-1)>>13 {space not allocated}
+      cbt da=(fsys<<24)!da
+
+      cbt==cbta(c)
+      c=c+1
+
+      %if allocatecbt=yes %or rel seg=xseg %start
+         *IPK_0(0); *ST_2,SAVEKEY; *SPKA_0(0)
+         cbt_da=cbt da
+         abort director %if sect len > sec pgs
+         cbt_length=sect len-1
+         cbt_flags=cbt flags
+         *L_2,SAVEKEY; *SPKA_0(2)
+      %finish
+
+      %if k=secs per seg {segment full} %or nsects=0 {no more anyway} %start
+         n=((k-1)*sec pgs {pgs in previous sections}+sect len {pgs in this section}+(sec pgs>>1) %c
+            -1) {round up to half a section}>>(sec p shift-1)-1
+         {number of half sections - 1}
+         *IPK_0(0); *ST_2,SAVEKEY; *SPKA_0(0)
+
+         %if target=xa %start
+            segment table(rel seg)=(segment table(rel seg)>>4<<4)!n
+         %finish
+
+         %if target=amdahl %start
+            segment table(rel seg)=(n<<28)!(segment table(rel seg)<<4>>4)
+         %finish
+
+         sst(rel seg)<-c0
+
+         *L_2,SAVEKEY; *SPKA_0(2)
+         j=fsys use count(fsys, 1) %unless rel seg=sig seg
+      %finish
+
+      pags=pags-sect len
+      s=sd>>19
+      %exit %unless 1<=s<=nsd
+      sd==sds(s)
+      %exit %if nsects=0 {finished anyway}
+      cbt flags=cbt flags!cbt continuation
+      %if k=secs per seg %start {going to need another seg}
+         k=0
+         rel seg=rel seg+1
+      %finish
+   %repeat
+
+   j=87
+   ->vout %if nsects=0 %and (pags>0 %or s>0)
+
+   ct_seg=seg
+   ct_gap=gap
+   ct_full=full {this makes entry 'in-use'}
+
+   dmonw(X'F0', seg, full) %if d_page mon#0 %and integer(d_pagemon)>32
+
+   !------------------------- COMPLETE THE CPOINT TABLE ------------------------
+
+   j=xseg
+   %while j<=topseg %cycle
+      %if j<=topfseg %then d_cpoint(j)=conent %else d_cpoint(j)=reserved
+      j=j+1
+   %repeat
+
+   !----------------------------- UPDATE FILE DESCRIPTOR -----------------------
+
+   %if mode&2#0 %start;                  ! WRITE MODE
+      fl_arch=(fl_arch&(\2))!1;          ! SET BITS 2**0 AND CLEAR 2**1
+      fl_codes2=fl_codes2!wrconn
+   %finish
+   %if wsa#0 %then fl_codes2=fl_codes2!wsallow
+   fl_arch=fl_arch!4;                    ! HAS-BEEN-CONNECTED BIT
+   fl_cct=fl_cct+1 %unless fl_cct=255
+   fl_dayno=ddaynumber&255 %if codes&tempfs=0 {omit for temp files}
+   %cycle
+      fl_usecount=fl_usecount+1 %if fl_usecount<32767
+      %exit %if fl_prefix=0
+      fl==fds(fl_prefix)
+   %repeat
+
+   j=0
+vout:
+   vv(addr(f_sema), f_semano)
+out:
+   printmp(0, 0) %if j=28 {cbt full}
+   %if j = 0 %and codes2 & 16 > 0 %and monitor = 0 %start  { monitor this call }
+                     { but don't try and monitor the monitor file !!! }
+      monitor connect(uname, "SS#MONITOR", "connects ".findex.":".file)
+   %finish
+   %result=j
+%end;                                    ! DCONNECTI
+
+!-------------------------------- DCLEARPRIVVIOL -------------------------------
+
+%external %integer %fn dclearprivviol(%string %name xfile index, xfile, %integer %name xfsys)
+
+%integer j, firstfree, priv viol, fsys
+%integer i0, prefix, nfd, newcopyblocks, ent, nsecs
+%integer findad, first sec
+%integer seg, codes, cpt
+%integer flag, sdesc
+%string (6) uname
+%string (11) iname, s11
+%string (19) findex
+%string (31) full, s31
+%string (255) w, file
+%record (ctf) %name ct
+%record (ff) %name f
+%record (fdf) %array %name fds
+%record (fdf) %name fl
+%integer a
+%const %string (9) fn= "DCLEARPV "
+
+   flag=into(18, "SSI")
+   ->out %unless flag=0
+
+   findex=s(0); file=s(1); fsys=i(0)
+
+   flag=uif(findex, file, uname, iname, full)
+   ->out %unless flag=0
+   uctranslate(addr(full)+1, length(full))
+
+   flag=finda(findex, fsys, findad, 2)
+   ->out %unless flag=0
+
+   f==record(findad)
+
+   s31<-file
+   flag=pp(addr(f_sema), f_semano, fn.s31)
+   ->out %unless flag=0
+
+   fds==array(findad+f_fdstart, fdsf)
+   nfd=(f_size<<9-f_fdstart)//fdsize
+
+   flag=78;                              ! Disconnect cannot find file
+   w=file.gsep
+   prefix=0
+   %cycle
+      w->s11.(gsep).w {this bit is just to calculate PREFIX}
+      j=0
+      %cycle i0=1, 1, nfd
+         fl==fds(i0)
+         ->vout %if fl_name="";          ! reached end of used descriptors
+         %if equal(fl_name, s11)=yes %and fl_prefix=prefix %start
+            %if fl_sd=0 %start
+               j=i0 %and %exit %if w#"";  ! found intermediate group
+            %finish %else %start
+               ->check conlist %if w="";  ! found first occurrence of file
+            %finish
+         %finish
+      %repeat
+      ->vout %if j=0
+      prefix=j
+   %repeat
+
+check conlist:
+
+   first sec=0
+   j=conseg(full, prefix, fsys, a, firstfree)
+   %if j>0 %start
+      cpt=a&255
+      ct==d_conlist(cpt)
+         fl==fds(ct_fdx)
+         sdesc=fl_sd
+         ! This has to be the correct descriptor, but let's check for extra safety
+         ->vout %if fl_name=""
+         ->vout %unless equal(fl_name, s11)=yes %and fl_prefix=prefix
+         seg=ct_seg
+         ->got descriptor
+   %finish
+   flag=39 {file is not connected}
+   ->vout
+
+got descriptor:
+
+   codes=fl_codes
+
+   priv viol=codes&violat
+
+   ! Set Subsystem file-type into SSBYTE
+   %if fl_ssbyte=0 %and sst(seg)&cbt not available=0 %start
+      j=integer(seg<<segshift+12)
+      j=2 %unless 0<j<=8
+      fl_ssbyte=j
+   %finish
+
+   flag=0
+   newcopyblocks=0;                      ! Count of same and used as flag/cannot clear viol bit
+
+   %if priv viol#0 %start
+      %while d_cpoint(seg)=cpt %cycle
+         ! If CBT is not allocated and segment is newcopy, then we must allocate
+         ! CBT and do the REF NEW BLOCKS.  If CBT is not allocated and segment is
+         ! not newcopy, then there is nothing to do.
+
+         %if sst(seg)&not alloc mask=not alloc %and sst(seg)&newcopy seg#0 %then %c
+            newcopyblocks=1 %and %exit
+
+         ent=sst(seg)
+         %if ent&not alloc=0 %start
+            nsecs=segment table(seg)
+            %if target=amdahl %start
+               nsecs=nsecs>>28
+            %finish
+            nsecs=((nsecs&15)+2)>>1
+            %cycle
+               %if cbta(ent)_flags&cbt new block#0 %then newcopyblocks=newcopyblocks+1
+               nsecs=nsecs-1
+               %exit %if nsecs<=0
+               ent=ent+1
+            %repeat
+         %finish
+         seg=seg+1
+      %repeat
+      %if newcopyblocks=0 %then fl_codes=fl_codes&(\violat)
+   %finish
+
+vout:
+   vv(addr(f_sema), f_semano)
+   flag=5 %if newcopyblocks>0
+out:
+   %result=outof(flag)
+%end;                                    ! DCLEARPRIVVIOL
+
+!-----------------------------------------------------------------------
+
+%routine ref new blocks(%integer seg)
+! This routine arranges to reference a page in each block of segment SEG for which
+! the new-copy bit is set in the CBT entry.
+
+! It does nothing for a non-connected segment, nor for a non-alloc-CBT segment.
+! [If the seg is non-alloc, it may not contain any priv-viol pages]
+
+%integer ent, dummy, vaddr, bytes, nsecs
+%const %integer block bytes=sec pgs<<12
+   vaddr=seg<<seg shift
+   ent=sst(seg)
+   %return %if ent&not alloc#0
+
+   dummy=0
+   nsecs=segment table(seg)
+   %if target=amdahl %start
+      nsecs=nsecs>>28
+   %finish
+   nsecs=((nsecs&15)+2)>>1
+
+   %cycle
+      dummy=dummy!integer(vaddr) %unless cbta(ent)_flags&cbt new block=0
+      nsecs=nsecs-1
+      %exit %if nsecs=0
+      vaddr=vaddr+block bytes
+      ent=ent+1
+   %repeat
+   wrsn("REF NEW BLOCKS SEG", seg) %unless dummy=0
+%end;                                    ! REF NEW BLOCKS
+
+!-----------------------------------------------------------------------
+
+%externalinteger %fn ddisconnecti(%string (19) findex, %string (255) file, %integer fsys, lo)
+! Bits in parameter LO are as follows:
+
+
+!     2**0 = 0 User call, disconnect only from user segments
+!            1 from DSTOP, allow all disconnects and destroy
+!              temp and vtemp files
+
+!     2**1 = 1 disconnect and destroy, but only if this is the
+!              only connection, flag 42 otherwise
+
+%integer j, firstfree, destroy, ddd, priv viol, saveseg, savekey
+%integer i, i0, da, prefix, nfd, curstackseg
+%string (11) s11
+%integer findad, pi, npd
+%integer seg, codes, codes2, cpt
+%integer flag, pages, nkb, n, s, nsd, sdesc
+%string (6) uname
+%string (11) iname
+%string (31) full, s31
+%string (255) w
+%record (ctf) %name ct
+%record (pdf) %array %name pds
+%record (pdf) %name pd
+%record (ff) %name f
+%integer %array %name sds
+%record (fdf) %array %name fds
+%record (fdf) %name fl
+%integer a
+%const %string (11) fn= "DISCONNECT "
+
+   wrs("-> ".fn." ".findex.":".file) %unless d_dirmon=0
+   flag=uif(findex, file, uname, iname, full)
+   ->out %unless flag=0
+   uctranslate(addr(full)+1, length(full))
+
+   flag=finda(findex, fsys, findad, 2)
+   ->out %unless flag=0
+
+   f==record(findad)
+
+   s31<-file
+   flag=pp(addr(f_sema), f_semano, fn.s31)
+   ->out %unless flag=0
+
+   *st_11,j
+   curstackseg=j>>segshift
+
+   fds==array(findad+f_fdstart, fdsf)
+   sds==array(findad+f_sdstart, sdsf)
+   nsd=(f_fdstart-f_sdstart)>>2
+   nfd=(f_size<<9-f_fdstart)//fdsize
+   pds==array(findad+f_pdstart, pdsf)
+   npd=(f_sdstart-f_pdstart)//9
+
+   flag=78;                              ! Disconnect cannot find file
+   w=file.gsep
+   prefix=0
+   %cycle
+      w->s11.(gsep).w {this bit is just to calculate PREFIX}
+      j=0
+      %cycle i0=1, 1, nfd
+         fl==fds(i0)
+         ->vout %if fl_name="";          ! reached end of used descriptors
+         %if equal(fl_name, s11)=yes %and fl_prefix=prefix %start
+            %if fl_sd=0 %start
+               j=i0 %and %exit %if w#"";  ! found intermediate group
+            %finish %else %start
+               ->check conlist %if w="";  ! found first occurrence of file
+            %finish
+         %finish
+      %repeat
+      ->vout %if j=0
+      prefix=j
+   %repeat
+
+check conlist:
+
+   j=conseg(full, prefix, fsys, a, firstfree)
+   %if j>0 %start
+      cpt=a&255
+      ct==d_conlist(cpt)
+         fl==fds(ct_fdx)
+         sdesc=fl_sd
+         ! This has to be the correct descriptor, but let's check for extra safety
+         ->vout %if fl_name=""
+         ->vout %unless equal(fl_name, s11)=yes %and fl_prefix=prefix
+         seg=ct_seg
+         ->got descriptor
+      %finish
+   flag=39 {file is not connected}
+   ->vout
+
+got descriptor:
+
+   flag=84;                              ! restricted connect
+   ->vout %unless ct_flags&X'80'=0 %or lo&1>0;  ! restricted connect
+   ->vout %if seg=curstackseg
+
+   ! Check that segment being disconnected does not contain the PC from
+   ! which fn DDISCONNECT was called, else flag 21. (If this fn DDISCONNECTI
+   ! was not called from DDISCONNECT butfrom somewhere in Director, this
+   ! test is equally valid. A possibility not catered for at present
+   ! is that the PC of the call of DDISCONNECT could be in the second
+   ! segment of a PD file. This case would escape the test which follows).
+
+
+   codes=fl_codes
+   codes2=fl_codes2
+
+   ! Reduce usecounts on parent group descriptors
+   %cycle
+      fl_usecount=fl_usecount-1 %if fl_usecount>0
+      %exit %if fl_prefix=0
+      fl==fds(fl_prefix)
+   %repeat
+   fl==fds(ct_fdx);                      ! Map back to original
+
+   flag=0;                               ! ANTICIPATE SUCCESS
+   destroy=0
+   %if fl_usecount=0 %start
+      ! Clear STACK, DISC ONLY, WSALLOW, and WRCONN bits
+      fl_codes2=codes2&B'10010110'
+      ! Set DESTROY non-zero for destroy:
+      !  1 for TEMPFI and VTEMPFI, and 2 for OLDGEN.
+      ! We destroy vtempfiles anyway, and tempfiles if this is the
+      ! closedown call of DISCONNECT (LO&1=1). AlsO we destroy if 2**1 is set in param LO.
+      %if codes&vtempf#0 %or (lo&1#0 %and codes&tempfi#0) %or lo&2#0 %then destroy=1
+
+      ! IF 'NO ACCESS' OR 'DONT DESTROY' THEN DONT DESTROY !!
+      %if codes2&old ge>0 %then destroy=2 %else %start
+         %if destroy=1 %and (fl_ownp=0 %or fl_ownp&8>0) %then destroy=0 %and flag=51
+      %finish
+
+   %finish
+
+   ! Now either destroy the file or reference blocks in the file for which
+   ! the new-copy bit is set in the corresponding CBT entry, to ensure that
+   ! zero pages go back to the disc.
+   ! we want to release the semaphore as soon as possible, as disconnection
+   ! may involve disc transfers.
+
+   priv viol=codes&violat
+   %if destroy=0 %start
+
+      ! Set Subsystem file-type into SSBYTE
+      %if fl_ssbyte=0 %and sst(seg)&cbt not available=0 %start
+         j=integer(seg<<segshift+12)
+         j=2 %unless 0<j<=8
+         fl_ssbyte=j
+      %finish
+
+      fl_codes=fl_codes&(\violat)
+
+   %finish %else %start
+      pages=decode pgs(fl_pgs)
+
+      %if destroy=1 %start
+         ! in the case of 'generation destroy', all adjustments to
+         ! counts etc have already been done in NEWGEN
+         nkb=pages*4
+         f_files=f_files-1
+         f_totkb=f_totkb-nkb
+
+         %unless fl_codes&tempfs=no %start
+            %if f_tempfiles>0 %start
+               f_tempfiles=f_tempfiles-1
+            %else
+               wrs("tempfiles disco")
+            %finish
+            f_tempkb=f_tempkb-nkb
+         %finish
+
+         %unless fl_codes&chersh=no %start
+            f_cherfiles=f_cherfiles-1
+            f_cherkb=f_cherkb-nkb
+         %finish
+      %finish
+
+      pi=fl_phead
+      fl=0
+      fl_name=".NULL"
+      %while 0<pi<=npd %cycle
+         pd==pds(pi)
+         pi=pd_bl
+         pd=0
+      %repeat
+   %finish
+vout:
+   vv(addr(f_sema), f_semano)
+   ->out %unless flag=0 %or flag=51
+
+   ! Clear conlist entries
+   dmonw(X'E0', seg, full) %if d_page mon#0 %and integer(d_pagemon)>32
+
+   ddd=0;                                ! "DESTROY" FLAG TO DCHAIN
+   ddd=1 %if destroy#0
+
+   ! We must not blot out CPOINT entries in this next cycle (as pre CBT-deallocate)
+   ! because ALLOCATE CBT uses CPOINT.  Save the segment number for the following cycle.
+
+   saveseg=seg
+   %while d_cpoint(seg)=cpt %cycle
+      ! If CBT is not allocated and segment is newcopy, then we must allocate
+      ! CBT and do the REF NEW BLOCKS.  If CBT is not allocated and segment is
+      ! not newcopy, then there is nothing to do.
+
+      %if destroy=0 %and sst(seg)&not alloc mask=not alloc %and sst(seg)&newcopy seg#0 %then %c
+         j=allocate cbt(seg<<seg shift)
+
+      ! If CBT was not allocated and segment was newcopy, SST(SEG) should now be
+      ! allocated, so that we can reference the newcopy blocks. (We are saying
+      ! ALLOCATE CBT cannot fail at this point: the segment is in the right
+      ! range, and CBT can always be found). If the segment NOW has no CBT
+      ! allocated, then there is nothing to do except decrement the FSYS usecount.
+
+      %if sst(seg)&not alloc=0 %start
+         ref new blocks(seg) %if destroy=0
+         dchain(seg, ddd)
+      %else
+         *ipk_0(0); *st_2,savekey; *spka_0(0)
+         sst(seg)=dendsst
+         *l_2,savekey; *spka_0(2)
+         j = fsys use count(fsys, -1)
+      %finish
+      !d_cpoint(seg)=0  See note above cycle
+      seg=seg+1
+   %repeat
+
+   j=saveseg
+   %while j<seg %cycle
+      d_cpoint(j)=0
+      j=j+1
+   %repeat
+
+   %while d_cpoint(seg)=reserved %cycle
+      d_cpoint(seg)=0
+      seg=seg+1
+   %repeat
+
+   %if cpt=185 %then j=5 %else j=cpt+1 { 'next' }
+   %if d_conlist(j)_full#"" %start
+      ct_full=".free"
+   %else
+      ct_full=""
+      %cycle
+         %if cpt=5 %then j=185 %else j=cpt-1 { 'previous' }
+         ct==d_conlist(j)
+         %exit %unless ct_full=".free"
+         ct_full=""
+         cpt=j
+      %repeat
+   %finish
+
+   %if destroy>0 %start
+      j=file deal(findad, sdesc, pages)
+      active block("DISCONNECT", full, fsys) %if j=91
+   %finish
+   %unless d_fsyswarn=0 %start
+      %cycle j=99, -1, 0
+         emptydvm %and %exit %if d_fsysusecount(j)#0=av(j, 0) {CCK'd disc now off line}
+      %repeat
+   %finish
+out:
+   flag=42 %if lo&2>0=destroy %and flag=0
+   wrs("<- ".fn." res=".itos(flag)) %unless d_dirmon=0
+   %result=flag
+%end;                                    ! DDISCONNECTI
+
+!-----------------------------------------------------------------------
+
+%routine recover2(%integer start seg, old end seg, new last sec, new last sec len)
+
+! Recovers CBT entries for blocks beyond NEW LAST SEC.
+! NEW LAST SEC is a blockno counting from 0 in START SEG.
+! NEW LAST SEC LEN is no of epages to be left in new last block.
+! The routine deals with more then one segment if necessary.
+
+%integer r, cur, new end seg, cell, c, old last sec, k, w, savekey
+
+%record (cbtf) %array savecbta(0:secs per seg-1)
+
+   new end seg=start seg+new last sec//secs per seg
+
+   cur=old end seg {first deal with whole segs}
+   %while cur>new end seg %cycle
+      dchain(cur, 1);                    ! destroy option - pages are going to be de-allocated
+      cur=cur-1
+   %repeat
+
+   new last sec=new last sec-(new end seg-start seg)*secs per seg;  ! size of new last segment
+
+   *ipk_0(0); *st_2,savekey; *spka_0(0)  { 'ON' }
+
+   new last sec len=new last sec len-1 {put into range 0, 1,}
+
+   cell=sst(new end seg)
+
+   %if cell&not alloc=0 %start
+      ! CBT is allocated for the segment which is to become the new final segment
+      c=cell+new last sec
+      r = (cbta(cell)_length&X'E0')!new last sec len
+      abort director %if r >= secpgs
+      cbta(c)_length=r;           ! Alter length in new CBT entry to new last section length
+      r=remove amt entries(new end seg, 0)
+      wrsn("RECOVER2", new end seg) %if r=-1
+   %finish
+
+   %if target=370 %start
+      segment table(new end seg)=(new last sec len<<28)!(segment table(new end seg)<<4>>4)
+   %finish {370}
+
+
+   %if target=amdahl %or target=xa %start
+      %if target=amdahl %start
+         old last sec=segment table(new end seg)>>29
+      %finish
+
+      %if target=xa %start
+         old last sec=(segment table(new end seg)&15)>>1
+      %finish
+
+      %if cell&not alloc=0 %start
+         ! (CBT is allocated for the new last segment)
+         %if new last sec<old last sec %start {have fewer secs in NEW LAST SEG}
+            ! Save current CBT entries, then deallocate CBT.
+            k=0
+            %cycle {save as much as reqd}
+               savecbta(k)=cbta(cell+k)
+               %exit %if k=new last sec
+               k=k+1
+            %repeat
+
+            ! Must not leave SST entry pointing to a zero CBT entry, however briefly.
+            ! Local controller may need it (e.g. for a strobe).
+            sst(new end seg)<-cbt not available
+
+            recover cbt(cell, old last sec+1)
+
+            ! Get new CBT entries and install information from old
+            c=getn(new last sec+1) {get a new - smaller - CBT array}
+            k=dstop(24) %if c<0
+
+            k=0
+            %cycle {Restore previous CBT entries into new}
+               cbta(c+k)=savecbta(k)
+               %exit %if k=new last sec
+               k=k+1
+            %repeat
+
+            sst(new end seg)=c
+         %finish
+      %finish
+
+      w=((new last sec<<5)+new last sec len)>>4;  ! number of half sections counting 0, 1,..
+
+      %if target=amdahl %start
+         segment table(new end seg)=(w<<28)!(segment table(new end seg)<<4>>4)
+      %finish
+
+      %if target=xa %start
+         segment table(new end seg)=(segment table(new end seg)&X'FFFFFFF0')!w
+      %finish
+   %finish {AMDAHL or XA}
+
+   *l_2,savekey; *spka_0(2)  { 'OFF' }
+
+%end;                                    ! RECOVER2
+
+!-----------------------------------------------------------------------
+
+%routine block extend(%integer seg, blkno, newda, addpages, oldpages)
+
+! Call supplies a new disc address and the additional number of pages
+! for the block. A call with ADDPAGES zero simply replaces the disc address
+! for the  block.
+! ADDPAGES can be non-zero only when BLKNO specifies the last block of SEG.
+! OLDPAGES is needed in order to get the Seg table entry right on Amdahl and XA.
+! In 2900 & 370 we can deduce the new page-table-length-field from the old value
+! and ADDPAGES, but this is not possible with 1 Mbyte segments.
+
+%integer tags, ent, da, savekey
+
+
+   *ipk_0(0); *st_2,savekey; *spka_0(0)  { 'ON' }
+
+   %if sst(seg)&not alloc=0 %start
+      ent=sst(seg)+blkno
+      da=cbta(ent)_da
+
+      cbta(ent)_da=(cbta(ent)_da&X'FF000000')!newda {preserve FSYS}
+      tags = cbta(ent)_length+addpages
+      abort director %if tags >= secpgs
+      cbta(ent)_length=tags
+   %finish
+
+
+   %if target=370 %start
+      segment table(seg)=((segment table(seg)>>28+add pages)<<28)!(segment table(seg)&X'0FFFFFFF')
+   %finish
+
+   %if addpages>0 %start
+      %if target=amdahl %start
+         segment table(seg)=(((oldpages+addpages-1)>>4)<<28)!(segment table(seg)&X'0FFFFFFF')
+      %finish
+
+      %if target=xa %start
+         segment table(seg)=(segment table(seg)&X'FFFFFFF0')!((oldpages+addpages-1)>>4)
+      %finish
+   %finish;                              ! ADDPAGES>0
+
+   *l_2,savekey; *spka_0(2)  { 'OFF' }
+%end;                                    ! BLOCK EXTEND
+
+!-----------------------------------------------------------------------
+
+%end %oflist
+
+
+
+
+
+
+! Here are the routines to create EXAC7
+
+! TCH
+! The descriptor in ACC points to a table of check bits. Successive
+! bytes in the DR string are checked against the table as follows
+!        - pick up the bit addressed by the byte
+!        - proceed along the DR string until get
+!          a byte with a check bit of 1
+!        - DR is left at that byte
+
+
+
+!%externalroutine EXAC7(%string(255)S)
+!!
+!%externalroutinespec DEFINE(%string(255)S)
+!%externalroutinespec CLEAR(%string(255)S)
+!%externalroutinespec PROMPT(%string(255)S)
+!%externalroutinespec RSTRG(%stringname S)
+!!
+!%systemroutinespec PHEX(%integer N)
+!!
+!%integerarray T(0:55); ! 7*8-1
+!%integer BD, AD, BYTE, W, CON, I, INDEX
+!%string(31)FILE
+!!
+!      BD = 7*256
+!      AD = ADDR(T(0))
+!      FILL(56*4, AD, 0)
+!!
+!      %cycle BYTE = 1, 1, 254
+!         W = BYTE << 24
+!         CON = 0
+!         %cycle I = 0, 1, 7
+!            CON = CON + 1 %if W >= 0
+!            %if W<0 %or I=7 %start
+!               %if CON>0 %start; ! GOT FROM 1 TO 7 CONSECUTIVE ZERO BITS
+!                  INDEX = 256*(CON-1)+BYTE
+!                  *LDTB_BD
+!                  *LDA_AD
+!                  *LB_INDEX
+!                  *LSS_1
+!                  *ST_(%dr+%b)
+!                  CON = 0
+!               %finish
+!            %finish
+!            W = W << 1
+!         %repeat
+!      %repeat
+!!
+!      PROMPT("FILE:        ")
+!      RSTRG(FILE)
+!      DEFINE("1,".FILE)
+!      SELECTOUTPUT(1)
+!      PRINTSTRING("%CONSTINTEGERARRAY EXAC7(0:55) = %C
+!")
+!!
+!      I = 0
+!      %cycle W = 0, 1, 55
+!         I = I + 1
+!         PRINTSTRING("X'")
+!         PHEX(T(W))
+!         %if W = 55 !         %then PRINTSTRING("'") !         %else PRINTSTRING("',")
+!         PRINTSYMBOL(NL) %and I = 0 %if I = 4
+!      %repeat
+!!
+!      SELECT OUTPUT(0)
+!      CLOSESTREAM(1)
+!      CLEAR("")
+!%end
+!%endoffile
+
+
+! Here follow the routines (commented out) which were used to create the
+! array in fn FIND SMALL HOLE
+!%integerfn CONSEC HOLES(%integer BYTE,HOLESIZE)
+!! Result is  0  ("No") if there are not HOLESIZE consecutive zero bits in BYTE
+!!            1  ("Yes") if the is a group of HOLESIZE zero bits in BYTE
+!%integer N,CONSEC
+!      BYTE=(\BYTE)<<24; ! TO LH BYTE OF WORD
+!      N=0
+!      CONSEC=0
+!      %while N<=7 %cycle
+!         %if BYTE<0 %start
+!            ! Top bit set
+!            CONSEC=CONSEC+1
+!            %if CONSEC=HOLESIZE %then %result=1
+!         %finish %else CONSEC=0
+!         BYTE=BYTE<<1
+!         N=N+1
+!         %repeat
+!      %result=0
+!%end; ! CONSEC HOLES
+
+!-----------------------------------------------------------------------
+
+!%routine SETBIT(%integer TABAD,TABNO,BITNO,BITVAL)
+!%integer I,BD,INDEX
+!      BD=7*256
+!      INDEX=256*TABNO + BITNO
+!!-----------------------------------------------------
+!      ! TYPE 0, VECTOR
+!      ! SIZE=0, BIT
+!      ! A=0, USC=0, BCI=0
+!      *LDTB_BD
+!      *LDA_TABAD
+!      *LB_INDEX
+!      *LSS_BITVAL
+!      *ST_(%dr+%b)
+!%end; ! SETBIT
+
+!-----------------------------------------------------------------------
+
+!%externalroutine MAKE 7 TABLES(%string(255) S)
+!%integerarray TABLES(0:7*8-1)
+!%integer HOLESIZE,TABNO,N,YES OR NO,J,TABAD
+!%string(31) FILE
+!      TABAD=ADDR(TABLES(0))
+!      %cycle HOLESIZE=1,1,7
+!         TABNO=HOLESIZE-1
+!         %cycle N=0,1,255
+!            YES OR NO=CONSEC HOLES(N,HOLESIZE)
+!            SETBIT(TABAD,TABNO,N,YES OR NO)
+!            %repeat
+!         %repeat
+!      PROMPT("FILE: ")
+!      RSTRG(FILE)
+!      DEFINE("1,".FILE)
+!      SELECT OUTPUT(1)
+!      PRINTSTRING( !"%CONSTINTEGERARRAY TAB7(0:7*8-1)=  %C
+!")
+!      N=0
+!      %cycle J=0,1,7*8-1
+!         N=N+1
+!         PRINTSTRING("X'")
+!         PRHEX(TABLES(J))
+!         %unless J=7*8-1 %then PRINTSTRING("',") %else PRINTSTRING("'")
+!         %if N=6 %then PRINTSYMBOL(NL)
+!         %if N=8 %then PRINTSYMBOL(NL) %and N=0
+!         %repeat
+!      PRINTSYMBOL(NL)
+!      SELECT OUTPUT(0)
+!      CLOSE STREAM(1)
+!      CLEAR("")
+!%end; ! MAKE 7 TABLES
+
+!-----------------------------------------------------------------------
+
+   %list
+%integer %fn small hole(%integer lo, hi, epages, %integer %name mask)
+
+! This function is used to find space for sections of 1 to 7 EPAGES within
+! a byte.  It tries first to find an 'exact' hole and, if that fails,
+! to find a sufficiently large hole.  If a hole is found, it constructs
+! a MASK which is to be OR'd into a word in the bitmap.  The result is
+! the address of the byte containing the hole or zero.
+
+%const %integer %array table(0:111)= %c
+X'26362F36',X'26FF2F36',X'FFFFFFFF',X'FFFFFFFF',
+ X'26362F36',X'FFFFFFFF',X'2636FFFF',X'26FF2F36',
+ X'08483848',X'FFFFFFFF',X'08FF3848',X'0F483848',
+ X'0848FFFF',X'0F483848',X'08FF3848',X'0F483848',
+ X'0080FFFF',X'30804080',X'0F804080',X'30804080',
+ X'00FF4080',X'30804080',X'0F804080',X'30804080',
+ X'00FF8000',X'40008000',X'30008000',X'40008000',
+ X'0F008000',X'40008000',X'30008000',X'40008000',
+ X'0F000000',X'80000000',X'40000000',X'80000000',
+ X'30000000',X'80000000',X'40000000',X'80000000',
+ X'30000000',X'00000000',X'80000000',X'00000000',
+ X'40000000',X'00000000',X'80000000',X'00000000',
+ X'40000000',X'00000000',X'00000000',X'00000000',
+ X'80000000',X'00000000',X'00000000',X'00000000',
+ X'FFFFFFFF',X'FFFFFFFF',X'FFFFFFFF',X'FFFFFFFF',X'FFFFFFFF',X'FFFFFFFF',
+ X'FFFFFFFF',X'FFFFFFFE',
+ X'FFFFFFFF',X'FFFFFFFF',X'FFFFF8C8',X'FFC8F8C8',X'FFFFFFFF',X'FFC8F8C8',
+ X'FFFFF8C8',X'FFC8F8C8',
+ X'FFFFFFFF',X'F080C080',X'FF80C080',X'F080C080',X'FFFFC080',X'F080C080',
+ X'FF80C080',X'F080C080',
+ X'FFFF8000',X'C0008000',X'F0008000',X'C0008000',X'FF008000',X'C0008000',
+ X'F0008000',X'C0008000',
+ X'FF000000',X'80000000',X'C0000000',X'80000000',X'F0000000',X'80000000',
+ X'C0000000',X'80000000',
+ X'F0000000',X'00000000',X'80000000',X'00000000',X'C0000000',X'00000000',
+ X'80000000',X'00000000',
+ X'C0000000',X'00000000',X'00000000',X'00000000',X'80000000',X'00000000',
+ X'00000000',X'00000000'
+
+
+
+%integer adr1, t, j, bj, con, m, k
+   adr1=addr(table(0))+((epages-1)<<5)
+   %cycle t=0, 1, 1
+      %cycle j=lo, 1, hi
+         %exit %if t=0 { *********** until discs are full !!! **** }
+         bj=byteinteger(j)
+         %if getbit(adr1, bj)=1 %start {a good byte}
+            bj=bj<<24
+            m=(-1)<<(32-epages)>>((j&3)<<3)
+            mask=m
+            con=0
+            %cycle k=0, 1, 7
+               con=con+1 %if bj>=0 {count consec zero bits}
+               m=m>>1 {in case its not this group of zero bits}
+               %if bj<0 %or k=7 %start
+                  %result=j %if con=epages %or (t=1 %and con>=epages)
+                  con=0
+                  mask=m
+               %finish
+               bj=bj<<1
+            %repeat
+            %exit {should never get this far !}
+         %finish
+      %repeat
+      adr1=adr1+32*7
+   %repeat
+   %result=0
+%end;                                    ! SMALL HOLE
+
+!-----------------------------------------------------------------------
+
+%integer %fn findhole(%integer startad, endad)
+! This function finds a zero byte in
+! the interval STARTAD to ENDAD.
+! Result is   0  if no hole is found
+!            #0  = address of byte containing the (start of the) hole
+
+
+
+%integer j
+   %cycle j=startad, 1, endad
+      %result=j %if byteinteger(j)=0
+   %repeat
+   %result=0
+%end;                                    ! FINDHOLE
+
+!-----------------------------------------------------------------------
+
+%integer %fn smalloc(%integer %name startpg, %integer fsys, epages, zeropags)
+! For allocations up to 7 epages the alignment is arbitrary.
+! For other allocations, align on a byte boundary.
+
+! Possible improvements:
+
+! 1. Do not restrict small holes to lie within bytes
+
+! 2. Do not restrict large holes to start on byte boundary
+
+! 3. Do not restrict holes to lie within words
+
+! 4. Compact 'old last sections' {Dchsize}
+
+%integer b, times, lob, hib, cat, m, ad, ad3
+%integer load, hiad
+%integer mask, save, ad0
+%integer j
+%integer offset, wdad
+%record (discdataf) data
+%const %integer %array size(0:4)= 7, 8, 16, 16, 32
+%switch sw(1:4)
+
+   j=fbase2(fsys, addr(data))
+   %result=j %unless j=0
+
+   lob=((data_start+data_filestart+31)&(-32))>>3
+   hib=(data_end&(-32))>>3
+   b=sysad(bitkey, fsys)
+   load=b+lob
+   hiad=b+hib
+   ad=lob
+
+   cat=0;                                ! compute 'category' of required hole
+   %cycle
+      %exit %if epages<=size(cat)
+      cat=cat+1
+   %repeat { so cat is 0, 1, 2 or 4 }
+
+   save=0
+   %if cat>0 %and fsys=d_procfsys %start
+      %if d_alloc from here(cat-1)=0 %then d_alloc from here(cat-1)=ad %else %c
+         ad=d_alloc from here(cat-1)
+      ad=lob %unless lob<=ad<hib
+      save=1
+   %finish
+
+   ad=b+ad
+   times=0
+smover:
+   times=times+1
+   %if cat=0 %start;                     ! find a hole and the corresponding word mask
+      ad=small hole(load, hiad, epages, m)
+   %finish %else %start
+      ad0=ad
+      %cycle
+         ->sw(cat)
+sw(1):   %exit %if byteinteger(ad)=0; ->r
+sw(2):   %exit %if shortinteger(ad)=0; ->r
+sw(4):   %exit %if integer(ad)=0
+r:
+         ad=ad+cat
+         ad=load %if ad>=hiad
+         ad=0 %and %exit %if ad=ad0
+      %repeat
+   %finish
+
+   %if ad=0 %start;                      ! No hole found
+      doper2("FSYS ".itos(fsys)." FULL")
+      %result=10;                        ! FULL
+   %finish
+
+   %if cat>0 %start
+      m=((-1)<<(32-epages))>>((ad&3)<<3)
+      d_alloc from here(cat-1)=ad-b %if save>0
+   %finish
+
+   j=pp(b, fsys<<16, "SMALLOC");         ! Take the semaphore
+   ->smover %unless j=0
+
+   wdad=ad&(\3);                         ! Set bits if all clear
+   %if integer(wdad)&m=0 %then integer(wdad)=integer(wdad)!m %else m=0
+
+   vv(b, fsys<<16)
+   ->smover %if m=0;                     ! Some bits were already set, try again
+
+   offset=0
+   j=m
+   j=j<<1 %and offset=offset+1 %while j>0
+   startpg=(wdad-b)<<3+offset
+
+   %unless zeropags=0 %start;            ! Clear the new pages
+      j=movesection(-1, 0, fsys, startpg, epages)
+      %if j#0 %start
+         ->smover %if times<10
+         %result=j;                      ! 10 disc zero-writes failed
+      %finish
+   %finish
+
+   %result=0
+%end;                                    ! SMALLOC
+
+!-----------------------------------------------------------------------
+
+
+%external %integer %fn dcreatef(%string (19) findex, %string (255) file, %integer fsys, nkb,
+   alloc, i0, %integer %name da)
+! IF ALLOC {1} 2**0 = 0  THEN MAKE THE INDEX ENTRY BUT DO NOT ALLOCATE
+!                        THE PAGES
+!                     1  NORMAL FILE CREATE
+! AND IF {2}    2**1 = 0  MAKE FD AVAIABLE ON COMPLETION
+!                      1  LEAVE FD UNAVAILABLE
+! AND IF {4}  2**2 SET THEN TEMPFI
+! AND IF {8}  2**3 SET THEN VTEMPF
+! AND IF {16} 2**4 SET THEN ZERO PAGES
+! AND IF {32} 2**5 SET THEN CREATE 'CHERISHED'
+! AND IF {64} 2**6 SET THEN SET EEP TO TOP BYTE OF 'ALLOC'
+!    {128} 2**7 NO ARCH
+
+%integer nsd, nfd, s, ns, link, thash
+%integer j, startpg, maxkb, maxfile, findad
+%integer num, ep, r1, np, epages
+%integer prefix, e, k, i
+%string (6) uname
+%string (11) s11
+%string (31) full, s31
+%string (255) w
+%record (ff) %name f
+%record (fdf) %array %name fds
+%integer %array %name sds
+%record (fdf) %name fl
+%integer %name sd
+%const %string (9) fn= "DCREATEF "
+   da=-1
+   j=uiforg(findex, file, uname)
+   ->out %unless j=0
+
+   j=44
+   ->out %if file=""
+
+   %unless charno(file, length(file))=gsepch %start {omit size check for groups}
+      j=8
+      ->out %unless 0<nkb<=(512<<10);     ! ie a max of 512Mbytes
+      epages=(nkb+3)>>2
+      epages = (epages+255) & (-256) %if epages >> 14 > 0
+      nkb=epages<<2
+   %finish
+
+   s31<-file
+   j=map file index(findex, fsys, findad, fn.s31)
+   ->out %unless j=0
+
+   f==record(findad)
+   fds==array(findad+f_fdstart, fdsf)
+   nfd=(f_size<<9-f_fdstart)>>5
+   sds==array(findad+f_sdstart, sdsf)
+   nsd=(f_fdstart-f_sdstart)>>2;         ! number of SDs
+
+   %if i0=0 %start
+      %if f_name="" %then i0=leave %else i0=1
+   %finish
+
+   prefix=0
+   w=file.gsep
+   %cycle
+      w->s11.(gsep).w
+      e=0
+      k=0
+      %cycle i=i0, 1, nfd
+         fl==fds(i)
+         %if fl_name="" %or fl_name=".NULL" %start {found an empty descriptor}
+            e=i %if e=0 {remember first}
+            %exit %if fl_name="" {there are no more to look at}
+         %finish
+         %if equal(fl_name, s11)=yes %and fl_codes2&oldge=0 %and fl_prefix=prefix %start
+            %if fl_sd=0 %start;          ! this is a group descriptor
+               %if length(w)>0 %start;   ! we are looking for a group
+                  j=16 %and ->save fd %if w=gsep;  ! found terminal group
+                  k=i {intermediate group}
+                  %exit
+               %finish %else %start
+                  j=2 {name already used for a group}
+                  ->save fd {found a group with name of file}
+               %finish
+            %finish %else %start {a file descriptor}
+               %if w="" %start {found reqd file}
+                  da=(fsys<<24)!(fl_sd<<13>>13)
+                  j=16
+                  ->save fd
+               %finish %else %start
+                  j=26 {name already used for a file}
+                  ->save fd {were looking for a group}
+               %finish
+            %finish
+         %finish
+      %repeat
+      %exit %if length(w)<2;             ! ie null or a GSEP
+      j=24 %and ->vout %if k=0; {intermediate group does not exist}
+      prefix=k
+   %repeat
+
+   %if length(s11)>1 %and charno(s11,1)&X'DF'='T' %andc
+              charno(s11,2)='#' %c
+   %then thash = yes %c
+   %else thash = no
+
+   alloc = alloc ! 4{temp} %if thash=yes %and alloc&tempfs=0
+
+   j=15
+   ->vout %if e=0;                       ! need to create something - no free descriptors
+!   ->vout %if alloc&tempfs>0 %and f_tempfiles=255
+
+   fl==fds(e)
+   fl=0
+   fl_name=s11
+   fl_prefix=prefix
+   %if alloc&tempfs=0 %start {permanent}
+      fl_dayno=ddaynumber&255
+   %else
+      %if f_owner=d_procuser %then fl_dayno=d_invoc %else fl_dayno=255
+   %finish
+
+   fl_ownp=7
+   fl_eep=alloc>>24 %if alloc&64>0
+   ->gout %if w=gsep;                    ! just created a group
+
+   j=41;                                 ! single file limit exceeded
+   maxfile=f_maxfile
+   maxfile=default maxfile %if maxfile=0
+   ->clearfd %unless epages<=maxfile>>2;  ! single file limit exceeded
+
+   j=83;                                 ! total (non-temp) filespace limit exceeded
+   maxkb=f_maxkb
+   maxkb=default maxkb %if maxkb=0
+   ->clearfd %if alloc&tempfs=0 %and f_totkb-f_tempkb+nkb>maxkb
+
+   num=(epages+sec pgs-1)>>sec p shift
+   fl_usecount=1 %if i0<3 %and f_name="";     ! #STK and #LCSTK do not get connected
+   fl_sd=(-1)>>13
+   fl_pgs = encode pgs(epages)
+   fl_codes=unava
+
+   %if num>1 %start;                     ! more than 1 section, so need some SDs
+      j=43;                              ! in case there are no free SDs
+      ns=num-1
+      sd==fl_sd
+      %cycle s=1, 1, nsd
+         %if sds(s)=0 %start;            ! found a free SD
+            sd=sd!(s<<19)
+            sd==sds(s)
+            sd=(-1)>>13
+            ns=ns-1
+            %exit %if ns=0
+         %finish
+      %repeat
+
+      %unless ns=0 %start;               ! could not get enough
+         s=fl_sd
+         %cycle
+            link=s>>19
+            %exit %unless 1<=link<=nsd
+            s=sds(link)
+            sds(link)=0
+         %repeat
+         ->clear fd
+      %finish
+
+   %finish
+   sd==fl_sd
+   vv(addr(f_sema), f_semano)
+   %if alloc&1#0 %start
+      ep=epages
+      %while ep>0 %cycle
+         np=ep
+         np=sec pgs %if np>sec pgs
+         r1=smalloc(startpg, fsys, np, alloc&16)
+
+         %if r1#0 %start;                ! allocate fails
+            j=file deal(findad, fl_sd, epages)
+            active block(fn, full, fsys) %if j=91
+            j=pp(addr(f_sema), f_semano, fn.s31)
+            ->out %unless j=0
+            j=r1
+            ->clear fd
+         %finish
+
+         da=(fsys<<24)!startpg %if da=-1
+         sd=((sd>>19)<<19)!startpg
+         link=sd>>19
+         sd==sds(link) %if link>0
+         ep=ep-np
+      %repeat
+   %finish;                              ! ALLOC # 0
+   j=pp(addr(f_sema), f_semano, fn.s31)
+   ->out %unless j=0
+   f_totkb=f_totkb+nkb
+
+   %unless alloc&tempfs=no %start
+      ! temporary
+      f_tempkb=f_tempkb+nkb
+      f_tempfiles=f_tempfiles+1
+   %finish
+
+   %unless alloc&32=no %start
+      ! cherished
+      f_cherkb=f_cherkb+nkb
+      f_cherfiles=f_cherfiles+1
+   %finish
+
+   f_files=f_files+1
+   ! Clear UNAVA unless 2**1 set in ALLOC
+   fl_codes=0 %if alloc&2=0
+   %if alloc&4#0 %then fl_codes=fl_codes!tempfi
+   %if alloc&8#0 %then fl_codes=fl_codes!vtempf
+   %if alloc&16=0 %then fl_codes=fl_codes!violat
+   %if alloc&32#0 %then fl_codes=fl_codes!chersh
+   %if alloc&128#0 %then fl_codes=fl_codes!noarch
+gout:
+   %if prefix>0 %start {transfer any interesting attributes}
+      {from parent group                  }
+      fl_codes=fl_codes!(fds(prefix)_codes&(offer!chersh!noarch))
+      fl_arch=fds(prefix)_arch&128 {the to-be-archived bit}
+   %finish
+
+   j=0
+save fd:
+   d_last fd=fl
+   ->vout
+clear fd:
+   fl=0
+   fl_name=".NULL"
+vout:
+   vv(addr(f_sema), f_semano)
+out:
+   %result=j
+%end;                                    ! DCREATEF
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn ddestroyf(%string (19) findex, %string (255) file, %integer fsys, dealloc)
+! BITS IN DEALLOC :
+!     2**0     DEALLOCATE PGS IF SET, always do this
+!     2**1     DESTROY EVEN IF "UNAVA" OR "OFFER" SET (FOR FN DTRANSFER)
+!     2**2     DESTROY EVEN IF USE IS NON--ZERO OR UNAVA SET (FOR PROCESS
+!              1 TO DESTROY SIGSTK"S - NEVER DISCONNECTED)
+%integer findad, fi, sd, pi, npd, nfd, p, pre, fiw
+%integer j, pages, nkb, k
+%integer %array a(-1:127)
+%integer %name i
+%string (6) uname
+%string (31) s31
+%record (fdf) %name fd, fw
+%record (ff) %name f
+%record (fdf) %array %name fds
+%record (pdf) %array %name pds
+%record (pdf) %name pd
+%record (fdf) fd0
+%const %string (10) fn= "DDESTROYF "
+
+   wrs("-> ddestroyf ".findex.":".file) %unless d_dirmon=0
+   j=uiforg(findex, file, uname)
+   ->out %unless j=0
+
+   j=finda(findex, fsys, findad, 2)
+   ->out %unless j=0
+
+   f==record(findad)
+   fds==array(findad+f_fdstart, fdsf)
+   nfd=(f_size<<9-f_fdstart)//fdsize
+   pds==array(findad+f_pdstart, pdsf)
+   npd=(f_sdstart-f_pdstart)//pdsize
+
+   s31<-file
+   j=pp(addr(f_sema), f_semano, fn.s31)
+   ->out %unless j=0
+
+   fi=0
+   fd==fd0
+   fd=0
+   %unless file="" %start
+      j=find(findad, file, fi)
+      ->vout %unless j=16
+
+      fd==fds(fi)
+      %if dealloc & 6 = 0 %start  { reject if on offer.. }
+         j = 20
+         -> vout %if fd_codes & offer > 0
+      %finish
+
+   %finish
+
+   a(-1)=0
+   a(0)=fi
+   p=0
+   i==a(0)
+   ->l4
+l1:
+   i=i+1
+   ->l3 %unless i>nfd
+l2:
+   p=p-1
+   i==a(p)
+   pre=a(p-1)&X'FFFF'
+   j=e+150 {errors encountered}
+   ->l6 %if i<0 {errors, so can't destroy group}
+   j=0
+   pi=f_fiphead {for if the group is the whole index}
+   fd==fd0
+   fd==fds(i) %and pi=fd_phead %if i>0 {its not!}
+   ->l5
+l3:
+   fd==fds(i)
+   ->l2 %if fd_name="" {escape from loop, no more descriptors}
+   ->l1 %if fd_name=".NULL"
+   ->l1 %unless fd_prefix=pre
+l4:
+   %if fd_sd=0 %start {its a group}
+      p=p+1
+      a(p)=1
+      pre=i
+      i==a(p)
+      ->l3
+   %finish
+
+   %if dealloc&4=0 %start;               ! SET ONLY BY PROCESS 1 ON DESTROYING SIGSTKS
+      j=40;                              ! FILE CONNECTED
+      ->l6 %if fd_usecount#0
+      %if dealloc&2=0 %start;            ! set only by DTRANSFER
+!                                   BOB THINKS 'UNLESS CALLER PRIVI'
+         j=51
+         ->l6 %if (fd_ownp=0 %or fd_ownp&8>0) %and d_dtrying>=0
+         j=5;                            ! FILE NOT READY
+         ->l6 %if fd_codes&unava#0
+      %finish
+   %finish
+
+   pi=fd_phead
+
+   pages=decode pgs(fd_pgs)
+   nkb=pages*4
+
+   f_totkb=f_totkb-nkb
+
+   %unless fd_codes&tempfs=no %start
+      ! temporary
+      f_tempkb=f_tempkb-nkb
+      %if f_tempfiles>0 %start
+         f_tempfiles=f_tempfiles-1
+      %else
+         wrs("tempfiles destroy")
+      %finish
+   %finish
+
+   %unless fd_codes&chersh=no %start
+      ! cherished
+      f_cherkb=f_cherkb-nkb
+      f_cherfiles=f_cherfiles-1
+   %finish
+
+   f_files=f_files-1
+
+l5:
+   %while 0<pi<=npd %cycle
+      pd==pds(pi)
+      pi=pd_bl
+      pd=0
+   %repeat
+
+   sd=fd_sd
+   %unless d_dirmon=0 %start
+      file=fd_name
+      k=fd_prefix
+      %while k>0 %cycle
+         fw==fds(k)
+         file=fw_name.gsep.file
+         k=fw_prefix
+      %repeat
+      wrs(file)
+   %finish
+   fd=0
+   fd_name=".NULL"
+
+   %unless sd=0 %start {for files only}
+      vv(addr(f_sema), f_semano)
+      j=file deal(findad, sd, pages)
+      active block("DESTROY", file, f_fsys) %if j=91
+
+      j=pp(addr(f_sema), f_semano, fn.s31)
+      ->out %unless j=0 {oops! can't get sema}
+   %finish
+l6:
+   %if j>0 %start
+      a(p-1)=(1<<31)!a(p-1) {report any error to higher level}
+      wrs(fd_name.derrs(j)) %if p>0
+   %finish
+
+   ->l1 %if p>0
+vout:
+   vv(addr(f_sema), f_semano)
+out:
+   %unless d_fsyswarn=0 %start
+      %cycle k=99, -1, 0
+         %if d_fsysusecount(k)#0=av(k, 0) %then emptydvm %and %exit
+      %repeat
+   %finish
+
+   wrs("<- ddestroyf res=".itos(j)) %unless d_dirmon=0
+   %result=j
+%end;                                    ! DDESTROYF
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn dmon(%string %name xs)
+
+%integer j, seg, gap, da, ent, savekey
+%integer stb0, stb1
+%const %string (6) uname= "VOLUMS"
+%const %string (10) fname= "PAGEFAULTS"
+%string (63) file
+%const %integer nkb= 128
+%const %integer wr= 3
+%record (fhdrf) %name h
+%record (parmf) %name p
+
+   j=into(3, "S")
+   ->out %unless j=0
+
+   p==outp(curcontext)
+   *IPK_0(0)
+   *ST_2,SAVEKEY
+   *SPKA_0(0)
+   p=0
+   *L_2,SAVEKEY
+   *SPKA_0(2)
+   j=99;                                 ! silly fail flag
+
+   %if s(0)="" %start;                   ! monitor OFF
+      %unless d_page mon=0 %start;       ! not already off
+         j=0
+         *MC_20(0),0
+!            %result = 98 %if P_DEST < 0; ! ignore failures
+         j=dunlock(d_page mon)
+         d_page mon=0
+         j=ddisconnecti(uname, fname, -1, 0)
+         wrss(fname, " OFF")
+      %finish
+      ->out
+   %finish
+
+   j=0 %and ->switchon %if s(0)="SWITCHON"
+
+!   *** turn monitor ON ***
+
+   ->out %unless d_page mon=0
+
+   j=ddestroyf(uname, fname, -1, 0)
+   seg=0
+   gap=0
+   j=dcreatef(uname, fname, -1, nkb, (3<<24)+64+1, 0, da)
+   ->out %if 0#j#16
+   j=dconnecti(uname, fname, -1, wr, seg, gap)
+   ->out %if 0#j#34
+
+   d_page mon=seg<<seg shift
+   wrss(fname, " ON")
+   h==record(d_page mon)
+   h=0
+   h_next free byte=32
+   h_txt relst=32
+   h_next cyclic=32
+   h_max bytes=nkb<<10
+   h_read to=32
+
+   j=dlock(d_page mon, nkb<<10, stb0, stb1);  ! lock down
+
+   %if s(0)="LATER" %start
+      d_pagemon=0 %unless j=0
+      ->out
+   %finish
+
+switchon:
+   %cycle seg=35, 1, d_hiseg;            ! list current segments
+      ent=sst(seg)
+      %unless ent=dendsst %start
+         file=d_conlist(d_cpoint(seg))_full
+         dmonw(X'F0', seg, file);        ! 'F0' = connect
+      %finish
+   %repeat
+
+   %if j=0 %start
+      *IPK_0(0)
+      *ST_2,SAVEKEY
+      *SPKA_0(0)
+      p_p1=d_page mon
+      *L_2,SAVEKEY
+      *SPKA_0(2)
+      *MC_20(0),0
+      j=98 %if p_dest<0
+   %finish
+out:
+   %result=outof(j)
+%end;                                    ! DMON
+
+
+!-----------------------------------------------------------------------
+
+%external %routine output message to fep(%record (fepf) %array %name feps, %integer fe, type,
+   message addr, message length, strm id, protocol)
+%integer cursor, add, total len, buff len, flag, zero, j
+%integer semadr, semano
+%record (parmf) p
+%record (dircomf) %name dircom
+
+
+
+%routine put(%integer adr, len)
+%integer l
+   l=buff len-cursor;                    ! space remaining in buffer, >0
+   %if len>l %start;                     ! have to split
+      move(l, adr, add+cursor)
+      move(len-l, adr+l, add)
+      cursor=len-l
+   %finish %else %start
+      move(len, adr, add+cursor)
+      cursor=cursor+len
+      cursor=0 %if cursor>=buff len
+   %finish
+%end;                                    ! PUT
+
+
+
+   zero=0
+   %if protocol = normal %c
+   %then total len=1+1+2+message length+1 %c
+   %else total len = 128
+
+   %if feps(fe)_available#yes %then %return
+   !
+   ! This routine is called by DIRECT and in user processes by DSETMODE.
+   ! The fep buffers are in the same segment as the record format FEPS and
+   ! the field OUT BUFF CONN ADDR gives the offset into it.
+   !
+   add=addr(feps(0))>>18<<18+feps(fe)_fep details(protocol)_out buff con addr<<14>>14
+   j=integer(add);                       ! page fault on buffer before claiming semaphore
+   !
+   dircom==record(sysad(dircomkey, -1))
+   semadr=addr(dircom_fepsema)
+   semano=X'40000002'
+   flag=pp(semadr, semano, "FEPoutmsg")
+   !
+   cursor=feps(fe)_fep details(protocol)_output cursor
+   buff len=feps(fe)_fep details(protocol)_out buff length
+%if protocol = normal %start
+   put(addr(total len)+3, 1)
+   put(addr(type)+3, 1)
+   put(addr(strm id)+2, 2)
+   put(addr(zero), 1)
+%finish
+   put(message addr, message length)
+   p=0
+   p_dest=stream control message
+   p_srce=fe<<8!fep output reply mess
+   p_p1=feps(fe)_fep details(protocol)_output stream
+   cursor=(cursor+63)&(-64)
+   cursor=0 %if cursor=buff len
+   p_p2=cursor
+   p_p3 = -1 %if protocol = 1  { info }
+   j=dpon3i("", p, 0, 0, 6 {pon and continue, was 7})
+   feps(fe)_fep details(protocol)_output cursor=cursor
+   vv(semadr, semano) %if flag=0
+%end;                                    ! OUTPUT MESSAGE TO FEP
+
+!-----------------------------------------------------------------------
+
+!<DCHACCESS
+
+%external %integer %fn dchaccess(%string %name xfile index, xfile, %integer %name xfsys, xnewmode)
+
+! This procedure is used to change the access mode (Segment table access
+! permission field, APF) for connected file FILE belonging to file index
+! FILE INDEX on disc-pack FSYS (0-99). Bits in NEWMODE have the following
+! meanings (as in the MODE parameter to procedure DCONNECT):
+!         2**0 set - read access to be allowed
+!         2**1 set - write access to be allowed
+!         2**2 set - execute access to be allowed
+!         2**3 set - write-shared access to be allowed
+!         2**4 set - newcopy access
+!         2**8 set - disallow (further) change-access or disconnect
+!         2**9 set - advisory sequential(not set, then clear)
+! The bottom 3 bits of NEWMODE must have one of the values 1, 3
+! or 5.  The file must be permitted to the caller in the appropriate
+! mode.
+!>
+%integer j, k, prm, nsecs, newflags, c, findad, ww, savekey
+%integer seg, cflags, currentmode
+%integer times, newmode, someblockactive, curstackseg
+%string (6) uname
+%string (11) iname
+%string (31) full, s31
+%record (ctf) %name ct, ctprev
+%record (ff) %name f
+%record (fdf) %array %name fds
+%record (fdf) %name fl
+%const %string (10) fn= "DCHACCESS "
+%const %integer newcopybit=16
+%record (parmf) %name p
+
+   j=into(7, "SSII")
+   ->out %unless j=0
+
+   j=8
+   newmode=i(1)
+   ww=newmode&2_10111 {omit WS-allow bit}
+   ->out %unless (ww=1 %or ww=3 %or ww=5 %or ww=19)
+   ->out %if ww&2_11000=2_11000 {disallow newcopy with WS-allow}
+   ->out %unless newmode&X'FFFFFCE0'=0
+   ->out %if i(0) {FSYS}<0
+
+   *st_11,j
+   curstackseg=j>>segshift
+
+   newflags=0
+   newflags=cbt read only %unless newmode&2>0
+   newflags=newflags!cbt sequential %if newmode>>9>0
+   newflags=newflags!cbt new block %if newmode&newcopybit#0
+
+   j=uif(s(0) {FILE INDEX}, s(1) {FILE}, uname, iname, full)
+   ->out %unless j=0
+
+   s31<-s(1)
+   j=map file index(s(0) {FILE INDEX}, i(0) {FSYS}, findad, fn.s31)
+   ->out %unless j=0
+
+   f==record(findad)
+   fds==array(findad+f_fdstart, fdsf)
+
+   j=find(findad, s(1) {FILE}, k)
+   ->vout %unless j=16
+   fl==fds(k)
+
+   times=0
+   j=39;                                 ! file not connected
+   seg = lo vss seg
+   %cycle
+      ct==d_conlist(d_cpoint(seg))
+      %if equal(ct_full, full)=yes %and ct_prefix=fl_prefix %and ct_fsys=i(0) {FSYS} %start
+         %if times=0 %start
+            j=32
+            prm=file perm(findad, fl, d_procuser)
+            ->dout %if ww&prm<ww&3
+
+            j=33 {conflicting use in another VM}
+            %if fl_usecount>1 %start
+               %if newmode&newcopybit#0 %then ->dout
+               currentmode=1
+               currentmode=3 %if fl_codes2&wrconn>0
+               currentmode=currentmode!8 %unless fl_codes2&wsallow=0
+
+               %if target=xa %start
+                  ! For >1 users, cannot add or remove W-access unless WS-allow is set
+                  %if (newmode!!currentmode)&2#0 %c
+                     {making W-bit in new mode different from its value in current mode} %and %c
+                     fl_codes2&wsallow=0 %then ->dout
+
+               %else
+
+                  ! Always maintain same mode in all VMs for 370 & Amdahl
+                  ! In the test which follows, only the WS-allow,E,W,and R bits
+                  ! are relevant to conflict of mode
+                  ->dout %unless newmode&15=currentmode
+
+               %finish
+            %finish
+         %finish
+         times=times+1
+         j=84
+         ->vout %if ct_flags&X'80'#0;    ! not allowed to change access
+         ->vout %if seg=curstackseg
+         nsecs=segment table(seg)
+         %if target=amdahl %start
+            nsecs=nsecs>>28
+         %finish
+         nsecs=((nsecs&15)+2)>>1
+!wrs("Nsecs=".itos(nsecs)) %unless d_dirmon=0
+
+         c=sst(seg);                     ! CBT index
+
+         %if c&not alloc=0 %start;       ! CBT is allocated for this segment
+
+            someblockactive=0
+
+            %cycle
+               cflags=cbta(c)_flags
+
+               ! j=84 %and ->dout %if cflags&cbt new block>0 %and newmode&2=0 {new copy, read only}
+               *ipk_0(0); *st_2,savekey; *spka_0(0)  { 'ON' }
+               cbta(c)_flags=cflags&(\(cbt read only!cbt sequential))!newflags
+               *l_2,savekey; *spka_0(2)  { 'OFF' }
+
+               p==outp(curcontext)
+
+!wrsnt("cflags ", cflags, x'22') %unless d_dirmon=0
+               %if cflags&cbt active>0 %start
+
+                  someblockactive=1
+                  ! For change-access to newcopy, we disconnect-and-destroy (MC_3)
+                  ! any active segment.  Otherwise MC_27 will do the whole
+                  ! segment, if any block is active.
+                  ! If no block is active there is nothing to do except to
+                  ! set the appropriate CBT FLAG bits (done above).
+
+                  %if newmode&newcopybit#0 %start
+
+                     *ipk_0(0); *st_2,savekey; *spka_0(0)  { 'ON' }
+
+                     p=0
+                     p_p1=seg
+                     p_p2=1 {destroy}
+
+                     *l_2,savekey; *spka_0(2)  { 'OFF' }
+
+                     *MC_3(0),0 {remove AMTX entries}
+
+                     wrs("Dchaccess - AMTX") %if p_dest=-1
+
+                  %finish {newmode is newcopy}
+               %finish {a block was active in this segment}
+
+               nsecs=nsecs-1
+               %if nsecs=0 %start
+                  %if someblockactive#0 %start
+!wrsn("seg", seg) %unless d_dirmon=0
+                     *ipk_0(0); *st_2,savekey; *spka_0(0)  { 'ON' }
+                     p=0
+                     p_p1=seg
+                     *l_2,savekey; *spka_0(2)  { 'OFF' }
+                     *mc_27(0),0;        ! Change access of active segment
+                  %finish
+                  %exit
+               %finish
+               c=c+1
+            %repeat
+
+         %finish {CBT was allocated} %else %if newmode&newcopy bit#0 %start
+            *ipk_0(0); *st_2,savekey; *spka_0(0)
+
+            sst(seg)=sst(seg)!newcopy seg
+
+            *l_2,savekey; *spka_0(2)
+         %finish
+
+      %finish %else %start
+
+         %if j=84 %start;                ! file has been found
+            %if fl_usecount=1 %start
+               fl_codes2=fl_codes2&(\(wrconn!wsallow))
+               fl_codes2=fl_codes2!wrconn %if newmode&2>0
+               fl_codes2=fl_codes2!(newmode&wsallow)
+            %finish
+
+            ! Set written-to bit if NEWMODE contains WRITE
+            fl_arch=fl_arch!1 %if newmode&2>0
+            j=0
+            %exit
+         %finish
+
+      %finish
+
+      ctprev==ct;                        ! Save to adjust CONLIST FLAGS when complete
+
+      %exit %if seg = d_hiseg
+      %if seg = hi vss seg %then seg = louseg %else seg = seg + 1
+
+   %repeat
+   ->vout %if j=0
+
+dout:
+!   vv(addr(f_sema), f_semano)
+!   k=ddisconnecti(s(0) {fileindex}, s(1) {file}, i(0) {fsys}, 0)
+!   ->out
+vout:
+   vv(addr(f_sema), f_semano)
+out:
+   %if j=0 %start
+      %if newflags&cbt read only=0 %then newflags=3 %else newflags=1
+      ctprev_flags=(ctprev_flags&(\3))!(newflags&3)
+      %if newmode&x'100'>0 %then ctprev_flags=ctprev_flags!x'80' {further chacc/discon not allowed}
+   %finish
+
+   %result=outof(j)
+%end;                                    ! DCHACCESS
+
+
+!-----------------------------------------------------------------------
+
+!<DCHSIZE
+
+%external %integer %fn dchsize(%string %name xfile index, xfile, %integer %name xfsys, xnewkb)
+
+! The physical size of file FILE belonging to file index FILE INDEX on
+! disc-pack FSYS (or -1) is altered (if necessary) so that its new size
+! is NEWKB Kbytes.  The size may not be reduced to zero.  The file may
+! be connected in the caller's virtual memory (only).  If the caller is
+! not the file owner, he must either have W access to the file index or
+! be privileged.
+!>
+
+
+
+%integer oldpgs;                         !number of pages to start with
+%integer newpgs;                         ! number of pages required
+%integer xpgs;                           ! number of pages to be added or removed
+%integer xkb;                            ! number of Kbytes to be added or removed
+%integer maxkb;                          ! file space limit from file index
+%integer maxfile;                        ! also from file index
+%integer pgs in old last sect
+%integer pgs in new last sect
+%integer pgs in old last seg
+%integer oldsegs;                        ! number of segments to start with
+%integer newsegs;                        ! number of segments required
+%integer oldsects;                       ! number of sections to start with
+%integer newsects;                       ! number of sections required
+%integer xsects;                         ! number of sections to be added or removed
+%integer b, w;                           ! used in relocating last section when no change in size
+
+%integer j, k, n, lastseg, con, gap, zpgs
+%integer relseg
+%integer add to last sect
+%integer zeralloc
+%integer startp
+%integer cell, flags, newsectionflags
+%integer findad, da, link, nsd
+%string (6) uname
+%string (11) iname
+%string (31) full, s31
+%record (fdf) %name fl
+%integer %array %name sds
+%integer a
+%record (ff) %name f
+%record (fdf) %array %name fds
+%integer %name sd0, sd, sdx
+%string (5) arch
+%const %string (8) fn= "DCHSIZE "
+   k=into(9, "SSII")
+   ->out %unless k=0
+
+   k=uif(s(0) {FILE INDEX}, s(1) {FILE}, uname, iname, full)
+   ->out %unless k=0
+
+   k=93
+   ->pok %if uname=d_procuser
+   ->pok %if d_dtrying<0
+   ->pok %if file index perm(s(0) {FILE INDEX}, i(0) {FSYS})&2>0
+   ->out
+pok:
+   k=8;                                  ! BAD PARAM - SILLY SIZE
+   ->out %unless 0<i(1) {newkb}<=(512<<10)
+   newpgs=(i(1) {NEWKB}+3)>>2
+   newpgs = (newpgs+255) & (-256) %if newpgs >> 14 > 0
+   i(1) {NEWKB}=newpgs<<2;               ! ie rounded up to next page
+   newsegs=(newpgs<<12+seg mask)>>seg shift
+   ->out %unless newpgs>0
+
+   s31<-s(1)
+   k=map file index(s(0) {FILE INDEX}, i(0) {FSYS}, findad, fn.s31)
+   ->out %unless k=0
+
+   f==record(findad)
+   fds==array(findad+f_fdstart, fdsf)
+   sds==array(findad+f_sdstart, sdsf)
+   nsd=(f_fdstart-f_sdstart)>>2
+   maxfile=f_maxfile
+   maxfile=default maxfile %if maxfile=0
+   maxkb=f_maxkb
+   maxkb=default maxkb %if maxkb=0
+
+   k=find(findad, s(1) {FILE}, j)
+   ->vout %unless k=16
+
+   fl==fds(j)
+   oldpgs=decode pgs(fl_pgs)
+   k=87
+   ->vout %if oldpgs=0
+
+   oldsegs=(oldpgs<<12+seg mask)>>seg shift
+   oldsects=(oldpgs<<12+sec mask)>>sec shift
+   newsects=(newpgs<<12+sec mask)>>sec shift
+   xsects=newsects-oldsects
+   pgs in old last sect=oldpgs-(oldsects-1)<<sec p shift
+   pgs in new last sect=newpgs-(newsects-1)<<sec p shift
+   pgs in old last seg=oldpgs-(oldsegs-1)<<seg p shift
+
+   k=41;                                 ! single file limit exceeded
+   ->vout %if i(1) {NEWKB}>maxfile
+
+   xpgs=newpgs-oldpgs;                   ! number to increase by (-, +, or 0)
+   xkb=xpgs<<2
+
+   k=83;                                 ! total file space limit exceeded
+   arch="#ARCH"
+   ->vout %if xpgs>0 %and {increasing size of file}fl_codes&tempfs=0 %and %c
+      {and its not temporary}f_totkb-f_tempkb+xkb>maxkb %and %c
+      {and limit exceeded}equal(s(1) {FILE}, arch)=0 {but its not #ARCH}
+
+   j=conseg(full, fl_prefix, i(0) {FSYS}, a, k);  ! is file connected in this VM?
+
+   %if fl_usecount>0 %start;                  ! file is in use somewhere
+      k=0
+      ->vout %if xpgs=0;                 ! if we are just fiddling, exit
+      k=42
+      ->vout %if j=0;                    ! connected in another VM
+      ->vout %if fl_usecount>1;               ! ditto
+      k=84
+      flags=d_conlist(a&255)_flags
+
+      ! If the segment being extended currently has no CBT allocated, we
+      ! cannot get the appropriate CBT flags from current CBT.  So we take a
+      ! copy of the CONLIST flags for use after label INCREASE below
+      newsectionflags=flags
+
+      ->vout %if flags&X'80'>0;          ! restricted connect
+      ->vout %if xpgs>0 %and flags&3=1;  ! Do not allow EXTEND for R-mode connection
+   %finish
+
+   con=0
+   %if j=1 %start;                       ! file is connected in this VM
+      con=a>>20
+      gap=((a>>8)&x'FFF')+1-con
+      cell=sst(con)
+
+      %if cell&not alloc mask=not alloc %then flags=not alloc %else %c
+         flags=(cbta(cell)_flags!cbt continuation)&(\cbt active)
+      ! any subsequent blocks will be continuations but NOT active
+
+      lastseg=con+oldsegs-1
+      %if xpgs>0 %start;                 ! connected and extending
+         !k=28;                        ! insufficient CBT cells
+         !->vout %if flags#not alloc %and xsects>(d_cbt2-d_cbt1-10)
+         k=35;                           ! gap too small
+         ->vout %if newsegs>gap
+      %finish
+   %finish
+
+   sd0==fl_sd
+   sd==sd0;                              ! Now find last SD in chain
+   j=0
+   %while j<oldsects %cycle
+      j=j+1
+      link=sd>>19
+      %exit %unless 1<=link<=nsd
+      sd==sds(link)
+   %repeat
+   k=87
+   ->vout %unless j=oldsects %and link=0
+
+   %if xsects>0 %start;                  ! extend the chain of SDs if required
+      j=xsects
+      sdx==sd
+
+      %cycle link=1, 1, nsd
+         %if sds(link)=0 %start;         ! a free SD
+            sdx=sdx!(link<<19);          ! link to new SD
+            sdx==sds(link)
+            sdx=(-1)>>13;                ! set DA to '-1' in case allocate fails
+            j=j-1
+            %exit %if j=0
+         %finish
+      %repeat
+
+      %if j#0 %start
+         link=sd>>19;                    ! failed to get enough new SDs
+         sd=sd<<13>>13;                  ! so tidy up
+         %while link>0 %cycle
+            sdx==sds(link)
+            link=sdx>>19
+            sdx=0
+         %repeat
+         k=43;                           ! not enough SDs
+         ->vout
+      %finish
+   %finish
+
+
+   fl_codes=fl_codes!unava;              ! mark file UNAVAILABLE while we 'adjust' it
+   vv(addr(f_sema), f_semano)
+   ->increase %if xpgs>0
+   !----------------------->--->--->----- INCREASE ------>--->--->-----------
+
+
+   %if con>0>xpgs %start;                ! file is connected and we are shrinking
+      recover2(con, lastseg, newsects-1, pgs in new last sect);  ! recover blocks
+      j=lastseg;                         ! and amend conlist
+      %while j>=con+newsegs %cycle
+         d_cpoint(j)=reserved
+         j=j-1
+      %repeat
+   %finish
+
+   sd==fl_sd;                            ! de-allocate surplus pages
+   n=0
+   %while n<oldsects %cycle
+      n=n+1
+      link=sd>>19
+      %if n>=newsects %start
+         startp=(sd<<13)>>13
+         k=startp
+         zpgs=sec pgs
+         zpgs=pgs in old last sect %if n=oldsects
+         %if n=newsects %start
+            sdx==sd;                     ! leave SDX pointing at new last SD and
+            ! discard any beyond
+            sd=startp;                   ! clear link in new last sect
+            zpgs=zpgs-pgs in new last sect
+            startp=startp+pgs in new last sect
+         %finish
+         j=0
+         j=deal(i(0) {FSYS}, k, startp, zpgs) %if zpgs>0
+         active block("CHSIZE1", full, i(0) {FSYS}) %if j=91
+         sd=0 %if n>newsects
+      %finish
+      %exit %unless 0<link<=nsd
+      sd==sds(link)
+   %repeat
+   k=87 %and ->out %unless link=0 %and n=oldsects
+
+   %if xpgs<0 %start;                    ! we are reducing size of file
+      ->relocate %if pgs in new last sect<9
+      ->update index
+   %finish
+
+   b=sysad(bitkey, i(0) {FSYS});         ! size remaining same, get addr of bitmap
+   k=sdx;                                ! first page of last sect
+   w=integer(b+(k>>5<<2));               ! word in bitmap containing sect
+
+   j=k&31;                               ! start page within word
+   ->relocate %if j>0 %and {sect not at start of word}w<<(j-1)>=0 {previous page is free}
+
+   j=(k+pgs in new last sect)&31;        ! page after this sect
+   ->relocate %if j>0 %and {sect not at end of word}w<<j>=0 {following page free}
+
+   k=0;                                  ! release file and exit
+   fl_codes=fl_codes&(\unava)
+   ->out
+
+relocate:
+   ! WRSN("Dchsize RELOCATES " . FULL, PGS IN NEW LAST SECT) %if XPGS = 0
+
+   %if con>0 %start
+      lastseg=con+newsegs-1
+      %if flags#not alloc %start
+         j=remove amt entries(lastseg, 0)
+         %if j=-1 %then wrsn("DCHSIZE RELOCATE SEG", lastseg)
+      %finish
+   %finish
+
+   %cycle n=1, 1, 10;                    ! have 10 attempts to move
+      j=smalloc(startp, i(0) {FSYS}, pgs in new last sect, no);  ! NO = DONT CLEAR
+      %exit %unless j=0;                 ! give up
+
+      j=movesection(i(0) {FSYS}, sdx, i(0) {FSYS}, startp, pgs in new last sect)
+      %if j=0 %start
+         j=deal(i(0) {FSYS}, 0, sdx, pgs in new last sect)
+         active block("CHSIZE3", full, i(0) {FSYS}) %if j=91
+         sdx=startp
+         %if con>0 %then block extend(lastseg, newsects-1-(newsegs-1)*secs per seg, startp, 0, 0)
+         ! adjust DA field in CBT entry
+         %exit;                          ! success
+      %finish
+      j=deal(i(0) {FSYS}, 0, startp, pgs in new last sect)
+      active block("CHSIZE4", full, i(0) {FSYS}) %if j=91
+   %repeat
+   ->update index
+
+increase:                                !-------------------------- INCREASE-----------------------
+
+   !Get here with :
+   ! - SD mapped to old last SD, with (possibly) more new SD's hanging on
+
+   %if con>0 %start
+      %if oldpgs&(seg pgs-1)>0 %start
+
+         ! Last segment is not full.  If it has no CBT allocated and it is
+         ! a newcopy segment, then we must allocate CBT, so that we can
+         ! reference the new blocks.
+
+         %if sst(lastseg)&newcopy seg#0 %then j=allocate cbt(lastseg<<seg shift)
+         %if sst(last seg)&not alloc=0 %start
+            ! Last segment not full and CBT is (now) allocated.
+
+            ref new blocks(last seg)
+            j=remove amt entries(last seg, 0)
+            %if j=-1 %start
+               printstring("DCHSIZE")
+               write(lastseg, 1)
+               write(sst(lastseg), 1)
+               printsymbol(nl)
+            %finish
+         %finish
+      %finish
+   %finish
+
+   %if oldpgs&(sec pgs-1)>0 %start
+      ! Last section not full, so pages will be allocated to it.
+      ! Re-allocate the space and move if no new sections required
+      add to last sect=xpgs
+      add to last sect=sec pgs-(oldpgs&(sec pgs-1)) %if xsects>0;  ! just fill up old....
+      k=smalloc(startp, i(0) {FSYS}, pgs in old last sect+add to last sect, 0)
+      ! don't zero the pages
+      %if k#0 %then ->inc recover;       ! FSYS full
+      link=sd>>19
+      da=(sd<<13)>>13
+      k=move section(i(0) {FSYS}, da, i(0) {FSYS}, startp, pgs in old last sect)
+      ->inc recover %unless k=0
+      k=movesection(-1, 0, i(0) {FSYS}, startp+pgs in old last sect, addto last sect)
+      ->inc recover %unless k=0
+
+      j=deal(i(0) {FSYS}, 0, da, pgs in old last sect)
+      active block("CHSIZE5", full, i(0) {FSYS}) %if j=91
+      sd=(link<<19)!startp
+
+      %if con>0 %start
+         ! Replace disc address for last block
+         block extend(lastseg, oldsects-1-(oldsegs-1)*secs per seg, startp, add to last sect,
+            pgs in old last seg)
+      %finish;                           ! CON > 0
+   %finish
+
+   %if xsects>0 %start;                  ! new sections are being added,
+                                         ! allocate them and then make and
+      ! fill in new cells
+      sdx==sd;                           ! point to old last
+      zeralloc=no
+      zeralloc=yes %if con=0;            ! clear new bits only if file not connected
+      %cycle j=1, 1, xsects
+         zpgs=sec pgs
+         %if j=xsects %then zpgs=pgs in new last sect
+         k=smalloc(startp, i(0) {FSYS}, zpgs, zeralloc);  ! Zero pgs if not connected else newcopy
+         ->inc recover %if k#0;          ! FSYS full
+         sdx==sds(sdx>>19);              ! move to next
+         sdx=((sdx>>19)<<19)!startp;     ! and insert DA
+         %if con>0 %start;               ! file is connected, connect new sections
+            relseg=(oldsects+j-1)>>(seg shift-sec shift)
+
+            ! All new sections will get CBT allocated.
+            ! New sections must be in write-mode.  Take sequential-status
+            ! from CONLIST flags
+
+            flags=cbt continuation;      ! not readonly,active or multiple use (newcopy is given by param to sconnect)
+            %if newsectionflags&64#0 %then flags=flags!cbt sequential
+
+            k=sconnect(con+relseg, (i(0) {FSYS}<<24)!startp, zpgs, 1 {newcopy}, flags)
+            wrsn("DCHSIZE", k) %if k#0
+
+         %finish
+      %repeat
+   %finish
+
+   %if con>0 %start;                     ! update con table
+      j=lastseg+1
+      %while j<con+newsegs %cycle
+         d_cpoint(j)=d_cpoint(con)
+         j=j+1
+      %repeat
+   %finish
+   ->update index
+
+inc recover:
+   %if con>0 %then recover2(con, con+newsegs-1, old sects-1, pgs in old last sect)
+   link=sd>>19
+   sd=(sd<<13)>>13;                      ! mark old last SD as end of list
+   %while link>0 %cycle
+      sd==sds(link)
+      link=sd>>19
+      sd=0
+   %repeat
+   fl_codes=fl_codes&(\unava)
+   ->out
+
+
+update index:
+   k=pp(addr(f_sema), f_semano, fn.s31)
+   ->out %unless k=0
+   fl_pgs = encode pgs(newpgs)
+   f_totkb=f_totkb+xkb
+
+   %unless fl_codes&tempfs=no %start
+      ! temporary
+      f_tempkb=f_tempkb+xkb
+   %finish
+
+   %unless fl_codes&chersh=no %start
+      ! cherished
+      f_cherkb=f_cherkb+xkb
+   %finish
+
+   fl_codes=fl_codes!violat %if xsects>0 %and con>0
+   fl_codes=fl_codes&(\unava)
+vout:
+   vv(addr(f_sema), f_semano)
+out:
+   %result=outof(k)
+%end;                                    ! DCHSIZE - 370/XA family
+
+
+!-----------------------------------------------------------------------
+
+!<DCONNECT
+
+%external %integer %fn dconnect(%string %name xfile index, xfile,
+   %integer %name xfsys, xmode, xseg, xgap)
+
+! Provided that the file is suitably permitted to the caller, the file of
+! name FILE belonging to file index FILE INDEX on disc-pack FSYS (or -1)
+! is connected into the caller's virtual memory.
+
+! The bits in the parameter MODE have the following meanings (when set):
+!     2**0     Read access required
+!        1     Write access required
+!        2     Execute access required
+!        3     Write access by other processes to be allowed
+!        4     New copy of file to be written
+!        5     Communications mode
+!        6     Not to be allocated space on the drum
+!        7     Segment to be used as a process stack
+
+! The purpose of bit 2**3 is to allow (read and) write access by more
+! than one process to be achieved only when each user specifically allows
+! the situation (by setting the bit in his request).
+
+! Bits 2**1 or 2**3 may not be set in the request if bit 2**2 (execute
+! access) is also set.
+
+! SEG either specifies the segment number at which the file is to be
+! connected (in the range 34 to 127), or is zero, indicating that the
+! choice of segment number is to be left to Director.  If the result of
+! the function is 0 or 34 (file already connected), SEG is set to the
+! chosen segment number.
+
+! GAP specifies the number of segments which are to be reserved for the
+! file, even though the current size of the file may be less than that
+! number of segments.  Attempts to specify a value of SEG which conflicts
+! with this GAP, in subsequent connect requests before this file is
+! disconnected, will be rejected.
+
+! If GAP is set to zero then no segments of virtual memory, other than
+! those required by the current file size, are reserved for the file.
+! If the result of the function is 0 or 34 (file already connected), GAP
+! is set to the number of segments reserved for the file.
+
+! APF may be used to specify the access permission field in the
+! segment(s) being connected.  The bottom 9 bits are significant:
+
+!                   1      4      4
+!                  EXE-  WRITE   READ
+!                  CUTE   ACR    ACR
+
+! The read and write ACR values supplied must be greater than or equal to
+! the ACR at which the calling program (subsystem) is running. If the APF
+! parameter is set to zero, a value of X'1nn' is used, where n is the ACR
+! at which the caller is executing.
+!>
+
+%integer j, wap, rap
+   j=into(11, "SSIIJJ")
+   ->out %unless j=0
+
+   j=93
+! 1 << 31 means segment to be non-slaved
+! 1 << 30 means special 'monitor' call
+   %if d_dtrying<<7>=0 %and (charno(s(1) {FILE}, 1)='#' %or i(1) {MODE}>>30>0) %then ->out
+
+   j=dconnecti(s(0) {FILE INDEX}, s(1) {FILE}, i(0) {FSYS}, i(1) {MODE},
+      i(2) {SEG}, i(3) {GAP})
+out:
+   %result=outof(j)
+%end;                                    ! DCONNECT
+
+!-----------------------------------------------------------------------
+
+!<DCPUTIME
+%external %integer %fn dcputime
+!>
+%longinteger stpt
+%integer correction, t1, t2, ad, count
+
+   count = 0
+   ad = addr(stpt)
+   *mc_12(0),0
+   %cycle
+      count = count + 1
+      t1 = accts_millisecs
+      ! Ensure that operand for STPT is double-word aligned
+      *la_11,7(11)
+      *srl_11,3
+      *sll_11,3
+      *stpt_0(11)
+      *l_1,ad
+      *mvc_0(8,1),0(11)
+      stpt = 0 %if stpt < 0
+      correction = stpt >> 22
+      t2 = accts_millisecs
+      %continue %unless t1 = t2
+      wrs("DCPUTIME count = " . itos(count)) %if count > 2
+      *mc_13(0),0
+      %result = t1 - correction
+   %repeat
+%end;                                    ! DCPUTIME
+
+!-----------------------------------------------------------------------
+
+!<DCREATE2
+
+%external %integer %fn dcreate(%string %name xfile index, xfile, %integer %name xfsys, xnkb,
+   xtype, xda)
+! A file of name FILE is created, in file index FILE INDEX on disc-pack
+! FSYS, of E Epages, where E is the smallest number of Epages containing
+! NKB Kbytes.  The maximum size of file allowed is 16 Mbytes.  Subsystems
+! requiring larger files should arrange that they be made up of subfiles
+! comprising files created by this procedure.
+
+! Bits in TYPE may be set:
+
+!     2**0     For a temporary file (destroyed when the creating process
+!              stops if the file was connected, or at System start-up).
+
+!     2**1     For a very temporary file (destroyed when the file is
+!              disconnected).
+
+!     2**2     For a file which is to be zeroed when created.
+
+!     2**3     To set "CHERISHed" status for the file.
+
+
+! Temporary files are made into ordinary files (that is, the "temporary"
+! attribute is removed) on being RENAMEd, OFFERed, TRANSFERred or
+! PERMITted, and also explicitly by an appropriate call on procedure
+! DFSTATUS.
+
+! The disc address of the first section of the file is returned in DA.
+!>
+%integer j
+%string (6) uname
+   j=into(13, "SSIIIK")
+   ->out %unless j=0
+
+   j=uiforg(s(0) {FILE INDEX}, s(1) {FILE}, uname)
+   ->out %unless j=0
+
+   j=18
+   ->out %if s(1) {FILE}=""
+   ->out %if charno(s(1) {FILE}, 1)='#' %and d_dtrying<<7>=0
+
+   j=93
+   ->pok %if uname=d_procuser
+   ->pok %if d_dtrying<0
+   ->pok %if file index perm(s(0) {FILE INDEX}, i(0) {FSYS})&2>0
+   ->out
+pok:
+   j=8
+   ->out %unless 0<=i(2) {TYPE}<=15 %and i(2) {TYPE}&3#3
+
+   j=dcreatef(s(0) {FILE INDEX}, s(1) {FILE}, i(0) {FSYS}, i(1) {NKB}, (i(2) {TYPE}<<2)!1, 0,
+      i(3) {DA})
+   %result=outof(j)
+out:
+   %result=outof(j)
+%end;                                    ! DCREATE
+
+
+!-----------------------------------------------------------------------
+
+!<DDESTROY
+
+%external %integer %fn ddestroy(%string %name xfile index, xfile, xdate, %integer %name xfsys,
+   xtype)
+! File FILE belonging to file index FILE INDEX on disc-pack FSYS, is
+! destroyed.  TYPE should be set to 1 to destroy a file from archive
+! storage, otherwise it should be set to zero.  When TYPE=1, DATE should
+! be set to the archive date.  DATE is ignored if TYPE=0.
+
+! The procedure fails if 'OWNP' for the file is either zero (no access)
+! or 8 (do not destroy).
+!>
+!  TYPE  =  0     destroy on-line file
+!           1     destroy archive file
+
+%integer j
+%string (6) uname
+   j=into(16, "SSSII")
+   ->out %unless j=0
+
+   j=uiforg(s(0) {FILE INDEX}, s(1) {FILE}, uname)
+   ->out %unless j=0
+
+   j=18
+   ->out %if s(1) {FILE}=""
+   ->out %if charno(s(1) {FILE}, length(s(1) {FILE}))=gsepch %and i(1) {TYPE}>0
+
+   j=93
+   ->pok %if uname=d_procuser
+   ->pok %if d_dtrying<0
+   ->out %if file index perm(s(0) {FILE INDEX}, i(0) {FSYS})&2=0
+pok:
+   %if i(1) {TYPE}=0 %then j=ddestroyf(s(0) {FILE INDEX}, s(1) {FILE}, i(0) {FSYS}, 1) %else %c
+      j=adestroy(s(0) {FILE INDEX}, s(1) {FILE}, s(2) {DATE}, i(0) {FSYS}, i(1) {TYPE}-1)
+out:
+   %result=outof(j)
+%end;                                    ! DDESTROY
+
+
+!-----------------------------------------------------------------------
+
+!<DDISCONNECT
+
+%external %integer %fn ddisconnect(%string %name xfile index, xfile, %integer %name xfsys, xdstry)
+! The file of name FILE belonging to file index FILE INDEX on disc-pack
+! FSYS is disconnected from the caller's virtual memory.  Parameter
+! DESTROY should be set either to 0 or 1.  If set to 1 the file will be
+! destroyed, provided that it belongs to the process owner (not necessary
+! if the process is privileged) and the "use-count" for the file is zero
+! after disconnection.  Otherwise the  parameter is ignored.
+!>
+%integer j
+%string (6) uname
+%string (11) iname
+%string (31) full
+   j=into(18, "SSII")
+   ->res %unless j=0
+
+   j=8
+   ->res %unless 0<=i(1) {DSTRY}<=1
+
+   j=uif(s(0) {FILE INDEX}, s(1) {FILE}, uname, iname, full)
+   ->res %unless j=0
+
+   j=93
+   ->pok %if d_dtrying<<7<0;             ! a privileged user
+   ->res %if charno(s(1) {FILE}, 1)='#';  ! can't disconnect #... files
+   ->pok %if uname=d_procuser
+   ->res %if i(1) {DSTRY}#0=file index perm(s(0) {FILE INDEX}, i(0) {FSYS})&2
+pok:
+   i(1) {DSTRY}=2 %if i(1) {DSTRY}#0
+   j=ddisconnecti(s(0) {FILE INDEX}, s(1) {FILE}, i(0) {FSYS}, i(1) {DSTRY})
+res:
+   %result=outof(j)
+%end;                                    ! DDISCONNECT
+
+!-----------------------------------------------------------------------
+
+!<DGETDA
+
+%external %integer %fn dgetda(%string %name xfile index, xfile, %integer %name xfsys,
+   %integer %array %name data)
+
+! This procedure provides the disc addresses of the sections of file FILE
+! belonging to file index FILE INDEX on disc-pack FSYS.  Data is written
+! from address ADR in the format
+
+!     (%integer SECTSI, NSECTS, LASTSECT, SPARE, %integerarray DA(0:255))
+
+! where SECTSI      is the size (in epages) of the sections (except
+!                   possibly the final section)
+
+!       NSECTS      is the number of sections, and hence the number
+!                   of entries returned in array DA
+
+!       LASTSECT    is the size (in epages) of the final section
+
+! In each entry in the DA array, the top byte contains the FSYS number.
+!>
+%integer j, n, link, nsd, nsects
+%integer findad, fi
+%integer pags
+%string (6) uname
+%string (11) iname
+%string (31) full, s31
+%record (ff) %name f
+%record (fdf) %name fd
+%record (fdf) %array %name fds
+%integer %name sd
+%integer %array %name sds
+%const %string (7) fn= "DGETDA "
+   j=into(30, "SSI")
+   ->out %unless j=0
+
+   j=uif(s(0) {FILE INDEX}, s(1) {FILE}, uname, iname, full)
+   ->out %unless j=0
+
+   s31<-s(1)
+   j=map file index(s(0) {FILE INDEX}, i(0) {FSYS}, findad, fn.s31)
+   ->out %unless j=0
+
+   f==record(findad)
+   fds==array(findad+f_fdstart, fdsf)
+   sds==array(findad+f_sdstart, sdsf)
+   nsd=(f_fdstart-f_sdstart)>>2
+
+   j=find(findad, s(1) {FILE}, fi)
+   ->vout %unless j=16
+
+   fd==fds(fi)
+
+   j=5;                                  ! FILE NOT READY
+   ->vout %unless fd_codes&unava=0
+
+   j=87
+   pags=decode pgs(fd_pgs)
+   ->vout %unless pags>0
+
+   nsects=(pags+sec pgs-1)>>(sec p shift)
+   j=45
+   ->vout %unless val(addr(data(0)), nsects<<2+12, 1, 1)=0
+
+   data(0)=sec pgs
+   data(1)=nsects
+   data(2)=pags-(nsects-1)<<(sec p shift)
+
+   sd==fd_sd;                            ! proceed down sections chain
+   j=87
+   n=0
+   %while n<nsects %cycle
+      data(n+3)=(i(0) {FSYS}<<24)!((sd<<13)>>13)
+      n=n+1
+      link=sd>>19
+      %exit %unless 1<=link<=nsd
+      sd==sds(link)
+   %repeat
+   j=0 %if n=nsects %and link=0
+vout:
+   vv(addr(f_sema), f_semano)
+out:
+   %result=outof(j)
+%end;                                    ! DGETDA
+
+
+!-----------------------------------------------------------------------
+
+!<DMDC
+%external %routine dmdc
+!>
+%integer seg, j, cell
+   %cycle seg=lodseg, 1, d_hiseg
+      cell=sst(seg)
+      %if cell&newcopy seg#0 %then j=allocate cbt(seg<<seg shift)
+      %if cell&not alloc=0 %start
+         j=remove amt entries(seg, 0)
+         wrs("DMDC") %if j=-1
+      %finish
+   %repeat
+%end;                                    ! DMDC
+
+!-----------------------------------------------------------------------
+
+!<DMODE
+%external %integer %fn dmode(%integer %name xset, xadr, xcommand)
+
+! If SET = 1 then ADR specifies the address of N bytes (N<65) of TCP
+! command data, the first being a length byte containing N-1, which are
+! to be dispatched (via the executive process DIRECT) to the TCP. If a
+! GETMODES TCP command has been included in the command data, the process
+! is suspended until the mode data arrive (they are placed in the UINF
+! record of user information). The mode data should be accessed using
+! this procedure with SET = 0.  COMMAND is not used.
+
+! If SET = 0 then COMMAND specifies a TCP command byte for which the
+! corresponding mode data are required. ADR specifies an eight-byte area
+! into which the relevant mode data are to be placed. Data will be up to
+! date only if a DMODE command with SET = 1, specifying 'send mode data',
+! has recently been sent. This interface routine, which accesses a copy
+! of the mode data in the UINF record, is provided to enable changes to
+! be made to the internal representation of the data without requiring
+! user programs to be modified.
+!>
+%integer pt, step, flag, getmode, seg, gap, j, len, savekey
+%integer stream id
+%record (parmf) %name p
+%record (logf hdf) %name logh
+%record (fepf) %array %name feps
+%record (procdatf) %array %name proclist
+%const %string (6) uname= "VOLUMS"
+%const %string (7) fname= "#LOGMAP"
+
+! in FLAG0 and 1
+! PDP-11 bit nos:                   111111
+!                           7654321054321098
+%const %byte echo=B'00000010'   {bit 1 }
+%const %byte bin in=B'00010000'   {bit 4 }
+%const %byte graph=B'00000100'   {bit 2 }
+%const %byte lowcase=B'00001000'   {bit 3 }
+%const %byte video=B'00001000'   {bit 11}
+
+! in FLAG2 and 3
+%const %byte zmode=B'10000000'   {bit 7 }
+%const %byte screed=B'01000000'   {bit 6 }
+%const %byte bulkin=B'00000100'   {bit 2 }
+%const %byte xon=B'00000010'   {bit 1 }
+%const %byte native mode= B'00000001'   {bit 8 }
+
+%integer v
+%record (tmodef) %name t
+
+%const %integer topg= 33
+%switch dg(0:topg)
+   flag=into(43, "III")
+   ->out %unless flag=0
+
+   flag=8
+
+   stream id=uinf_stream id
+   ->out %unless 2<=i(0) {SET}<=3
+!   ->out %unless uinf_dident=-2;         ! not new FE software
+
+   getmode=0
+   getmode=1 %if i(0) {SET}=2
+   flag=8
+   len=byteinteger(i(1) {ADR})
+   ->out %unless 0<len<64
+
+   flag=45
+   ->out %unless val(i(1) {ADR}, len+1, 0, 0)=0
+
+   flag=0
+   ->out %unless streamid>>24=14;        ! proceed only if to an FE
+
+   j=com_secsfrmn-d_dmode prev;          ! time since last call(or time of day)
+   j=j+24*60*60 %if j<0;                 ! adjust for new day
+   %if j<1 %then d_dmode n=d_dmode n+1 %else d_dmode n=0
+   d_dmode prev=com_secsfrmn;            ! remember time of this call
+   j=60-j
+   %if d_dmode n>15 %start
+      wrs("DMODE delays for ".itos(j)." secs")
+      j=ddelay(j);                       ! wait until its at least a min since last call
+   %finish
+
+   ! Now dispatch the data
+   seg=0
+   gap=0
+   flag=dconnecti(uname, fname, -1, 8+2+1, seg, gap)
+   ->out %unless flag=0 %or flag=34
+
+   logh==record(seg<<seg shift+X'10000')
+   proclist==logh_proclist
+
+   ! Mark the PROCLIST entry, to be sure that DIRECT deals with mode data OK
+   proclist(uinf_pslot)_getmode=1 %if getmode#0
+   feps==logh_feps
+
+   output message to fep(feps, streamid<<8>>24, 2, i(1) {ADR}, len+1, streamid<<16>>16,
+      proclist(uinf_pslot)_protocol)
+
+   flag=ddisconnecti(uname, fname, -1, 0) %if flag=0
+   flag=0 %if flag=34
+
+! Suspend on sync2 service if mode data expected. We cannot use the
+! DOUTI routine, as comms controller is unable to supply a DACT corres-
+! ponding to a given SACT.
+
+   %if getmode#0 %start
+      p==outp(curcontext)
+      *IPK_0(0)
+      *ST_2,SAVEKEY
+      *SPKA_0(0)
+      p=0 {set time-out for network misbehaviour}
+      p_dest=X'A0002' {single kick}
+      p_p1=uinf_sync2dest
+      p_p2=15 {seconds}
+      *l_2,savekey
+      *spka_0(2)
+      *mc_6(0),0
+      *ipk_0(0)
+      *st_2,savekey
+      *spka_0(0)
+      p=0
+      p_srce=M'MODE'
+      *L_2,SAVEKEY
+      *SPKA_0(2)
+      d_loutp=p
+      d_loutpstate="DMODE"
+      *MC_7(0),0
+      d_loutpstate="DMODEexit"
+      %if p_srce>>16#X'A' %start {ok}
+         *ipk_0(0)
+         *st_2,savekey
+         *spka_0(0)
+         p=0
+         p_dest=X'A0001'
+         p_p1=uinf_sync2dest
+         p_p2=-1 {cancel}
+         *l_2,savekey
+         *spka_0(2)
+         *mc_6(0),0
+      %else
+         wrs("DMODE timed out")
+         flag=71 {no time left}
+      %finish
+   %finish
+out:
+   %result=outof(flag)
+%end;                                    ! DMODE
+
+
+!-----------------------------------------------------------------------
+
+!<DNEWGEN
+
+%external %integer %fn dnewgen(%string %name xfile index, xfile, xnewgen, %integer %name xfsys)
+
+! This procedure provides a means of introducing an updated version
+! (i.e. a new generation) of file FILE belonging to file index FILE INDEX
+! even though it may be connected in other users' virtual memories.
+
+! If FILE is not connected in any virtual memory, a call on DNEWGEN is
+! equivalent to destroying FILE and then renaming NEWGEN to FILE,
+! except that the new version of FILE retains the former FILE's access
+! permissions.
+
+! If FILE is connected in some virtual memory, then the filename
+! NEWGEN "disappears", and any subsequent connection of FILE into
+! a virtual memory yields the contents of the new generation formerly
+! held in NEWGEN.
+
+! When the number of users of a former copy of FILE becomes zero
+! (i.e. when it is not connected in any virtual memory), that copy is
+! destroyed.
+!>
+
+
+
+%integer findad, j
+%integer sd, pi, npd, violat status
+%integer oldpgs, newpgs, olda, newa, oldkb, newkb
+%string (6) uname
+%string (11) iname, w
+%string (31) full, s31
+%record (ff) %name f
+%record (fdf) %array %name fds
+%record (pdf) %array %name pds
+%record (pdf) %name pd
+%record (fdf) %name newfl, oldfl
+%const %string (8) fn= "DNEWGEN "
+   j=into(47, "SSSI")
+   ->out %unless j=0
+
+   j=uif(s(0) {FILE INDEX}, s(1) {FILE}, uname, iname, full)
+   ->out %unless j=0
+
+   j=18
+   ->out %unless fnok(s(2) {NEWGEN}, w)=0
+   ->out %if equal(s(1) {FILE}, s(2) {NEWGEN})=yes
+
+   ->pok %if uname=d_procuser
+   ->pok %if d_dtrying<0
+   ->pok %if file index perm(s(0) {FILE INDEX}, i(0) {FSYS})&2>0
+   j=93
+   ->out
+pok:
+   s31<-s(1)
+   j=map file index(s(0) {FILE INDEX}, i(0) {FSYS}, findad, fn.s31)
+   ->out %unless j=0
+
+   f==record(findad)
+   fds==array(findad+f_fdstart, fdsf)
+   pds==array(findad+f_pdstart, pdsf)
+   npd=(f_sdstart-f_pdstart)//pdsize
+
+   j=find(findad, s(1) {FILE}, olda)
+   ->vout %unless j=16
+   oldfl==fds(olda)
+
+   j=find(findad, s(2) {NEWGEN}, newa)
+   ->vout %unless j=16
+   newfl==fds(newa)
+
+   %if d_dtrying>=0 %start
+      j=93
+      ->vout %if charno(oldfl_name, 1)='#'
+      ->vout %if charno(newfl_name, 1)='#'
+   %finish
+
+   j = 51
+   -> vout %if oldfl_ownp & 2 = 0  { no W permission }
+   -> vout %if oldfl_ownp & 8 > 0  { no destroy }
+
+   j=40;                                 ! FILE IS CONNECTED
+   ->vout %if newfl_usecount#0
+
+   ! j=5
+   ! ->vout %if newfl_codes&violat#0 %or oldfl_codes&violat#0
+
+   violat status=newfl_codes&violat
+
+   j=6
+   ->vout %if newfl_codes&offer#0 %or oldfl_codes&offer#0
+
+! There are now no more potential failures so do the
+! common actions before splitting on file in use or no
+
+
+   oldpgs=decode pgs(oldfl_pgs)
+   newpgs=decode pgs(newfl_pgs)
+
+   oldkb=oldpgs*4
+   newkb=newpgs*4
+
+   f_files=f_files-1
+   f_totkb=f_totkb-oldkb
+
+   %unless oldfl_codes&tempfs=no %start  { old file temp }
+      f_tempkb=f_tempkb-oldkb
+      %if newfl_codes&tempfs = no %start  { new is perm }
+         f_tempkb = f_tempkb + newkb
+      %finish %else %start  { new is temp also }
+         f_tempfiles = f_tempfiles - 1
+      %finish
+   %finish %else %start  { old is perm }
+      %unless newfl_codes & tempfs = no %start  { new is temp }
+         f_tempkb = f_tempkb - newkb
+         f_tempfiles = f_tempfiles - 1
+      %finish
+   %finish
+
+   %unless newfl_codes&chersh=no %start
+      ! new file is cherished and its attributes are about to be lost
+      f_cherfiles=f_cherfiles-1
+      f_cherkb=f_cherkb-newkb
+   %finish
+
+   %unless oldfl_codes&chersh=no %start
+      f_cherkb=f_cherkb-oldkb+newkb
+   %finish
+
+   pi=newfl_phead;                       ! discard any permissions on NEWFL
+   %while 0<pi<=npd %cycle
+      pd==pds(pi)
+      pi=pd_bl
+      pd=0
+   %repeat
+
+   %if oldfl_usecount=0 %start
+      oldfl_pgs = encode pgs(newpgs)
+      sd=oldfl_sd
+      oldfl_sd=newfl_sd
+      oldfl_codes=oldfl_codes!violat status
+      oldfl_arch=oldfl_arch!1;           ! WRITTEN TO
+      newfl=0
+      newfl_name=".NULL"
+      vv(addr(f_sema), f_semano)
+      j=file deal(findad, sd, oldpgs)
+      active block(fn, full, i(0) {FSYS}) %if j=91
+      ->out
+   %finish
+
+
+! Then old file was connected. OLDFL is newest gen of the file (currently
+! not marked OLDGE). Change that to OLDGE.
+! Rename NEWGEN OF FILE to be FILE.
+! Attributes to be same as previous newest generation.
+
+   sd=newfl_sd;                          ! save it
+   newfl=oldfl;                          ! copy across all attributes
+   newfl_sd=sd;                          ! but then reset SD (the disc addresses)
+   newfl_pgs = encode pgs(newpgs);                     ! and its size
+   newfl_usecount=0
+   newfl_codes=newfl_codes!violat status
+   newfl_codes2=newfl_codes2&(\(oldge!wrconn!wsallow))
+   newfl_arch=newfl_arch!1;              ! written to
+
+   oldfl_codes2=oldfl_codes2!oldge
+   oldfl_phead=0;                        ! any permissions have been transferred to NEWFL
+   j=0
+vout:
+   vv(addr(f_sema), f_semano)
+out:
+   %result=outof(j)
+%end;                                    ! DNEWGEN
+
+
+!-----------------------------------------------------------------------
+
+!<DRENAME
+
+%external %integer %fn drename(%string %name xfile index, xoldname, xnewname, %integer %name xfsys)
+
+! File OLDNAME belonging to file index FILE INDEX on disc-pack FSYS is
+! renamed NEWNAME.
+
+! A file may not be renamed while it is connected in any virtual memory.
+!>
+
+
+
+%integer fi, findad, j, k, fiw, thash
+%string (6) uname
+%string (11) terminal
+%string (31) s31
+%record (ff) %name f
+%record (fdf) %name fl
+%record (fdf) %array %name fds
+%const %string (8) fn= "DRENAME "
+   j=into(70, "SSSI")
+   ->out %unless j=0
+
+   j=uiforg(s(0) {FILE INDEX}, s(1) {OLDNAME}, uname)
+   ->out %unless j=0
+
+   j=forgok(s(2) {NEWNAME}, terminal) {just checks syntax, not existence}
+   ->out %unless j=0
+
+   j=93
+   ->pok %if d_dtrying<0
+   ->out %if charno(terminal, 1)='#';    ! INVALID NAME
+   ->pok %if uname=d_procuser
+   ->out %if file index perm(s(0) {FILE INDEX}, i(0) {FSYS})&2=0
+pok:
+   s31<-s(1)
+   j=map file index(s(0) {FILE INDEX}, i(0) {FSYS}, findad, fn.s31)
+   ->out %unless j=0
+
+   f==record(findad)
+   fds==array(findad+f_fdstart, fdsf)
+
+   j=find(findad, s(1) {OLDNAME}, fi)
+   ->vout %unless j=16
+
+   j = 20
+   fl == fds(fi)
+   -> vout %if fl_codes & offer > 0
+
+   j=93
+   ->vout %if charno(fl_name, 1)='#' %and d_dtrying>=0
+
+   j=find(findad, s(2) {NEWNAME}, fi)
+   ->vout %unless j=32
+
+   %if charno(s(2) {NEWNAME}, length(s(2) {NEWNAME}))=gsepch %start
+      j=e+148 {cannot rename a file to be a group}
+      ->vout %unless fl_sd=0
+   %finish %else %start
+      j=e+149 {cannot rename a group to be a file}
+      ->vout %if fl_sd=0
+   %finish
+
+   j=5;                                  ! FILE NOT READY
+   ->vout %if fl_codes&unava#0
+
+   j=40;                                 ! FILE IS CONNECTED
+   ->vout %if fl_usecount#0
+
+   j=e+160
+   k=d_prefix  { of last 'found' fd, ie new }
+               { fi is pointer to old fd and cant rename g1 to g1.g2 }
+   %while k>0 %cycle
+      ->vout %if k=fi
+      k=fds(k)_prefix
+   %repeat
+
+   %if length(terminal) > 1 %and charno(terminal,1)&X'DF'='T' %andc
+             charno(terminal,2)='#' %c
+   %then thash = yes %c
+   %else thash = no
+
+   j = 15
+!   -> vout %if fl_codes&tempfs=0{perm} %and thash=yes %and f_tempfiles=255
+
+   fl_name=terminal;                     ! No more failures, so can rename
+   fl_prefix=d_prefix
+
+   %if d_prefix>0 %start {transfer interesting attributes - see DCREATE}
+      fl_codes=fl_codes!(fds(d_prefix)_codes&(offer!chersh!noarch))
+      fl_arch=fl_arch!(fds(d_prefix)_arch&128)
+   %finish
+
+   %if fl_codes&tempfs=no %start  { permanent }
+      %if thash = yes %start  { make temp }
+         %if f_owner = d_procuser %then fl_dayno=d_invoc %else fl_dayno = 255
+         fl_codes = fl_codes ! 4 {temp}
+         f_tempfiles = f_tempfiles + 1
+         f_tempkb = f_tempkb + decodepgs(fl_pgs)*4
+      %finish
+   %finish %else %start
+      ! renaming a temporary file
+      %if thash = no %start  { make it perm }
+         f_tempkb=f_tempkb-decode pgs(fl_pgs)*4
+         %if f_tempfiles>0 %start
+            f_tempfiles=f_tempfiles-1
+         %else
+            wrs("tempfiles rename")
+         %finish
+         fl_codes<-fl_codes&(\tempfs)
+         fl_dayno=ddaynumber&255
+      %finish
+   %finish
+
+   fl_arch=fl_arch!1;                    ! WRITTEN TO
+   j=0
+vout:
+   vv(addr(f_sema), f_semano)
+out:
+   %result=outof(j)
+%end;                                    ! DRENAME
+
+
+!-----------------------------------------------------------------------
+
+!<DSTOP
+%external %integer %fn dstop(%integer %name xreason)
+
+! This is the means by which a subsystem terminates its process.
+! Director disconnects all files, disconnects interactive terminal
+! streams, unlocks locked-down areas and destroys temporary files.  The
+! integer REASON, which conventionally should be 100 for a normal stop or
+! greater than 100 for an abnormal stop, is printed in a stopping message
+! in the log file.  Values less than 100 are generated by Director itself
+! in abnormal circumstances:
+
+!    REASON     Meaning
+
+!      0        Error condition noted in monitor printing (Dirlog).
+
+!      1        A contingency occurred, but the Director procedure PRIME
+!               CONTINGENCY (used to specify a subsystem contingency
+!               procedure to be executed)had not previously been called.
+
+!      2        A program error has occurred during execution of the
+!               subsystem's contingency handling procedure and before
+!               a call of Director procedure DRESUME.  (A call of DRESUME
+!               indicates that diagnostic actions are complete, and more
+!               specifically that the contingency procedure itself is
+!               again ready to handle further contingencies.)
+
+!      3        The number of program error and virtual store
+!               contingencies for the process has exceeded a certain
+!               fixed number, currently 32.  The purpose of this limit is
+!               to terminate the contingency loop which will occur if the
+!               subsystem contingency procedure executes satisfactorily
+!               but the computation repeatedly "resumed to" immediately
+!               fails.
+
+!      4        The number of instructions executed by the process
+!               exceeds the limit specified for the session.  In the case
+!               of an interactive session this is currently a very large
+!               number, but may be subject to the System Manager's
+!               control.  In the case of a batch session, it is the
+!               number specified when the batch job was submitted to the
+!               SPOOLR process.  A subsystem should normally arrange,
+!               through use of Director procedures DSETIC and DSFI
+!               (TYPE=21), that this session limit is not violated, in
+!               order to initiate the termination under its own control.
+
+!      5        Not used.
+
+!      6        A program error has occurred during execution of a
+!               Director procedure.  Currently this may be caused by
+!               supplying the wrong number of parameter words to a
+!               procedure, later machine modification levels will enable
+!               this condition to generate a "subsystem program error"
+!               contingency.
+
+!      7        Illegal call of Director procedure DRESUME: the value of
+!               the LNB parameter is >0 but is not at least 5 words
+!               below the machine register LNB contents at the time of
+!               the call of DRESUME.
+
+!      8        Illegal call of Director procedure DRESUME: the parameter
+!               LNB specifies Director's contingency stack segment, which
+!               is reserved.
+
+!      9        Illegal call of Director procedure DRESUME, specifying
+!               resumption of a computation in which a virtual store
+!               error (address error) has just occurred.
+
+!     10        Illegal call of Director procedure DRESUME, specifying
+!               resumption of a computation when a contingency has not in
+!               fact occurred.
+
+!     11        A processor stack-switch has failed to occur, perhaps
+!               when a call of Director procedure DRESUME has specified
+!               (through parameter LNB) a segment which is not the normal
+!               or other nominated stack segment.
+
+!     12        Illegal call of Director procedure DASYNC INH to despatch
+!               (accept) a queued asynchronous contingency, either when
+!               no contingency is queued, or before the subsystem
+!               contingency-handling procedure has indicated, through a
+!               suitable call of Director procedure DRESUME, that it is
+!               able to accept further contingency notifications.
+
+!     13        An "emergency stop" command has been sent to the process
+!               Director from the machine Operator console.  This REASON
+!               for stopping may be printed in addition to one of the
+!               above-specified stopping messages when certain of the
+!               above failures occur during processing using the
+!               subsystem-nominated processor stack segment.  In this
+!               case the message printed previously specifies the true
+!               reason for stopping.
+
+!     14        A "stop" command has been sent from the Operator console
+!               or from DIRECT as part of the System automatic close-down
+!               sequence, or from the interactive communications system
+!               following line or network-processor failure.
+
+!     21        Called from procedure FAIL in DIRECTOR
+
+!     22        Called from procedure DIRECTOR, various unlikely failures
+!               at start up.
+
+!     24        Called from procedure RECOVER2, CBT full.
+
+!     98        Process DIRECT has restarted more than twice.
+!>
+
+%integer seg, j, stakad, findad, nfd, savekey, async dest
+
+%integer reason
+
+%string (30) full
+%string (255) fname
+%string (18) index
+%record (parmf) p, q
+%record (parmf) %name pp
+%record (ctf) %name ct
+%switch entry(0:3)
+%record (hf) %name nh
+%record (ff) %name f
+%record (fdf) %array %name fds
+%record (fdf) %name fd
+%integer gpindad
+%integer k, l
+%string (14) logmap
+
+   *mc_12(0),0
+   i(0)=99
+   j=into(256+7, "I")
+   reason = i(0)  { put into local because of dmagclaim call }
+
+   %if d_session pence>0 %and d_ownind#0 %start
+      j=funds(gpindad, d_ownind) {!!!! GPINDAD can be rubbish !!!!}
+      j=j-d_session pence
+      j=0 %if j<0
+      nh==record(gpindad)
+      nh_inuts=j
+   %finish
+
+   %unless d_page mon=0 %start
+      pp==outp(curcontext)
+      *IPK_0(0)
+      *ST_2,SAVEKEY
+      *SPKA_0(0)
+      pp=0
+      *L_2,SAVEKEY
+      *SPKA_0(2)
+      *MC_20(0),0
+      d_page mon=0
+      wrs("PAGEFAULTS DSTOP")
+   %finish
+
+   %cycle j=0, 1, 2
+      %if d_drs locked(j)_dr0#0 %then k=dunlock(d_drs locked(j)_dr1)
+   %repeat
+
+   j=dmagclaim("", j, 1, 0) %if d_tapes claimed>0
+
+   ->entry(d_dstops)
+entry(0):
+   %unless d_gotsema=0 %start
+      vv(d_semaddrheld, d_semanoheld)
+      wrss(d_semaholder, " had sema at DSTOP")
+   %finish
+   j=ainda("", -1, j) %unless d_saindad=0
+
+! IF CURRENT STACK IS NOT THE NORMAL STACK THEN PON AN XSTOP, TO GET THE DISCONNECTS
+! ETC DONE ON THE NORMAL STACK
+   *ST_11,STAKAD
+   %if stakad>>seg shift#stack seg %start
+      q=0
+      q_dest=((com_async dest+d_process)<<16)!dirdact
+      q_s="XSTOP"
+      q_p6= reason
+      j=douti(q)
+      ->entry(3);                        ! (BUT SHOULD NOT RETURN FROM THE PON)
+   %finish
+   d_dstops=d_dstops+1 %if d_dstops<3
+   d_async inhib=100;                    ! we can't treat async events when files have been disconnected
+! INHIBIT IC INTERRUPTS
+
+   %unless d_procuser="VOLUMS" %orc
+           d_procuser="DIRECT" %orc
+           d_procuser="FCHECK" %orc
+           d_ownind = 0 %c
+   %start {try to delete temp files}
+      findad=d_ownind+512
+      f==record(findad)
+      fds==array(findad+f_fdstart, fdsf)
+      nfd=(f_size<<9-f_fdstart)//fdsize
+      %cycle j=1, 1, nfd
+         fd==fds(j)
+         %if fd_codes&tempfs>0 {a temp file} %and %c
+            fd_dayno=d_invoc {created by this invocation} %and fd_usecount=0 {not connected} %start
+            fname=fd_name
+            %if fd_prefix>0 %then fname=prefixs(d_procuser, d_procfsys, fd_prefix).fname
+            k=ddestroyf(d_procuser, fname, d_procfsys, 1)
+            wrsn("DSTOP destroys ".fname." flag", k)
+         %finish
+      %repeat
+   %finish
+
+   d_hottopn=0;                          ! prevents any further accesses to HOTTOP
+   ! which may be a file
+   d_iupdate init=0;                     ! switch off IUPDATE
+   d_autoday=accts_millisecs {save these for the DSTOP message}
+   d_autoend=accts_aptrns
+   d_ownind=0
+   d_facilitya=0;                        ! ...and procedure counting
+
+   comms closedown
+
+   ! DIVERT ANY FURTHER MSGS TO
+   ! MAINLOG AS WE ARE ABOUT TO
+   ! DISCONNECT DIRLOG
+   %if d_process=1 %start
+      wrs("DSTOP DISCONNECTING")
+      stop feps
+   %finish
+   d_log action=dt!log
+   d_dirlog ad=0
+
+   %if "FCHECK"#d_procuser#"DIRECT" %and uinf_reason=batch %start
+      REASON=(uinf_priority<<24)!(REASON<<8>>8)
+   %finish
+entry(1):
+   dchain(uinfseg, 0)
+   %if d_usecounts=0 %start
+      logmap="VOLUMS".usep."#LOGMAP"
+      seg=lo vss seg
+      %cycle
+         seg=uuinf seg %if seg=hi vss seg+1
+         ct==d_conlist(d_cpoint(seg))
+         full=ct_full
+         %if full->index.(usep).fname %and (d_process#1 %or equal(full, logmap)=no) %start
+            ! We want the logmap file to be (disconnected and) destroyed
+            ! only by a consistency check.
+            %if ct_prefix>0 %then fname=prefixs(index, ct_fsys, ct_prefix).fname
+            j=ddisconnecti(index, fname, ct_fsys, 1)
+            derr2(full, 6, j) %if j#0
+         %finish
+         %exit %if seg=hi d seg
+         seg=seg+1
+      %repeat
+   %finish
+entry(2):
+   %cycle seg=uuinf seg, 1, hi d seg
+      dchain(seg, 0)
+   %repeat
+entry(3):
+   %if d_procuser#"DIRECT" %and d_usecounts=0 %start
+      d_usecounts=1
+      %cycle j=99, -1, 0
+         k=d_fsys usecount(j)
+         %if k>0 %start
+            doper2("Fsys ".itos(j)." usecount".itos(k))
+            %while k>0 %cycle
+               l=fsys use count(j, -1)
+               k=k-1
+            %repeat
+         %finish
+      %repeat
+   %finish
+
+   p=0
+   p_dest=X'FFFF0000'!user stops dact
+   p_p1=d_process
+   j=dpon3i("VOLUMS", p, 0, 1, ponandcontinue) %unless d_procuser="VOLUMS"
+
+   %if d_eot msg id#0 %start
+      ! Cancel Clock Tick message following an EOT (the message to have been
+      ! received on the asynchronous activity to force closedown should the
+      ! process have been unable to terminate normally because it was waiting
+      ! for an event which refused to occur (e.g. an OUT to SPOOLR/MAILER when
+      ! the executive process could   not reply, or an output request which did
+      ! not terminate).
+
+      p_dest=x'000A0001';               ! Timer service, cancel request
+      p_p1=((com_async dest+d_process)<<16)!delayed eot dact
+      p_p2=-1;                          ! means "cancel"
+      j=dponi(p)
+   %finish
+
+   pp==outp(curcontext)
+   *IPK_0(0); *ST_2,SAVEKEY; *SPKA_0(0)
+   pp=0
+   ! DEST is set up by the local controller, which PONs the message
+   pp_p1= {ACCTS_MILLISECS}d_autoday
+   pp_p2=d_invoc
+   string(addr(pp_p3))=d_procuser
+   pp_p5=REASON
+   pp_p6= {ACCTS_APTRNS}d_autoend
+   *L_2,SAVEKEY; *SPKA_0(2)
+
+   %if d_process=1 %start
+      wrs("PROCESS 1 CLOSING DOWN")
+      %cycle l=0, 1, 63;                 ! 4096 CHS TO MAINLOG TO FLUSH IT OUT
+         symbols(64, '*')
+         printsymbol(nl)
+      %repeat
+   %finish
+
+   *MC_0(0),0
+%end;                                    ! DSTOP
+
+
+!-----------------------------------------------------------------------
+
+!<FBASE2
+%external %integer %fn fbase2(%integer fsys, adr)
+
+! This returns the characteristics of an on-line disc in a record
+! of format DISCDATAF at address ADR
+!>
+%record (ddtf) %name ddt
+%record (propf) %name prop
+%integer j, entad, hibit, type, k
+%record (discdataf) %name data
+%const %integer toptype= 7
+%const %integer %array bitsize(1:top type)= X'1000'(2), X'2000'(2), X'5000', X'1000', X'5000'
+%const %integer %array nntstart(1:top type)= X'7000'(4), X'A000', X'7000', X'A000'
+%const %integer %array nntsize(1:top type)= X'4000'(4), X'1FF8', X'4000'(2)
+%const %integer %array nnttop(1:top type)= 1364(4), 681, 1364(2)
+%const %integer %array nnthash(1:top type)= 1361(4), 667, 1361(2)
+%const %byte %array indexstart(1:top type)= 12(4), 14, 12, 14
+%const %integer %array filestart(1:top type)= 1024(5), 32, 1024
+%const %integer %array hi(1:top type)= X'3F1F', X'59F3', X'8F6F',
+                  X'B3E7', X'24797', X'20CF', X'2068D'
+   j=ddt entry(entad, fsys)
+   ->out %unless j=0
+
+   ddt==record(entad)
+   prop==record(ddt_propaddr)
+   hibit=prop_tot pages-1
+   type=-1
+   %cycle k=top type, -1, 1
+      type=k %and %exit %if hibit=hi(k)
+   %repeat
+   j=8 %and ->out %if type<0
+
+   data==record(adr)
+
+   data_start=ddt_base
+   data_bitsize=bitsize(type)
+   data_nntstart=nntstart(type)
+   data_nntsize=nntsize(type)
+   data_nnttop=nnttop(type)
+   data_nnthash=nnthash(type)
+   data_indexstart=index start(type)
+   data_filestart=file start(type)
+   data_end=((hibit+1)&(-32))-1
+out:
+   %result=j
+%end;                                    ! FBASE2
+
+!-----------------------------------------------------------------------
+
+!<DFSYSDATA
+%external %integer %fn d fsys data(%integer %name fsys, %integer %array %name data)
+!>
+%integer j
+   j=into(17, "I")
+   ->out %unless j=0
+
+   j=fbase2(i(0) {FSYS}, addr(data(0)))
+out:
+   %result=outof(j)
+%end;                                    ! DFSYSDATA
+
+!-----------------------------------------------------------------------
+
+!<GETAVFSYS
+
+
+%external %integer %fn d av fsys(%integer %name xn, %integer %array %name a)
+
+! This procedure supplies the numbers of the disc-packs currently
+! on-line.  Array A, which should be declared (0:99), is filled from
+! A(0), A(1), .....  with as many numbers as there are on-line EMAS
+! disc-packs, and N is set to the number of entries returned.
+! By on-line we mean that the disk must be
+!     - mounted
+!     - consistency checked (CCK'd)
+!     - not closing
+! The IPL disc is always placed first in the list.
+!>
+%integer j
+%integer %array la(0:99)
+
+   j=into(88, "K")
+   ->out %unless j=0
+
+   get av fsys2(0, i(0) {N}, la)
+
+   ->out %unless i(0) {N}>0
+   j=45 %and ->out %unless val(addr(a(0)), 4*i(0) {N}, 1, d_dcallers psr)=0
+
+   move(i(0) {N}<<2, addr(la(0)), addr(a(0)))
+out:
+   %result=outof(j)
+%end;                                    ! D AV FSYS
+
+
+!-----------------------------------------------------------------------
+
+%routine monitor connect(%stringname index, file, txt)
+
+%integer j, new, seg, gap, k, t, conad, findad
+%integer ltext, atext, over, last
+%string(255)text
+%constinteger msizekb = 64
+%recordformat hf(%integer end, start, size, type)
+%record(hf)%name h
+%record(ff)%name f
+
+%routine write to file(%string(255) txt)
+   text = "DT: ".date." ".time." ".d_procuser." ".txt.snl
+   ltext = length(text)
+   atext = addr(text) + 1
+
+   gap = h_start - h_end  { how far from 'end' to 'start' }
+   gap = h_size - h_end + h_start - 32 %if gap < 0
+   %if ltext >= gap %then over = yes %else over = no
+
+   gap = h_size - h_end
+   %if gap < ltext %start
+      %if gap > 0 %start
+         move(gap, atext, conad+h_end)
+         atext = atext + gap
+         ltext = ltext - gap
+      %finish
+      h_end = 32
+   %finish
+
+   move(ltext, atext, conad+h_end)
+   h_end = h_end + ltext
+   h_end = 32 %if h_end = h_size
+
+   %if over = yes %start
+      last = 0
+      h_start = h_end + 256
+      %cycle
+         h_start = h_start + 1
+         h_start = 32 %if h_start >= h_size
+         %exit %if last = nl
+         last = byteinteger(conad + h_start)
+      %repeat
+   %finish
+%end; ! write to file
+
+   seg = 0; gap = 0
+   j = dconnecti(index, file, -1, (1<<30) ! 11, seg, gap)
+   %return %unless j = 0
+
+   j = map file index(index, -1, findad, "Mon con")
+   -> dis %unless j = 0
+   f == record(findad)
+
+   { now have it connected shared write and semaphored }
+   conad = seg << segshift
+   h == record(conad)
+   write to file(txt)
+   vv(addr(f_sema), f_semano)
+dis:
+   j = ddisconnecti(index, file, -1, 0)
+%end; ! monitor connect
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn depmonitor(%string %name xentry, xfile)
+
+%integer j
+%string (31) index
+%record(dircomf)%name dircom
+
+   j=into(31, "SS")
+   ->out %unless j=0
+
+   j=8
+   ->out %unless s(1) {file}->index.(usep).s(1)
+
+   j = 0
+   %if index = "SUBSYS" %start
+      dircom == record(sysad(dircomkey, -1))
+      -> out %if dircom_i0 < 1
+   %finish
+
+   ->out %if length(s(0)) > 200
+   monitor connect(index, s(1), s(0))
+out:
+   %result=outof(j)
+%end;                                    ! depmonitor
+
+!-----------------------------------------------------------------------
+
+%end %of %file

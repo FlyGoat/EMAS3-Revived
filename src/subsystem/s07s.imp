@@ -1,0 +1,4323 @@
+! S07 I/O
+
+%end %oflist
+%include "SUBARC:SSOWNF3"
+   %list
+!
+!***********************************************************************
+!*                                                                     *
+!*                              Constants                              *
+!*                                                                     *
+!***********************************************************************
+
+! THESE CODES ARE ARBITARY BUT THE TOP DECIMAL DIGIT GIVES THE NO OF BYTES
+! IN THE UNIT OF ADDRESSABILITY. BYTE ADDRESSES HOSTS BEING 1N AND
+! 16 BIT WORD ADDRESSED HOSTS BEING 2N ETC
+%const %integer emas=10
+%const %integer ibm=11
+%const %integer ibmxa=12
+%const %integer amdahl=14
+
+%const %integer lintavail= 1<<amdahl ! 1<<ibm ! 1<<ibmxa ! 1<<emas
+%const %integer llrealavail= 1<<amdahl ! 1<<ibm ! 1<<ibmxa ! 1<<emas
+%const %integer target=amdahl
+
+%const %long %real imax=2147483647;      ! MAX INTEGER FOR 32 BIT WORD
+%const %long %real pmax= 1@16
+   %if 1<<target&llrealavail#0 %start
+   %const %long %long %real ten=10.0,tenth=r'4019999999999999009999999999999a'
+   %else
+   %const %long %real ten=10.0,tenth=r'401999999999999a'
+   %finish
+
+%const %integer margin1=16000
+%const %long %real dz=0
+%const %integer ebcdicbit=X'20'
+%const %integer ring needed= 64
+%const %integer k128= X'20000'
+%const %integer k16= X'4000'
+%const %integer k4= X'1000'
+%const %integer k64= X'10000'
+%const %integer segsize= 1 << seg shift
+%const %integer auinf= uinf seg << seg shift
+%const %integer mtclosemode= 8;          ! FULL UNLOAD BY DEFAULT
+%const %integer algolin= 2;              !DEFAULT INPUT STREAM FOR ALGOL
+%const %integer algolout= 1;             !DEFAULT OUTPUT STREAM FOR ALGOL
+%const %integer em= 25
+%const %integer cr= 13
+%const %integer np= 12
+%const %integer optext=1
+%const %integer sspermjournalsize= X'10000'
+%const %integer sstempjournalsize= X'10000'
+%const %real timefactor= 1000.0;         ! SECONDS = DCPUTIME/TIMEFACTOR.
+
+%const %string (4) itfilename= "T#IT"
+%const %string (5) sstempjname= "T#JN"
+
+%const %string (1) shortstem= "$"
+!
+!***********************************************************************
+!*                                                                     *
+!*                           Record formats                            *
+!*                                                                     *
+!***********************************************************************
+
+%record %format pf(%integer dest, srce, (%integer p1, p2, p3, p4, p5, p6 %or %string (23) s))
+
+%record %format dahf(%integer dataend, datastart, size, filetype, date, time, format, records)
+
+!***********************************************************************
+!*                                                                     *
+!*             DIRECTOR Routine/fn/map spec                            *
+!*                                                                     *
+!***********************************************************************
+
+%external %integer %fn %spec scarce %alias "s#scarce"
+%routine %spec mstop(%string (255) text, %integer n)
+%external %routine %spec batchstop %alias "s#batchstop"(%integer reason)
+%external %routine %spec emas3(%string %name com, par, %integer %name flag)
+%external %integer %fn %spec dclearintmessage
+%external %integer %fn %spec dconnect(%string %name fileindex, file, %integer %name fsys, mode,
+   seg, gap)
+%external %integer %fn %spec dcputime
+%external %integer %fn %spec ddisableterminalstream(%integer %name cursor, stream, mode)
+%external %integer %fn %spec denableterminalstream(%integer %name stream, mode, level, address,
+   len, cursor)
+%external %integer %fn %spec dmessage(%string %name user, %integer %name len, act, invoc, fsys,
+   adr)
+%external %integer %fn %spec requestinput(%integer t, ad)
+%external %integer %fn %spec requestoutput(%integer t, ad)
+%external %integer %fn %spec doper(%string %name text)
+%external %integer %fn %spec doperprompt(%string %name prompt)
+%external %integer %fn %spec dpoff(%record (pf) %name p)
+%external %integer %fn %spec dstop(%integer %name r)
+%external %integer %fn %spec dsfi(%string %name fileindex, %integer %name fsys, type, set,
+   %string %name s, %integer %array %name i)
+%external %integer %fn %spec dmode(%integer %name set, adr, comd)
+!
+!***********************************************************************
+!*                                                                     *
+!*               External/internal routine/fn/map specs                *
+!*                                                                     *
+!***********************************************************************
+!
+!
+%externalroutinespec adjustloadlevel %alias "s#adjustloadlevel"(%integer p)
+%external %routine %spec psysmess %alias "s#psysmess"(%string (255) caller, %integer flag)
+%external %routine %spec scanfile %alias "s#scanfile"(%integer %name start, end, wkad, line,
+   level, type)
+%external %string %fn %spec translateshortname %alias "s#translateshortname"(%string %name short,
+   %integer mode)
+! %external %integer %fn %spec findfn %alias "s#findfn"(%string %name curfile, %integer fsys)
+%external %string %fn %spec ucstring %alias "s#ucstring"(%string (255) s)
+%external %integer %fn %spec existtype %alias "S#EXISTTYPE"(%string (255) file)
+%external %routine %spec disposeheap %alias "S#DISPOSEHEAP"(%integer adr)
+%external %routine %spec uctranslate %alias "S#UCTRANSLATE"(%integer addr, len)
+
+%external %integer %fn %spec startswith %alias "s#startswith"(%string %name a, %string (255) b,
+   %integer chop)
+%integer %fn %spec stoi(%string (255) s, %integer %name i)
+%external %routine %spec shout %alias "s#shout"(%string (255) s)
+%external %routine %spec ssenter %alias "s#ssenter"(%string %name s, %integer %name i,
+   %string %name t)
+%external %routine %spec ssexit %alias "s#ssexit"(%string %name s, %integer %name i,
+   %string %name t)
+%external %routine %spec finfo %alias "s#finfo"(%string (255) file, %integer mode,
+   %record (frf) %name fr, %integer %name flag)
+%external %routine %spec printfd %alias "s#printfd"(%integer afd, mode)
+%external %routine %spec relink %alias "s#relink"(%record (conff) %name cur, %integer newlevel)
+%external %routine %spec monparams %alias "S#MONPARAMS"(%string (255) s)
+%external %routine %spec changeaccess %alias "s#changeaccess"(%string (255) file, %integer mode,
+   %integer %name flag)
+%external %routine %spec set conlevel %alias "s#setconlevel"(%string (255) file,
+   %integer conlevel, %integer %name flag)
+%external %integer %fn %spec checkname %alias "s#checkname"(%string %name name,
+   %integer %name type, qualifier)
+%external %integer %fn %spec devcode %alias "S#DEVCODE"(%string (16) s)
+%external %integer %fn %spec dirtoss %alias "S#DIRTOSS"(%integer flag)
+!%routine %spec ADDTOJOBOUTPUT(%integer START, LEN, %integer %name FLAG)
+%external %routine %spec changefilesize %alias "S#CHANGEFILESIZE"(%string (255) file,
+   %integer newsize, %integer %name flag)
+%external %routine %spec destroy %alias "S#DESTROY"(%string (255) file, %integer %name flag)
+%external %routine %spec disconnect %alias "S#DISCONNECT"(%string (255) file, %integer %name flag)
+
+%external %routine %spec halt %alias "S#HALT"
+
+
+%external %routine %spec magio %alias "S#MAGIO"(%integer fdad, op, %integer %name f)
+%external %routine %spec meter %alias "emas#meter"
+
+%external %routine %spec sendfile2 %alias "S#SENDFILE2"(%string (255) file, %string (16) device,
+   %string (31) name, %integer copies, forms, %integer %name flag)
+%routine %spec set io default(%integer io, chan, dummy)
+%routine %spec tidyfiles(%integer selectflag)
+%external %routine %spec trim %alias "s#trim"(%string (255) file, %integer %name flag)
+%external %string %fn %spec next temp %alias "S#NEXTTEMP"
+%external %string %fn %spec substring %alias "S#SUBSTRING"(%string %name s, %integer i, j)
+%external %string %fn %spec htos %alias "s#htos"(%integer val, pls)
+
+%external %integer %fn %spec findchan %alias "S#FINDCHAN"(%string (255) chan, %integer %name pos)
+%integer %fn %spec close(%integer channel)
+%external %integer %fn %spec getheap %alias "s#getheap"(%integer bytes)
+%integer %fn %spec iocp(%integer ep, parm)
+%external %integer %fn %spec open %alias "S#OPEN"(%integer afd, mode)
+%external %integer %fn %spec pageturns %alias "s#pageturns"
+%external %routine %spec allow interrupts %alias "S#ALLOWINTERRUPTS"
+%external %routine %spec connect %alias "S#CONNECT"(%string (255) file, %integer mode, nhole,
+   nprot, %integer %name fconad, ffiletype, fdatastart, fdataend, flag)
+%routine %spec console(%integer ep, %integer %name p1, p2)
+%external %routine %spec extend %alias "S#EXTEND"(%record (fdf) %name r, %integer %name f)
+%routine %spec initjournal
+%external %routine %spec move %alias "S#MOVE"(%integer nlength, nfrom, nto)
+%external %routine %spec outfile %alias "S#OUTFILE"(%string (255) file, %integer size, hole,
+   prot, %integer %name conad, flag)
+%external %routine %spec setreturncode %alias "S#setreturncode"(%integer flag)
+%external %routine %spec setssinhibit %alias "S#SETSSINHIBIT"
+%external %routine %spec emas3signal %alias "EMAS3SIGNAL"(%integer %name class, subclass)
+%string %fn %spec slprintfl(%long %long %real r, %integer n)
+%routine %spec tojournal(%integer a, l)
+!
+%external %string %fn %spec itos %alias "s#itos"(%integer n)
+%external %integer %fn %spec instream %alias "s#instream"
+%external %string %fn %spec failuremessage %alias "s#failuremessage"(%integer flag)
+!
+%integer %fn %spec closei(%integer chan, clear)
+%routine %spec stoj (%string(255)s)
+!
+!***********************************************************************
+!*                                                                     *
+!*                         End of declarations                         *
+!*                                                                     *
+!***********************************************************************
+!
+
+
+%external %routine printline %alias "s#printline"(%string (255) s)
+
+   printstring(s)
+   newline
+%end;                                    ! printline
+
+!-----------------------------------------------------------------------
+
+%routine adjust conf defines(%string (255) iden, %integer inc)
+%integer j, pos
+%record (conff) %name cur
+
+!printstring("Adj for ".iden." inc=".itos(inc))
+   %if startswith(iden, shortstem, 1)=yes %start
+      %if iden->iden.("_") %start; %finish
+      j = stoi(iden, pos)
+!printline("stoi on ".iden." gives ".itos(j)) %unless j = 0
+      cur == record(ssown_conf(pos))
+      %if inc<0 %start
+         %if cur_defines=0 %then printline("No defines on ".cur_file) %else %c
+            cur_defines = cur_defines-1
+      %finish %else cur_defines = cur_defines+1
+!printstring(" done")
+   %finish
+!newline
+%end;                                    ! adjust conf defines
+
+!-----------------------------------------------------------------------
+
+%external %string %fn translate prompt %alias "s#translateprompt"(%integer type)
+%external %integer %fn %spec mexpr %alias "s#jobspaceexpression"(%string %name line,
+   %record (job spacevarf) %name v)
+%external %string %fn %spec mvtos %alias "s#jobspacevtos"(%record (job spacevarf) %name v)
+
+%integer j
+%string (255) s
+%record (job spacevarf) v
+
+! monparams(">jr*ptype=".itos(ssown_prompttype)." pt=\".ssown_prompttext."\ cp=\".ssown_commandprompt."\") %if ssown_ssnote = 97
+   %if type=0 %start
+      s = ssown_prompt text
+   %else
+      s = ssown_command prompt
+   %finish
+
+   %if ssown_prompt type&2>0 { a command prompt has been set } %and (type=1 %or %c
+      ssown_prompt type&1>0) %start
+      j = mexpr(s, v)
+      %if j=0 %start
+         s = mvtos(v)
+         s = "
+".s %if s="" %or charno(s, 1)#nl
+      %else
+         %if type=0 %then s = ssown_prompt text %else s = ssown_command prompt
+         ssown_prompt type = ssown_prompt type&1 { don't waste time }
+         { trying to evaluate again }
+      %finish
+   %finish
+
+   %result = s
+%end;                                    ! translate prompt
+
+!-----------------------------------------------------------------------
+
+%external %routine wrsn %alias "s#wrsn"(%string (255) s, %integer n)
+
+   printstring(s)
+   write(n, 1)
+   newline
+%end;                                    ! wrsn
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn iocp %alias "S#IOCP"(%integer ep, parm)
+%const %integer maxep= 28
+%switch sw(0:maxep)
+   %const %byte %integer %array chtosym(0:127)= %c
+   0(9), 1(2) {TAB, NL}, 0(21), 1(95), 0
+%integer c, flag, len, top, res, i, from, to, fourdots count, j, k
+%integer chad, pos, start, col, ch, max, cur, end, next, arad
+   %const %byte %array trtab(0:255)=0(10), 10, 0(16), 27, 0(228)
+%integer saveoutdsnum, domonitor
+%record (fdf) %name inf, outf
+%integer from0, len0
+%const %integer can monitor= X'B710000'
+
+%routine %spec pecho
+%routine %spec putoutput
+%routine %spec selectinout(%integer chan, ioroute)
+
+   do monitor = no
+   res = -1
+   ->out %unless 0<ep<=maxep
+!   %if monitoring possible=yes %and can monitor&(1<<ep)>0 %and %c
+!      ssown_ssnote&8>0=ssown_ssnote&1 %then do monitor = yes %and monparams(">jrjr")
+
+   j = ssown_lastep;                     ! For EP 11
+   ssown_lastep = ep
+   ->sw(ep)
+
+sw(11):
+   res = j
+   ->out
+
+
+!--------------------------------- CHARACTER INPUT CALLS -----------------------
+
+!WRITE-UP OF IOCP (READSYMBOL/READCH/PRINTSYMBOL/PRINTCH) ON
+!EMAS 2900 AND EMAS-3                                                   NOV 85
+!
+!
+!              EMAS 2900                        EMAS-3
+!
+!
+!READSYMBOL    Delivers characters 10,26,       Delivers characters 10,32-126
+!              32-126 only;                     only; IGNORES all control
+!              that is, IGNORES all             characters except 10; for
+!              control characters except        values 128-255, strips top
+!              10 and 26, and all values        bit and treats exactly as
+!              greater than 126                 values 0-127.
+!
+!              At EOF, gives signal.            At true EOF, or Ctrl-Y from
+!                                               terminal, gives signal. EM in
+!                                               file ignored.
+!
+!
+!READCH        Delivers all byte values         Delivers all byte values
+!              unchanged.                       unchanged.
+!
+!              At EOF, gives 25(EM) then        At true EOF, gives 25(EM) then
+!              signal at subsequent call.       signal at subsequent call.
+!                                               EM in file passed up as char
+!                                               value 25. No signal at
+!                                               subsequent call.
+
+! In all cases, after EM in file or Ctrl-Y from terminal, next read(ch or sym)
+! delivers the following character.  The necessity for a call of IOCP(12, ) is
+! removed, and the call is now null.
+
+!-------------------------------------------------------------------------------
+
+! Now here is a summary of what's implemented (differs slightly in area of Ctrl-Y
+! from terminal using READCH/NEXTCH, but the following definitions seem  sensible)
+
+! ACTIONS FOR VARIOUS DATA BYTES:
+!-----------------------+----------------------------+--------------------------
+!                       |          CH                |           SYM (See note below)
+!-----------------------+----------------------------+---------------------------------------------------
+! Data from FILE        |                            |                                                   FILE
+!                       |                            |
+!  printable chars      |  deliver the char          |  deliver the char
+!  plus NL plus TAB     |                            |
+!  ---------------------+----------------------------+--------------------------
+!  EM char              |  deliver the char          |  ignore the char
+!  ---------------------+----------------------------+--------------------------
+!  All other chars      |  deliver the char          |  ignore the char
+!  ---------------------+----------------------------+--------------------------
+!  At EOF               |  deliver EM; signal @next  |  Signal input ended
+!-----------------------+----------------------------+--------------------------
+
+!-----------------------+----------------------------+---------------------------------------------------
+! Data from TERMINAL    |                            |                                                   TERMINAL
+!                       |                            |
+!  printable chars      |  deliver the char          |  deliver the char
+!  plus NL plus TAB     |                            |
+!  ---------------------+----------------------------+--------------------------
+!  CTRL-Y               |  deliver EM                |  Signal input ended
+!  ---------------------+----------------------------+--------------------------
+!  All other chars      |  deliver the char          |  ignore the char
+!-----------------------+----------------------------+--------------------------
+
+
+!  Note on SYMBOL inputs:  BEFORE the above action(s) are taken, the top bit
+!                          (if present) is removed from the data byte.
+
+sw(1):                                   ! READSYMBOL
+sw(2):                                   ! NEXTSYMBOL
+sw(4):                                   ! READCH
+sw(18):                                  ! NEXTCH
+
+   { observe that the '2' bit is set only for 2 and 18 }
+
+   inf == ssown_inf
+   %if inf_accessroute=10 {.NULL} %or inf_curstate=7 %then %start
+      ssown_ssfname = itos(instream)
+      emas3signal(140, 0)
+   %finish
+
+   %cycle
+      chad = inf_cur
+      %if inf_cur<inf_end %start
+         res = byteinteger(inf_cur)
+         %if res=27 %and ssown_fourdots=2 %start
+            monparams("=*fourdots trigger") %if ssown_ssnote&4>0
+            set io default(0, -90, 0)
+            select input(0)
+            inf == ssown_inf
+            ssown_fourdots = 1
+            %continue
+         %finish
+
+         %if ep<4 {read/next symbol} %start
+            res = res&127
+            %if chtosym(res)=0 %start
+               inf_cur = inf_cur+1
+               %if res=em %and inf_accessroute=9 {console} %then %start
+                  ssown_ssfname = itos(instream)
+                  emas3signal(140, 1)
+               %finish
+               %continue
+            %finish
+         %finish
+
+         %if ep&2=0 {ep=1 %or ep=4} %then inf_cur = inf_cur+1
+         %exit
+      %finish %else %if inf_cur=inf_end %start
+         %if inf_accessroute=9 {console} %start
+            %if ssown_ssmp ctl1&1#0 %and ssown_ssmp ctl2>0 %start
+               i = ssown_ssmp ctl2; j = addr(start); k = addr(len)
+               *l_2, i; *l_0, j; *l_1, k; *stm_4, 1, 16(11); *lm_12, 14, 0(2); *basr_15, 14
+            %else
+               console(1, start, len)
+            %finish
+            inf_cur = start
+            inf_currec = start
+            inf_end = start+len
+         %finish %else %start
+            ! File.  End of available data (not just an EM within data).
+            inf_curstate = 7
+            %if ep<4 %then %start
+               ssown_ssfname = itos(instream)
+               emas3signal(140, 2);      ! Give Input Ended for Read/Next SYMBOL
+            %finish
+            res = em
+            %exit
+         %finish
+      %finish
+   %repeat
+
+   ! if echo is ON and this is a new input line and input is from .IN then echo line to .OUT
+
+   %if inf_dsnum=ssown_indefault %start
+!printline("Sym read is X".htos(res,2)." dataecho=".itos(ssown_dataecho)." ptype=".itos(ssown_prompttype)) %if ssown_ssowner="ERCC04"
+      %if (ssown_dataecho>0 %and (ssown_dataecho=2 %or ssown_prompttype&1>0)) %start
+!          printline("Chad=".htos(chad,8).",Inf=".htos(inf_currec,8).",Ech=".htos(ssown_commandechoed,8)) %if ssown_ssowner="ERCC04"
+         pecho %if chad=inf_currec#ssown_command echoed
+      %finish
+   %finish
+
+   inf_currec = inf_cur %if res=nl %and ep&2=0 { ep=1 or ep=4 }
+   %result = res
+
+
+!  Spec for IOCP ep 28
+!
+!        This entry point is modelled on READCH, broadly speaking, rather than READSYMBOL.
+!        Characters are delivered without modification, up to but not including
+!        the next NEWLINE character.  [If NEWLINE is not found within 256 bytes
+!        those 256 characters are delivered as though they were a "line"].
+!        The RESULT of the function call equals the number of bytes returned
+!        (i.e. without the NEWLINE character).
+!
+!        End-of-file, when reading from a FILE, is indicated by giving RESULT -1.
+!        If a further call of IOCP 28 is made, after the -1 RESULT is given , then
+!        an input-ended SIGNAL is given.
+!
+!        Ctrl-Y from the terminal returns (always) a single character EM (value 10_25)
+!        and RESULT=1 (i.e. a "line" comprising the EM character).  No SIGNAL is given.
+
+
+sw(28):                                  ! READLINE
+
+   ! PARM should be set with address for data from the current input stream.
+   ! Data are moved to that address up to but not including the next newline.
+   ! RESULT is set to number of bytes presented.  Zero for a null line, -1 at EOF.
+   ! (Signal 140 on FURTHER call after the EOF indication).
+   arad = addr(trtab(0))
+   %cycle
+      four dots count = ssown_fourdots-2
+      inf == ssown_inf
+      cur = inf_cur
+      end = inf_end
+      %cycle
+         %if cur<end %start
+            len = end-cur
+            len = 256 %if len>256
+            *l_3, cur
+            *l_2, len
+            *bctr_2, 0
+            *l_1, arad
+            *ex_2, <trt>
+            !  CC = 0   if NL not found
+            *bc_8, <notfound>
+            !  R1 points to the NL, R2 contains the character
+            *la_0, 27
+            *cr_2, 0
+            *bc_7, <notem>
+            *l_0, fourdotscount
+            *ltr_0, 0
+            *bc_8, <emandfourdots>
+notem:
+            *st_1, next
+            *sr_1, 3
+            !  R1 contains number of bytes excluding NL
+            *st_1, res
+            *ltr_1, 1
+            *bc_8, <emptyline>
+            *bctr_1, 0
+            *l_2, parm {"To-address"}
+            *ex_1, <mvc>
+            inf_cur = next+1
+            inf_currec = inf_cur
+            %result = res
+         %else
+notfound:
+            %if cur>=end %start
+               %if inf_accessroute=9 {interactive terminal} %start
+
+                  %if ssown_ssmp ctl1&1#0 %and ssown_ssmp ctl2>0 %start
+                     i = ssown_ssmp ctl2; j = addr(cur); k = addr(len)
+                     *l_2, i; *l_0, j; *l_1, k; *stm_4, 1, 16(11); *lm_12, 14, 0(2)
+                     *basr_15, 14
+                  %else
+                     console(1, cur, len)
+                  %finish
+
+                  inf_currec = cur
+                  end = cur+len
+                  inf_end = end
+                  %continue
+               %finish
+               %if inf_curstate=7 %then %start
+                  ssown_ssfname = itos(instream)
+                  emas3signal(140, 0)
+               %finish
+               inf_curstate = 7
+               %result = -1
+            %else
+               ! CUR < END.  This means that the last character is not NL.
+               ! Provide what data we can and continue.  Presumably
+               ! it's EOF without a newline, or a "line" longer than 256 characters
+               *l_2, parm {"To-address"}
+               *l_3, cur
+               *l_1, len
+               *bctr_1, 0
+               *ex_1, <mvc>
+               inf_cur = cur+len
+               %result = len
+            %finish
+         %finish
+      %repeat
+emandfourdots:
+      set io default(0, -90, 0)
+      select input(0)
+      ssown_fourdots = 1
+   %repeat
+trt: *trt_0(0, 3), 0(1)
+mvc: *mvc_0(0, 2), 0(3)
+emptyline:
+   inf_cur = cur+1
+   %result = 0
+
+!---------------------------- CHARACTER OUTPUT ---------------------------------
+
+sw(6):
+   selectoutput(0)
+   printline("IOCP entry number 6 is WITHDRAWN !!")
+   ->out
+
+! Notes on how OUTPUT has been re-coded, March 86.  All the output routines used
+! to inspect every character, looking for NL, so that F_CURREC could be maintained
+! pointing to the start of the current line so that OUTPOS could give the column
+! position (which it did wrongly if non-printable chars were present anyway).
+! Now we just put all the characters into the file or buffer, and merely inspect
+! the last one to see if we should send output to the terminal (nothing to  do
+! anyway if file).  In a long output request we might have had included newlines
+! and the output wouldn't get sent if the final char were not newline.  But this
+! hardly matters, as a newline is sure to be sent before long in that case.
+! OUTPOS now does all the work on request (working out the column position).
+! It will only work for terminal output provided PUTOUTPUT has not been called
+! since the last newline char, because all interactive output first goes to an
+! intermediate buffer (ssown_outbuf()), and this gets cleared at every CONSOLE(2,..
+! So these entries have been coded accordingly.  Note that CONSOLE(2,.. RETURNS
+! a START position, and requires only LENGTH (last param) as input.
+
+sw(3):                                   !PRINTSYMBOL
+sw(5):                                   !PRINTCH
+   outf == ssown_outf
+   %if outf_accessroute=10 {.NULL} %then ->resultzero
+   %if outf_cur>=outf_end %then putoutput
+   byteinteger(outf_cur) <- parm
+   outf_cur = outf_cur+1
+   %if ssown_graphmode>0 %or parm=nl %or parm=np %start; !DEAL WITH NEWLINE/NEWPAGE
+      %if outf_accessroute=9 %start
+         len = outf_cur-outf_currec
+         console(2, outf_cur, len)
+         outf_end = outf_cur+len
+      %finish
+      outf_currec = outf_cur;            !POINT CURREC TO START OF NEW LINE
+   %finish
+   ->resultzero
+
+sw(7):                                   !PRINTSTRING
+sw(15):                                  !RESPONSIBLE PRINTSTRING
+   from = parm+1;                        !FIRST BYTE OF DATA
+   len = byteinteger(parm)
+   ->sw15a
+
+sw(19):                                  !LONG OUTPUT REQUEST
+sw(23):                                  !DITTO
+   from = integer(parm+4)
+   len = integer(parm)<<8>>8
+
+sw15a:
+   from0 = from
+   len0 = len
+   outf == ssown_outf
+   %if outf_accessroute=10 {.NULL} %then ->resultzero
+   %while len>0 %cycle
+      max = outf_end-outf_cur
+      %if max<=0 %then putoutput %else %start
+         to = outf_cur
+         %if len>max %start
+            ! move(max, from, ssown_outf_cur)
+            *l_0, to
+            *l_2, from
+            *l_1, max
+            *lr_3, 1
+            *mvcl_0, 2;                  ! It has to work
+            outf_cur = outf_cur+max
+            putoutput
+            from = from+max
+            len = len-max
+         %else
+            ! move(len, from, ssown_outf_cur)
+            *l_0, to
+            *l_2, from
+            *l_1, len
+            *lr_3, 1
+            *mvcl_0, 2
+            outf_cur = outf_cur+len
+            len = 0
+         %finish
+      %finish
+   %repeat
+   %if outf_accessroute=9 {console} %start
+      ! We are not looking at every character and we don't want to PUT OUTPUT
+      ! after every bit of printstring.
+      ! PUTOUTPUT if most recent char is NL
+      %if (outf_cur#outf_currec %and byteinteger(outf_cur-1)=nl) %or ssown_graphmode>0 %then %c
+         putoutput
+   %finish
+
+   ->resultzero
+
+
+sw(17):                                  ! Print N copies of Char
+
+   outf == ssown_outf
+   %if outf_accessroute#10 {.NULL} %and parm>0 %start
+      len = (parm>>8)&255
+      j = parm<<25>>1;                   ! The character ANDed to 7 bits and <<24
+      %while len>0 %cycle
+         max = outf_end-outf_cur
+         %if max<=0 %then putoutput %else %start
+            to = outf_cur
+            %if len>max %start
+               *l_0, to
+               *lr_2, 0
+               *l_1, max
+               *l_3, j
+               *mvcl_0, 2;               ! It has to work
+               outf_cur = outf_cur+max
+               putoutput
+               from = from+max
+               len = len-max
+            %else
+               *l_0, to
+               *lr_2, 0
+               *l_1, len
+               *l_3, j
+               *mvcl_0, 2
+               outf_cur = outf_cur+len
+               len = 0
+            %finish
+         %finish
+      %repeat
+      putoutput %if (outf_accessroute=9 {console} %and parm&127=nl) %or ssown_graphmode>0
+   %finish
+   ->resultzero
+
+
+!------------------------------- SELECT CALLS ----------------------------------
+
+sw(21):                                  !ALGOL SELECTIN
+
+   %if parm=algolin %start
+      j = findchan(itos(algolin), pos)
+      %if j#0 {not found} %then parm = 0
+      ! CHANNEL (ALGOLIN) NOT DEFINED  - USE DEFAULT
+   %finish
+
+sw(8):                                   !IMP SELECTINPUT
+   selectinout(parm, 1) %if parm=0 %or parm#ssown_sscomreg(22); !SELECTIN
+   ->resultzero
+
+sw(22):                                  !ALGOL SELECTOUT
+
+   %if parm=algolout %start
+      j = findchan(itos(algolout), pos)
+      %if j#0 {not found} %then parm = 0
+      !CHANNEL(ALGOLOUT) NOT DEFINED - USE DEFAULT OUTPUT STREAM
+   %finish
+
+sw(9):                                   !IMP SELECTOUTPUT
+   selectinout(parm, 2) %if parm=0 %or parm#ssown_sscomreg(23); !SELECTOUT
+   ->resultzero
+
+sw(10):                                  !ISOCARD
+   %while ssown_inf_cur#ssown_inf_currec %cycle
+      c = iocp(4, 0)
+   %repeat
+   !SKIP REST OF CURRENT RECORD
+   top = parm+79;                        !ADDR OF LAST BYTE IN CARD ARRAY
+   %for i = parm, 1, top %cycle
+      c = iocp(4, 0)
+      %if c=nl %start;                   !SHORT LINE
+         %for i = i, 1, top %cycle
+            byteinteger(i) = ' '
+         %repeat
+         ->resultzero
+      %finish
+      byteinteger(i) = c
+   %repeat
+   c = iocp(4, 0) %until c=nl;           !SKIP TILL NEWLINE
+   ->resultzero
+
+
+sw(16):                                  !CLOSESTREAM(PARM)
+   flag = close(parm)
+   ->resultzero
+
+sw(20):                                  !INPOS AND OUTPOS
+
+   %if parm=0 %then %result = ssown_inf_cur-ssown_inf_currec; ! INPOS
+
+
+   ! For OUTPUT we propose to do better on EMAS-3 (than we used to do on 2900).  The previous
+   ! algorithm was simply OUTF_CUR - OUTF_CURREC, which took no account of characters
+   ! like CR, BS Newpage etc.  For a file (and for the terminal if the interactive
+   ! buffer has not just been filled), we go back to OUTF_CURREC and work
+   ! out the current column position.  For the terminal following a push of a full
+   ! buffer, the CURREC field has gone to zero, and OUTPUT will simply be
+   ! incorrect.  This is evidently not serious.  Occurrs only for "line" lenths
+   ! greater than 133
+
+   ! OUTPOS
+   ! Work out true column position.  CURREC may not be up-to-date, because
+   ! embedded NLs etc in long printstrings are not noticed and CURREC is updated
+   ! only when CONSOLE(2, or PUTOUTPUT is called.  But CURREC will always point
+   ! to the start of a line (except for interactive output when a line longer
+   ! than 133 chars has been sent - OUTPOS will not work in that case (it never
+   ! has, but could be improved if necessary), even if it is not the latest line
+   ! of output.
+
+sw(27):
+   ! New (6/86) for S01: deliver non-zero if anything (even non-printable) is left in the output buffer
+
+   outf == ssown_outf
+   %if outf_cur=outf_currec %then res = 0 %else %if ep=27 %then res = 1 %else %start
+      j = outf_cur
+      %while j>outf_currec %cycle
+         ch = byteinteger(j-1)
+         %if ch=nl %or ch=np %then %exit
+         j = j-1
+      %repeat
+      ! J now points to the char after the most recent NL or NP or to CURREC
+
+      res = 0
+      %while j<outf_cur %cycle
+         ch = byteinteger(j)
+         %if chtosym(ch&127)#0 %then res = res+1 %else %if ch=8 {backspace} %then %c
+            res = res-1 %else %if ch=cr %then res = 0
+         j = j+1
+      %repeat
+   %finish
+
+   ->out
+
+sw(24):                                  !OVER-WRITE LAST OUTPUT CHAR WITH PARM
+   %if ssown_outf_accessroute=8 %start;  !ONLY OUTPUT TO FILE
+      %if ssown_outf_cur>ssown_outf_conad+integer(ssown_outf_conad+4) %start
+         !NOT AT START OF FILE
+         byteinteger(ssown_outf_cur-1) <- parm; !PARM TO OVERWRITE LAST CHARACTER
+      %finish
+   %finish
+   ->resultzero
+
+sw(25):                                  !TERMINATE CURRENT LINE - ONLY MEANINGFUL ON INTERACTIVE TERMINAL
+   outf == ssown_outf
+   %if outf_accessroute=9 %start
+      putoutput
+      i = 0;                             ! Don't await reply from REQUEST OUTPUT.
+      console(9, i, i)
+   %finish
+
+resultzero:
+   res = 0
+sw(*):
+out:
+   monparams("<*".itos(res)) %if do monitor=yes
+   %result = res
+
+!-------------------------------------------------------------------------------
+
+%routine pecho
+%integer len, adr, j
+%string (255) text
+
+   ssown_command echoed = inf_currec
+   i = inf_currec
+   %if i=inf_end %then %return
+   %cycle
+      !  %until end of available data or end of line.
+      !  PRINTSYMBOL(BYTEINTEGER(I)) - not necessary if we are going to use IOCP 23
+      %if i=inf_end-1 %or byteinteger(i)=nl %then %exit
+      i = i+1
+   %repeat
+   adr = inf_currec
+   {******} %return %if byteinteger(adr)=' '
+   len = i-inf_currec+1
+
+   %if len>0 %start
+      %if ssown_outf_dsnum=ssown_outdefault %then saveoutdsnum = -1 %else %start
+         saveoutdsnum = ssown_outf_dsnum
+         selectoutput(0)
+      %finish
+
+!%if ssown_ssowner = "ERCC04" %start
+!   text = "Pecho(".htos(inf_currec,8)." )len=".itos(len)
+!   j=len-1; j=4 %if j>4
+!   %cycle i=0,1,j
+!      text=text." ".htos(byteinteger(inf_currec+i),2)
+!   %repeat
+!   text=text.":"
+!   i = iocp(7, addr(text))
+!%finish
+
+      text = translate prompt(0)
+      i = iocp(7, addr(text));           ! PRINTSTRING(SSOWN_PROMPTTEXT)
+
+      i = iocp(23, addr(len))
+      %if saveoutdsnum>0 %then selectoutput(saveoutdsnum)
+   %finish
+%end;                                    ! of PECHO.
+
+!-----------------------------------------------------------------------
+
+%routine putoutput
+%integer start, len, flag
+   %if outf_accessroute=8 %start;        ! CHAR FILE
+      extend(outf, flag)
+      %if flag#0 %start
+
+! printstring("dsnum=".itos(outf_dsnum).", reason=".itos(ssown_ssreason).", olevel=".itos(ssown_obeylevel).snl)
+         %if outf_dsnum=-91 %and ssown_ssreason=batchreason %start
+            printstring(snl.snl."   ***   No more space for output   ***".snl)
+            %monitor
+            batchstop(-3);               !dont print reason again
+         %else
+            %if ssown_obeylevel#0 %start; !{and dsnum=-91?}
+!               set io default(0,-90,0)
+!               selectinput(0)
+               inf == ssown_inf
+               inf_cur = inf_end
+               set io default(1, -91, 0)
+               selectoutput(0)
+!                  tidyup after obey
+               printstring(snl.snl."OBEY fails - no more room for output".snl)
+!                  %stop
+            %finish
+         %finish
+         set io default(1, -91, 0) { to get get diags on terminal rather than into the }
+         select output(0) { full file which leads to signal fail 3 for command > file }
+         emas3signal(136, 0);            ! signal output exceeded
+      %finish
+   %finish %else %if outf_accessroute=9 %start
+      !TERMINAL
+      len = outf_cur-outf_currec
+      console(2, start, len);            !SEND OUTPUT TO TERMINAL
+      outf_cur = start
+      outf_currec = start
+      outf_end = outf_cur+len
+   %finish %else %if outf_accessroute=10 %start
+      outf_cur = outf_conad+32;          !RESET TO START OF FILE
+      outf_currec = outf_cur
+   %finish
+%end;                                    ! of PUTOUTPUT
+
+!-----------------------------------------------------------------------
+
+%routine selectinout(%integer chan, ioroute)
+   ! Parameter ioroute must be 1 (input) or 2 (output)
+%const %integer input=1, output=2
+%integer loop
+%integer afd, flag, reqchan, far, nxc, j, pos, special1, special2, aotheriof
+%integer %name default
+%record (fchanf) %name cur
+%record (fdf) %name f
+%string (255) wk
+
+   loop = 0
+   flag = 0
+   reqchan = chan;                       !INITIALLY REQUESTED CHAN
+   nxc = reqchan
+   %if ioroute=input %start
+      special1 = -98
+      special2 = 0
+      aotheriof = addr(ssown_outf)
+      default == ssown_indefault
+   %else
+      special1 = -99
+      special2 = 99
+      aotheriof = addr(ssown_inf)
+      default == ssown_outdefault
+   %finish
+
+   %cycle
+      chan = nxc
+
+      %if chan=0 %or chan=special1 %or chan=special2 %then chan = default
+
+      %if-91<=chan<=-90 %start
+         j = 0
+         pos = ssown_pos(chan)
+      %else
+         j = findchan(itos(chan), pos)
+      %finish
+      %if j#0 %then flag = 151 %else %start
+         cur == record(ssown_chan(pos))
+         afd = cur_afd
+         f == record(afd)
+         far = f_accessroute
+         %if far=ioroute %then nxc = default %else %if far=3-ioroute %then flag = 266 %else %c
+            nxc = f_asvar
+      %finish
+      %exit %if flag#0 %or ioroute#far#6
+
+      loop = loop+1
+      %continue %if loop<10
+      flag = 999
+      printline("ioroute=".itos(ioroute)." far=".itos(far)." req=".itos(reqchan)." nxc=".itos %c
+         (nxc)." chan=".itos(chan))
+   %repeat
+
+   ! We have now EITHER detected a failure OR got a channel which is NOT .IN and NOT mapped.
+   ! The possible failures are indicated by non-zero values of FLAG, viz.:
+   !  151 - channel not defined
+   !  266 - tried to select .OUT
+
+   %if flag=0 %start
+      %if f_status#0 %start;             ! Already open.
+         %if f_modeofuse#1 %then flag = 266 %else %if f_valid action&ioroute=0 %then %c
+            flag = 171 %else %if far=8 %and addr(f)=aotheriof %then flag = 185
+      %else
+
+         %if ioroute=output %start
+            %if f_accessroute=8 {file} %and 0#existtype(f_iden)#sscharfiletype %start
+               flag = 392 {Attempting to & file of different type}
+            %finish %else %start
+               f_modeofuse = 1
+               flag = open(afd, output)
+               %if flag=0 %and f_modeofuse#1 %then flag = 267 {Invalid filetype}
+               %if flag=0 %then f_curstate = 3; !after write..for NEWFILEOP (SH)
+            %finish
+
+         %else {input}
+
+            flag = open(afd, input)
+            %if flag=0 %start
+               %if f_accessroute#8 %then f_modeofuse = 1 %else %if f_modeofuse#1 %start
+                  flag = 267
+                  ssown_ssfname = translateshortname(f_iden, 0)
+               %finish
+               %if flag=0 %then f_curstate = 2; !after read..for NEWFILEOP (SH)
+            %finish
+
+         %finish {input}
+      %finish
+   %finish
+
+   %if flag=0 %start
+      ssown_sscomreg(21+ioroute) = reqchan
+      %if ioroute=input %then ssown_inf == f %else ssown_outf == f
+   %else
+
+      ! In summary, possible flags are
+      !        151   Channel & not defined
+      !        171   Invalid operation on file
+      !        185   File has conflicting use (English?)
+      !        266   Inconsistent file use
+      !        267   Invalid filetype &
+      !        392   Attempting to & file of different type
+      ! Plus possible failures from OPEN to do with filespace:
+      !        275   File system full
+      !        276   No free descriptors in file index
+      !        280   User individual filesize limit exceeded
+      !        308   User total filespace limit exceeded
+
+      %if flag=151 %then ssown_ssfname = itos(chan) %else %start
+         ssown_ssfname = "Channel = ".itos(chan)."   File = ".translateshortname(f_iden, 0)
+         ssown_ssfname2 = ssown_ssfname %and ssown_ssfname = "write to" %if flag=392
+
+         ! [Special rules invented for strfn FAILUREMESSAGE: ssfname2 used
+         !  instead of ssfname for & if the former is non-null.  And ssfname
+         !  always printed AFTER message (if no & in text) when ssfname
+         !  commences with nl].
+         ! but changed/simplified 18 mar 87
+
+      %finish
+
+      %if chan=-91 %start
+         nxc = doper(ssown_ssowner."Batch job fails - cannot open output file".itos(flag))
+         mstop(itos(flag), 127)
+      %finish
+      %if ioroute=input %or (reqchan#0 %and reqchan#99 %and chan#-99) %then selectoutput(0)
+      ssown_inhibitmessages = 0 { ensure massages not OFF !! }
+      setreturncode(flag)
+      %if flag=275 %or flag=276 %or flag=280 %or flag=308 %then emas3signal(136, flag)
+      ! Output exceeded
+      %monitor
+      ssown_sscomreg(10) = 1
+      %if ssown_ssreason=batchreason %then batchstop(flag)
+      %stop
+   %finish
+%end;                                    ! of SELECTINOUT
+
+%end;                                    ! of IOCP
+
+!-----------------------------------------------------------------------
+
+
+
+%external %integer %fn instream %alias "s#instream"
+!RESULT IS STREAM NO CURRENTLY SELECTED FOR INPUT
+%integer stream
+   stream = ssown_sscomreg(22)
+   %if stream=ssown_indefault %then stream = 0
+   !STANDARD MAPPING
+   %result = stream
+%end;                                    ! of INSTREAM
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn outstream %alias "s#outstream"
+%integer stream
+   stream = ssown_sscomreg(23)
+   %if stream=ssown_outdefault %then stream = 0
+   !STANDARD MAPPING
+   %result = stream
+%end;                                    ! of OUTSTREAM
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn inpos %alias "s#inpos"
+   %result = iocp(20, 0)
+%end;                                    ! inpos
+!
+!-----------------------------------------------------------------------
+!
+%external %integer %fn outpos %alias "s#outpos"
+   %result = iocp(20, 1)
+%end;                                    ! outpos
+!
+!-----------------------------------------------------------------------
+!
+%external %routine terminate %alias "s#terminate"
+%integer dummy
+   dummy = iocp(25, 0)
+%end;                                    ! of TERMINATE
+!
+!-----------------------------------------------------------------------
+!
+%external %string %fn interrupt %alias "s#interrupt"
+   !IF THERE IS AN OUTSTANDING
+   ! MULTI-CHARACTER TERMINAL
+   ! INTERRUPT IT
+   !RETURNS IT AND CLEARS IT-
+   ! OTHERWISE RETURNS NULL STRING
+%integer flag
+%string (15) res
+   %if ssown_ttype#2 %then res = "" {NO MULTI-CHAR INTS FROM OPER} %else %start
+      res = ssown_iostat_intmess
+      %if res#"" %then flag = dclearintmessage
+   %finish
+   %result = res
+%end;                                    ! of INTERRUPT
+
+!-----------------------------------------------------------------------
+
+%external %routine prompt %alias "s#prompt"(%string (255) s)
+   %if ssown_erte process=yes %then s = s."|"
+   ssown_prompttext <- s
+   ssown_prompt type = ssown_prompt type&(-2) { clear bottom bit }
+%end;                                    ! of PROMPT
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn isatty %alias "S#ISATTY"(%integer chan)
+%integer flag, pos
+%record (fchanf) %name cur
+%record (fdf) %name f
+%string (255) schan
+   ! specials -1 (.in), -2(.out) added SH, 24-Oct-88
+   %if chan=-1 %then chan=ssown_indefault %elsec
+      %if chan=-2 %then chan=ssown_outdefault
+   schan = itos(chan)
+   flag = findchan(schan, pos)
+   %if flag=0 {Found} %start
+      cur == record(ssown_chan(pos))
+      f == record(cur_afd)
+      %if f_accessroute=9 %or f_accessroute=1 %or f_accessroute=2 %then %c
+         %result = 1 {interactive terminal}
+   %finish
+   %result = 0 {not a TTY}
+%end;                                    ! of ISATTY
+
+!----------------------------------------- SSMP CTL -----------------------------------------
+
+! Use of the four SSMP control words in SSOWN
+!
+!    SSMP CTL(1)     Bits controlling entry to routines pointed to by words 2 and 3, as follows
+!                                    Action when SET
+!                    2**0   1        divert input calls to SSMP input routine
+!                    2**1   2        divert output calls to SSMP output routine
+!                    2**2   4        suppress output of the prompt string
+!                    2**31           set on entry to NDIAG,  so that the SSMP session can be
+!                                    stopped before diagnostics are printed.
+!                    The whole word is cleared on return to command level.
+!    SSMP CTL(2)     Pointer to entry-point four-words for SSMP input routine
+!    SSMP CTL(3)     Pointer to entry-point four-words for SSMP output routine
+!    SSMP CTL(4)
+
+%external %integer %map ssmp ctl %alias "S#SSMPCTL"(%integer i)
+   %if 0<i<=3 %then i = addr(ssown_ssmp ctl1)+(i-1)<<2 %else i = 0
+   %result == integer(i)
+%end;                                    ! ssmp ctl
+
+!----------------------------------------- SSMP BITS -----------------------------------------
+
+%external %routine ssmp bits %alias "S#SSMPBITS"(%integer p1, %integer %name bits)
+! P1  =  0    Clear the bits in SSMP CTL1 corresponding to set bits in BITS
+!             returning in BITS the original value of SSMP CTL1
+!        1    Restore SSMP CTL1 to value BITS (BITS is set to the original value of SSMP CTL1)
+!        2    Set the bits in SSMP CTL1 corresponding to set bits in BITS
+!             returning in BITS the original value of SSMP CTL1
+%integer save
+   save = ssown_ssmp ctl1
+   %if p1=0 %start
+      ssown_ssmp ctl1 = ssown_ssmp ctl1&(\bits)
+   %finish %else %if p1=1 %start
+      ssown_ssmp ctl1 = bits
+   %finish %else %if p1=2 %start
+      ssown_ssmp ctl1 = ssown_ssmp ctl1!bits
+   %finish
+   bits = save
+%end;                                    ! ssmp bits
+
+%external %routine console %alias "S#CONSOLE"(%integer ep, %integer %name start, len)
+%const %integer maxep= 18
+%const %integer opbin= X'21'
+%switch sw(1:maxep)
+%integer i, flag, opmessagelen, j, k
+%string (255) s
+%string (11) pistr, uistr, tistr
+%byte %integer %array area(0:3)
+
+%routine %spec opmess(%string (255) s)
+%routine %spec getoper
+%routine %spec getfep
+%routine %spec initfep
+%integer %fn %spec rqout(%integer pos, trig)
+%routine %spec outfep(%integer from, len)
+%routine %spec kill output
+
+
+   %unless 1<=ep<=maxep %then ->err;     !IGNORE INVALID EPS
+   ->sw(ep)
+
+sw(1):                                   !GET INPUT
+   ! Obtains input, setting START to point to first byte and LEN to number of bytes provided
+   ssown_sstthide = 0
+   %if ssown_ttype=0 %then getoper
+   %if ssown_ttype=2 %then getfep
+   s = translate prompt(0)
+   tojournal(addr(s)+1, length(s));      !PROMPT TO JOURNAL FILE
+   tojournal(start, len);                !INPUT TO JOURNAL FILE
+   ->err
+
+sw(2):                                   !PUT OUTPUT
+   ! Sends LEN bytes from the start address given in previous call of this entry
+   ! Sets START to point to an area for further output and LEN to its maximum length
+   %if len>0 %start
+      %if len>1 %and ssown_outbuff(len)=nl %start
+         ! REMOVE TRAILING SPACES UNLESS ONLY A NEWLINE OR NOT ENDING WITH NL
+         %for i = len-1, -1, 1 %cycle;   !LOCATE  LAST PRINTABLE CHAR ON LINE
+            %if ssown_outbuff(i)#' ' %then %exit
+         %repeat
+         !I NOW POINTS TO HIGHEST PRINTABLE CHARACTER
+         %if i=1 %and ssown_outbuff(1)=' ' %then i = 0; !AMBIGUOUS VALUE
+         len = i+1
+         ssown_outbuff(len) = nl
+      %finish
+
+      i = 0
+      %if ssown_ttype=2 %start;          ! OUTFEP CAN TAKE ALL 73 CHAS
+         %if ssown_ssmp ctl1&2#0 %and ssown_ssmp ctl3>0 %start
+            i = ssown_ssmp ctl3; j = addr(ssown_outbuff(1)); k = len; start = j
+            len = 133
+            ssown_outf_cur = start; ssown_outf_currec = start; ssown_outf_end = start+len
+            *l_2, i; *l_0, j; *l_1, k; *stm_4, 1, 16(11); *lm_12, 14, 0(2); *basr_15, 14
+         %else
+            outfep(addr(ssown_outbuff(1)), len)
+         %finish
+      %finish %else %if len>1 %start;    ! ALWAYS IGNORE BLANK LINES TO OPER
+         ssown_outbuff(0) = len
+         opmess(string(addr(ssown_outbuff(0))))
+      %finish
+   %finish
+
+   start = addr(ssown_outbuff(1));       !START OF OUTPUT BUFFER
+   len = 133;                            !MAX LENGTH OF BUFFER
+   ->err
+
+sw(4):                                   !SELECT OPER
+   ssown_aitbuffer = getheap(64)
+   ssown_it == record(ssown_aitbuffer)
+   ssown_it = 0
+   initjournal
+   ->err
+
+sw(5):                                   !SELECT FEP
+   initfep
+   ->err
+
+sw(6):                                   !PRINT OPERATOR MESSAGE
+   ->err %unless ssown_ttype=2;          !EITHER USING OPER CONSOLE OR NOT YET CONNECTED TO FEP OR BATCH JOB
+
+   %if start#0 %start;                   !BROADCAST MESSAGE
+      %if ssown_bopmessstart=0 %then ssown_bopmessstart = start; !NONE OUTSTANDING
+      ssown_bopmesslen = ssown_bopmesslen+len
+   %finish
+   ssown_it_omwaiting = 1;               !broadcast to do
+   ssown_inttombusy = ssown_inttombusy+1; !semaphore
+   %if ssown_inttombusy#1 %or ssown_inhibitmessages&1 {operator}#0 %or %c
+      ssown_it_outbusy#0 %then %start
+      ssown_inttombusy = ssown_inttombusy-1; !reset semaphore
+      ->err
+   %finish
+
+!*    ->err %if ssown_inhibitmessages#0;    !TEMPORARY INHIBIT
+!*    %if ssown_it_outbusy#0 %start
+!*       ssown_it_omwaiting = 1
+!*       ->err
+!*    %finish
+   ssown_it_omwaiting = 0;               !STRAIGHT AWAY TO AVOID RACE WITH INT:T
+
+%begin
+%record %format fhdrf(%integer next free byte, txt rel st, max bytes, zero, sema, date,
+   next cyclic, read to)
+%record (fhdrf) %name h1
+%integer conseg, gap, available, mout, lep, la1p, la2p
+%byte %integer %array operbuff(0:2001)
+%routine xnl(%integer %name l)
+%integer i, c, p
+   %if operbuff(l)=nl %then l = l-1
+   %if 0<l<=72 %start
+      c = 0
+      %for i = 1, 1, l %cycle
+         %if operbuff(i)=nl %start
+            p = i
+            c = c+1
+         %finish
+      %repeat
+      %if c=1 %then operbuff(p) = ' '
+   %finish
+%end;                                    ! of XNL
+
+!-----------------------------------------------------------------------
+
+   mout = 0
+   operbuff(0) = nl
+   %if ssown_bopmessstart#0 %start;      !BROADCAST MESSAGE WAITING
+      %if ssown_broadcastfilebase=0 %start; !NOT YET CONNECTED
+         conseg = 0
+         gap = 0
+         !NOTE USE OF DCONNECT HERE BECAUSE OTHERWISE WE
+         !MAY INTERRUPT A CONNECT SEQUENCE FOR ANOTHER FILE.
+         !THIS TEMPORARY ARRANGEMENT IS TO BE IMPROVED.
+         ! (There would be no advantage in CONNECTing for sequential access).
+         flag = dconnect("VOLUMS", "BROADCAST", -1, 9, conseg, gap)
+         %if flag=0 %then ssown_broadcastfilebase = conseg<<segshift
+      %finish
+      %if ssown_broadcastfilebase#0 %start
+         h1 == record(ssown_broadcastfilebase)
+         %if ssown_bopmesslen>=0 %then available = ssown_bopmesslen %else %start
+            available = h1_max bytes-ssown_bopmessstart
+            ssown_bopmesslen = ssown_bopmesslen+h1_max bytes-h1_txt rel st
+         %finish
+         la1p = ssown_broadcastfilebase+ssown_bopmessstart
+         la2p = addr(operbuff(1))
+         move(available, la1p, la2p)
+         lep = ssown_bopmesslen-available
+         la1p = ssown_broadcastfilebase+h1_txt rel st
+         la2p = la2p+available
+         move(lep, la1p, la2p)
+         xnl(ssown_bopmesslen)
+         outfep(addr(operbuff(0)), ssown_bopmesslen+1)
+         mout = 1
+      %finish
+   %finish
+   ssown_bopmessstart = 0
+   ssown_bopmesslen = 0
+   %cycle
+      opmessagelen = 2000;               !MAXIMUM SPACE FOR MESSAGE
+      flag = dmessage(ssown_ssowner, opmessagelen, 0, 0, ssown_ssownfsys, addr(operbuff(1)))
+      %if opmessagelen=0 %or flag#0 %then %exit
+      !NO MESSAGE LEFT OR FAILURE
+      xnl(opmessagelen)
+      %for i = 1, 1, opmessagelen %cycle
+         %if operbuff(i)=27 {ESC} %then operbuff(i) = ' '; !to avoid sabotage
+      %repeat
+      outfep(addr(operbuff(0)), opmessagelen+1)
+      mout = 1
+   %repeat
+   %if mout#0 %then outfep(addr(operbuff(0)), 1)
+%end;                                    ! of BEGIN-END BLOCK
+
+!-----------------------------------------------------------------------
+
+freeinttom:                              !free inttom semaphore
+   ssown_inttombusy = 0
+   start = 0
+   len = 0
+   %if ssown_it_omwaiting#0 %then ->sw(6)
+   %if ssown_it_inttwaiting#0 %then ->sw(12)
+   ->err
+
+sw(7):                                   !KILL OUTPUT
+   kill output
+   ->err
+
+sw(8):                                   !KILL INPUT
+   ->err %unless ssown_ttype=2;          !ONLY IF USING FEP
+   ssown_it_inpointer = ssown_iostat_inpos
+   ->err
+
+sw(9):                                   !FORCE OUT OUTSTANDING OUTPUT
+   ->err %unless ssown_ttype=2 %and ssown_it_outpointer#0; !NO CONSOLE
+   %if start=0 %then i = -1 %else i = ssown_it_outpointer-1
+   ! That decides whether to await reply from REQUESTOUTPUT or not.
+   flag = rqout(ssown_it_outpointer, i); !PUT OUT ALL CURRENT OUTPUT
+   ->err
+
+sw(10):                                  !DIRECT OUTPUT CALL FOR GRAPHICS
+   ->err %unless ssown_ttype=2;          !MUST BE OUTPUTING TO TELETYPE
+   outfep(start, len)
+   ->err
+
+sw(11):                                  !TEST IF ANY OUTSTANDING INPUT
+   %if ssown_ttype#2 %or ssown_iostat_inpos#ssown_it_inpointer %then start = 1 {yes} %else %c
+      start = 0 {no}
+   ->err
+
+sw(12):                                  !INT:T
+   ->err %unless ssown_ttype=2;          !NOT FROM I.T.
+   ssown_it_inttwaiting = 1
+   ssown_inttombusy = ssown_inttombusy+1; !semaphore
+   %if ssown_inttombusy#1 %or ssown_it_outbusy#0 %or ssown_inhibitmessages&2 {intt}#0 %start
+      ssown_inttombusy = ssown_inttombusy-1; !reset
+      ->err
+   %finish
+
+   !* %if ssown_it_outbusy#0 %start
+   !*    ssown_it_inttwaiting = 1
+   !*    ->err
+   !* %finish
+
+   ssown_it_inttwaiting = 0;             !STRAIGHT AWAY - TO AVOID A RACE WITH OPER MESSAGE
+   i = int((dcputime-ssown_olddcpu)/timefactor)
+   tistr = itos(i)
+   i = pageturns-ssown_oldpageturns
+   pistr = itos(i)
+   i = com_users-uinf_top exec
+   uistr = itos(i)
+   s = "
+T=".tistr." PT=".pistr." U=".uistr
+   !**FUNDSSTART
+   %if funds on#0 %start
+      %if scarce=1 %start
+         ! INTERACTIVE USERS >= SCARCE LIMIT
+         s = s." **Resources are Scarce."
+      %finish
+   %finish
+   !**FUNDSEND
+   s = s."
+"
+   outfep(addr(s)+1, length(s))
+   ->freeinttom
+
+sw(13):                                  !GET BUFFER AND IOSTAT  ADDRESSES
+!   %if ssown_ttype=2 %and ssown_inf_accessroute=9=ssown_outf_accessroute %start
+!      ! ONLY IF RUNNING FROM INTERACTIVE TERMINAL
+!      ! AND BOTH CURRENT STREAMS POINT TO TERMINAL
+      start = ssown_aitbuffer
+      len = ssown_aiostat
+!   %else
+!      start = 0
+!   %finish
+   ->err
+
+sw(14):                                  !RESET SSOWN_IT_JNBASE
+   %if ssown_aitbuffer#0 %then ssown_it_jnbase = imod(ssown_it_jnbase)
+   ->err
+
+sw(15):                                  ! SETMODE REQUEST - no longer supported.
+   ->err
+
+sw(16):                                  ! Output request, new style
+   outfep(start, len) %if len>0
+   ->err
+
+sw(17):                                  ! NEW SETMODE REQUEST - no longer supported.
+   ->err
+
+sw(18):                                  !SELECT INPUT MODE
+   ->err %unless ssown_ttype=2
+   %if start=1 %then i = 0 {Ctrl-A -> Int:A etc} %else i = 1 {NO ACTION on Ctrl-A etc}
+   ->err %if start=ssown_fepmode
+
+   area(0) = 2
+   area(1) = 254
+   area(2) = i
+   flag = dmode(3 {do not wait for any response}, addr(area(0)), 0)
+!   %if ssown_ssowner = "ERCC04" %c
+!   %then stoj("dmode(3, ".itos(i).") flag=".itos(flag))
+   ssown_fepmode = start
+
+!  flag = ddisableterminalstream(0, 0, 4)
+!  %if flag#0 %then flag = dstop(114)
+!
+!  flag = denableterminalstream(0, i, 0, ssown_it_inbase, ssown_it_inlength, 0)
+!  %if flag#0 %then flag = dstop(116)
+
+!  ssown_it_inpointer = 0
+
+sw(*):
+err:
+   %return
+
+
+%routine opmess(%string (255) s)
+%integer r
+   tojournal(addr(s)+1, length(s));      !OUTPUT TO JOURNAL FILE
+   r = doper(s)
+%end;                                    ! of OPMESS
+!
+!-----------------------------------------------------------------------
+!
+%routine getoper
+   !GET INPUT FROM OPER CONSOLE
+%record (pf) p
+%string %name in
+%byte %integer %name last
+%integer res
+%string (255) s, a, b
+
+   in == string(addr(ssown_inbuff(0)))
+   in = "";                              !CLEAR IT OUT
+   s = translateprompt(0)
+   s = a.b %while s->a.("
+").b
+!   %if ssown_prompttext=commandprompt %then ssown_prompttext = "Command:"
+   !NO NEWLINES ALLOWED IN OPER PROMPTS
+   res = doperprompt(s)
+   %cycle
+      res = dpoff(p)
+      in = in.p_s
+      last == byteinteger(addr(in)+length(in))
+      %if last=133 %then last = 10;      !MAP TO IMP NEWLINE
+      %exit %if last=nl
+   %repeat
+   start = addr(ssown_inbuff(1));        !START OF INPUT TEXT
+   len = ssown_inbuff(0);                !LENGTH OF INPUT TEXT
+%end;                                    ! of GETOPER
+!
+!-----------------------------------------------------------------------
+!
+%routine initfep
+%string (255) fname
+%integer flag, isize, eight
+%record (reportf) conrec
+%record (frf) inforec
+   !CREATE INPUT AND OUTPUT
+   %if ssown_itinlength<320 %then ssown_itinlength = 1024
+   %if ssown_itoutlength<1024 %then ssown_itoutlength = 3072
+   ssown_iostat == record(ssown_aiostat); !MAP OWN RECORD FOR INPUT STATUS BUFFER FILES
+   flag = 0
+   eight = 8
+   isize = ssown_itinlength+ssown_itoutlength
+   fname = itfilename
+   outfile(fname, isize, flag, eight, ssown_aitbuffer, flag)
+   %if flag#0 %then mstop(itos(flag), 107); ! Cannot create i/o buffer file
+
+   ssown_it == record(ssown_aitbuffer);  !MAP CONTROL RECORD ONTO START OF BUFFER
+   ssown_it = 0;                         !CLEAR RECORD
+   ssown_it_inlength = ssown_itinlength-64; !LEAVE ROOM FOR THE CONTROL RECORD
+   ssown_it_outlength = ssown_itoutlength
+   ssown_it_inbase = ssown_aitbuffer+64; !LENGTH OF CONTROL RECORD
+   ssown_it_outbase = ssown_it_inbase+ssown_it_inlength
+   ssown_it_lastfree = ssown_it_outlength; !for "free" in 1st call of outfep
+   !NOW ENABLE  THE STREAMS
+   flag = denableterminalstream(0, 1, 0, ssown_it_inbase, ssown_it_inlength, 0)
+   %if flag#0 %then mstop(itos(flag), 109)
+   flag = denableterminalstream(1, opbin, 0, ssown_it_outbase, ssown_it_outlength, 0)
+   %if flag#0 %then mstop(itos(flag), 110)
+   initjournal
+   ssown_ttype = 2
+%end;                                    ! of INITFEP
+!
+!-----------------------------------------------------------------------
+!
+%routine prompttobuffer(%integer start, len, %integer %name pos)
+   !PUTS DATA INTO OUTPUT BUFFER WRAPPING AROUND IF REQUIRED
+   !POS RETURNS THE POSITION OF THE NEXT FREE BYTE IN THE BUFFER
+%integer toad, toadlim, ch, pt, outbase
+   %if len<=0 %start
+      pos = ssown_it_outpointer
+      %return
+   %finish
+
+   outbase = ssown_it_outbase
+   toad = outbase+ssown_it_outpointer
+   toadlim = outbase+ssown_it_outlength-1
+   pt = start
+
+   %while len>0 %cycle
+      ! Move next character to buffer.  But if character is NL, put CR in first
+      ch = byteinteger(pt)
+      %if ch=nl %start
+         byteinteger(toad) = cr
+         %if toad=toadlim %then toad = outbase %else toad = toad+1
+      %finish
+      byteinteger(toad) = ch
+      %if toad=toadlim %then toad = outbase %else toad = toad+1
+      len = len-1
+      pt = pt+1
+   %repeat
+   pos = toad- {SSOWN_IT_}outbase
+   ssown_lastch in outfep = ' ' { ie not nl/cr }
+%end;                                    ! of PROMPTTOBUFFER
+%routine getfep
+%integer i, inpos, pos, flag
+%string (255) text
+%byte %integer %name ch
+
+
+   ssown_curlines out = 0
+   %cycle
+      %if ssown_iostat_inpos=ssown_it_inpointer %start
+         !NO INPUT IN BUFFER
+         ! SSOWN_IT_OUTBUSY = 1;                !DONT PRINT OPER MESSAGE WHILE WAITING FOR INPUT
+         ! **** **** We think that last line could come out **** ****
+         ! **** **** when the TCP s/w is modified.          **** ****
+         %if ssown_ssmp ctl1&4=0 %start
+            text = translate prompt(0)
+            prompttobuffer(addr(text)+1, length(text), ssown_it_outpointer)
+            pos = ssown_it_outpointer
+            flag = rqout(pos, -1)
+         %finish %else pos = ssown_it_outpointer
+         {this value not relevant, except that it must be reasonable!}
+
+         ssown_ssttact = 1
+         flag = requestinput(pos, ssown_it_inpointer)
+         ssown_ssttact = 0
+         !GET INPUT CALL
+         %if flag#0 %then mstop(itos(flag), 111)
+      %finish
+      start = ssown_it_inbase+ssown_it_inpointer
+      inpos = ssown_iostat_inpos;        !MUST FREEZE IT IN LOCAL
+      ! VARIABLE TO AVOID CONFUSION
+      ! IF IT CHANGES
+      %if inpos>ssown_it_inpointer %start
+         !USE ALL INPUT - NO WRAPROUND
+         len = inpos-ssown_it_inpointer
+      %else;                             !WRAP AROUND SO ONLY USE PART
+         ! TO END OF BUFFER
+         len = ssown_it_inlength-ssown_it_inpointer
+      %finish
+   %repeat %until len>0
+   i = 0
+   %cycle
+      ! **** What follows is a "scan for NL" and it would be
+      ! **** quicker in machine code.
+      ! ONLY RETURN ONE LINE AT A TIME
+
+      ch == byteinteger(start+i); i = i+1
+      ch = ch&ssown_parity mask
+      ch = nl %if ch&127=cr %and ssown_nocrtrans=0
+      %if ch=nl %start { reached end of line }
+         len = i
+         ssown_outfep linecount = ssown_outfep linecount+1
+      %finish
+      %exit %if i=len
+   %repeat
+
+   ssown_it_inpointer = start+i-ssown_it_inbase
+   %if ssown_it_inpointer=ssown_it_inlength %then ssown_it_inpointer = 0
+   ssown_it_outbusy = 0
+   ! **** **** The final two statements of this routine **** ****
+   ! **** **** can lead to the whole of OUTFEP being    **** ****
+   ! **** **** executed without any protection from     **** ****
+   ! **** **** asynchronous interrupts arriving.  If a  **** ****
+   ! **** **** further INT:T or operator message should **** ****
+   ! **** **** arrive, that could cause trouble.        **** ****
+   flag = 0
+   %if ssown_it_inttwaiting#0 %then console(12, flag, flag)
+   !INT:T WAITING
+   %if ssown_it_omwaiting#0 %then console(6, flag, flag)
+   !PRINT MESSAGE THAT WAS WAITING
+   %return
+
+%end;                                    ! of GETFEP
+
+!-----------------------------------------------------------------------
+
+%integer %fn rqout(%integer address, trigger)
+%integer flag, r
+
+   %if trigger=address %then trigger = -1
+
+   ssown_ssttact = 2
+   r = requestoutput(address, trigger)
+   %if r<0 %then mstop(itos(r), 115)
+   ssown_ssttact = 0
+
+   %if ssown_ssttkn=yes %start
+      console(7, flag, flag);            ! Kill output
+      ssown_ssttkn = no
+   %finish
+
+   %result = r
+%end;                                    ! of RQOUT
+
+%routine outfep(%integer from, len)
+%integer next, lastbyte, ch, inhibit, fract, trigger, free, send, sent
+%record (itf) %name it
+
+   %return %if len<=0
+   it == ssown_it
+   fract = 8;                            ! Data to be sent when FREESPACE < (10*FRACT)/OUTBUFFSIZE
+
+   %if ssown_sstthide=no %start
+      %if ep#10 {graphic} %and ssown_graphmode=0 %then tojournal(from, len)
+      %return %if ssown_suppress terminal output#no
+      it_outbusy = 1
+      lastbyte = from+len-1
+      free = -1;                         ! means freespace needs to be calculated
+
+      %if 6 {opmsg}#ep#12 {Int:T} %then setssinhibit %and inhibit = 1 %else inhibit = 0
+
+      %cycle
+         %if free<0 %start
+            free = it_lastfree-it_outpointer
+            %if free<0 %then free = free+it_outlength
+            free = free-maxpromptsize
+            send = (fract*free)//10;     ! SEND when this no of chars has been placed
+            sent = 0
+         %finish
+
+         ch = byteinteger(from); from = from+1
+         %if ch=nl %start
+
+            %continue %if ssown_lastch in outfep=nl %and ssown_blanklines#0
+
+            %if {nl#}ssown_lastch in outfep#cr %and ep#10 {graphic} %and ssown_graphmode=0 %start
+               ch = cr
+               from = from-1
+               ssown_outfep linecount = ssown_outfep linecount+1
+            %finish
+         %finish
+
+         byteinteger(it_outbase+it_outpointer) = ch
+         next = it_outpointer+1
+         next = 0 %if next>=it_outlength
+         it_outpointer = next
+         sent = sent+1
+
+         %if sent>=send %start
+            ! Work out a suitable trigger.  Let it point to 1/4 of the ITLENGTH
+            ! behind the last byte about to be sent.
+            trigger = it_outpointer-it_outlength>>2
+            trigger = trigger+it_outlength %if trigger<0
+
+            it_lastfree = rqout(it_outpointer, trigger)
+            free = -1;                   ! Re-calculate freespace
+            %exit %if ssown_sstthide=yes; ! Kill output received during the RQOUT routine
+         %finish
+
+         ! Allow interrupts (if locally inhibited) every 32 characters
+         ! In fact, we will not do this, on the grounds that no transfer will
+         ! exceed 130-ish bytes while all CONSOLE output goes via SSOWN_OUTBUF(0:133)
+         ! This leaves a max of 130-ish chars to allow interrupts to get in.
+         ! %if inhibit#0 %and from&31=0 %then allowinterrupts %and setssinhibit
+
+         ssown_lastch in outfep = ch
+      %repeat %until from>lastbyte
+
+      %if ssown_sstthide=no %start
+         it_lastfree = rqout(it_outpointer, -1)
+      %finish
+
+      it_outbusy = 0
+
+      %if inhibit#0 %then allowinterrupts
+   %finish
+
+   ! **** **** The final two statements of this routine **** ****
+   ! **** **** can lead to the whole of OUTFEP being    **** ****
+   ! **** **** executed without any protection from     **** ****
+   ! **** **** asynchronous interrupts arriving.  If a  **** ****
+   ! **** **** further INT:T or operator message should **** ****
+   ! **** **** arrive, that could cause trouble.        **** ****
+   ch = 0
+   %if ssown_it_omwaiting#0 %and ep#6 %then console(6, ch, ch)
+   %if ssown_it_inttwaiting#0 %and ep#12 %then console(12, ch, ch)
+%end;                                    ! of OUTFEP
+
+!-----------------------------------------------------------------------
+
+%routine killoutput
+%integer flag, cursor
+   %return %unless ssown_ttype=2
+   ssown_it_outbusy = 1;                 !TO IGNORE OPER MESSAGES DURING KILL OUTPUT
+   flag = ddisableterminalstream(cursor, 1, 5); !ABORT OUTPUT
+   %if flag#0 %then mstop(itos(flag), 114)
+   flag = denableterminalstream(1,  {SSOWN_FEPMODE}opbin, 0, ssown_it_outbase,
+      ssown_it_outlength, 0)
+   %if flag#0 %then mstop(itos(flag), 116)
+
+   %if ssown_outf_access route=9 %start { to console }
+      ssown_outf_cur = ssown_outf_end;   ! These two lines to force a new
+      ssown_outf_currec = ssown_outf_end; ! call of CONSOLE(2,...
+   %finish
+
+   ssown_it_outpointer = 0
+   ssown_it_lastfree = ssown_it_outlength
+   ssown_it_outbusy = 0;                 !OFF WE GO AGAIN
+%end;                                    ! of KILL OUTPUT
+%end;                                    ! of CONSOLE
+!
+!-----------------------------------------------------------------------
+!
+%external %integer %fn outfep linecount %alias "s#outfeplinecount"
+   %result = ssown_outfep linecount
+%end;                                    ! outfep linecount
+
+!-----------------------------------------------------------------------
+
+%external %routine emas3 set parity mask(%integer %name nmask, nflag)
+%integer mask, flag
+
+   ssenter("", mask, "iriw")
+   %if mask=127 %or mask=255 %then ssown_parity mask = mask %and flag = 0 %else %c
+      flag = 140  { invalid integer }
+   ss exit("", mask, "iriw")
+%end;                                    ! emas3 set parity mask
+
+!-----------------------------------------------------------------------
+
+%external %routine tojournal %alias "S#TOJOURNAL"(%integer from, len)
+%integer hole
+   %return %if addr(ssown_it)=0 %or ssown_it_jnbase<=0 %or len<=0; !NOJOURNAL OR NO TEXT
+   %if len>4096 %then len = 4096;        !TRUNCATE LONG REQUESTS
+   %cycle
+      hole = ssown_it_jnmax-ssown_it_jncur
+      %if len<hole %then hole = len
+      move(hole, from, ssown_it_jncur)
+      len = len-hole
+      %exit %if len=0
+      ssown_it_jncur = ssown_it_jnbase+32
+      from = from+hole
+   %repeat
+   ssown_it_jncur = ssown_it_jncur+hole
+   %if ssown_it_jncur>=ssown_it_jnmax %then ssown_it_jncur = ssown_it_jnbase+32
+   byteinteger(ssown_it_jncur) = 255;    !CURRENT END
+%end;                                    ! of TOJOURNAL
+!
+!-----------------------------------------------------------------------
+!
+%external %routine stoj %alias "s#stoj" (%string(255)s)
+   %unless s = "" %start
+      length(s) = 248 %if length(s) > 248
+      s = "Stoj: " . s . snl
+      tojournal(addr(s)+1, length(s))
+   %finish
+%end; ! stoj
+!
+!---------------------------------------------------
+!
+%external %routine initjournal %alias "S#INITJOURNAL"
+%record (frf) fr
+%record (reportf) rr
+%integer flag, i, jnsize
+%string (11) file
+
+   %return %if ssown_ssjournal=0 %or ssown_aitbuffer=0
+
+   jnsize = ssown_journal pages<<12
+   %if ssown_ssjournal=1 {tempjournal selected} %then file = sstempjname %else file = sspermjname
+
+   %cycle
+      finfo(file, 0, fr, flag)
+      %if flag=218 %or fr_size#jnsize %then %c
+         outfile(file, jnsize, 0, x'18' {adv seq, perm conn}, rr_conad, flag) %else %c
+         connect(file, x'30B' {seq,  permconn, RW}, 0, 0, rr_conad, rr_filetype, rr_datastart,
+         rr_dataend, flag)
+      %exit %if flag=0
+      ->err %if file=sstempjname
+      file = sstempjname
+   %repeat
+
+   integer(rr_conad+12) = 8;             !TYPE = JOURNAL FILE
+   ssown_it_jnbase = rr_conad
+   ssown_it_jnmax = ssown_it_jnbase+jnsize
+   %if integer(ssown_it_jnbase)=0 %start; !LAST SESSION ENDED WITHOUT CLOSING JOURNAL
+      %for i = ssown_it_jnbase+32, 1, ssown_it_jnmax-1 %cycle
+         %if byteinteger(i)=255 %start
+            ssown_it_jncur = i
+            ->endfound
+         %finish
+      %repeat
+      ssown_it_jncur = ssown_it_jnbase+32; ! NO TERMINATOR FOUND
+      byteinteger(ssown_it_jnmax-1) = 0; !SO GETJOURNAL WILL NOT PRODUCE INVALID WRAP AROUND
+   %finish %else ssown_it_jncur = ssown_it_jnbase+integer(ssown_it_jnbase)
+   byte integer(ssown_it_jncur) = 255
+endfound:
+
+   integer(ssown_it_jnbase) = 0;         !TO INDICATE FAILURE DURING SESSION
+err:
+
+%end;                                    ! of INITJOURNAL
+!
+!-----------------------------------------------------------------------
+!
+%external %integer %fn int %alias "S#INT"(%long %real x)
+   %result = intpt(x+0.5)
+%end;                                    ! of INT
+!
+!-----------------------------------------------------------------------
+!
+%integer %fn fix(%long %real x)
+   %result = intpt(x)
+%end;                                    ! of FIX
+!
+!-----------------------------------------------------------------------
+!
+%external %integer %fn intpt %alias "S#INTPT"(%long %real x)
+   %result = fix(x)
+%end;                                    ! of INTPT
+!
+!-----------------------------------------------------------------------
+!
+%const %integer powerll=-78
+! from ibm assembler which claims to evaluate exactly and round to 128 bits
+   %const %long %long %real %array powers(-78:75)= %c
+       {Ten to the -78}           R'001DA48CE468E7C772026520247D3556' ,
+       {Ten to the -77}           R'011286D80EC190DC73617F3416CE4156' ,
+       {Ten to the -76}           R'01B94470938FA89B73CEF808E40E8D5B' ,
+       {Ten to the -75}           R'0273CAC65C39C96174615B058E891859' ,
+       {Ten to the -74}           R'03485EBBF9A41DDC75DCD8E37915AF38' ,
+       {Ten to the -73}           R'042D3B357C0692AA760A078E2BAD8D83' ,
+       {Ten to the -72}           R'051C45016D841BAA774644B8DB4C7872' ,
+       {Ten to the -71}           R'0611AB20E472914A786BEAF3890FCB47' ,
+       {Ten to the -70}           R'06B0AF48EC79ACE878372D835A9DF0C7' ,
+       {Ten to the -69}           R'076E6D8D93CC0C1179227C7218A2B67C' ,
+       {Ten to the -68}           R'084504787C5F878A7AB58DC74F65B20E' ,
+       {Ten to the -67}           R'092B22CB4DBBB4B67BB1789C919F8F49' ,
+       {Ten to the -66}           R'0A1AF5BF109550F27C2EEB61DB03B98D' ,
+       {Ten to the -65}           R'0B10D9976A5D52977D5D531D28E253F8' ,
+       {Ten to the -64}           R'0BA87FEA27A539E97DA53F2398D747B3' ,
+       {Ten to the -63}           R'0C694FF258C744327E0747763F868CD0' ,
+       {Ten to the -62}           R'0D41D1F7777C8A9F7F448CA9E7B41802' ,
+       {Ten to the -61}           R'0E29233AAAADD6A3008AD7EA30D08F01' ,
+       {Ten to the -60}           R'0F19B604AAACA6260136C6F25E825961' ,
+       {Ten to the -59}           R'101011C2EAABE7D702E23C577B1177DD' ,
+       {Ten to the -58}           R'10A0B19D2AB70E6E02D65B6ACEAEAE9D' ,
+       {Ten to the -57}           R'11646F023AB269050345F922C12D2D22' ,
+       {Ten to the -56}           R'123EC56164AF81A3044BBBB5B8BC3C35' ,
+       {Ten to the -55}           R'13273B5CDEEDB106050F55519375A5A1' ,
+       {Ten to the -54}           R'1418851A0B548EA306C99552FC298785' ,
+       {Ten to the -53}           R'14F53304714D926506DFD53DD99F4B30' ,
+       {Ten to the -52}           R'15993FE2C6D07B7F07ABE546A8038EFE' ,
+       {Ten to the -51}           R'165FC7EDBC424D2F08CB6F4C2902395F' ,
+       {Ten to the -50}           R'173BDCF495A9703D09DF258F99A163DB' ,
+       {Ten to the -49}           R'18256A18DD89E6260AAB7779C004DE69' ,
+       {Ten to the -48}           R'1917624F8A762FD80B2B2AAC18030B02' ,
+       {Ten to the -47}           R'19E9D71B689DDE710BAFAAB8F01E6E11' ,
+       {Ten to the -46}           R'1A9226712162AB070C0DCAB3961304CA' ,
+       {Ten to the -45}           R'1B5B5806B4DDAAE40D689EB03DCBE2FF' ,
+       {Ten to the -44}           R'1C391704310A8ACE0EC1632E269F6DDF' ,
+       {Ten to the -43}           R'1D23AE629EA696C10F38DDFCD823A4AB' ,
+       {Ten to the -42}           R'1E164CFDA3281E3810C38ABE071646EB' ,
+       {Ten to the -41}           R'1EDF01E85F912E3710A36B6C46DEC52F' ,
+       {Ten to the -40}           R'1F8B61313BBABCE211C62323AC4B3B3E' ,
+       {Ten to the -39}           R'20571CBEC554B60D12BBD5F64BAF0507' ,
+       {Ten to the -38}           R'213671F73B54F1C8139565B9EF4D6324' ,
+       {Ten to the -37}           R'2222073A8515171D145D5F9435905DF7' ,
+       {Ten to the -36}           R'23154484932D2E72155A5BBCA17A3ABA' ,
+       {Ten to the -35}           R'23D4AD2DBFC3D0771587955E4EC64B45' ,
+       {Ten to the -34}           R'2484EC3C97DA624A16B4BD5AF13BEF0B' ,
+       {Ten to the -33}           R'255313A5DEE87D6E17B0F658D6C57567' ,
+       {Ten to the -32}           R'2633EC47AB514E65182E99F7863B6960' ,
+       {Ten to the -31}           R'272073ACCB12D0FF193D203AB3E521DC' ,
+       {Ten to the -30}           R'2814484BFEEBC29F1A863424B06F352A' ,
+       {Ten to the -29}           R'28CAD2F7F5359A3B1A3E096EE45813A0' ,
+       {Ten to the -28}           R'297EC3DAF94180651B06C5E54EB70C44' ,
+       {Ten to the -27}           R'2A4F3A68DBC8F03F1C243BAF513267AB' ,
+       {Ten to the -26}           R'2B318481895D96271D76A54D92BF80CB' ,
+       {Ten to the -25}           R'2C1EF2D0F5DA7DD81EAA27507BB7B07F' ,
+       {Ten to the -24}           R'2D1357C299A88EA71F6A58924D52CE4F' ,
+       {Ten to the -23}           R'2DC16D9A0095928A1F2775B7053C0F18' ,
+       {Ten to the -22}           R'2E78E480405D7B962058A9926345896F' ,
+       {Ten to the -21}           R'2F4B8ED0283A6D3D21F769FB7E0B75E5' ,
+       {Ten to the -20}           R'302F39421924844622BAA23D2EC729AF' ,
+       {Ten to the -19}           R'311D83C94FB6D2AC2334A5663D3C7A0E' ,
+       {Ten to the -18}           R'3212725DD1D243AB24A0E75FE645CC48' ,
+       {Ten to the -17}           R'32B877AA3236A4B4244909BEFEB9FAD5' ,
+       {Ten to the -16}           R'33734ACA5F6226F025ADA6175F343CC5' ,
+       {Ten to the -15}           R'34480EBE7B9D5856266C87CE9B80A5FB' ,
+       {Ten to the -14}           R'352D09370D4257362703D4E1213067BD' ,
+       {Ten to the -13}           R'361C25C26849768128C2650CB4BE40D6' ,
+       {Ten to the -12}           R'37119799812DEA1129197F27F0F6E886' ,
+       {Ten to the -11}           R'37AFEBFF0BCB24AA29FEF78F69A5153A' ,
+       {Ten to the -10}           R'386DF37F675EF6EA2ADF5AB9A2072D44' ,
+       {Ten to the  -9}           R'3944B82FA09B5A522BCB98B405447C4B' ,
+       {Ten to the  -8}           R'3A2AF31DC46118732CBF3F70834ACDAF' ,
+       {Ten to the  -7}           R'3B1AD7F29ABCAF482D5787A6520EC08D' ,
+       {Ten to the  -6}           R'3C10C6F7A0B5ED8D2E36B4C7F3493858' ,
+       {Ten to the  -5}           R'3CA7C5AC471B47842E230FCF80DC3372' ,
+       {Ten to the  -4}           R'3D68DB8BAC710CB22F95E9E1B089A027' ,
+       {Ten to the  -3}           R'3E4189374BC6A7EF309DB22D0E560419' ,
+       {Ten to the  -2}           R'3F28F5C28F5C28F531C28F5C28F5C28F' ,
+       {Ten to the  -1}           R'4019999999999999329999999999999A' ,
+       {Ten to the   0}           R'41100000000000003300000000000000' ,
+       {Ten to the   1}           R'41A00000000000003300000000000000' ,
+       {Ten to the   2}           R'42640000000000003400000000000000' ,
+       {Ten to the   3}           R'433E8000000000003500000000000000' ,
+       {Ten to the   4}           R'44271000000000003600000000000000' ,
+       {Ten to the   5}           R'45186A00000000003700000000000000' ,
+       {Ten to the   6}           R'45F42400000000003700000000000000' ,
+       {Ten to the   7}           R'46989680000000003800000000000000' ,
+       {Ten to the   8}           R'475F5E10000000003900000000000000' ,
+       {Ten to the   9}           R'483B9ACA000000003A00000000000000' ,
+       {Ten to the  10}           R'492540BE400000003B00000000000000' ,
+       {Ten to the  11}           R'4A174876E80000003C00000000000000' ,
+       {Ten to the  12}           R'4AE8D4A5100000003C00000000000000' ,
+       {Ten to the  13}           R'4B9184E72A0000003D00000000000000' ,
+       {Ten to the  14}           R'4C5AF3107A4000003E00000000000000' ,
+       {Ten to the  15}           R'4D38D7EA4C6800003F00000000000000' ,
+       {Ten to the  16}           R'4E2386F26FC100004000000000000000' ,
+       {Ten to the  17}           R'4F16345785D8A0004100000000000000' ,
+       {Ten to the  18}           R'4FDE0B6B3A7640004100000000000000' ,
+       {Ten to the  19}           R'508AC7230489E8004200000000000000' ,
+       {Ten to the  20}           R'5156BC75E2D631004300000000000000' ,
+       {Ten to the  21}           R'523635C9ADC5DEA04400000000000000' ,
+       {Ten to the  22}           R'5321E19E0C9BAB244500000000000000' ,
+       {Ten to the  23}           R'54152D02C7E14AF64680000000000000' ,
+       {Ten to the  24}           R'54D3C21BCECCEDA14600000000000000' ,
+       {Ten to the  25}           R'558459516140148447A0000000000000' ,
+       {Ten to the  26}           R'5652B7D2DCC80CD248E4000000000000' ,
+       {Ten to the  27}           R'5733B2E3C9FD080349CE800000000000' ,
+       {Ten to the  28}           R'58204FCE5E3E25024A61100000000000' ,
+       {Ten to the  29}           R'591431E0FAE6D7214B7CAA0000000000' ,
+       {Ten to the  30}           R'59C9F2C9CD04674E4BDEA40000000000' ,
+       {Ten to the  31}           R'5A7E37BE2022C0914C4B268000000000' ,
+       {Ten to the  32}           R'5B4EE2D6D415B85A4DCEF81000000000' ,
+       {Ten to the  33}           R'5C314DC6448D93384EC15B0A00000000' ,
+       {Ten to the  34}           R'5D1ED09BEAD87C034F78D8E640000000' ,
+       {Ten to the  35}           R'5E13426172C74D82502B878FE8000000' ,
+       {Ten to the  36}           R'5EC097CE7BC9071550B34B9F10000000' ,
+       {Ten to the  37}           R'5F785EE10D5DA46D51900F436A000000' ,
+       {Ten to the  38}           R'604B3B4CA85A86C4527A098A22400000' ,
+       {Ten to the  39}           R'612F050FE938943A53CC45F655680000' ,
+       {Ten to the  40}           R'621D6329F1C35CA454BFABB9F5610000' ,
+       {Ten to the  41}           R'63125DFA371A19E655F7CB54395CA000' ,
+       {Ten to the  42}           R'63B7ABC62705030555ADF14A3D9E4000' ,
+       {Ten to the  43}           R'6472CB5BD86321E3568CB6CE6682E800' ,
+       {Ten to the  44}           R'6547BF19673DF52E5737F2410011D100' ,
+       {Ten to the  45}           R'662CD76FE086B93C58E2F768A00B22A0' ,
+       {Ten to the  46}           R'671C06A5EC5433C6590DDAA16406F5A4' ,
+       {Ten to the  47}           R'68118427B3B4A05B5AC8A8A4DE845987' ,
+       {Ten to the  48}           R'68AF298D050E43955AD69670B12B7F41' ,
+       {Ten to the  49}           R'696D79F82328EA3D5BA61E066EBB2F89' ,
+       {Ten to the  50}           R'6A446C3B15F992665C87D2C40534FDB5' ,
+       {Ten to the  51}           R'6B2AC3A4EDBBFB805D14E3BA83411E91' ,
+       {Ten to the  52}           R'6C1ABA4714957D305E0D0E549208B31B' ,
+       {Ten to the  53}           R'6D10B46C6CDD6E3E5F0828F4DB456FF1' ,
+       {Ten to the  54}           R'6DA70C3C40A64E6C5F51999090B65F68' ,
+       {Ten to the  55}           R'6E6867A5A867F10360B2FFFA5A71FBA1' ,
+       {Ten to the  56}           R'6F4140C78940F6A2614FDFFC78873D45' ,
+       {Ten to the  57}           R'7028C87CB5C89A256271EBFDCB54864B' ,
+       {Ten to the  58}           R'71197D4DF19D60576367337E9F14D3EF' ,
+       {Ten to the  59}           R'71FEE50B7025C36A630802F236D04754' ,
+       {Ten to the  60}           R'729F4F2726179A22644501D762422C94' ,
+       {Ten to the  61}           R'7363917877CEC055656B21269D695BDD' ,
+       {Ten to the  62}           R'743E3AEB4AE138356662F4B82261D96A' ,
+       {Ten to the  63}           R'7526E4D30ECCC321675DD8F3157D27E2' ,
+       {Ten to the  64}           R'76184F03E93FF9F468DAA797ED6E38ED' ,
+       {Ten to the  65}           R'76F316271C7FC390688A8BEF464E3946' ,
+       {Ten to the  66}           R'7797EDD871CFDA3A695697758BF0E3CC' ,
+       {Ten to the  67}           R'785EF4A74721E8646A761EA977768E5F' ,
+       {Ten to the  68}           R'793B58E88C75313E6BC9D329EAAA18FC' ,
+       {Ten to the  69}           R'7A25179157C93EC76C3E23FA32AA4F9D' ,
+       {Ten to the  70}           R'7B172EBAD6DDC73C6D86D67C5FAA71C2' ,
+       {Ten to the  71}           R'7BE7D34C64A9C85D6D4460DBBCA87197' ,
+       {Ten to the  72}           R'7C90E40FBEEA1D3A6E4ABC8955E946FE' ,
+       {Ten to the  73}           R'7D5A8E89D75252446F6EB5D5D5B1CC5F' ,
+       {Ten to the  74}           R'7E3899162693736A70C531A5A58F1FBB' ,
+       {Ten to the  75}           R'7F235FADD81C282271BB3F07877973D5'
+
+!
+%external %routine readfrombuff %alias "s#readfrombuff"(%string (255) buff, %integer %name spnt,
+   resflag, %name opnd)
+!***********************************************************************
+!*       THIS ROUTINE IS THE IMP IMPLICITLY SPECIFIED ROUTINE WITH A   *
+!*       %name PARAMETER. The two-word value passed is as follows.     *
+!*                                                                     *
+!*         first word:                                                 *
+!*                                                                     *
+!*         byte 3:                                                     *
+!*         prec<<4 ! type, where                                       *
+!*                               prec = 3  for byte                    *
+!*                                      4  for short                   *
+!*                                      5  for integer                 *
+!*                                      6  for long                    *
+!*                               type = 1  for integer                 *
+!*                                      2  for real                    *
+!*         second word:                                                *
+!*                                                                     *
+!*         bytes 0-3:                                                  *
+!*         address of destination location.                            *
+!*                                                                     *
+!*                                                                     *
+!*       THE METHOD USED IS SIMPLE REPEATED MULTIPLICATION USING LONG  *
+!*       REAL VARIABLES. SOME ROUNDING ERRORS ARE INTRODUCED WHICH     *
+!*       COULD BE AVOIDED BY USING PACKED DECIMAL INSTNS WITH NECESSARY*
+!*       SCALING.                                                      *
+!***********************************************************************
+%integer type, prec, flag, cursym;       ! FLAG= 0FOR'-',1 FOR '+'
+%integer ivalue, partype, typebnd, adr
+   %if 1<<target&lintavail#0 %then %start
+   %long %integer livalue
+   %finish
+   %if 1<<target&llrealavail#0 %start
+   %long %long %real rwork, scale
+   %finish %else %start
+   %long %real rwork, scale
+   %finish
+%switch il(3:6), rl(5:7)
+   %on %event 1, 6, 9 %start
+      type = eventinf
+      %if type=x'102' %then %start
+         resflag = 1;                    !real overflow
+         %return
+      %finish
+      %if type=x'601' %then %start
+         resflag = 7;                    !capacity exceeded
+         %return
+      %finish
+      %if type=x'901' %then %start
+         resflag = 25
+         %return
+      %finish
+      selectoutput(0)
+      printstring("Unexpected event")
+      write(type>>8, 1)
+      write(type&15, 1)
+      newline
+      %monitor
+      %stop
+   %finish
+   flag = 1; type = 0
+   %if target=emas %start
+      *lsd_opnd; *st_typebnd
+   %finish
+   %if target=ibm %or target=ibmxa %or target=amdahl %start
+      *mvc_typebnd(8), opnd
+   %finish
+   partype = typebnd&7
+   prec = typebnd>>4&7
+   %if target=emas %start
+      %if typebnd=X'58000002' %then %start
+         partype = 1
+         prec = 4
+      %finish %else %start
+         prec = (typebnd>>27)&7
+      %finish
+      %if typebnd=X'20000001' %then typebnd = X'58000002'
+   %finish
+   %if spnt>0 %then %start
+      %if spnt>length(buff) %then cursym = x'19' %else cursym = charno(buff, spnt)
+   %finish %else %start
+      cursym = next symbol;              ! CARE NOT TO READ TERMINATOR
+   %finish
+   ! NOW IGNORE LEADING SPACES
+   %while cursym=' ' %or cursym=nl %cycle
+      %if spnt>0 %then %start
+         spnt = spnt+1;                  !advance pointer
+         %if spnt>length(buff) %then cursym = x'19' %else cursym = charno(buff, spnt)
+      %finish %else %start
+         skip symbol
+         cursym = next symbol
+      %finish
+   %repeat
+   %if cursym=X'19' %then %start
+      resflag = 25 {input ended}; {%signal %event 9, 1}
+      %return
+   %finish
+   ! RECORD INITIAL MINUS
+   %if cursym='-' %then flag = -1 %and cursym = '+'
+   ! MOVE OVER SIGN ONCE IT HAS
+   ! BEEN RECORDED IN FLAG
+   %if cursym='+' %then %start
+      %cycle
+         %if spnt>0 %then %start
+            spnt = spnt+1;               !advance pointer
+            %if spnt>length(buff) %then cursym = x'19' %else cursym = charno(buff, spnt)
+         %finish %else %start
+            skip symbol
+            cursym = next symbol
+         %finish
+      %repeat %until cursym#' '
+   %finish
+   %if '0'<=cursym %and cursym<='9' %then %start
+      rwork = cursym-'0';                ! KEEP TOTAL IN RWORK
+      type = 1;                          ! VALID DIGIT
+      %cycle
+         %if spnt>0 %then %start
+            spnt = spnt+1;               !advance pointer
+            %if spnt>length(buff) %then cursym = x'19' %else cursym = charno(buff, spnt)
+         %finish %else %start
+            skip symbol
+            cursym = next symbol
+         %finish
+         %exit %unless '0'<=cursym %and cursym<='9'
+         rwork = 10.0*rwork+(cursym-'0'); ! CONTINUE EVALUATING
+      %repeat
+   %finish %else rwork = 0
+   %if cursym='.' %and partype=2 %then %start
+      scale = 10.0
+      %cycle
+         %if spnt>0 %then %start
+            spnt = spnt+1;               !advance pointer
+            %if spnt>length(buff) %then cursym = x'19' %else cursym = charno(buff, spnt)
+         %finish %else %start
+            skip symbol
+            cursym = next symbol
+         %finish
+         %exit %unless '0'<=cursym %and cursym<='9'
+         type = 1
+         rwork = rwork+(cursym-'0')/scale
+         scale = 10.0*scale
+      %repeat
+   %finish
+!
+! THE VALUE HAS NOW BEEN READ INTO RWORK. THERE MIGHT BE AN EXPONENT
+! E.G. '1.7@10 '  IS VALID DATA FOR READ
+!
+   %if (cursym='@' %or cursym='&') %and partype=2 %then %start
+      %if type=0 %then type = 1 %and rwork = 1
+      %if spnt>0 %then %start
+         spnt = spnt+1;                  !advance pointer
+      %finish %else %start
+         skip symbol;                    ! MOVE PAST THE '@'
+      %finish
+      readfrombuff(buff, spnt, resflag, ivalue); ! RECURSIVE CALL TO FIND EXPONENT
+      %if resflag#0 %then %return;       !recursive read failed
+      %if ivalue>75 %then %start
+         resflag = 15 {illegal exponentiation} {was %signal %event 2,1, now 5,5}
+         ! overflow
+         %return
+      %finish
+      %if ivalue<powerll %then rwork = 0 %else rwork = rwork*powers(ivalue)
+   %finish
+   %if type=0 %then %start
+      resflag = 26 {symbol in data} {%signal %event 4, 1}; ! NO VALID DIGIT FOUND
+      %return
+   %finish
+!
+! KNOCK NUMBER INTO RIGHT FORM
+!
+   resflag = 0;                          !assume success
+   %if partype=1 %then %start
+      %if 1<<target&lintavail#0 %and prec=6 %then %start
+         livalue = flag*lint(rwork)
+      %finish %else %start
+         %if rwork>imax %then %start
+            resflag = 3 {integer overflow} {%signal %event 1, 1}
+            %return
+         %finish
+         ivalue = flag*int(rwork)
+      %finish
+      ->il(prec)
+   %finish
+   %if partype#2 %then %start
+      resflag = 77 {invalid parameter type} {%signal %event 8, 3}; ! UNASSIGNED PARAMETER TYPE
+      %return
+   %finish
+   %if flag<0 %then rwork = -rwork
+   %if prec<5 %then prec = 5
+   ->rl(prec)
+
+il(6):                                   ! 64 BIT INTEGERS
+   %if 1<<target&lintavail#0 %then %start
+      longinteger(adr) = livalue
+      %return;                           !OK
+   %finish %else %start
+      resflag = 77 {invalid parameter type} {%signal %event 8, 3}
+      %return
+   %finish
+il(5):                                   ! 32 BIT INTEGERS
+   integer(adr) = ivalue
+   %return;                              !OK
+il(4):                                   ! 16 BIT REAL
+   halfinteger(adr) = ivalue
+   %return;                              !OK
+il(3):                                   ! 8 BIT INTEGER
+   byteinteger(adr) = ivalue
+   %return;                              !OK
+rl(5):                                   ! 32 BIT REAL
+   %if target=emas %then %start
+      *lsd_=X'7F'; *ush_=25
+      *or_=1; *ush_=31;                  ! ACC=X'7F00000080000000'
+      *and_rwork; *rad_rwork;            ! SOFTWARE ROUND
+      *stuh_(typebnd)
+   %finish %else real(adr) = rwork
+   %return;                              !OK
+rl(6):                                   ! 64 BIT REAL
+   %if target=emas %then %start
+      *lsd_=X'7F'; *ush_=56; *and_rwork
+      *slsd_=1; *ush_=55; *and_rwork+8
+      *luh_TOS; *rad_rwork;              ! SOFTWARE ROUND
+      *stuh_(typebnd)
+   %finish %else longreal(adr) = rwork
+   %return;                              !OK
+rl(7):                                   ! 128 BIT REAL
+   %if 1<<target&llrealavail#0 %then %start
+      longlongreal(adr) = rwork
+      %return;                           !OK
+   %finish %else %start
+      resflag = 77 {invalid parameter type} {%signal %event 8, 3}!type not supported
+      %return
+   %finish
+!
+!  %monitor (N) == FORCE FAULT NO N
+!  N=16    REAL INSTEAD OF INTEGER IN DATA
+!  N=14    SYMBOL IN DATA
+!
+%end;                                    ! of strtoval
+!
+%external %routine readnew %alias "s#read"(%name opnd)
+%integer spnt, resflag
+   spnt = 0
+   readfrombuff("", spnt, resflag, opnd)
+   %if resflag=0 %then %return
+   %if resflag=25 {input ended} %then %start
+      ssown_ssfname = itos(instream)
+      %signal %event 9, 1
+   %finish
+   %if resflag=15 {illegal exponentiation} %then %signal %event 5, 5
+   %if resflag=26 {symbol in data} %then %signal %event 4, 1
+   %if resflag=3 {integer overflow} %then %signal %event 1, 1
+   %if resflag=77 {invalid parameter type} %then %signal %event 8, 3
+   %if resflag=1 {real overflow} %then %signal %event 1, 2
+   %if resflag=7 {capacity exceeded} %then %signal %event 6, 1
+   !should not get here
+   selectoutput(0)
+   printstring("Unexpected result from readfrombuff")
+   %monitor
+   %stop
+%end
+!
+%external %routine readold %alias "s#readold"(%name opnd)
+!* This routine is now obsolete - was the old read routine.
+!* SH  12-01-88.
+!*
+!***********************************************************************
+!*       THIS ROUTINE IS THE IMP IMPLICITLY SPECIFIED ROUTINE WITH A   *
+!*       %name PARAMETER. The two-word value passed is as follows.     *
+!*                                                                     *
+!*         first word:                                                 *
+!*                                                                     *
+!*         byte 3:                                                     *
+!*         prec<<4 ! type, where                                       *
+!*                               prec = 3  for byte                    *
+!*                                      4  for short                   *
+!*                                      5  for integer                 *
+!*                                      6  for long                    *
+!*                               type = 1  for integer                 *
+!*                                      2  for real                    *
+!*         second word:                                                *
+!*                                                                     *
+!*         bytes 0-3:                                                  *
+!*         address of destination location.                            *
+!*                                                                     *
+!*                                                                     *
+!*       THE METHOD USED IS SIMPLE REPEATED MULTIPLICATION USING LONG  *
+!*       REAL VARIABLES. SOME ROUNDING ERRORS ARE INTRODUCED WHICH     *
+!*       COULD BE AVOIDED BY USING PACKED DECIMAL INSTNS WITH NECESSARY*
+!*       SCALING.                                                      *
+!***********************************************************************
+%integer type, prec, flag, cursym;       ! FLAG= 0FOR'-',1 FOR '+'
+%integer ivalue, partype, typebnd, adr
+   %if 1<<target&lintavail#0 %then %start
+   %long %integer livalue
+   %finish
+   %if 1<<target&llrealavail#0 %start
+   %long %long %real rwork, scale
+   %finish %else %start
+   %long %real rwork, scale
+   %finish
+%switch il(3:6), rl(5:7)
+   flag = 1; type = 0
+   %if target=emas %start
+      *lsd_opnd; *st_typebnd
+   %finish
+   %if target=ibm %or target=ibmxa %or target=amdahl %start
+      *mvc_typebnd(8), opnd
+   %finish
+   partype = typebnd&7
+   prec = typebnd>>4&7
+   %if target=emas %start
+      %if typebnd=X'58000002' %then %start
+         partype = 1
+         prec = 4
+      %finish %else %start
+         prec = (typebnd>>27)&7
+      %finish
+      %if typebnd=X'20000001' %then typebnd = X'58000002'
+   %finish
+   cursym = next symbol;                 ! CARE NOT TO READ TERMINATOR
+   ! NOW IGNORE LEADING SPACES
+   %while cursym=' ' %or cursym=nl %cycle
+      skip symbol
+      cursym = next symbol
+   %repeat
+   %if cursym=X'19' %then %signal %event 9, 1
+   ! RECORD INITIAL MINUS
+   %if cursym='-' %then flag = -1 %and cursym = '+'
+   ! MOVE OVER SIGN ONCE IT HAS
+   ! BEEN RECORDED IN FLAG
+   %if cursym='+' %then %start
+      %cycle
+         skip symbol
+         cursym = next symbol
+      %repeat %until cursym#' '
+   %finish
+   %if '0'<=cursym %and cursym<='9' %then %start
+      rwork = cursym-'0';                ! KEEP TOTAL IN RWORK
+      type = 1;                          ! VALID DIGIT
+      %cycle
+         skip symbol
+         cursym = next symbol
+         %exit %unless '0'<=cursym %and cursym<='9'
+         rwork = 10.0*rwork+(cursym-'0'); ! CONTINUE EVALUATING
+      %repeat
+   %finish %else rwork = 0
+   %if cursym='.' %and partype=2 %then %start
+      scale = 10.0
+      %cycle
+         skip symbol
+         cursym = next symbol
+         %exit %unless '0'<=cursym %and cursym<='9'
+         type = 1
+         rwork = rwork+(cursym-'0')/scale
+         scale = 10.0*scale
+      %repeat
+   %finish
+!
+! THE VALUE HAS NOW BEEN READ INTO RWORK. THERE MIGHT BE AN EXPONENT
+! E.G. '1.7@10 '  IS VALID DATA FOR READ
+!
+   %if (cursym='@' %or cursym='&') %and partype=2 %then %start
+      %if type=0 %then type = 1 %and rwork = 1
+      skip symbol;                       ! MOVE PAST THE '@'
+      readold(ivalue);                   ! RECURSIVE CALL TO FIND EXPONENT
+      %if ivalue>75 %then %signal %event 2, 1; ! overflow
+      %if ivalue<powerll %then rwork = 0 %else rwork = rwork*powers(ivalue)
+   %finish
+   %signal %event 4, 1 %if type=0;       ! NO VALID DIGIT FOUND
+!
+! KNOCK NUMBER INTO RIGHT FORM
+!
+   %if partype=1 %then %start
+      %if 1<<target&lintavail#0 %and prec=6 %then %start
+         livalue = flag*lint(rwork)
+      %finish %else %start
+         %if rwork>imax %then %signal %event 1, 1
+         ivalue = flag*int(rwork)
+      %finish
+      ->il(prec)
+   %finish
+   %if partype#2 %then %signal %event 8, 3; ! UNASSIGNED PARAMETER TYPE
+   %if flag<0 %then rwork = -rwork
+   %if prec<5 %then prec = 5
+   ->rl(prec)
+
+il(6):                                   ! 64 BIT INTEGERS
+   %if 1<<target&lintavail#0 %then %start
+      longinteger(adr) = livalue
+      %return
+   %finish %else %signal %event 8, 3
+il(5):                                   ! 32 BIT INTEGERS
+   integer(adr) = ivalue
+   %return
+il(4):                                   ! 16 BIT REAL
+   halfinteger(adr) = ivalue
+   %return
+il(3):                                   ! 8 BIT INTEGER
+   byteinteger(adr) = ivalue
+   %return
+rl(5):                                   ! 32 BIT REAL
+   %if target=emas %then %start
+      *lsd_=X'7F'; *ush_=25
+      *or_=1; *ush_=31;                  ! ACC=X'7F00000080000000'
+      *and_rwork; *rad_rwork;            ! SOFTWARE ROUND
+      *stuh_(typebnd)
+   %finish %else real(adr) = rwork
+   %return
+rl(6):                                   ! 64 BIT REAL
+   %if target=emas %then %start
+      *lsd_=X'7F'; *ush_=56; *and_rwork
+      *slsd_=1; *ush_=55; *and_rwork+8
+      *luh_TOS; *rad_rwork;              ! SOFTWARE ROUND
+      *stuh_(typebnd)
+   %finish %else longreal(adr) = rwork
+   %return
+rl(7):                                   ! 128 BIT REAL
+   %if 1<<target&llrealavail#0 %then %start
+      longlongreal(adr) = rwork
+   %finish %else %signal %event 8, 3
+!
+!  %monitor (N) == FORCE FAULT NO N
+!  N=16    REAL INSTEAD OF INTEGER IN DATA
+!  N=14    SYMBOL IN DATA
+!
+%end;                                    ! of READ
+!
+!-----------------------------------------------------------------------
+!
+%external %long %real %fn fracpt %alias "S#FRACPT"(%long %real x)
+!***********************************************************************
+!*       RETURNS (X-INTPT(X)) AS THE RESULT                            *
+!***********************************************************************
+%integer exp
+%long %real ipt
+   exp = (byteinteger(addr(x))&X'7F')-64
+   %if exp>=14 %then %result = 0.0 %else %start
+      %if exp>0 %then %start
+         longinteger(addr(ipt)) = longinteger(addr(x))&(\((lengtheni(-1))>>(8+4*exp)))
+         x = x-ipt
+      %finish
+      %if x>=0.0 %then %result = x %else %result = x+1.0
+   %finish
+%end;                                    ! of FRACPT
+!
+!-----------------------------------------------------------------------
+!
+%external %string %fn swrite %alias "s#swrite"(%integer val, places)
+%string (255) s
+   s = itos(val)
+   s = " ".s %unless val<0
+   s = " ".s %while length(s)<=places
+   %result = s
+%end;                                    ! swrite
+!
+!-----------------------------------------------------------------------
+!
+%external %string %fn litos %alias "S#LITOS"(%long %integer n)
+%string (63) s
+%integer sign, shortd
+%long %integer w, d
+
+   %result = "0" %if n=0
+   %result = "-9223372036854775808" %if n=X'8000000000000000'
+
+   sign = 1
+   sign = -1 %and n = -n %if n<0
+
+   s = ""
+   %while n>0 %cycle
+      w = n//10
+      d = n-w*10
+      shortd = shorteni(d)
+      s = tostring('0'+shortd).s
+      n = w
+   %repeat
+   s = "-".s %if sign<0
+   %result = s
+%end;                                    ! of litos
+!
+!-----------------------------------------------------------------------
+!
+%external %string %fn slwrite %alias "s#slwrite"(%long %integer val, %integer places)
+%string (255) s
+   s = litos(val)
+   s = " ".s %while length(s)<=places
+   %result = s
+%end;                                    ! slwrite
+!
+!-----------------------------------------------------------------------
+!
+%external %routine lwrite %alias "s#lwrite"(%long %integer val, %integer places)
+   printstring(slwrite(val, places))
+%end;                                    ! lwrite
+!
+!-----------------------------------------------------------------------
+!
+%external %string %fn slprint %alias "s#slprint"(%long %long %real x, %integer n, m)
+   %if 1<<target&llrealavail#0 %start
+   %long %long %real y, z, round, factor
+   %else
+   %long %real y, z, round, factor
+   %finish
+%integer i, j, l
+%byte %integer sign
+%string (255) s
+   m = m&63;                             ! DEAL WITH STUPID PARAMS
+   %if n<0 %then n = 1; n = n&31;        ! DEAL WITH STUPID PARAMS
+   x = x+dz;                             ! NORMALISE
+   sign = ' ';                           ! '+' IMPLIED
+   %if x<0 %then sign = '-'
+   y = mod(x);                           ! ALL WORK DONE WITH Y
+   round = 0.5/10**m;                    ! ROUNDING FACTOR
+   %if y>pmax %or n=0 %then %start;      ! MEANINGLESS FIGURES GENERATED
+      %if n>m %then m = n;               ! FOR FIXED POINT PRINTING
+      %result = slprint fl(x, m);        ! OF ENORMOUS NUMBERS
+   %finish
+   i = 0; z = 1; y = y+round
+   %until z>y %cycle;                    ! COUNT LEADING PLACES
+      i = i+1; z = ten*z;                ! NO DANGER OF OVERFLOW HERE
+   %repeat
+!   spaces(n-i);                          ! O.K FOR ZERO OR -VE SPACES
+!   print symbol(sign)
+   s = ""
+   s = s." " %while length(s)<n-i
+   s = s.tostring(sign)
+   j = i-1; z = 10**j
+   factor = tenth
+   %cycle
+      %until j<0 %cycle
+         l = int pt(y/z);                ! OBTAIN NEXT DIGIT
+         y = y-l*z; z = z*factor;        ! AND REDUCE TOTAL
+!         print symbol(l+'0')
+         s = s.tostring(l+'0')
+         j = j-1
+      %repeat
+      %result = s %if m=0;               ! NO DECIMAL PART TO BE O/P
+!      printstring(".")
+      s = s."."
+      j = m-1; z = 10**(j-1); m = 0
+      y = 10*y*z
+   %repeat
+   %result = s
+%end;                                    ! slprint
+!
+!-----------------------------------------------------------------------
+!
+%external %string %fn slprintfl %alias "s#slprintfl"(%long %long %real xx, %integer n)
+   %if 1<<target&llrealavail#0 %start
+   %long %long %real factor, lb, ub, x
+   %else
+   %long %real factor, lb, ub, x
+   %finish
+%long %real sign, round
+%integer count, inc
+   x = xx
+   round = 0.5/10**n;                    ! TO ROUND SCALED NO
+   lb = 1-round; ub = 10-round
+   sign = 1
+   x = x+dz;                             ! NORMALISE
+   %if x=0 %then count = -99 %else %start
+      %if x<0 %then x = -x %and sign = -sign
+      inc = 1; count = 0
+      factor = tenth
+      %if x<=1 %then factor = 10 %and inc = -1
+      ! FORCE INTO RANGE 1->10
+      %while x<lb %or x>=ub %cycle
+         x = x*factor; count = count+inc
+      %repeat
+   %finish
+!   print(sign*x, 1, n)
+!   printstring("@")
+!   write(count, 2)
+   %result = slprint(sign*x, 1, n)."@".swrite(count, 2)
+%end;                                    ! slprintfl
+!
+!-----------------------------------------------------------------------
+!
+%external %routine print %alias "S#PRINT"(%long %real x, %integer n, m)
+!***********************************************************************
+!*       PRINTS A REAL NUMBER (X) ALLOWING N PLACES BEFORE THE DECIMAL *
+!*       POINT AND M PLACES AFTER.IT REQUIRES (M+N+2) PRINT PLACES     *
+!*       UNLESS (M=0) WHEN  (N+1) PLACES ARE REQUIRED.                 *
+!*                                                                     *
+!*       A LITTLE CARE IS NEEDED TO AVOID UNNECESSARY LOSS OF ACCURACY *
+!*       AND TO AVOID OVERFLOW WHEN DEALING WITH VERY LARGE NUMBERS    *
+!***********************************************************************
+   printstring(slprint(x, n, m))
+%end;                                    ! of PRINT
+!
+!-----------------------------------------------------------------------
+!
+%external %routine write %alias "S#WRITE"(%integer value, places)
+!***********************************************************************
+!*    SIMPLE MINDED ALL IMP VERSION NOT USING STRINGS                  *
+!***********************************************************************
+   printstring(swrite(value, places))
+%end;                                    ! of WRITE
+!
+!-----------------------------------------------------------------------
+!
+%external %routine printfl %alias "S#PRINTFL"(%long %real xx, %integer n)
+!***********************************************************************
+!*       PRINTS IN FLOATING POINT FORMAT WITH N PLACES AFTER THE       *
+!*       DECIMAL POINT. ALWAYS TAKES N+7 PRINTING POSITIONS.           *
+!*       CARE REQUIRED TO AVOID OVERFLOW WITH LARGE X                  *
+!***********************************************************************
+   printstring(slprintfl(xx, n))
+%end;                                    ! of PRINTFL
+!
+!-----------------------------------------------------------------------
+!
+%external %string %fn sprint %alias "s#sprint"(%long %real x, %integer n, m)
+   %result = slprint(x, n, m)
+%end;                                    ! sprint
+
+!-----------------------------------------------------------------------
+
+%external %string %fn sprintfl %alias "s#sprintfl"(%long %real x, %integer n)
+   %result = slprintfl(x, n)
+%end;                                    ! sprintfl
+
+!-----------------------------------------------------------------------
+
+%external %routine lprint %alias "s#lprint"(%long %long %real x, %integer n, m)
+   printstring(slprint(x, n, m))
+%end;                                    ! lprint
+
+!-----------------------------------------------------------------------
+
+%external %routine lprintfl %alias "s#lprintfl"(%long %long %real x, %integer n)
+   printstring(slprintfl(x, n))
+%end;                                    ! lprintfl
+
+!-----------------------------------------------------------------------
+
+%external %routine fprintfl %alias "S#FPRINTFL"(%long %real xx, %integer n, type)
+!***********************************************************************
+!*       PRINTS IN FLOATING POINT FORMAT WITH N PLACES AFTER THE       *
+!*       DECIMAL POINT. ALWAYS TAKES N+7 PRINTING POSITIONS.           *
+!*       CARE REQUIRED TO AVOID OVERFLOW WITH LARGE X                  *
+!***********************************************************************
+!
+%long %real round, factor, lb, ub, x, y
+%integer count, inc, sign, l, j
+   round = 0.5/R'41A0000000000000'**n;   ! TO ROUND SCALED NO
+   lb = 1-round; ub = 10-round
+   sign = ' '
+   x = xx+dz;                            ! NORMALISE
+   y = x
+   %if x=0 %then count = -99 %else %start
+      %if x<0 %then x = -x %and sign = '-'
+      inc = 1; count = 0; factor = R'401999999999999A'
+      %if x<=1 %then factor = 10 %and inc = -1
+      ! FORCE INTO RANGE 1->10
+      %while x<lb %or x>=ub %cycle
+         x = x*factor; count = count+inc
+      %repeat
+   %finish
+   x = x+round
+   printsymbol(sign)
+   l = intpt(x)
+   printsymbol(l+'0')
+   printsymbol('.')
+   j = 1
+   %while j<=n %cycle
+      x = (x-l)*10
+      l = intpt(x)
+      printsymbol(l+'0')
+      j = j+1
+   %repeat
+   %if type=1 %then printstring("E") %else printstring("D")
+   write(count, 2)
+%end;                                    ! of FPRINTFL
+
+
+!-------------------------------------------------------------------------------
+
+%integer %fn hashfn(%string (255) name)
+! RETURNS VALUE IN THE RANGE 0-MAXCHAN FOR FINDING ENTRY IN THE DEFINED CHANNEL TABLE.
+! MAXCHAN should be ONE LESS than some prime number.
+%integer a, j, w, l, a1, a2
+   a = addr(name)
+   l = length(name)
+   %if l>8 %start
+      ! Close up last 4 to first 4
+      a1 = a+5
+      a2 = a+l-3
+      byteinteger(a1+j) = byteinteger(a2+j) %for j = 3, -1, 0
+   %finish %else name = name.name.name."<>#@!+&"
+   w = byteinteger(a+1)*71+byteinteger(a+2)*47+byteinteger(a+3)*97+byteinteger(a+4) %c
+      *79+byteinteger(a+5)*29+byteinteger(a+6)*37+byteinteger(a+7)*53+byteinteger(a+8)*59
+   j = w-(w//(maxchan+1))*(maxchan+1)
+   %result = j
+%end;                                    ! of HASHFN
+
+!------------------------------ FINDCHAN ------------------------------------
+
+%external %integer %fn findchan %alias "S#FINDCHAN"(%string (255) chan, %integer %name pos)
+! LOOK FOR CHAN. SET POS TO POSITION OR TO POSITION OF HOLE IF NOT FOUND.
+
+! RESULT=0 IF FOUND (ALREADY CONNECTED)
+! RESULT=1 IF NOT FOUND.  IF SSOWN_CHAN(i) IS -1 THEN POSITION CAN BE RE-USED.
+!                         IT HAS BE LEFT LIKE THIS TO PREVENT A SEARCH CHAIN BEING BROKEN
+
+%integer empty, startpos, rlt
+%record (fchanf) %name cur
+
+   %if monitoring possible=yes %and ssown_ssnote&8#0 %then mon params(">triw")
+   empty = -1;                           !IMPOSSIBLE VALUE
+   uctranslate(addr(chan)+1, length(chan))
+   pos = hashfn(chan)
+   startpos = pos
+   rlt = 1 {not found - not defined}
+
+   %cycle
+      %if ssown_chan(pos)=0 %then %exit
+      %if ssown_chan(pos)>0 %start
+         cur == record(ssown_chan(pos))
+         %if cur_chan=chan %then rlt = 0 %and %exit
+         shout("chan at pos".itos(pos)." is ".cur_chan) %if ssown_ssnote&8>0
+      %finish %else %if empty<0 %then empty = pos {first "EMPTY" cell}
+      %if pos=maxchan %then pos = 0 %else pos = pos+1; !WRAP ROUND AT TOP OF SSOWN_CONF
+      %if pos=startpos %start;           !GONE RIGHT ROUND
+         %if empty<0 %then rlt = 165 {cannot happen, provided MAXCHAN is kept greater than MAXFD}
+         %exit
+      %finish
+   %repeat
+
+   %if rlt=1 %and empty>=0 %then pos = empty
+
+   %if monitoring possible=yes %and ssown_ssnote&8#0 %then %c
+      mon params("<triw* startpos=".itos(startpos).",pos=".itos(pos).",res=".itos(rlt))
+   %result = rlt
+%end;                                    ! of FINDCHAN
+
+!------------------------------- CLEARCHAN -------------------------------------
+
+%external %routine clearchan %alias "S#CLEARCHAN"(%integer pos)
+!CLEARS OUT ENTRY POS IN ARRAY SSOWN_CHAN. ALSO CLEARS ANY PRECEEDING
+! "EMPTY" SLOTS IF THE NEXT ONE IS EMPTY.
+%record (fchanf) %name cur
+%integer nextx, idenpos
+
+   %if ssown_ssnote&4#0 %then monparams("=jr")
+   cur == record(ssown_chan(pos))
+
+   disposeheap(ssown_chan(pos))
+   %if pos=maxchan %then nextx = 0 %else nextx = pos+1
+   %if ssown_chan(nextx)=0 %start
+      ssown_chan(pos) = 0
+      ! Clear any adjacent (previous) "EMPTY" cells
+      %cycle
+         %if pos=0 %then pos = maxchan %else pos = pos-1; !NEXT LOWER - WITH WRAP ROUND
+         cur == record(ssown_chan(pos))
+         %exit %if ssown_chan(pos)>=0
+         ! Then SAFE TO CLEAR IT OUT
+         ssown_chan(pos) = 0
+      %repeat
+   %finish %else ssown_chan(pos) = -1;   ! "EMPTY"
+%end;                                    ! of CLEARCHAN
+
+!--------------------------------- FDMAP --------------------------------------
+
+%external %integer %fn fdmap %alias "S#FDMAP"(%integer chan)
+! RETURNS THE ADDRESS OF THE REQUESTED FILE DESCRIPTOR - IF ANY OTHERWISE 0 IF NOT DEFINED
+%integer flag, pos
+%record (fchanf) %name cur
+   flag = findchan(itos(chan), pos)
+   cur == record(ssown_chan(pos))
+   %if flag=0 %then %result = cur_afd %else ssown_ssfname = itos(chan) %and %result = 0 {not found}
+%end;                                    ! of FDMAP
+
+!-------------------------------------- FINDF77FD ---------------------------------------------
+
+%external %routine findf77fd %alias "S#FINDF77FD"(%string %name filename, %integer %name afd)
+!  Returns          if filename found as F77 definition, AFD=address of FD
+!                   if filename not found as F77 definition  AFD=0
+%integer i
+   %if ssown_ssnote&4#0 %then monparams(">sriw")
+   afd = 0
+   %for i = 1, 1, ssown_topfd %cycle
+      %if ssown_fd(i)_f77flag#0 %and ssown_fd(i)_iden=filename %start
+         afd = addr(ssown_fd(i)_link)
+         %exit
+      %finish
+   %repeat
+   %if ssown_ssnote&4#0 %then monparams("<sriw")
+%end;                                    ! FINDF&&FD
+
+!------------------------------------- ALLOCATEFD ---------------------------------------------
+
+%external %routine allocate fd %alias "S#ALLOCATEFD"(%integer %name afd, flag)
+!   Returns  FLAG   0     AFD is address of free FD
+!                 165     none free
+%integer i
+   %if ssown_ssnote&4#0 %then monparams(">iwiw")
+   flag = 0; afd = 0
+   %for i = 1, 1, maxfd %cycle;          !LOOK FOR EMPTY RECORD
+      %if ssown_fd(i)_dsnum=0 %start
+         !EMPTY CELL FOUND
+         afd = addr(ssown_fd(i)_link)
+         %if i>ssown_topfd %then ssown_topfd = i; ! HIGHEST FD USED SO FAR
+         %exit
+      %finish
+      %if i=maxfd %then flag = 165 {too many definitions} %and %exit
+   %repeat
+   %if ssown_ssnote&4#0 %then monparams("<iwiw")
+%end;                                    ! ALLOCATEFD
+
+!--------------------------------- ENTERAFD ------------------------------------
+
+%external %integer %fn enterafd %alias "S#ENTERAFD"(%integer chan, afd)
+%integer j, pos, flag
+%record (fchanf) %name cur
+%string (21) schan
+   %if ssown_ssnote&4#0 %then monparams(">jrjr")
+   flag = 0
+   schan = itos(chan)
+   j = findchan(schan, pos)
+   %if j#0 {not found} %start
+      %if afd=0 {deleting entry} %then flag = 218 {not exist} %else %start
+         ! Need not check for hash-table-full provided MAXCHAN is kept > MAXFD
+         ssown_chan(pos) = getheap(chbaselen+length(schan))
+         cur == record(ssown_chan(pos))
+         cur_chan = schan
+         cur_afd = afd
+      %finish
+   %finish %else %start
+      ! Found
+      %if afd=0 %start
+         ! Removing entry
+         clearchan(pos)
+      %finish %else %start
+         ssown_chan(pos) = getheap(chbaselen+length(schan))
+         cur == record(ssown_chan(pos))
+         cur_afd = afd
+         cur_chan = schan
+      %finish
+   %finish
+   %if ssown_ssnote&4#0 %then monparams("<jrjr*".itos(flag))
+   %result = flag
+%end;                                    ! of ENTERAFD
+
+!--------------------------- DEVNAME -----------------------------------
+!
+%external %string %fn devname %alias "S#DEVNAME"(%integer code)
+%string (15) %array %format devarrayaf(1:256)
+%string (15) %array %name devarray
+%string (16) res
+%integer special
+   res = ""
+   special = code&1;                     !IF SET MUST BE A SPECIAL DEVICE
+   code = code>>1
+   %if code=1 %then res = ".LP" %else %if 0<code<=ssown_maxdevarray %start
+      devarray == array(ssown_devarraybase, devarrayaf)
+      res = devarray(code)
+      %if special#0 %start
+         %if length(res)>=2 %and charno(res, 2)='P' %then %start
+            %if charno(res, 1)='G' %then res = "S".res
+            %if charno(res, 1)='P' %then res = "B".res
+         %finish
+      %finish
+      res = ".".res
+   %finish
+   %result = res
+%end;                                    ! of DEVNAME
+
+!---------------------------------- IDEFINE ------------------------------------
+
+%external %routine idefine %alias "S#IDEFINE"(%integer chan, %string (255) iden,
+   %integer %name afd, flag)
+%record (fdf) %name f
+%record (fchanf) %name cur
+%integer i, devc, j, pos, faccessroute, fmaxrec, fflags
+%integer fmodeofuse
+%string (16) rest, schan
+
+   %if ssown_ssnote&4#0 %then monparams(">jrtriwiw")
+   flag = 0;                             !DEFAULT
+   %if-1<=chan<=0 %then flag = 223 {invalid chan} %and ->err
+
+   fflags = 0; fmodeofuse = 0; fmaxrec = 0; devc = 0
+   %if iden#"" %and charno(iden, 1)='.' %then %start
+      %if iden=".IN" %then faccessroute = 1 %else %if iden=".OUT" %then faccessroute = 2 %else %c
+         %if iden=".TT" %then %start
+         %unless chan=-90 %or chan=-91 %then flag = 264 %and ->err
+         ! ONLY ALLOW .TT FOR CHANS 90 AND 91 PROTEM
+         faccessroute = 9
+         fmaxrec = 160;                  !MAX FOR STREAM OUTPUT BUFFER PROTEM
+      %finish %else %start
+         devc = devcode(iden)
+         %if devc<0 %then flag = 264 {invalid device code} %and ->err
+         %if iden->rest.(".LP") %and rest="" %then fflags = 16; !INTERPRET FE CHAS
+         %if devc#0 %then %start;        ! NOT .NULL OR .TEMP
+            fmodeofuse = 1
+            fmaxrec = 160
+         %finish
+         rest = nexttemp
+         rest = ssown_ssowner.":T#".rest
+         faccessroute = 8
+         faccessroute = 10 %if iden=".NULL"; ! SPECIAL CASE FOR ".NULL"
+         iden = rest
+      %finish
+   %finish %else %start
+      !MUST BE A FILENAME
+      %if length(iden)>4 %and substring(iden, length(iden)-3, length(iden))="-MOD" %start
+         fflags = 8
+         length(iden) = length(iden)-4
+      %finish
+      flag = checkname(iden, 1 {file or mem}, 0)
+      ->err %if flag#0
+!      iden = ssown_shortname
+      faccessroute = 8
+   %finish
+
+   schan = itos(chan)
+   j = findchan(schan, pos)
+   %if j=0 {found} %start
+      cur == record(ssown_chan(pos))
+      afd = cur_afd
+      f == record(afd)
+      %if f_status#0 %then flag = 265 {channel in use} %and ->err
+      disposeheap(addr(f_iden))
+   %else
+      ! Not found
+      allocatefd(afd, flag)
+      %if flag#0 %then ->err
+      ssown_chan(pos) = getheap(chbaselen+length(schan))
+      cur == record(ssown_chan(pos))
+      cur_afd = afd
+      cur_chan = schan
+      f == record(afd)
+   %finish
+
+   f = 0
+   f_dsnum = chan
+   f_iden == string(getheap(length(iden)+1))
+   f_iden = iden
+   f_devcode = devc&255
+   f_devcode upper = devc>>8
+   f_accessroute = faccessroute
+   f_modeofuse = fmodeofuse
+   f_maxrec = fmaxrec
+   f_flags = fflags
+   f_rectype = 2;                        !DEFAULT RECTYPE=V
+   f_minrec = 1
+   f_maxrec = 1024
+   f_maxsize = ssown_default define size; ! THIS IS IN BYTES
+   f_mode = 11;                          !PROTEM
+   f_validaction = 127;                  !ALLOW ALL ACTIONS
+
+   adjust conf defines(iden, +1)
+
+err:
+   ssown_ssfname = translateshortname(iden, 0)
+   %if ssown_ssnote&4#0 %then monparams("<jrtriwiw*TOPFD=".itos(ssown_topfd))
+%end;                                    ! of IDEFINE
+
+!-------------------------------- SDEFINE --------------------------------------
+
+%external %routine sdefine %alias "S#DEFINE"(%integer chan, %string (255) iden,
+   %integer %name afd, flag)
+   %unless chan>0 %or lofree<=chan<=hifree %then flag = 223 {invalid channel} %and %return
+   idefine(chan, iden, afd, flag)
+%end;                                    ! of SDEFINE
+
+!-------------------------- EMAS3CLAIMCHANNEL ----------------------------
+
+%external %routine emas3claimchannel(%integer %name xchan)
+%integer j, pos, free, chan
+
+!   %if ssown_ssnote&4#0 %then monparams(">iw")
+   ssenter("", chan, "iw")
+   %if ssown_freechan=0 %then ssown_freechan = lofree {initialisation}
+   chan = 0
+   free = ssown_freechan
+   %cycle
+      free = free-1
+      %if free<lofree %then free = hifree
+      j = findchan(itos(free), pos)
+      %if j#0 {not found} %start
+         chan = free
+         ssown_freechan = free
+!         %if ssown_ssnote&4#0 %then monparams("<iw")
+         %exit
+      %finish
+      ! Otherwise FOUND.  This is most unlikely, surely.  It would occur only
+      ! if all potential free channels had been used, most of them had been
+      ! CLEARed, but we got round to one which was still in use.  And we surely
+      ! cannot get into a loop here, provided we keep MAXCHAN > MAXFD.
+   %repeat
+   ssexit("", chan, "iw")
+%end;                                    ! of EMAS3CLAIMCHANNEL
+
+!----------------------------- SETIODEFAULT ------------------------------------
+
+%external %routine set io default %alias "S#SETIODEFAULT"(%integer def, chan, dummy)
+
+! This routine finds the FD corresponding to CHAN (going indirectly via F_ASVAR
+! in the case of FORTRAN accssroute=6) and sets the DEF word (SSOWN_INDEFAULT if def=0 or
+! OUTDEFAULT) to the resulting channel number, for mag tape, file, console or
+! .NULL only.  The FD is not altered.
+
+%integer afd, r, pos, j
+%record (fdf) %name f
+%record (fchanf) %name cur
+   %if ssown_ssnote&4#0 %then monparams(">jrjr")
+   %cycle
+      %if-91<=chan<=-90 %start
+         pos = ssown_pos(chan)
+      %else
+         j = findchan(itos(chan), pos)
+         %if j#0 {not defined} %then %return
+      %finish
+      cur == record(ssown_chan(pos))
+      afd = cur_afd
+      f == record(afd)
+      r = f_accessroute
+      %exit %if r#6 {may be set 6 by F77OPEN}
+      chan = f_asvar
+   %repeat
+
+   %if r=5 {mag tape} %or 8<=r<=10 {file, console, .NULL respectively} %start
+      %if def=0 %then ssown_indefault = chan %else ssown_outdefault = chan
+   %finish
+
+   %if ssown_ssnote&4#0 %then monparams("<jrjr")
+%end;                                    ! of SET IO DEFAULT
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn indefault %alias "s#indefault"
+%integer d
+   d = ssown_indefault
+   monparams("=*".itos(d)) %if ssown_ssnote&4>0
+   %result = d
+%end;                                    ! indefault
+
+
+%external %integer %fn outdefault %alias "s#outdefault"
+%integer d
+   d = ssown_outdefault
+   monparams("=*".itos(d)) %if ssown_ssnote&4>0
+   %result = d
+%end;                                    ! outdefault
+
+!---------------------------------- BATCHSTOP ---------------------------------
+
+%external %routine batchstop %alias "s#batchstop"(%integer reason)
+%integer flag, start, len
+%string (40) message
+
+%constinteger top = 4
+%conststring(33)%array mess(1:top) = %c
+"***Job time limit exceeded***",
+"***Job terminated by operator***",
+"***No more space for output***",
+"*** ECL STOP Called ***"
+
+   monparams(">jr")
+   newlines(5)
+   printstring(mess(reason)) %if 1 <= reason <= top
+
+   newlines(2)
+   printstring("***  Batch job ended at ".time." on ".date."  ***")
+   newlines(2)
+   meter
+   %if uinf_priority<3 %then %c
+      printline("[Amount charged was less than shown because job was run at low priority]")
+   newlines(3)
+
+   ssown_ssnote = 0;                     !in case monitoring on
+   ssown_loadlevel = 0;                  ! To allow CLOSE to disconnect the document files
+   tidyfiles(1);                         ! No select i/o to be done
+
+   message = "Batch job ".uinf_jobname." completed"
+   start = addr(message)+1
+   len = length(message)
+   flag = dmessage(ssown_ssowner, len, 1, ssown_ssinvocation!!1, ssown_ssownfsys, start)
+   halt
+%end;                                    ! of BATCHSTOP
+
+!-------------------------- INITIALISE IO STREAMS -------------------------------
+
+%external %routine initialise io streams %alias "s#initialiseiostreams"
+%integer afd, flag, i, ftype, fconad, datastart, dataend, maxsize, initialsize
+%string (31) boutput, doc
+%record (fdf) %name fi, fo
+%integer line, wkad
+%record (job spacef) %name job space
+%string (255) wstring, hdr
+
+   ssown_pos(-91) = hashfn("-91")
+   ssown_pos(-90) = hashfn("-90")
+
+   %if ssown_ssreason=batchreason %start
+      hdr = "*****    BATCH JOB ".uinf_jobname."   STARTED AT ".time." ON ".date."    ********"
+      doc = uinf_jobdocfile
+      connect(doc, 0, 0, (ssown_ssownfsys<<8)!x'82', fconad, ftype, datastart, dataend, flag)
+      %if flag#0 %start
+         wstring = ssown_ssfname
+         doc = "CONNECT DOCUMENT FILE"
+         ->stop early
+      %finish
+
+      boutput = "JO#".substring(doc, 8, length(doc))
+      %if 20<(uinf_output limit+16)<=(ssown_ssmaxfsize>>10) %then %c
+         maxsize = (uinf_output limit+16)<<10 %else %start
+         %if ssown_default definesize<=ssown_ssmaxfsize %then %c
+            maxsize = ssown_default definesize %else maxsize = ssown_ssmaxfsize
+      %finish
+      %if maxsize>(128<<10) %then initialsize = 128<<10 %else initialsize = maxsize
+      outfile(boutput, initialsize, maxsize, 2, i, flag); ! (Check we can create)
+      %if flag#0 %start
+         wstring = ssown_ssfname
+         doc = "CREATE OUTPUT FILE"
+         ->stop early
+      %finish
+
+      integer(i+12) = sscharfiletype
+      idefine(-91, boutput, afd, flag)
+      fo == record(afd)
+      fo_maxsize = maxsize
+
+      idefine(-90, doc, afd, flag)
+      datastart = fconad+datastart
+      dataend = fconad+dataend
+      line = 0
+      flag = 0
+      scanfile(datastart, dataend, wkad, line, 2, flag)
+      %unless flag=0 %start
+         wstring = ssown_ssfname
+         ssown_ssfname = wstring
+         doc = "ECL"
+         ->stop
+      %finish
+      job space == record(wkad)
+      job space_afd = afd
+      fi == record(afd)
+      fi_cur = job space_fstart
+      fi_cur rec = job space_fstart
+   %finish %else %start
+      %if ssown_ssreason#testreason %start; !OPER OR FEP TERMINAL
+         idefine(-90, ".TT", afd, flag)
+         idefine(-91, ".TT", afd, flag)
+      %else
+         idefine(-90, ".NULL", afd, i)
+         idefine(-91, ".LP", afd, i)
+      %finish
+   %finish
+
+   set io default(0, -90, 0)
+   set io default(1, -91, 0)
+
+
+   adjust load level(-1);  ! To protect the document files
+
+   selectinput(0)
+   selectoutput(0)
+   %if ssown_ssreason = batchreason %start
+      integer(fo_conad + 4) = 256  { extend header foor batch journal }
+      fo_cur = fo_conad + 256
+      fo_currec = fo_cur
+      fo_datastart = fo_cur
+      printline(hdr)
+   %finish
+
+   ssown_fd(maxfd) = 0;                  ! This was used as a .NULL stream pending this initialisation
+!*    ssown_loadlevel = ssown_loadlevel+1;  ! Now the files are open
+   adjustloadlevel(+1)
+   %return
+
+stop early:
+   idefine(-90, ".NULL", afd, i)
+   idefine(-91, ".LP", afd, i)
+stop:
+   set io default(0, -90, 0)
+   set io default(1, -91, 0)
+   select input(0)
+   select output(0)
+   printline(hdr)
+   ssown_ssfname = wstring
+   psysmess(doc, flag)
+   printline("Batch job aborted")
+   batchstop(0)
+%end;                                    ! of INITIALISE IO STREAMS
+
+!------------------------------- TIDYFILES ------------------------------------
+
+%external %routine tidyfiles %alias "S#TIDYFILES"(%integer selectflag)
+!   Is SELECTFLAG is zero, zero i & o streams are selected, otherwise no select is done
+
+%integer flag, i, next, lev, link, clear status
+%integer dodisconnects, loopcount, dummy
+%record (conff) %name cur
+%record (fdf) %name fd
+%string (255) ssfname, wk
+
+   %if monitoring possible=yes %and ssown_ssnote&8#0 %then monparams(">*ll=".itos(ssown_loadlevel))
+   ssfname = ssown_ssfname
+
+   ! Close any open channels which are eligible for closure
+   %for i = 1, 1, ssown_topfd %cycle
+      fd == ssown_fd(i)
+      %if fd_link>=ssown_loadlevel %start
+         %if fd_f77flag#0 %and fd_f2#0 {defined by and within F77} %then clear status = 1 %else %c
+            clear status = 0
+         %if fd_status#0 %start
+
+            %if fd_dsnum=ssown_outdefault %and ssown_dfdfoutsdc#0 %start
+               ! Restore "stacked" REPORTON channel.  (They SHOULD be stacked!)
+               set io default(1, ssown_dfdfoutsdc, dummy)
+               ssown_dfdfoutsdc = 0
+            %finish
+
+            flag = closei(addr(fd_link), clear status)
+         %finish
+      %finish
+   %repeat
+
+   %if ssown_loadlevel<=basell %start
+      set io default(0, -90, 0)
+      set io default(1, -91, 0)
+      ssown_dfdfoutsdc = 0
+   %finish
+
+   %if ssown_loadlevel<=ssown_tempavdset %start
+      ssown_avd = ssown_holdavd
+      ssown_tempavdset = 0
+      ssown_dirdiscon = 1;               !TO ENSURE CONNECTDIRECTORIES CALLED
+   %finish
+
+   !  Disconnect/changeaccess strategy:  for the levels above current LL, change
+   !  access to read-mode where appropriate.  However, if the
+   !  number of free segments is less than algorithm(nfree) then we
+   !  disconnect all possible (conlevel zero).
+
+   !  Cycle down from loadlevel TOPPLOADELEVEL through to SSOWN_LOADLEVEL+1, then do ZERO if we require disconnects
+   %if ssown_connfiles>(4*maxconf)//5 {"algorithm"} %then dodisconnects = 1 %else %c
+      dodisconnects = 0 %and setssinhibit
+
+   !  [Need to protect the calls of RELINK with the SETSSINIHIBIT above]
+
+   lev = toploadlevel
+   %cycle
+      %if lev=ssown_loadlevel %start
+         %if dodisconnects=0 %then %exit %else lev = 0
+      %finish
+      link = ssown_levelhead(lev)
+      loopcount = 0
+      %while link#0 %cycle
+         cur == record(link)
+         link = cur_flnk
+
+         ! This disconnection was done for the Amdahls, where modes in
+         ! different VMs had to agree.  Believed no longer necessary, now that
+         ! the protection is on the page table entries and we can have different
+         ! modes in different VMs.  KY  29/06/88
+         %if dodisconnects#0 {%or cur_mode&(8+2)=(8+2)..disabled} %start
+            !disconnect if currently shared write (SH)
+            disconnect(shortstem.itos(cur_pos), flag)
+         %finish %else %start
+
+            relink(cur, 0)
+
+            ! Level ZERO files connected in write-mode are left alone.  This is
+            ! intended to deal with #CONNECT, and no other instance is imagined
+            ! at time of writing.  [#CONNECT is an explicit call for an unprotected
+            ! (level 0) write-mode connect].
+
+            %if (cur_mode&2 {WRITE}#0 %and %not (cur_file->("T#"))) %or %c
+               cur_mode&x'200' {SEQ}#0 %then changeaccess(shortstem.itos(cur_pos), 1 {READ}, flag)
+
+         %finish
+
+         loopcount = loopcount+1
+         %if loopcount>500 %start
+            %if ssown_sscomreg(25)#4 %start
+               ssown_sscomreg(25) = 1
+               printline("Tidyfiles loop ".cur_file)
+               %monitor
+               ssown_sscomreg(25) = 4
+            %finish
+            %exit
+         %finish
+      %repeat
+      lev = lev-1
+   %repeat %until lev<=0
+
+   %if dodisconnects=0 %then allowinterrupts
+
+   %if selectflag=0 %then selectinput(0) %and selectoutput(0)
+
+   console(14, flag, flag);              !TO RESET JNBASE IN CASE RECALL OR RECAP CALLED **PROTEM
+   ssown_ssfname = ssfname
+   %if ssown_ssnote&8#0 %then monparams("<")
+%end;                                    ! of TIDYFILES
+
+!--------------------------------- INCOPEN -------------------------------------
+
+%external %routine inc open %alias "S#INCOPEN"(%string %name iden)
+! Provided for use by OPENSM, to increment the OPEN count in CONF.
+! IDEN is a filename which exists and is connected.
+%integer j
+%record (conff) %name cur
+%string (255) iden1
+   !j=findfn(iden, -1)
+   iden1 = iden
+   j = checkname(iden1, 1, 0)
+   cur == record(ssown_conf(ssown_confpos))
+   cur_opens = cur_opens+1
+%end;                                    ! INCOPEN
+
+!----------------------------- OPEN --------------------------------------------
+
+%external %integer %fn open %alias "S#OPEN"(%integer afd, mode)
+!*
+!* MODE = 1  INPUT
+!*        2  OUTPUT
+!*
+
+! Notes on F_ACCESSROUTE:
+
+!         1      ssown_indefault
+!         2      ssown_outdefault
+!         3      SMfile
+!         5      magnetic tape
+!         6      [FORTRAN F77OPEN:]  take DSNUM from F_ASVAR field
+!         8      file
+!         9      console
+!        10      .NULL
+!        11      so-called "alien data" i.e. "*", and believed not now used.
+
+%record (dahf) %name head
+%record (reportf) rr
+%record (fdf) %name f
+%record (conff) %name cur
+%integer start, len, outconad, flag, openmode, hole, pos, j, gap
+%string (255) tempf
+
+   %if monitoring possible=yes %and ssown_ssnote&4#0 %then %c
+      monparams(">jrjr*ll=".itos(ssown_loadlevel)) %and printfd(afd, 1)
+   f == record(afd)
+   f_link = ssown_loadlevel
+   %if mode=1 %then %start;              !OPEN FOR READING
+      f_validaction = 109;               !Exclude WRITE and ENDFILE
+      %if f_accessroute=9 %then %start;  ! INTERACTIVE TERMINAL
+         f_conad = 0
+         f_currec = 0
+         f_cur = 0
+         f_end = 0
+!*          f_validaction = 97;             !Exclude WRITE, REWIND, BACKSPACE and ENDFILE
+         f_validaction = 97!4;           !exclude write, backspace, endfile
+         ! allow REWIND for Fortran IO (SH 09-02-88)
+      %finish %else %if f_accessroute=8 %then %start
+         %if f_conad=0 %start
+            ! flag = checkname(f_iden, 1, 0)
+            hole = 0
+            hole = f_maxsize %if f_size spec=yes
+            connect(f_iden, x'200' {seq}, hole, 4 {soft-perm}, rr_conad, rr_filetype,
+               rr_datastart, rr_dataend, flag)
+            %if flag#0 %then ->opout
+            pos = ssown_confpos
+            f_conad = rr_conad
+            f_currec = rr_conad+rr_datastart
+            f_end = rr_conad+rr_dataend
+            head == record(rr_conad);    !MAP HEAD ONTO FILE HEAFDER
+            %unless sscharfiletype<=rr_filetype<=ssdatafiletype %then %c
+               flag = 267 {INVALID FILETYPE} %and ->opout
+            f_cursize = head_size
+            %if rr_filetype=sscharfiletype %then %start
+               f_rectype = 4
+               f_modeofuse = 1;          !CHARACTER FILE ACCESS
+            %finish %else %start
+               f_modeofuse = 2;          !SQ FILE ACCESS
+               f_rectype = head_format&3; ! RECORD FORMAT 1=F 2=V
+               f_flags = f_flags!(head_format&ebcdicbit)
+               !INCLUDE EBCDIC BIT
+               f_maxrec = head_format>>16
+               %if f_rectype=1 %then %start; ! FIXED FORMAT
+                  f_minrec = f_maxrec
+                  f_recsize = f_maxrec
+               %finish
+            %finish
+         %finish { conad=0 } %else %start
+            tempf = translateshortname(f_iden, 0)
+            !j=findfn(tempf, -1);        ! Must be found, since connected
+            j = checkname(tempf, 1, 0)
+            pos = ssown_confpos
+         %finish
+
+         cur == record(ssown_conf(pos))
+         cur_opens = cur_opens+1
+
+         f_transfers = 0
+         f_datastart = f_currec
+         f_cur = f_currec
+      %finish %else %if f_accessroute=5 %then %start; ! MAGNETIC TAPE
+         magio(afd, 9, flag);
+         %if flag#0 %then %result = flag
+         f_validaction = X'3D';          ! EXCLUDE WRITE
+         f_flags = f_flags!ebcdicbit
+      %finish %else %if f_accessroute=10 %then %start; !.NULL
+         f_cur = 0
+         f_end = 0
+      %finish %else %if f_accessroute=11 %then %start; !ALIEN DATA
+         f_cur = f_datastart
+         f_currec = f_cur
+         f_end = f_cur+f_maxsize
+         f_modeofuse = 1;                !CHARACTER FILE TYPE INPUT
+      %finish %else %if f_accessroute#1 %then %result = 266; !INCONSISTENT DEFINITION
+      ! **** **** I think ACCESSROUTE=1 should be treated as  **** ****
+      ! **** **** a fault: if it can arise at all, then I do  **** ****
+      ! **** **** not think it should simply be ignored.      **** ****
+
+      !                                                                                 above here...  INPUT
+      !-------------------------------------------------------------------------------------------------------
+      !                                                                                 below here...  OUTPUT
+
+   %finish %else %if mode=2 %then %start; !OPEN FOR WRITING
+      f_validaction = 127
+      %if f_accessroute=9 %then %start;  ! INTERACTIVE TERMINAL
+         len = 0
+         start = 0
+         console(2, start, len);         !TO GET ADDRESSES
+         f_cur = start
+         f_currec = start
+         f_end = start+len
+         f_validaction = 119;            !EXCLUDE BACKSPACE
+      %finish %else %unless 8#f_accessroute#10 %then %start
+         !FILE OR .NULL
+         %if f_flags&8=0 %start;         !NORMAL OPEN - NOT -MOD
+newfile:
+            ! [  %if ssown_ssreason=batchreason %then len = x'20000' %else len = 4096
+            !  For batch, initialise io now OUTFILES the file according to MAXLOG or
+            !  default define size or SSMAXFSIZE to get the HOLE right.  Uses the
+            !  lesser of MAXLOG (from spoolr) and SSMAXFSIZE for SIZE ].
+
+            len = 4096
+
+            ! For .NULL, the GAP parameter need not be specified: we minimise VM use by not specifying.
+            %if f_accessroute=10 {.NULL} %then gap=0 %else gap = f_maxsize
+
+            outfile(f_iden, -len, gap, x'14' {seq,level 1=perm}, outconad, flag)
+            %if flag#0 %then ->opout
+            cur == record(ssown_conf(ssown_confpos))
+            cur_opens = cur_opens+1
+            head == record(outconad)
+
+            ! We have asked for a newcopy output file of minimum size LEN.
+            ! Take actual size supplied from file header
+            len = head_size
+
+            %if f_modeofuse=1 %start
+               head_filetype = sscharfiletype
+               head_datastart = 32 { added 12/7/88 }
+            %finish %else %start
+               head_filetype = ssdatafiletype
+               head_format = (f_maxrec<<16)!f_rectype!(f_flags&ebcdicbit)
+               head_records = 0
+            %finish
+            f_conad = outconad
+            f_cur = f_conad+head_datastart { 32 replaced by datastart 12/7/88 }
+            f_transfers = 0
+            f_end = outconad+len
+            f_cursize = len
+            %if ssown_ssreason=batchreason %then f_end = f_end-margin1
+
+         %finish %else %start;           !OPEN -MOD
+
+            ! flag = checkname(f_iden, 2, 0)
+            connect(f_iden, x'203' {seq,RW}, f_maxsize, 4 {soft-perm}, rr_conad, rr_filetype,
+               rr_datastart, rr_dataend, flag)
+            %if flag=218 %then ->newfile; !FILE DOES NOT EXIST
+            %if flag#0 %then ->opout
+            cur == record(ssown_conf(ssown_confpos))
+            cur_opens = cur_opens+1
+            head == record(rr_conad)
+            %if head_filetype=sscharfiletype %then f_modeofuse = 1 {CHAR FILE ACCESS} %else %start
+               %if head_filetype#ssdatafiletype %then flag = 266 %and ->opout
+               f_modeofuse = 2;          !DATA FILE ACCESS
+               f_flags = f_flags!(head_format&ebcdicbit)
+               f_maxrec = head_format>>16
+               f_rectype = head_format&3
+               %if f_rectype=1 %then f_minrec = f_maxrec
+               f_transfers = head_records
+            %finish
+            f_conad = rr_conad
+            f_cur = rr_conad+rr_dataend
+            ! **** **** In the next couple of lines, the   **** ****
+            ! **** **** current size of the file is found  **** ****
+            ! **** **** in HEAD_SIZE.  This may not always **** ****
+            ! **** **** be reliable: it would be better to **** ****
+            ! **** **** use a call on FINFO.               **** ****
+            f_end = f_conad+head_size
+            f_cursize = head_size
+         %finish
+         f_currec = f_cur
+         f_datastart = f_cur
+         f_recsize = f_maxrec;           ! This is set in INREC for every
+         ! record for variable length records, but remains
+         ! constant for fixed length records.
+
+      %finish %else %if f_accessroute=5 %then %start; !MAGNETIC TAPE
+
+         %if f_flags&ringneeded=0 %then %result = 319; ! NO RING REQUESTED
+         %if f_rectype=255 %then %result = 330
+         ! NO FORMAT INFORMATION SUPPLIED FOR WRITING THE TAPE
+         %if f_flags&8=0 %then openmode = 10 %else openmode = 11
+         ! IE NORMAL OR -MOD
+         magio(afd, openmode, flag)
+         %if flag#0 %then %result = flag
+         f_validaction = X'3F';          ! INCLUDE WRITE
+      %finish %else %if f_accessroute#2 %then %result = 266; !INCONSISTENT DEFINITION
+   %finish
+!*
+
+   flag = 0
+   f_status = 3
+   f_curstate = 1
+opout:                                   ! Jump to here only after connect or outfile (when flag#0)
+   tempf = f_iden; %if tempf->tempf.("_") %start; %finish
+   %if flag#0 %then setconlevel(tempf, 0, len)
+   %if ssown_ssnote&4#0 %then printfd(afd, 1) %and monparams("<jrjr*".itos(flag))
+   %result = flag
+%end;                                    ! of OPEN
+
+!----------------------------- GET AVAILABLE BYTES ------------------------------
+
+%routine get available bytes(%integer %name additional, %string (19) user, %integer fsys)
+
+! Returns the number of BYTES of filespace currently available within the user's allocation
+
+%integer max, maxspace, dflag
+%integer %array sfinf(0:6)
+%string (7) dsfips
+
+   dflag = dsfi(user, fsys, 11, 0, dsfips, sfinf)
+   %if dflag=0 %then %start
+      maxspace = sfinf(0) {max total space}
+      dflag = dsfi(user, fsys, 30, 0, dsfips, sfinf)
+   %finish
+
+   %if dflag#0 %start
+      mstop("User=".user." Fsys=".itos(fsys)." Dflag=".itos(dflag), 135)
+   %finish
+
+   max = maxspace-(sfinf(1) {total disc kb}-sfinf(5) {temp disc kb})
+   {in brackets=current perm kb}
+   additional = max<<10
+%end;                                    ! of GET available bytes
+
+!---------------------------------- EXTEND -------------------------------------
+
+%external %routine extend %alias "S#EXTEND"(%record (fdf) %name f, %integer %name flag)
+
+! THIS ROUTINE ATTEMPTS TO EXTEND AN OPEN OUTPUT FILE. IT TAKES THE FOLLOWING SIZES IN KBYTES:
+! 4,16,64,128,256,384.......
+! THIS ALGORITHM CAN BE CHANGED IF THERE ARE PROBLEMS OF DISK FRAGMENTATION
+
+%integer newsize, sparebytes, cursize, margin
+%string (19) curindex
+%record (conff) %name cur
+
+   %if monitoring possible=yes %and ssown_ssnote&4#0 %then %c
+      monparams(">*chan=".itos(f_dsnum).",size=".htos(f_cursize, 8))
+   ssown_ssfname = "   Channel = ".itos(f_dsnum)."   File = ".translateshortname(f_iden, 0)
+   cursize = f_cursize;                  !CURRENT FILE SIZE
+   %if cursize>=f_maxsize %start
+
+      ! Already big enough
+      flag = 13 { No more space for output & }
+      %if ssown_ssreason=batchreason %start
+         %if f_end<f_conad+f_cursize %then f_end = f_conad+f_cursize %else %c
+            mstop(ssown_ssfname, 145)
+!      %else
+!         %if ssown_obeylevel>0 {and dsnum=-91?} %then ->out
+!         setreturncode(flag)
+      %finish
+!      ->out
+      %return { not useful to do any more output! }
+   %finish
+
+   %if cursize<k16 %then newsize = k16 %else %if cursize<k64 %then newsize = k64 %else %c
+      newsize = (cursize+k128)&(-k128)
+   %if newsize>f_maxsize %then newsize = f_maxsize
+
+   flag = checkname(f_iden, 2, 0)
+   %if flag#0 %then ->out
+   cur == record(ssown_conf(ssown_confpos))
+   cur_file -> curindex.(":")
+
+   %cycle
+      changefilesize(ssown_shortname, newsize, flag); !TRY TO CHANGE IT
+      %if flag=0 %then %start
+         f_cursize = newsize
+         f_end = f_conad+newsize;        !ABS END OF EXTENDED FILE
+         integer(f_conad+8) = newsize
+         %if ssown_ssreason=batchreason %start
+            margin = f_end-f_cur { actual amount of free space in file }
+            %if margin>margin1 %then margin = margin1 { 16000 at last look } %else %c
+               margin = margin>>1
+            f_end = f_end-margin
+         %finish
+      %finish %else %start
+         %if ssown_ssreason=batchreason %start
+            %if f_end<f_conad+f_cursize %then f_end = f_conad+f_cursize %else %c
+               mstop(itos(flag).ssown_ssfname, 125)
+            ! And the non-zero flag will give a signal "output exceeded", which
+            ! can use up the remaining space in the file
+         %finish %else %if flag=308 {total file limit exceeded} %start
+            get available bytes(sparebytes, curindex, -1)
+            %exit %if sparebytes<=0 { with flag of 308 }
+            newsize = f_cursize+sparebytes
+            %continue
+         %finish
+      %finish
+      %exit
+   %repeat
+
+out:
+   %if monitoring possible=yes %and ssown_ssnote&4#0 %then monparams("<*flag=".itos(flag))
+
+%end;                                    ! of EXTEND
+
+!-------------------------------- CLOSEI ---------------------------------------
+
+%integer %fn closei(%integer channel, clear)
+! clear = 0 just close
+!           else clear as well
+%integer j, pos, flag, afd, notebit1, old status, devcode
+%record (fchanf) %name cur
+%record (conff) %name confcur
+%record (fdf) %name f
+%record (dahf) %name h
+%string (15) par1, par2
+%string (255) file
+
+   %if monitoring possible=yes %and ssown_ssnote&4#0 %then %c
+      monparams(">jrjr*ll=".itos(ssown_loadlevel))
+   notebit1 = ssown_ssnote&1
+   pos = -1
+
+   %if addr(ssown_fd(1)_link)<=channel<=addr(ssown_fd(maxfd)_link) %start
+      afd = channel
+   %finish %else %start
+      %if channel=-1 %or channel=0 %then %c
+         ssown_ssfname = itos(channel) %and flag = 223 {invalid chan} %and ->cout
+!*       flag = 151 { not def }
+      j = findchan(itos(channel), pos)
+      %unless j=0 %then flag = 151 {not def} %and ssown_ssfname = itos(channel) %and ->cout
+      cur == record(ssown_chan(pos))
+      afd = cur_afd
+   %finish
+
+   ssown_ssnote = ssown_ssnote&(\1);     ! Cannot tolerate terminal monitoring during close
+   f == record(afd)
+   ! we do not fail if not open - may not have been selected.
+   %if f_status#0 %start;                !FILE IS OPEN
+      old status = f_status;             ! Value 2 = partly open (OPENSQ)
+      f_status = 0;                      !TO PREVENT FAILURE LOOP
+
+      ssown_sscomreg(23) = 0 %if ssown_sscomreg(23)=f_dsnum
+
+      %if f_accessroute=5 {mag tape} %then magio(afd, mtclosemode, flag) %else %start
+
+         %if f_accessroute=8 {file} %or (f_accessroute=10 %and f_validaction&2#0) %or %c
+            f_accessroute=3 %start
+            ! For Pdfiles, strip off the member.
+            %unless f_iden->file.("_") %then file = f_iden
+            %if old status#2 %start
+               ! Not through here for "partly open" file
+               file = translateshortname(file, 0)
+               j = checkname(file, 1, 0); ! MUST be found, since open & connected
+               confcur == record(ssown_conf(ssown_confpos))
+
+               %if confcur_opens=0 %start { oops! }
+                  ssown_ssfname = "File: ".file." channel: ".itos(channel). %c
+                     " zero open count at close"
+                  flag = 100
+                  ->cout
+               %finish
+               confcur_opens = confcur_opens-1
+               %if confcur_opens=0 %then setconlevel(file, 0, flag)
+            %finish
+         %finish
+
+         %if f_accessroute=8 {file} %and f_validaction&2#0 {output file} %and %c
+            f_conad>0 {file connected} %start
+            h == record(f_conad)
+            %if 13#f_modeofuse#3 %then %start
+               ! Correct the length except for DA files.
+               ! The next statement is to cope with a slightly pathological
+               ! situation.  If the file is opened for output on two channels,  then
+               ! the first CLOSE changes the access back to read, leading to an  address error.
+               %if confcur_mode&2=0 %then change access(f_iden, 2, j)
+               h_size = f_cursize;       !done here..not in extend..sh JUL 86
+               h_dataend = f_cur-f_conad
+            %finish %else f_darecnum = 0
+            %if f_modeofuse=2 %then h_records = f_transfers; ! CURRENT LENGTH
+            !
+            ! SEND OR TRIM
+            devcode = (f_devcode upper<<8)!f_devcode
+            %if devcode#0 %start
+               par1 = devname(devcode)
+               par2 = "OUTPUT".itos(f_dsnum)
+               ! flag = checkname(f_iden, 2, 0)
+               sendfile2(f_iden, par1, par2, 1, 0, flag)
+            %else
+               %if f_cursize>(f_cur-f_conad+4095)&(\4095) %then trim(f_iden, flag)
+               ! The UNLESS in the following statement is gives a minor saving, which
+               ! brings CLOSE into line with TIDYFILES (not bothering to change
+               ! access back to read for T#-files).  The protection lost is
+               ! surely negligible, although it also reduces the logical
+               ! protection offered against overwriting by HIGHER LOAD-LEVEL
+               ! programs of files in read mode at lower load level.  A saving worth
+               ! having, however, on balance?
+               changeaccess(f_iden, 1, flag) %unless f_iden->("T#")
+            %finish
+         %finish {output}
+
+         %if f_accessroute=10 {.NULL} %start
+            ! flag = checkname(f_iden, 1, 0)
+            destroy(f_iden, flag)
+         %finish
+      %finish
+   %finish
+
+   %unless clear=0 %start
+      adjust conf defines(f_iden, -1)
+      disposeheap(addr(f_iden))
+      %if pos=-1 %start
+         channel = f_dsnum
+         flag = findchan(itos(channel), pos)
+         ->cout %unless flag=0
+      %finish
+      f = 0
+      clearchan(pos)
+   %finish
+
+   f_conad = 0
+   f_curstate = 0
+   flag = 0
+cout:
+   ssown_ssnote = ssown_ssnote!notebit1
+   %if ssown_ssnote&4#0 %then monparams("<jrjr*".itos(flag))
+   %result = flag
+%end;                                    ! of CLOSEI
+
+!-------------------------------- CLOSE -----------------------------------------------
+
+%external %integer %fn close %alias "S#CLOSE"(%integer channel)
+   %result = closei(channel, 0)
+%end;                                    ! close
+
+!------------------------------- CLOSENCLEAR ------------------------------------------
+
+%external %integer %fn closenclear %alias "s#closenclear"(%integer channel)
+   %result = closei(channel, 1)
+%end;                                    ! closenclear
+
+!-------------------------------- DFDFIN ---------------------------------------
+
+%external %routine dfdfin %alias "S#DFDFIN"(%string (255) infile, %integer chan,
+   %integer %name flag)
+%integer afd
+   %if ssown_ssnote&4#0 %then monparams(">trjriw")
+   %if ssown_dfdfinsdc=0 %then ssown_dfdfinsdc = ssown_indefault
+   %if infile#"" %then %start
+      sdefine(chan, infile, afd, flag)
+      set io default(0, chan, 0)
+   %finish %else %start
+      %if ssown_dfdfinsdc#0 %then set io default(0, ssown_dfdfinsdc, 0)
+      ssown_dfdfinsdc = 0
+   %finish
+   select input(0)
+   %if ssown_ssnote&4#0 %then monparams("<trjriw")
+%end;                                    ! of DFDFIN
+
+!-------------------------------- DFDFOUT --------------------------------------
+
+%external %routine dfdfout %alias "S#DFDFOUT"(%string (255) outfile, %integer chan,
+   %integer %name flag)
+%integer afd
+%record (fdf) %name fd
+   %if ssown_ssnote&4#0 %then monparams(">trjriw")
+   %if ssown_dfdfoutsdc=0 %then ssown_dfdfoutsdc = ssown_outdefault
+   %if outfile#"" %then %start
+      %if length(outfile)<5 %or %c
+         substring(outfile, length(outfile)-3, length(outfile))#"-MOD" %then %c
+         sdefine(chan, outfile, afd, flag) %else %start
+         sdefine(chan, substring(outfile, 1, length(outfile)-4), afd, flag)
+         %if flag=0 %then %start
+            fd == record(afd)
+            fd_flags = fd_flags!8
+         %finish
+      %finish
+      set io default(1, chan, 0)
+   %finish %else %start
+      %if ssown_dfdfoutsdc#0 %then set io default(1, ssown_dfdfoutsdc, 0)
+      ssown_dfdfoutsdc = 0
+   %finish
+   %if ssown_ssnote&4#0 %then monparams("<trjriw")
+   select output(0)
+%end;                                    ! of DFDFOUT
+!
+!------------------------------- CLOSESTREAM -----------------------------------
+!
+%external %routine closestream %alias "s#closestream"(%integer ch)
+%integer flag, saveout
+   ! -79 to -2 are the Subsystem-allocated free channels
+!*    %if ssown_sscomreg(22)=ch %thenstart
+!*       ssown_ssfname="Cannot close current input stream"
+!*       flag=100
+!*    %finishelseif ssown_sscomreg(23)=ch %thenstart
+!*       ssown_ssfname="Cannot close current output stream"
+!*       flag=100
+   %if ch=ssown_sscomreg(22) {current input} %or %c
+      ch=ssown_sscomreg(23) {current output} %then %start
+      flag = 29;                         !stream in use
+   %finish %else %start
+!*    %if (ch>0 %or lofree<=ch<=hifree) %and ssown_sscomreg(22)#ch#ssown_sscomreg(23) %then
+      flag = closei(ch, 0)
+   %finish
+   %if flag#0 %then %start
+      saveout = ssown_sscomreg(23);      !save current output stream
+      selectoutput(0)
+      printstring("**Warning..CLOSESTREAM fails -")
+      printstring(failuremessage(flag))
+      selectoutput(saveout)
+   %finish
+%end
+!
+!---------------------------- READSTRING ---------------------------------------
+!
+%external %routine readstring %alias "s#readstring"(%string (*) %name dest)
+%integer i, delim, len, maxlen; %string (1) t
+%string (255) s
+   len = 0;                              !CURRENT LENGTH
+   maxlen = size of(dest)-1;             !BOUND LESS 1 BYTE FOR LENGTH BYTE
+   readsymbol(i) %until i>32
+   %signal %event 4, 2 %unless i='''' %or i='"'; ! SYMBOL INSTEAD OF STRING
+   s = ""; delim = i
+   %cycle
+      %if nextsymbol=delim %start
+         skip symbol
+         %exit %unless next symbol=delim
+      %finish
+      %if len>=maxlen %then %signal %event 6, 1
+      readitem(t)
+      s = s.t
+      len = len+1
+   %repeat
+   dest = s
+%end;                                    ! of READSTRING
+
+!----------------------------------- CLEAR -------------------------------------
+
+%external %routine sclear %alias "S#CLEAR"(%integer chan, %integer %name flag)
+%integer j, pos, negonly
+%record (fdf) %name f
+%record (fchanf) %name cur
+
+   %if ssown_ssnote&4#0 %then monparams(">jriw")
+   flag = 0
+
+   %if chan=-200 {Used at return to command level} %start
+      ! Clear all temp-defined channels (those allocated by EMAS3CLAIMCHANNEL)
+      negonly = 1
+      chan = -1
+   %finish %else negonly = 0
+
+   %if chan=-1 %start;                   !CLEAR ALL NON-OPEN CHANNELS
+
+      %for j = 0, 1, maxchan %cycle
+         %if ssown_chan(j)>0 %start
+            cur == record(ssown_chan(j))
+            f == record(cur_afd)
+            chan = f_dsnum
+            %if ssown_sscomreg(22)#chan#ssown_sscomreg(23) %and f_status=0 %and (negonly=0 %or %c
+               (negonly>0 %and lofree<=chan<=hifree)) %start
+               adjust conf defines(f_iden, -1)
+               byteinteger(addr(f_iden)) = 0; ! Get rid of the filename
+               disposeheap(addr(f_iden))
+               f_dsnum = 0;              !TO MARK IT AS UNUSED
+               clearchan(j)
+            %finish
+         %finish
+      %repeat
+
+   %finish %else %start
+
+      j = findchan(itos(chan), pos)
+      %if j=0 {channel found} %start
+         cur == record(ssown_chan(pos))
+         f == record(cur_afd)
+         %if f_status=0 %and ssown_sscomreg(22)#chan#ssown_sscomreg(23) %start
+            adjust conf defines(f_iden, -1)
+            byteinteger(addr(f_iden)) = 0
+            disposeheap(addr(f_iden))
+            f_dsnum = 0;                 !TO SHOW DESCRIPTOR FREE
+            clearchan(pos)
+         %finish %else flag = 265 {channel not closed}
+      %finish %else ssown_ssfname = itos(chan) %and flag = 151 {channel not defined}
+
+   %finish
+   %if ssown_ssnote&4#0 %then monparams("<jriw")
+%end;                                    ! of sclear
+
+!------------------------------- DEFINFO ---------------------------------------
+
+%external %routine definfo %alias "s#definfo"(%integer chan, %string %name file,
+   %integer %name status)
+!RETURNS INFO ABOUT CHANNEL CHAN IN FILE AND STATUS
+%record (fdf) %name f
+%record (fchanf) %name cur
+%integer afd, j, pos
+   %if ssown_ssnote&4#0 %then monparams(">jrswiw")
+   file = "";                            !DEFAULT VALUE
+   status = 0
+   j = findchan(itos(chan), pos)
+   cur == record(ssown_chan(pos))
+   ->out %if j#0 {channel not found}
+   afd = cur_afd
+   f == record(afd)
+   %if f_accessroute=5 {MAGNETIC TAPE} %then %c
+      file <- string(afd+111)."(".string(afd+129).")" %else %if f_accessroute=10 %then %c
+      file = ".NULL" %else %if f_accessroute=11 {ALIEN DATA} %then file = "*" %else %if %c
+      f_devcode#0 %then file <- devname((f_devcode upper<<8)!f_devcode) %else %c
+      file <- translateshortname(f_iden, 0)
+   %if f_status=0 %then {DEFINED BUT NOT OPEN}status = 1 %else status = 3 {DEFINED AND OPEN}
+out:
+   %if ssown_ssnote&4#0 %then monparams("<jrswiw")
+%end;                                    ! of DEFINFO
+
+!--------------------------------EMAS3DEFINFO ----------------------------------
+
+%external %routine emas3definfo(%integer %name xchan, %string %name xfile, %integer %name xstatus)
+%string (255) file
+%integer chan, status
+   ss enter(file, chan, "irswiw")
+   definfo(chan, file, status)
+   ss exit(file, chan, "irswiw")
+%end;                                    !of emas3definfo
+
+!-----------------------------------------------------------------------
+
+%external %routine reporton %alias "s#reporton"(%integer chan)
+!This routine is used to re-route output on stream 0 to a nominated stream (chan)
+!It is intended for re-routeing messages from e.g.COPY, and DIAGNOSTICS after
+!program failure
+%string (255) file
+%integer flag
+   %if-1<=chan<=0 %then dfdfout("", 0, flag) {return to normal} %else %start
+      !This next statement is needed to obtain the filename or device required for output.
+      definfo(chan, file, flag);         !ignore flag
+      dfdfout(file, chan, flag);         !tell the subsystem
+   %finish
+%end;                                    ! reporton
+
+!-----------------------------------------------------------------------
+
+%external %routine emas3 get input pointers(%integer %name start, end)
+
+! returns zeros unless non empty file provided
+
+%integer chan, j, pos
+%record (fchanf) %name cur
+%record (fdf) %name f
+
+   start = 0; end = 0
+   chan = ssown_indefault
+   j = findchan(itos(chan), pos)
+   %return %unless j=0
+   cur == record(ssown_chan(pos))
+   f == record(cur_afd)
+   %return %unless f_access route=8 { file }
+!   j = open(cur_afd, 1)
+!   %return %unless j=0
+   %return %if f_status = 0
+   %return %unless f_end>f_currec
+   start = f_currec
+   end = f_end-1
+%end;                                    ! emas3 get input pointers
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn setfdi %alias "s#setfdi"(%integer chan, type, val)
+
+%integer j, pos
+%record (fchanf) %name cur
+%record (fdf) %name f
+%const %integer toptype= 27
+%switch sw(1:toptype)
+
+   ssown_ssfname = "1 to ".itos(toptype)
+   %result = 384 %unless 1<=type<=toptype
+
+   %cycle
+      j = findchan(itos(chan), pos)
+      %result = j %unless j=0
+      cur == record(ssown_chan(pos))
+      f == record(cur_afd)
+! shout("afd=".htos(cur_afd,8)); printfd(cur_afd,1)
+      chan = ssown_indefault %and %continue %if f_access route=1
+      chan = ssown_outdefault %and %continue %if f_access route=2
+      %exit
+   %repeat
+
+   ->sw(type)
+sw(21): f_currec = val; %result = 0
+sw(22): f_cur = val; %result = 0
+sw(*): %result = 0
+%end;                                    ! setfdi
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn fdi %alias "s#fdi"(%integer route, chan, type, %integer %name val)
+
+%integer j, pos
+%record (fchanf) %name cur
+%record (fdf) %name f
+%const %integer toptype= 27
+%switch sw(1:toptype)
+
+   ssown_ssfname = "1 to ".itos(toptype)
+   %result = 384 %unless 1<=type<=toptype
+
+   %if chan=0 %start
+      %if route=1 %then chan = ssown_indefault %else chan = ssown_outdefault
+   %finish
+
+   %cycle
+      j = findchan(itos(chan), pos)
+      %result = j %unless j=0
+      cur == record(ssown_chan(pos))
+      f == record(cur_afd)
+!shout("afd=".htos(cur_afd,8)); printfd(cur_afd,1)
+!      chan = ssown_indefault %and %continue %if f_access route = 1
+!      chan = ssown_outdefault %and %continue %if f_access route = 2
+      %exit
+   %repeat
+
+   %cycle
+      ->sw(type)
+sw(20): val = f_conad; %exit
+sw(21): val = f_currec; %exit
+sw(22): val = f_cur; %exit
+sw(23): val = f_end; %exit
+sw(26): val = f_cursize; %exit
+sw(27): val = f_datastart; %exit
+sw(*): %exit
+   %repeat
+
+   %result = 0
+%end;                                    ! fdi
+
+!-------------------------------- PRINTCHS -------------------------------------
+
+%external %routine printchs %alias "s#printchs"(%string (255) s)
+%integer i, j
+!
+   i = length(s)
+   %return %if i=0
+   j = addr(s)+1
+   console(10, j, i)
+%end;                                    ! of printchs
+!
+!-----------------------------------------------------------------------
+!
+%external %integer %fn stor %alias "s#stor"(%string (255) s, %long %real %name r)
+!
+! result is  0 a long real returned
+!            371 no digits!
+!            372 bad characters
+!            373 too big
+%integer j, sign, n, l, ch, esign, exp, dot
+%long %integer i
+%long %long %real llr, scale
+%byte %integer %array %name b
+%byte %integer %array %format bf(0:255)
+   s = ucstring(s)
+   b == array(addr(s), bf)
+   l = length(s)
+   sign = 0;                             ! no sign as yet seen
+   dot = 0;                              ! no decimal point etc, treat number as integer
+   n = 0;                                ! count digits
+   i = 0
+   j = 1;                                ! to index along B
+check sign:
+   %if j<=l %and b(j)='+' %start
+      %result = 372 %unless sign=0
+      sign = 1
+      j = j+1
+      ->check sign
+   %finish
+!
+   %if j<=l %and b(j)='-' %start
+      %result = 372 %unless sign=0
+      sign = -1
+      j = j+1
+      ->check sign
+   %finish
+!
+   %result = 371 %if j>l
+!
+   %if l=j+1 %and b(j)='P' %and b(l)='I' %start
+      r = pi
+      r = -r %if sign<0
+      %result = 0
+   %finish
+!
+   %if b(j)='X' %start;                  ! hex?
+      j = j+1
+      %result = 371 %if j>l
+      %while j<=l %cycle
+         ch = b(j)
+         j = j+1
+         %result = 372 %unless '0'<=ch<='9' %or 'A'<=ch<='F'
+         %if n=0 %start
+            n = 1 %unless ch='0'
+         %else
+            n = n+1
+            %result = 373 %if n>16
+         %finish
+         i = i<<4+9*ch>>6+ch&15
+      %repeat
+!
+      %if sign<0 %start
+         %result = 373 %if i=X'8000000000000000'
+         i = -i
+      %finish
+!
+      r = i
+      %result = 0;                       ! a good long integer
+   %finish
+!
+   %if '0'<=b(j)<='9' %start
+      llr = b(j)-'0'
+      j = j+1
+      n = n+1
+      %cycle
+         ->no more %if j>l
+         %exit %unless '0'<=b(j)<='9'
+         n = n+1
+         llr = llr*10.0+b(j)-'0'
+         j = j+1
+      %repeat
+   %finish %else llr = 0;                ! integer part
+!
+   %if b(j)='.' %start;                  ! add in the fractional part
+      dot = 1;                           ! decimal point encountered
+      scale = 10.0
+      j = j+1
+      %cycle
+         ->no more %if j>l
+         %exit %unless '0'<=b(j)<='9'
+         n = n+1
+         llr = llr+(b(j)-'0')/scale
+         scale = scale*10.0
+         j = j+1
+      %repeat
+   %finish
+!
+   %result = 371 %if n=0;                ! no digits so far
+!
+   %if b(j)='@' %start;                  ! appears to be an exponent
+      esign = 0
+      exp = 0
+      j = j+1
+checkesign:
+      %if j<=l %and b(j)='+' %start
+         %result = 372 %unless esign=0
+         esign = 1
+         j = j+1
+         ->checkesign
+      %finish
+!
+      %if j<=l %and b(j)='-' %start
+         %result = 372 %unless esign=0
+         esign = -1
+         j = j+1
+         ->checkesign
+      %finish
+!
+      %result = 371 %if j>l;             ! no digits in exponent
+!
+      %while j<=l %cycle
+         ch = b(j)
+         j = j+1
+         %result = 372 %unless '0'<=ch<='9'
+         exp = exp*10+ch-'0'
+      %repeat
+      exp = -exp %and dot = 1 %if esign<0
+!
+      %if exp=-99 %then llr = 0 %else llr = llr*10**exp
+   %finish
+   %if j<=l %and b(j)>' ' %then %result = 372
+no more:
+   llr = -llr %if sign<0
+!
+   r = llr
+!
+   %result = 0
+%end;                                    ! stor
+!
+!-----------------------------------------------------------------------
+!
+%external %integer %fn stoi %alias "s#stoi"(%string (255) s, %integer %name i)
+%integer sign, d, j, hex, shift
+%long %integer total
+%byte %integer %name len
+   len == byteinteger(addr(s))
+   i = 0 { potential result }
+   s = ucstring(s)
+   hex = 0
+   total = 0
+   sign = 0
+   shift = 0 { no 'K' or 'M' at end }
+
+   s -> (" ").s %while len>0 %and charno(s, 1)=' '
+   s -> ("+").s %while len>0 %and charno(s, 1)='+'
+   sign = -1 %and s -> ("-").s %if len>0 %and charno(s, 1)='-'
+   hex = 1 %and s -> ("X").s %if len>0 %and charno(s, 1)='X'
+   shift = 10 %and len = len-1 %if len>0 %and charno(s, len)='K'
+   shift = 20 %and len = len-1 %if len>0 %and charno(s, len)='M'
+   %result = 371 %if len=0 { no digits in number }
+   %result = 373 %if hex#0 %and len>8
+
+   %cycle j = 1, 1, len
+      d = charno(s, j)
+      %result = 372 %unless '0'<=d<='9' %or (hex#0 %and 'A'<=d<='F')
+      %if hex=0 %then total = 10*total %else total = total<<4+9*d>>6
+      total = total+d&15
+      %result = 373 %if total>x'0000001000000000'
+   %repeat
+
+   total = total<<shift %if shift>0
+
+   %if hex=0 %start
+      %if sign<0 %start
+         %result = 373 %if total>x'0000000080000000'
+      %finish %else %start
+         %result = 373 %if total>x'000000007fffffff'
+      %finish
+   %finish %else %start
+      %result = 373 %if total>x'00000000ffffffff'
+   %finish
+   total = -total %if sign<0
+   i = integer(addr(total)+4)
+   %result = 0
+%end;                                    ! STOI
+!
+!-----------------------------------------------------------------------
+!
+%external %routine mstop %alias "s#mstop"(%string (255) txt, %integer n)
+%integer j, lnb, gla, fn, chan
+%const %string (10) to= "stop#diags"
+
+   *st_10, lnb
+   gla = integer(lnb+4*13)
+   lnb = integer(lnb+4*10)
+   fn = 12+integer(gla+20)+shortinteger(lnb)&X'ffff'
+   txt = string(fn)." calls dstop(".itos(n).") ".txt
+   j = dmessage("ERCC04", length(txt), 1, 0, -1, addr(txt)+1)
+
+!   emas3 claim channel(chan)
+!   emas3("DEFINE", itos(chan).",".to, 0)
+!   select output(chan)
+!   printline(txt)
+!   select output(0)
+!   close stream(chan)
+!   sclear(chan, 0)
+!   emas3("OFFER", to.",ERCC04", 0)  { this all works but users are troubled }
+   { by the messages from OFFER/ACCEPT }
+
+   j = dstop(n)
+%end;                                    ! mstop
+
+%external %routine emas3 input waiting(%integer %name xin)
+%integer in
+%record (iostatf) %name iostat
+%record (itf) %name it
+
+   ssenter("", in, "iw")
+   in = 0
+   %if ssown_aitbuffer#0 %start
+      it == record(ssown_aitbuffer); iostat == record(ssown_aiostat)
+      in = 1 %unless iostat_inpos=it_inpointer
+   %finish
+   ssexit("", in, "iw")
+%end;                                    ! emas3 input waiting
+
+!-----------------------------------------------------------------------
+
+%end %of %file

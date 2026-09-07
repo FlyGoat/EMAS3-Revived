@@ -1,0 +1,1277 @@
+! S32 Commands
+
+%end %oflist
+%include "subarc:SSOWNF3"
+   %list
+
+
+!***********************************************************************
+!*                                                                     *
+!*                           Record formats                            *
+!*                                                                     *
+!***********************************************************************
+
+%record %format dahf(%integer dataend, datastart, size, filetype, date, time, format, records)
+%record %format frecf(%string (11) name, %integer sp12, kbytes, %byte %integer arch, codes, cct,
+   ownp, eep, use, codes2, ssbyte, flags, phead, dayno, group)
+%record %format jtabf(%integer start, length, type)
+
+
+!***********************************************************************
+!*                                                                     *
+!*                              Constants                              *
+!*                                                                     *
+!***********************************************************************
+
+   %const %byte %integer %array fsym(1:5)=   '1','+','-','0',' '
+   %const %byte %integer %array rept(1:5)=   1,1,3,2,1
+
+%const %integer ebcdicbit=x'20'
+%const %integer ssfformat=1
+%const %integer ssuformat=3
+%const %integer ssvformat=2
+!***********************************************************************
+!*                                                                     *
+!*                     %system Routine/fn/map spec                     *
+!*                                                                     *
+!***********************************************************************
+
+
+%external %routine %spec emas3 (%stringname c, p, %integername flag)
+%externalroutinespec stell %alias "s#tell" (%string(6)user,
+   %string(255)txt, %integername j)
+%external %routine %spec clearllists %alias "s#clearllists"
+%external %routine %spec changeaccess %alias "s#changeaccess"(%string (255) file, %integer mode,
+   %integer %name flag)
+%external %string %fn %spec suffixed %alias "s#suffixed"(%string %name file)
+%external %routine %spec printline %alias "s#printline"(%string (255) s)
+%external %routine %spec tidyfiles %alias "S#TIDYFILES"(%integer selectflag)
+%external %routine %spec get string %alias "s#getstring"(%string (255) vector, %string %name value)
+%external %routine %spec get integer %alias "s#getinteger"(%string (255) vector,
+   %integer %name value)
+%external %routine %spec getrestofline %alias "s#getrestofline"(%string %name s)
+%external %routine %spec sethelp %alias "s#sethelp"(%string (255) file)
+%external %integer %fn %spec checkname %alias "s#checkname"(%string %name name,
+   %integer %name type, qualifier)
+%external %integer %fn %spec dirtoss %alias "S#DIRTOSS"(%integer flag)
+%external %integer %fn %spec instream %alias "s#instream"
+%external %integer %fn %spec iocp %alias "S#IOCP"(%integer ep, parm)
+%external %routine %spec connect %alias "S#CONNECT"(%string (255) file, %integer mode, hole,
+   prot, %integer %name fconad, ffiletype, fdatastart, fdataend, flag)
+%external %string %fn %spec confile %alias "S#CONFILE"(%integer ad)
+%external %routine %spec sdestroy %alias "S#DESTROY"(%string (255) file, %integer %name flag)
+%external %routine %spec etoi %alias "S#ETOI"(%integer nad, nl)
+%external %routine %spec sfunds %alias "s#funds"
+%external %routine %spec modpdfile %alias "S#MODPDFILE"(%integer ep, %string (255) pdfile,
+   %string (11) member, %string (255) infile, %integer %name flag)
+%external %routine %spec mon params %alias "s#monparams"(%string (255) template)
+%external %routine %spec move %alias "S#MOVE"(%integer length, from, to)
+%external %routine %spec outfile %alias "S#OUTFILE"(%string (255) file, %integer filesize, hole,
+   prot, %integer %name conad, flag)
+%external %routine %spec sendfile2 %alias "S#SENDFILE2"(%string (255) file, %string (16) device,
+   %string (31) name, %integer ncopies, nforms, %integer %name flag)
+%external %routine %spec setline %alias "s#setline"(%string (255) text)
+%external %routine %spec setreturncode %alias "s#setreturncode"(%integer i)
+%external %routine %spec uctranslate %alias "S#UCTRANSLATE"(%integer naddress, nlength)
+%external %routine %spec adjustloadlevel %alias "s#adjustloadlevel"(%integer p)
+%external %string %fn %spec itos %alias "s#itos"(%integer n)
+%external %string %fn %spec nexttemp %alias "S#NEXTTEMP"
+%external %string %fn %spec substring %alias "S#SUBSTRING"(%string %name s, %integer i, j)
+%external %integer %fn %spec valid header %alias "s#validheader"(%integer conad)
+%external %integer %fn %spec close n clear %alias "s#closenclear"(%integer chan)
+
+
+!***********************************************************************
+!*                                                                     *
+!*               External/internal routine/fn/map specs                *
+!*                                                                     *
+!***********************************************************************
+
+
+%external %integer %fn %spec dcreate(%string %name fileindex, group, %integer %name fsys, kb,
+   type, da)
+%external %integer %fn %spec dfilenames(%string %name group, %integer %name filenum, maxrec,
+   nfiles, fsys, type, %record (frecf) %array %name inf)
+%external %integer %fn %spec dfstatus(%string %name fileindex, file, %integer %name fsys, act,
+   value)
+%external %integer %fn %spec dmessage(%string %name user, %integer %name len, act, invoc, fsys,
+   adr)
+%external %routine %spec prompt %alias "s#prompt"(%string (255) s)
+%integer %fn %spec trail spaces(%integer end, first, trans)
+%external %routine %spec clear priv viol %alias "S#CLEARPRIVVIOL"(%string (255) file,
+   %integer %name flag)
+
+
+!-----------------------------------------------------------------------
+
+%external %routine control line %alias "s#controlline"(%string %name line, %integer %name flag)
+
+   length(line) = 255
+   flag = iocp(28, addr(line)+1)
+   %if 0<=flag<256 %start
+      %unless flag=1 %and charno(line, 1)=25 %then length(line) = flag %and flag = 0
+   %finish %else flag = 1
+   line = "" %unless flag=0
+%end;                                    ! control line
+
+!-----------------------------------------------------------------------
+
+%string %fn shorten(%string %name file)
+%integer ch, s { removes username - if any - from filename }
+%string (6) w6
+%string (255) w
+   w = file
+   %if length(w)>7 %start
+      ch = charno(w, 7)
+      %if ch=usepch %or ch=isepchl %start
+         w6 <- w
+         %if w6=ssown_ssowner %start
+            s = 7
+            s = 8 %if ch=usepch
+            w = substring(w, s, length(w))
+         %finish
+      %finish
+   %finish
+   %result = w
+%end;                                    ! of shorten
+
+!-----------------------------------------------------------------------
+
+%integer %fn lenasa(%integer ff, trans)
+!*RETURNS THE NUMBER OF BYTES REQUIRED TO PRINT A FORMAT EFFECTOR
+%integer i, sym
+   sym = byteinteger(ff);                !AVOID WRITING TO FF
+   %if trans#0 %then sym = byte integer(ssown_sscomreg(11)+sym); ! Translate EBCDIC to ISO.
+   %for i = 1, 1, 5 %cycle
+      %if sym=fsym(i) %then %exit
+   %repeat
+   %result = rept(i)
+%end;                                    ! of LENASA
+
+!-----------------------------------------------------------------------
+
+%routine intasa(%integer ff, trans, %integer %name outp)
+!*
+!* MAPS FORMAT EFFECTORS AS FOLLOWS:
+!*   1 = 12        (NEWPAGE)
+!*   + = 13        (CR)
+!*   - = 10,10,10  (3 NEWLINES)
+!*   0 = 10,10     (2 NEWLINES)
+!*     = 10        (NEWLINE)
+!*
+   %const %byte %integer %array vals(1:5)= 12,13,10,10,10
+%integer lep, lap, i, sym
+   sym = byteinteger(ff);                !AVOID WRITING TO FF
+   %if trans#0 %then sym = byte integer(ssown_sscomreg(11)+sym); ! Translate EBCDIC to ISO.
+   %for i = 1, 1, 5 %cycle
+      %if sym=fsym(i) %then %exit
+   %repeat
+   lep = rept(i)
+   lap = addr(vals(i))
+   move(lep, lap, outp)
+   outp = outp+rept(i)
+%end;                                    ! of INTASA
+
+!-----------------------------------------------------------------------
+
+%integer %fn {file length}flc(%integer mode, inconad,  {OUTFORM,} %integer %name flag)
+%integer inp, intop, outlen, records, format, inlen, rlen
+%integer fe, len, i, lrecl, trans, tsp1, tsp2, informat
+%record (dahf) %name inh
+%string (1) null
+
+   null = ""
+   flag = 0
+   fe = (mode&2)>>1;                     !=1 IF FIRST CHAR IS FORMAT EFFECTOR
+   inh == record(inconad)
+   inp = inconad+inh_datastart
+   intop = inconad+inh_dataend
+   inlen = inh_dataend-inh_datastart
+   informat = 0
+   informat = inh_format %unless inh_filetype = sscharfiletype
+   trans = informat&ebcdicbit;         !EBCDIC FILE IF SET
+   %if mode&1#0 %start;                  !DATA TO CHARACTER
+      format = informat&x'F'
+      %if format=ssvformat %start;       !VARIABLE LENGTH RECORD
+         outlen = 0
+         %while inp<intop %cycle
+            rlen = (byteinteger(inp)<<8)!byteinteger(inp+1)
+            %if rlen<2 %then %start
+               flag = 311;               !CORRUPT FILE
+               %result = 0
+            %finish
+            %if fe#0 %and rlen>2 %then len = lenasa(inp+2, trans) %else len = 1
+            tsp1 = inp+rlen-1
+            tsp2 = inp+2+fe
+            outlen = outlen+rlen-2+len-fe-trail spaces(tsp1, tsp2, trans)
+            inp = inp+rlen
+         %repeat
+         %result = outlen+fe;            !FE FOR EXTRA NL AT END OF FILE
+      %finish %else %if format=ssfformat %start; !FIXED LENGTH RECORDS
+         lrecl = informat>>16;         !RECORD LENGTH
+         records = inlen//lrecl;         !NUMBER OF RECORDS
+         %if fe=0 %then %start
+            outlen = inlen+records;      !ALLOW ONE NL PER RECORD
+         %else
+            outlen = inlen-records+1;    !  - FE CHARS + LAST NL
+         %finish
+         i = inp
+         %while i<intop %cycle
+            tsp1 = i+lrecl-1
+            tsp2 = i+fe
+            outlen = outlen-trail spaces(tsp1, tsp2, trans)
+            %if fe#0 %then outlen = outlen+lenasa(i, trans)
+            i = i+lrecl
+         %repeat
+         %result = outlen
+      %finish %else %if format=ssuformat %then %result = inlen
+      flag = 267;                        !INVALID FILETYPE
+      ssown_ssfname = ""
+      %result = 0
+   %else;                                !CHARACTER TO CHARACTER
+      outlen = 1;                        !FOR EXTRA NL AT END
+      %while inp<intop %cycle
+         outlen = outlen+lenasa(inp, trans)
+         %for i = inp, 1, intop-1 %cycle
+            %if byteinteger(i)=nl %then %exit
+         %repeat
+         %if i#inp %then outlen = outlen+i-inp-1
+         inp = i+1
+      %repeat
+      %result = outlen
+   %finish
+%end;                                    ! of FLC
+
+!-----------------------------------------------------------------------
+
+%integer %fn trail spaces(%integer end, first, trans)
+   ! determines the no of trailing spaces
+%integer saveend, spacechar
+   saveend = end
+   %if trans#0 %then spacechar = 64 %else spacechar = ' '; !for ebcdic
+   %while byteinteger(end)=spacechar %and end>=first %cycle
+      end = end-1
+   %repeat
+   %result = saveend-end
+%end;                                    !of trail spaces
+
+!----------------------------------------------------------------------
+
+%routine fconv(%integer mode, inconad, out,  {RECFM,} %integer %name flag)
+!INITIAL VERSION ONLY CONVERTS DATA FILES TO CHARACTER
+! **** **** Ought to check file types and stop in good order **** ****
+! **** **** if asked to convert unacceptable types.          **** ****
+%integer lep, lap, inp, outp, rlen, intop, format, trans, fe, reclen, i
+%integer informat
+%record (dahf) %name inh
+%string (1) null
+
+   null = ""
+   flag = 0;                             !DEFAULT O.K.
+   fe = (mode&2)>>1;                     !FOR FORMAT EFFECTORS
+   inh == record(inconad)
+   inp = inconad+inh_datastart;          !START OF DATA
+   intop = inconad+inh_dataend;          !END OF DATA +1
+   informat = 0
+   informat = inh_format %unless inh_filetype = sscharfiletype
+   format = informat&x'F'
+   trans = informat&ebcdicbit;         !EBCDIC FILE IF SET
+   outp = out
+   %if mode&1#0 %then %start;            !DATA TO CHARACTER
+      %if format=ssvformat %start;       !VARIABLE LENGTH RECORDS
+         %while inp<intop %cycle
+            reclen = (byteinteger(inp)<<8)!byteinteger(inp+1)
+            !LENGTH INCLUDES LENGTH BYTES
+            lep = inp+reclen-1
+            lap = inp+2+fe
+            rlen = reclen-trail spaces(lep, lap, trans)
+            %if fe#0 %and rlen>2 %then %start
+               intasa(inp+2, trans, outp); !OUTPUT FORMAT EFFECTOR
+               lep = rlen-3
+               lap = inp+3
+               move(lep, lap, outp);     !OUTPUT REST OF RECORD
+               %if trans#0 %then etoi(outp, lep)
+               outp = outp+rlen-3
+            %else
+               lep = rlen-2
+               lap = inp+2
+               move(lep, lap, outp)
+               %if trans#0 %then etoi(outp, lep)
+               !TRANSLATE IF NEC
+               outp = outp+rlen-1
+               byteinteger(outp-1) = nl
+            %finish
+            inp = inp+reclen
+         %repeat
+      %finish %else %if format=ssfformat %start
+         reclen = informat>>16;        !FIXED RECORD LENGTH
+         %while inp<intop %cycle
+            lep = inp+reclen-1
+            lap = inp+fe
+            rlen = reclen-trail spaces(lep, lap, trans)
+            %if fe#0 %then %start
+               intasa(inp, trans, outp)
+               lep = rlen-1
+               lap = inp+1
+               move(lep, lap, outp)
+               %if trans#0 %then etoi(outp, lep)
+               outp = outp+rlen-1
+            %else
+               move(rlen, inp, outp)
+               %if trans#0 %then etoi(outp, rlen)
+               outp = outp+rlen+1
+               byteinteger(outp-1) = nl
+            %finish
+            inp = inp+reclen
+         %repeat
+      %finish %else %if format=ssuformat %start
+         !UN-STRUCTURED - PRESUMABLY CONTAINS OWN NEWLINES
+         lep = intop-inp
+         move(lep, inp, outp)
+      %else
+         flag = 267
+         ssown_ssfname = ""
+      %finish
+   %else;                                !CHARACTER TO CHARACTER
+      %while inp<intop %cycle
+         intasa(inp, trans, outp);       !FIRST CHAR IS FE
+         %for i = inp, 1, intop-1 %cycle
+            %if byteinteger(i)=nl %then %exit
+         %repeat
+         %if i#inp %then %start
+            lep = i-inp-1
+            lap = inp+1
+            move(lep, lap, outp)
+            outp = outp+i-inp-1
+         %finish
+         inp = i+1
+      %repeat
+   %finish
+   %if fe#0 %then byteinteger(outp) = nl; !ADD NL TO LAST LINE
+%end;                                    ! of FCONV
+
+!-----------------------------------------------------------------------
+
+%external %string %fn chopname %alias "s#chopname"(%string (255) name)
+%const %integer max=18 { for now !!! 31 when SPOOLR can cope}
+%integer len, first, lastv
+
+   len = length(name)
+   %if len<=max %then %result = name %else %start
+      name = substring(name, len-max+1, len)
+      first = 1
+      lastv = charno(name, 1)
+      %while first<max %and lastv#'+' %and lastv#':' %and lastv#'_' %and lastv#'.' %cycle
+         first = first+1
+         lastv = charno(name, first)
+      %repeat
+      %if 1<first<=max %then %start
+         %if first>2 %then name = substring(name, first-1, max)
+         charno(name, 1) = '#'
+      %finish
+   %finish
+   %result = name
+%end;                                    ! chopname
+
+!-----------------------------------------------------------------------
+
+%external %string %fn simplify name %alias "s#simplifyname"(%string (255) name)
+%string (7) remove
+%string (255) remainder
+
+   remove = ssown_ssowner.":"
+   name = name.remainder %while name->name.(remove).remainder
+   remove = ssown_ssowner."{"
+   name = name."{".remainder %while name->name.(remove).remainder
+   %result = name
+%end;                                    ! simplify name
+
+!-----------------------------------------------------------------------
+
+%const %integer maxlevel= 31;            ! Max level of PD nesting
+%const %string (7) copyf= ":T#COPY"
+%const %string (7) primf= ":T#PRIM"
+
+!---------------------------------------- SCOPY1 ----------------------------------------
+
+%external %routine scopy1 %alias "s#copy1"(%string (255) file1, file2, name1, name2,
+   %integer %name flag)
+%record %format pdf(%integer start, %string (11) name, %integer hole, s5, s6, s7)
+%record %format pdhf(%integer dataend, datastart, size, filetype, sum, datetime, adir, count)
+%record %format rf(%integer conad, filetype, datastart, dataend)
+%record (pdf) %array %format diraf(0:4095)
+
+
+%external %routine %spec oldconnect %alias "S#OLDCONNECT"(%string (255) s, %integer a, m, p,
+   %record (rf) %name r, %integer %name f)
+%external %routine %spec rename %alias "S#RENAME"(%string (255) file, newfile, %integer %name flag)
+%external %routine %spec newgen %alias "S#NEWGEN"(%string (255) file, newfile, %integer %name flag)
+
+
+%integer i, base, newbase, found, level, exist flag, basell, input file
+%integer conad, size, conad1, type1, start1, end1, save size
+%record (pdhf) %name h
+%record (fhf) %name hdr
+%record (pdf) %array %name dir
+%record (conff) %name cur
+%string (6) user
+%string (19) index
+%string (31) primfile, copyfile
+%string (255) rem, mem, work, fullname1, fullname2
+%string (31) %array f, m(0:maxlevel)
+%record (rf) rr
+
+   %if monitoring possible=yes %and ssown_ssnote&4#0 %then monparams(">trtrtrtriw")
+
+   basell = ssown_loadlevel;             ! Save to ensure put back right afterwards
+   adjustloadlevel(+1)
+   adjustloadlevel(+1)
+
+   uctranslate(addr(name1)+1, length(name1))
+   index = ""
+
+   input file = 0 { 0=no info, 1=t#join, 2=prim file made }
+   found = yes
+
+   flag = 129 { no filename specified }
+   ->out %if file1="" %or file2=""
+
+   flag = checkname(file1, 1, 5 {exist+read})
+   ->out %unless flag=0
+   fullname1 = file1
+
+   user <- file1  { owner of input file }
+   %if file1->("T#JOIN") %then input file = 1 %and primfile = file1
+   file1 = ssown_shortname { use short name from here on }
+   connect(file1, 0, 0, x'10' {seq}, conad1, type1, start1, end1, flag)
+   ->out %unless flag=0
+
+   %unless user = ssown_ssowner %start
+      stell("COPIES", "COPY ".itos(integer(conad1+8)>>12)." ".fullname1." ".itos(com_users-uinf_topexec), flag)
+   %finish
+
+   flag = valid header(conad1)
+   ->out %unless flag=0
+
+   %if charno(file2, 1)='.' %start
+      uctranslate(addr(file2)+1, length(file2))
+
+      %if input file=0 %start { not T#JOIN so need a copy }
+         primfile = primf
+         size = end1
+         outfile(primfile, size, 0, x'10' {seq}, conad, flag)
+         ->out %unless flag=0
+         move(size, conad1, conad)
+      %finish
+
+      ->out %if file2=".NULL"
+
+      work = chopname(simplifyname(name1))
+      sendfile2(ssown_shortname, file2, work, 0, 0, flag)
+      ->out %if flag#0
+      input file = 0 { disposed of }
+      ssown_ssfname = name1." copied to ".file2
+      flag = top bit
+      ->out
+   %finish
+
+   flag = checkname(file2, 1, 16<<type1 {insist on same type if it exists})
+   ->out %unless flag=0
+   fullname2 = file2
+   work = ssown_shortname
+   file2 -> index.(":")
+   user <- index  { first 6 characters }
+   flag = 258 %and ->out %unless user=ssown_ssowner
+   cur == record(ssown_conf(ssown_confpos))
+   existflag = cur_size
+
+   %if fullname1=fullname2 %start
+      flag = 229;                        ! File names must be different
+      ->out
+   %finish
+
+   file2 = work
+   copyfile = index.copyf
+   ->pdfile %if file2->("_")
+
+!    NOT A PD MEMBER
+
+   %if input file=1 {join} %and length(index)=6 %start
+      %if exist flag=0 %then rename(file1, file2, flag) %else newgen(file1, file2, flag)
+      input file = 0 %if flag=0
+   %finish %else %start
+      size = end1
+      outfile(file2, size, 0, X'12' {seq, avail for disconn}, conad, flag)
+      ->out %unless flag=0
+      hdr == record(conad)
+      save size = hdr_size
+      move(size, conad1, conad)
+      ! Set correct file size (but only for standard file types).
+      hdr_size = save size %if 0<hdr_type<=sstopfiletype %and hdr_size&x'FFF'=0
+      clear priv viol(file2, 0)
+      ! sdisconnect(file2, 0)
+   %finish
+   ->out %unless flag=0
+   ->done
+
+!     TO A PD MEMBER
+
+pdfile:
+   work = file2."_"
+   work -> work.("_").rem
+   oldconnect(work, 3, 0, 0, rr, flag) { connect outer pd file }
+   ->out %unless flag=0
+
+   base = rr_conad
+   level = 0
+   f(level) = work
+
+   %while rem#"" %cycle
+      %unless rem->mem.("_").rem %start
+         ssown_ssfname = name2
+         flag = 220;                     ! Invalid filename
+         ->out
+      %finish
+
+      m(level) = mem
+      level = level+1
+      %if level>maxlevel %start
+         flag = 300;                     ! Table too small
+         ->out
+      %finish
+      f(level) = copyfile.tostring('A'+level-1)
+      %if found=yes %start
+         h == record(base)
+         %unless h_filetype=sspdfiletype %start
+            ssown_ssfname = name2." is not a PD file"
+            flag = 100;                  ! General flag
+            ->out
+         %finish
+
+         dir == array(base+h_adir, diraf)
+         newbase = 0
+         %unless h_count<1 %start
+            %for i = 0, 1, h_count-1 %cycle
+               %if dir(i)_name=mem %start
+                  newbase = base+dir(i)_start
+                  %exit
+               %finish
+            %repeat
+         %finish
+
+         %if newbase=0 %start
+            found = no
+         %finish %else %start
+            base = newbase
+            h == record(base)
+            %unless rem="" %start;       ! Not at bottom yet, so copy out to f(level)
+               outfile(f(level), h_dataend, 0, x'10' {seq}, newbase, flag)
+               ->out %if flag#0
+               f(level) = ssown_shortname
+               hdr == record(newbase)
+               save size = hdr_size
+               move(h_dataend, base, newbase)
+               ! Set correct file size (but only for standard file types).
+               hdr_size = save size %if 0<hdr_type<=sstopfiletype %and hdr_size&x'FFF'=0
+            %finish
+         %finish
+      %finish
+
+      %if found=no %start
+         %unless rem="" %start
+            modpdfile(4, f(level), "", "", flag) { create an empty pd file }
+            ->out %if flag#0
+            f(level) = ssown_shortname
+         %finish
+      %finish
+   %repeat
+   f(level) = file1
+
+   ! At this point, f(level) is what we are going to insert
+
+   ! Free up the files we have connected, so that MODPDFILE can get at them
+   adjustloadlevel(-1)
+   tidyfiles(1)
+   ssown_loadlevel = basell
+
+   %for i = level-1, -1, 0 %cycle
+      modpdfile(2, f(i), m(i), "", flag); !destroy member
+      modpdfile(1, f(i), m(i), f(i+1), flag); !copy f(i+1) to f(i)_m(i)
+      ->out %if flag#0
+      sdestroy(f(i+1), 0) %if i+1<level { ignore flag }
+   %repeat
+done:
+   flag = top bit
+   ssown_ssfname = shorten(name2)." is a copy of ".shorten(name1)
+out:
+   work = ssown_ssfname
+   sdestroy(file1, 0) %if input file=1 { dispose of T#JOIN }
+   sdestroy(primfile, 0) %if input file=2
+   %if ssown_loadlevel#basell %start
+      adjustloadlevel(-1)
+      tidyfiles(1)
+      ssown_loadlevel = basell
+   %finish
+   ssown_ssfname = work
+
+   %if monitoring possible=yes %and ssown_ssnote&4#0 %then monparams("<trtrtrtriw")
+   %return
+%end;                                    ! scopy1
+
+!------------------------------------- SCOPY ---------------------------------------
+
+%external %routine scopy %alias "s#copy"(%string (255) file1, file2, %integer %name flag)
+   scopy1(file1, file2, file1, file2, flag)
+%end;                                    !of scopy
+
+!------------------------------------- SCOPYGROUP ---------------------------------
+
+%external %routine scopygroup %alias "s#copygroup"(%string (255) g1, g2, %integer %name flag)
+
+%integer i, nfiles, maxrec, fileno
+%string (255) n1, n2
+%const %integer top= 50
+%record (frecf) %array frec(0:top)
+
+   %if monitoring possible=yes %and ssown_ssnote&4#0 %then monparams(">trtriw")
+
+   flag = checkname(g1, 4, 0)
+   ->out %unless flag=0
+   flag = checkname(g2, 4, 0)
+   ->out %unless flag=0
+
+   fileno = 0 { where to start }
+
+   %cycle
+      maxrec = (1<<31)!top { how many we are prepared to receive }
+      flag = dfilenames(g1, fileno, maxrec, nfiles, -1, 0, frec)
+      flag = dirtoss(flag) %and ->out %unless flag=0
+      %if fileno=0 %start { first time through }
+         g2 -> n1.(usep).n2
+         flag = dcreate(n1, n2, -1, 0, 0, 0)
+         flag = dirtoss(flag) %and ->out %unless flag=0
+         printline("Group ".g2." created")
+      %finish
+! printline("maxrec=".itos(maxrec).", nfiles=".itos(nfiles))
+      %for i = 0, 1, maxrec-1 %cycle
+         %if frec(i)_group>0 %start { its a group name }
+            scopygroup(g1.frec(i)_name.".", g2.frec(i)_name.".", flag)
+         %else;                          !its a file
+            scopy1(g1.frec(i)_name, g2.frec(i)_name, g1.frec(i)_name, g2.frec(i)_name, flag)
+         %finish
+         %if flag=x'80000000' %then setreturncode(flag) %and flag = 0
+         ->out %unless flag=0
+      %repeat
+
+      fileno = fileno+maxrec { number now processed }
+      %exit %if fileno>=nfiles { no more to do }
+   %repeat
+out:
+   %if monitoring possible=yes %and ssown_ssnote&4#0 %then monparams("<trtriw")
+%end;                                    !of scopygroup
+
+!-----------------------------------------------------------------------
+
+%external %routine copygroup %alias "C#COPYGROUP"
+
+%string (255) g1, g2
+%integer flag
+
+   getstring("From;group,exist;?;call pamhelp(helper:two.two2)", g1)
+   getstring("To;group;?;", g2)
+   scopygroup(g1, g2, flag)
+   set return code(flag)
+%end;                                    ! copy group
+
+!-----------------------------------------------------------------------
+
+%external %routine copy %alias "C#COPY"
+%integer flag
+%string (255) original from, from, to, xfrom, xto
+
+   getstring("From;any;?;call pamhelp(helper:two.two2)", original from)
+   getstring("To;any;?;", to)
+   flag = 0
+   from = original from
+   setline(original from.",".to)
+   %if charno(to, 1)='.' %start
+      getstring("From;filelist;?;", xfrom)
+      getstring("To;device;?;", to)
+      %if xfrom->("+") %start
+         setline(xfrom)
+         getstring("From;filelist,join;?;", from)
+      %finish %else from = xfrom
+   %else
+      %unless from->("*") %or from->("+") %start; !may be a group?
+         flag = checkname(from, 4, 4);   !existing group
+         %if flag=0 %start
+            getstring("From;group,exist;?;", from)
+            getstring("To;group,notexist,write;?;", to)
+            scopygroup(from, to, flag)
+            set return code(flag)
+            %return
+         %finish
+      %finish
+      getstring("From;filelist,join,cowild,noamp;?;", from)
+      getstring("To;fileormem,cowild,write;?;", to)
+   %finish
+   xfrom = simplifyname(original from)
+   xto = simplifyname(to)
+   scopy1(from, to, xfrom, xto, flag)
+   set return code(flag)
+%end;                                    ! copy
+
+!-----------------------------------------------------------------------
+
+%external %routine newgroup %alias "EMAS#NEWGROUP"
+%string (255) group, fileindex
+%integer j
+   getstring("Group;group,notexist,nowild,write;?;call pamhelp(helper:two.two6)", group)
+   group -> file index.(usep).group
+   j = dcreate(file index, group, -1, 0, 0, 0)
+   %if j=0 %start
+      printline("New group ".group." created")
+      clearllists
+   %finish %else j = dirtoss(j)
+   setreturncode(j)
+%end;                                    ! newgroup
+
+!-----------------------------------------------------------------------
+
+%external %routine newpdfile %alias "EMAS#NEWPDFILE"
+%string (255) file
+%integer flag, f
+   get string("File;file,notexist,nowild;?;call pamhelp(helper:two.two61)", file)
+   modpdfile(4 {create}, file, "", "", flag)
+   ->err %unless flag=0
+!**VERY TEMP*** WHEN DIRECTOR CORRECTED REMOVE COMMENT FROM NEXT LINE
+   !PERMIT(FILE,UINFS(1),15,FLAG);          !PERMIT READ,WRITE EXECUTE AND PROTECT
+err:
+   %if flag=0 %start
+      changeaccess(file, 1, f)
+      file = shorten(file)
+      printline("New partitioned file  '".file."' created")
+   %finish
+   setreturncode(flag)
+%end;                                    ! of NEWPDFILE
+
+!-----------------------------------------------------------------------
+
+%const %integer clear cherish=0
+%const %integer set cherish=1
+%const %integer clear archive=2
+%const %integer set archive=3
+
+
+!-----------------------------------------------------------------------
+
+%external %routine cherish %alias "EMAS#CHERISH"
+%string (19) index
+%string (255) file
+%integer flag, mode
+
+   get rest of line(file)
+   mode = 1
+   mode = 0 %if file=""
+
+   %cycle
+      get rest of line(file)
+      %exit %if mode=1 %and file=""
+      get string("Fileorgroup;fileorgroup,exist,ornull;();call pamhelp(helper:two.two6)", file)
+      %if file="" %start
+         %exit %if mode=0
+         %continue
+      %finish
+      file -> index.(":").file
+      flag = dfstatus(index, suffixed(file), -1, clear archive, 0)
+      flag = dfstatus(index, suffixed(file), -1, set cherish, 0)
+      flag = dirtoss(flag) %unless flag=0
+      setreturncode(flag)
+   %repeat
+%end;                                    ! of cherish
+
+!-----------------------------------------------------------------------
+
+%external %routine hazard %alias "EMAS#HAZARD"
+%string (19) index
+%string (255) file
+%integer flag, mode
+
+   get rest of line(file)
+   mode = 1
+   mode = 0 %if file=""
+
+   %cycle
+      get rest of line(file)
+      %exit %if mode=1 %and file=""
+      get string("Fileorgroup;fileorgroup,exist,ornull;();call pamhelp(helper:two.two6)", file)
+      %if file="" %start
+         %exit %if mode=0
+         %continue
+      %finish
+      file -> index.(":").file
+      flag = dfstatus(index, suffixed(file), -1, clear archive, 0)
+      flag = dfstatus(index, suffixed(file), -1, clear cherish, 0)
+      flag = dirtoss(flag) %unless flag=0
+      setreturncode(flag)
+   %repeat
+%end;                                    ! of HAZARD
+
+!-----------------------------------------------------------------------
+
+%external %routine archive %alias "EMAS#ARCHIVE"
+%string (19) index
+%string (255) file
+%integer flag, mode
+
+   get rest of line(file)
+   mode = 1
+   mode = 0 %if file=""
+
+   %cycle
+      get rest of line(file)
+      %exit %if mode=1 %and file=""
+      get string("Fileorgroup;fileorgroup,exist,ornull;();call pamhelp(helper:two.two6)", file)
+      %if file="" %start
+         %exit %if mode=0
+         %continue
+      %finish
+      file -> index.(":").file
+      flag = dfstatus(index, suffixed(file), -1, set cherish, 0)
+      flag = dfstatus(index, suffixed(file), -1, set archive, 0)
+      flag = dirtoss(flag) %unless flag=0
+      set return code(flag)
+   %repeat
+%end;                                    ! of ARCHIVE
+
+!-----------------------------------------------------------------------
+
+%external %routine cherishgroup %alias "EMAS#CHERISHGROUP"
+%string (19) index
+%string (255) file
+%integer flag, mode
+
+   get rest of line(file)
+   mode = 1
+   mode = 0 %if file=""
+
+   %cycle
+      get rest of line(file)
+      %exit %if mode=1 %and file=""
+      get string("Group;group,exist,ornull;();call pamhelp(helper:two.two6)", file)
+      %if file="" %start
+         %exit %if mode=0
+         %continue
+      %finish
+      file -> index.(":").file
+      flag = dfstatus(index, suffixed(file), -1, set cherish, 0)
+      flag = dirtoss(flag) %unless flag=0
+      setreturncode(flag)
+   %repeat
+%end;                                    ! of cherishgroup
+
+!-----------------------------------------------------------------------
+
+%external %routine hazardgroup %alias "EMAS#HAZARDGROUP"
+%string (19) index
+%string (255) file
+%integer flag, mode
+
+   get rest of line(file)
+   mode = 1
+   mode = 0 %if file=""
+
+   %cycle
+      get rest of line(file)
+      %exit %if mode=1 %and file=""
+      get string("Group;group,exist,ornull;();call pamhelp(helper:two.two6)", file)
+      %if file="" %start
+         %exit %if mode=0
+         %continue
+      %finish
+      file -> index.(":").file
+      flag = dfstatus(index, suffixed(file), -1, clear archive, 0)
+      flag = dfstatus(index, suffixed(file), -1, clear cherish, 0)
+      flag = dirtoss(flag) %unless flag=0
+      setreturncode(flag)
+   %repeat
+%end;                                    ! of HAZARDGROUP
+
+!-----------------------------------------------------------------------
+
+%external %routine funds %alias "EMAS#funds"
+
+   sethelp("call pamhelp(helper:one.one91)")
+   sfunds
+%end;                                    ! funds
+
+!----------------------------------- JOINFILES ------------------------------------
+
+%routine joinfiles(%record (jtabf) %array %name tab, %integer firstcell, lastcell,
+   %string (255) out, %integer fe, adr, len, %integer %name flag)
+%integer outconad, outp, i, outlen, fef, hfl, f132
+%string (255) cfile
+
+   flag = 0;                             !DEFAULT REPLY
+   ->err %unless lastcell>=firstcell;    ! (Do nothing if there are no files.)
+
+   %if fe&4#0 %then f132 = 1 %and fe = fe&3 %else f132 = 0
+   outlen = 32+len;                      ! HEADER LENGTH
+   %for i = firstcell, 1, lastcell %cycle
+      outlen = outlen+tab(i)_length
+   %repeat
+   adjustloadlevel(+1)
+   adjustloadlevel(+1)
+   outfile(out, outlen, 0, X'12' {seq, avail for disconn}, outconad, hfl)
+   %if hfl=0 %start
+      integer(outconad) = outlen;        ! Logical dataend
+      integer(outconad+4) = 32;          ! Logical datastart
+      %if f132=1 %then integer(outconad+12) = 4 %and %c
+         integer(outconad+24) = 132<<16!ssfformat %else integer(outconad+12) = 3
+      outp = outconad+32+len
+
+      move(len, adr, outconad+32) %if len>0
+      %for i = firstcell, 1, lastcell %cycle
+         fef = fe
+         %if tab(i)_type#sscharfiletype %and f132=0 %then fef = fef!1
+         %if fef=0 %then move(tab(i)_length, tab(i)_start, outp) %else %c
+            fconv(fef, tab(i)_start, outp,  {0,}flag)
+         outp = outp+tab(i)_length;      !UPDATE OUT POINTER
+         cfile = confile(tab(i)_start)
+         %exit %unless flag=0
+      %repeat
+
+      clear priv viol(out, hfl)
+   %finish %else flag = hfl
+   adjustloadlevel(-1)
+   tidyfiles(1)
+   adjustloadlevel(-1)
+err:
+   mon params("=*".itos(flag)) %unless ssown_ssnote&2=0
+%end;                                    ! of JOINFILES
+
+!--------------------------------------- SCAN FILELIST ---------------------------------------
+
+%routine scan filelist(%string (255) filenames, %record (jtabf) %array %name tab, %integer mode,
+   firstcell, %integer %name lastcell, flag)
+!***********************************************************************
+!*                                                                     *
+!* This routine takes as input a string of the form A+B+C and builds   *
+!* an array for routine JOIN. The parameter FIRSTCELL enables us to    *
+!* leave room for additional information - for example heading for     *
+!* line printer listings. It is called from COMPILE,DEFINE,LIST etc.   *
+!*                                                                     *
+!* Mode: 2**0  binary data to binary device                            *
+!*       2**1  format effector byte present                            *
+!*       2**2  local MP, F132 format required                          *
+!***********************************************************************
+%integer p, fe, mask
+%record (reportf) rr
+%string (255) file
+
+   fe = mode&2;                          !FORMAT EFFECTOR
+   p = firstcell
+   %cycle
+      last cell = p-1 %and %return %if filenames=""
+
+      flag = 277 %and ->err %if p>lastcell; ! TOO MANY FILES
+
+      file = filenames %and filenames = "" %unless filenames->file.("+").filenames
+
+      connect(file, 0, 0, x'10' {seq}, rr_conad, rr_filetype, rr_datastart, rr_dataend, flag)
+      ->err %unless flag=0
+      flag = valid header(rr_conad)
+      ->err %unless flag=0
+
+      %if rr_filetype=sscharfiletype %or mode&1=1 %start
+         !TRULY CHARACTER OR BINARY TO BINARY DEVICE
+         !TEMP    ****MUST SORT THIS OUT BETTER
+         %if fe#0 %then %start
+            tab(p)_start = rr_conad
+            tab(p)_length = flc(fe, rr_conad,  {0,}flag) {file length}
+            ->err %if flag#0
+         %else
+            tab(p)_start = rr_conad+rr_datastart
+            tab(p)_length = rr_dataend-rr_datastart
+            %if mode&4=4 %start;         !for local MP
+               mask = 132<<16 {132 byte record}
+               %unless integer(rr_conad+12)=4 %and %c
+                  integer(rr_conad+24)&(mask!x'f')=mask!ssfformat %then flag = 482 %and ->err
+            %finish
+         %finish
+         tab(p)_type = sscharfiletype
+      %else
+         flag = 267 %and ->err %unless rr_filetype=ssdatafiletype
+         tab(p)_start = rr_conad
+         tab(p)_length = flc(fe!1, rr_conad,  {0,}flag) {file length}
+         ->err %if flag#0
+         tab(p)_type = ssdatafiletype
+      %finish
+      p = p+1
+   %repeat
+
+err:
+   mon params("=*".itos(flag)) %unless ssown_ssnote&2=0
+%end;                                    ! of SCAN FILELIST
+
+!----------------------------------- LIST ------------------------------------
+
+%external %routine list %alias "EMAS#LIST"
+!***********************************************************************
+!*                                                                     *
+!* LIST accepts concatenated filenames of type CHARACTER or DATA. It   *
+!* is necessary to call JOINFILes and JOIN if the output is directed   *
+!* to other than .OUT or if the file is a DATA file.                   *
+!*                                                                     *
+!***********************************************************************
+
+%integer flag, first, lastv, jmode, copies, forms, banner bytes
+%integer datalength, datastart {Keep together for IOCP call}
+%string (11) output
+%string (31) name
+%string (255) filenames
+%string (255) fe, simple
+%string (255) device, rest
+%record (jtabf) %array tab(0:18);        !allow room for extra space for banners
+%byte %integer %array banner(0:2047)
+
+%routine to banner(%string (255) s)
+   %return %if s=""
+   move(length(s), addr(s)+1, addr(banner(banner bytes)))
+   banner bytes = banner bytes+length(s)
+%end;                                    ! to banner
+
+
+   get string("Files;filelist,char,data,orequals;T#LIST;call pamhelp(helper:two.two5)", filenames)
+   %if filenames = "=" %start
+      emas3("output", "", flag)
+      -> out
+   %finish
+   get string("Device;device;.OUT;", device)
+   get integer("Copies;1:15;1;", copies)
+   get integer("Forms;0:255;0;", forms)
+   get string("Option;any,ornull;;", fe)
+
+   flag = 0
+   banner bytes = 0
+   simple = simplify name(filenames)
+   name = chopname(simple)
+
+   %if fe="FE" %then jmode = 2 %else %if fe="" %then jmode = 0 %else flag = 322 {invalid keyword}
+
+   %if (device->rest.(".GP") %or device->rest.(".SGP") %or device->rest.(".B")) %and %c
+      rest="" %then jmode = jmode!1 {bin data to bin dev}
+
+   %if device=".MP15" %or device=".MP23" %then jmode = 5 {binary, MP}
+
+   %if length(device)>=3 %and substring(device, 2, 3)="LP" %and device#".LPIS1" %and forms=0 %start
+      to banner("Date: ".date."
+Time: ".time."
+List: ")
+      to banner(simple)
+      to banner(", ".device."
+
+")
+   %finish
+
+   %if flag=0 %start
+      first = 1;
+      lastv = 17;                        !MAXIMUM OF 16 FILES
+      scan filelist(filenames, tab, jmode, first, lastv, flag)
+
+      %if flag=0 %start
+         %if jmode=0 %and lastv=first %and device=".OUT" %and tab(first)_type=sscharfiletype %start
+            ! No need to copy the file
+            datalength = tab(first)_length
+            datastart = tab(first)_start
+            first{as wk variable} = iocp(19, addr(datalength))
+         %else
+            output = "T#LIST".nexttemp
+            joinfiles(tab, first, lastv, output, jmode&6, addr(banner(0)), banner bytes, flag)
+            %if flag=0 %then sendfile2(output, device, name, copies, forms, flag)
+         %finish
+      %finish
+   %finish
+
+out:
+   setreturncode(flag)
+%end;                                    ! of LIST
+
+!-----------------------------------------------------------------------
+
+! C#SEND moved to BASEDIR (SUBSYS:Y.SEND) October 1988, principally to help 
+! KERMIT users who think they are in KERMIT but aren't and SEND a file into
+! oblivion.  Arguably all EMAS commands should be in BASEDIR so that they can be
+! thus overridden.
+
+!%external %routine send %alias "EMAS#SEND"
+!
+!%integer flag, copies, forms
+!%string (31) s31
+!%string (255) f, d
+!
+!   getstring("File;file,nowild,exist;T#LIST;call pamhelp(helper:two.two5)", f)
+!   getstring("Device;device;.LP;", d)
+!   get integer("Copies;1:15;1;", copies)
+!   get integer("Forms;0:255;0;", forms)
+!   s31 = chopname(simplifyname(f))
+!   sendfile2(f, d, s31, copies, forms, flag)
+!   setreturncode(flag)
+!%end;                                    ! send
+
+!----------------------------------- TELL ------------------------------------
+
+%external %routine tell %alias "EMAS#TELL"
+
+%const %integer maxmsize=1999;           ! Max length of message
+%record (reportf) rr
+%string (255) file, user
+%string (255) msl
+%byte %integer %array in(0:maxmsize)
+%integer flag, len, start, ch, nlsw
+
+   get string("User;user;?;call pamhelp(helper:six.six)", user)
+   get string("File;fileormem,ornull;;", file)
+   %if file="" %start;                   ! Read from terminal
+      prompt("Text:")
+      len = 0 { where to put next ch }
+      %cycle
+         control line(msl, ch)
+         %exit %if ch=1 %or msl="*" %or msl=":"
+         nlsw = maxmsize-len { space remaining, leave one slot for nl }
+         %if nlsw>0 %and msl#"" %start
+            %if length(msl)<nlsw %then nlsw = length(msl)
+            move(nlsw, addr(msl)+1, addr(in(len)))
+            len = len+nlsw
+         %finish
+         in(len) = nl
+         len = len+1
+      %repeat
+      start = addr(in(0))
+      flag = 0
+   %else;                                ! Read message from file
+      connect(file, 0, 0, 0, rr_conad, rr_filetype, rr_datastart, rr_dataend, flag)
+      ->err %if flag#0
+      %if rr_filetype#sscharfiletype %then %start
+         flag = 267
+         ssown_ssfname = file
+         ->err
+      %finish
+      len = rr_dataend-rr_datastart
+      %if len>maxmsize %then len = maxmsize
+      start = rr_conad+rr_datastart
+   %finish
+   ->err %if len=0;                      ! Ignore null message
+   flag = dmessage(user, len, 1, 0, -1, start); ! Forward message
+   %if 0#flag#61 %then %start;           ! Some sort of failure
+      flag = dirtoss(flag)
+      ->err
+   %finish
+   %if flag=0 %then msl = "sent to " %else flag = 0 %and msl = "stored for "
+   printline("Message ".msl.user)
+err:
+   setreturncode(flag)
+%end;                                    ! of TELL
+
+!---------------------------------------- CONCAT ----------------------------------------
+
+%external %routine concat %alias "C#CONCAT"
+%constant %integer maxfiles=32
+%record (pamf) %name pam
+
+%integer ad, type, start, end, inst, saveinst, last type
+%integer nfiles, flag
+%string (255) file
+%string (255) newfile
+%record (jtabf) %array tab(1:maxfiles)
+
+   last type = -1
+   nfiles = 0
+   getinteger("Control file;route,in,char;.in;call pamhelp(helper:two.two4)", inst)
+   saveinst = instream
+   selectinput(inst)
+   pam == record(ssown_currentpamad)
+   pam_control = pam_control!8;          !force consolecall on
+
+   %cycle
+      getstring("Conc;fileormem,read,exist,char,or.end;(.end);;file", file)
+      %exit %if file=".END"
+      flag = 277 { Too many input files }
+      ->err %if nfiles=maxfiles
+      connect(file, 1, 0, X'10' {seq}, ad, type, start, end, flag)
+      %unless flag=0 %then setreturncode(flag) %and %continue
+      flag = valid header(ad)
+      %unless flag=0 %then setreturncode(flag) %and %continue
+      %if last type=-1 %start
+         last type = type
+      %finish %else %start
+         %unless last type=type %start
+            setreturncode(397)
+            %continue
+         %finish
+      %finish
+      nfiles = nfiles+1
+      tab(nfiles)_start = ad+start
+      tab(nfiles)_length = end-start
+      tab(nfiles)_type = sscharfiletype
+   %repeat
+
+   %if nfiles=0 %start
+      flag = 100
+      ssown_ssfname = "No input files"
+      ->err
+   %finish
+
+   getstring("Outfile;file,write,char;?;", newfile)
+   joinfiles(tab, 1, nfiles, newfile, 0, 0, 0, flag)
+
+   %if flag=0 %then ssown_ssfname = itos(nfiles)." Files joined" %and flag = topbit
+
+err:
+   selectinput(saveinst)
+   setreturncode(flag)
+   flag = close n clear(inst)
+%end;                                    ! concat
+
+!----------------------------------- CONVERT -----------------------------------
+
+%external %routine convert %alias "C#CONVERT"
+! Converts data file to char file according to options, and also character to 
+! character, provided that option FES is specified.
+%integer outlength, outconad, flag
+%integer conad, type, start, end, fe, mode
+%record (fhf) %name h
+%string (255) in, out
+
+   getstring("Infile;fileormem,read,data,char;?;call pamhelp(helper:two.two4);INFILE", in)
+   getstring("Outfile;file,write,char;?;;OUTFILE", out)
+   getinteger("Option;word,nofes,fes;nofes", fe)
+
+   %if in=out %then flag = 266 {inconsistent file use} %and ->err
+   connect(in, 0, 0, x'10' {seq}, conad, type, start, end, flag)
+   ->err %if flag#0
+   ! Insist on option FES for input filetype CHARACTER
+   %if type=sscharfiletype %start
+      %if fe=0 %then printline("Char-to-char file conversions must take option FES") %and ->err
+      mode=0
+   %finish %else mode=1
+   outlength = flc(mode, conad, flag) {file length}
+   ->err %if flag#0
+   outfile(out, outlength+32, 0, x'12' {seq, avail for disconn}, outconad, flag)
+   ->err %if flag#0
+   h == record(outconad)
+   h_end = outlength+32
+   fconv((fe<<1)!mode, conad, outconad+32, flag)
+   clear priv viol(out, 0)
+   ->err %if flag#0
+   in=" file ".in." converted to character file ".out
+   %if mode=0 %then in="Character".in.snl."with format effectors interpreted" %else in="Data".in
+   printline(in)
+err:
+   setreturncode(flag)
+%end;                                    !OF CONVERT
+
+!-----------------------------------------------------------------------
+
+
+%end %of %file

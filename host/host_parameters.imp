@@ -1,0 +1,97 @@
+! SPDX-License-Identifier: MIT
+! Copyright (c) 2026 Jiaxun Yang <jiaxun.yang@flygoat.com>
+
+%externalintegerfn host parameter(%string(255) name,value)
+%record(statef)%name s
+  s==state;%result=set item(s_parameters,name,value)
+%end
+! C-string boundary retained for the existing interoperability checks.
+%externalintegerfn host set parameter(%byteintegername name,value)
+  %result=host parameter(c text(name),c text(value))
+%end
+%externalroutine host clear parameters
+%record(statef)%name s
+  s==state;clear items(s_parameters)
+%end
+%string(255)%fn parameter(%string(255) qualifier,%string(255)%name type)
+%string(255) key,fallback,prompt
+%longinteger p
+%record(statef)%name s
+%record(itemf)%name item
+  %signal 9,3 %if valid name(qualifier)=0
+  type="";fallback="?"
+  %if qualifier->key.(";").type.(";").fallback %start
+    %signal 9,3 %if key=""
+    %if fallback->fallback.(";").prompt %then prompt=""
+  %finish %else %start
+    key=qualifier
+    %signal 9,3 %if key->prompt.(";")
+  %finish
+  s==state;p=find item(s_parameters,key)
+  %if p#0 %then item==record(p) %and %result=item_value
+  %signal 9,4 %if fallback="?"
+  %result=fallback
+%end
+%integerfn number(%string(255) value)
+%longinteger n
+  %signal 9,3 %if unix parse integer(value,10,n)#0
+  %signal 9,3 %if n<-2147483648 %or n>2147483647
+  %result=n
+%end
+%externalroutine host string(%string(255) qualifier,%byteintegername value,%integer capacity)
+%string(255) selected,type
+  selected=parameter(qualifier,type);copy result(value,capacity,selected)
+%end
+%externalroutine host integer(%string(255) qualifier,%integername value)
+%string(255) selected,type,kind,choices,choice
+%integer i
+  selected=parameter(qualifier,type)
+  %if type->kind.(",").choices %start
+    %signal 9,3 %unless folded(kind)="word"
+    i=0
+    %cycle
+      %if choices->choice.(",").choices %start
+        %if folded(choice)=folded(selected) %then value=i %and %return
+        i=i+1
+      %finish %else %start
+        %if folded(choices)=folded(selected) %then value=i %and %return
+        %signal 9,3
+      %finish
+    %repeat
+  %finish
+  %signal 9,3 %unless folded(type)="integer"
+  value=number(selected)
+%end
+%externalroutine host getstring(%string(255) qualifier,%byteintegername value,%integer capacity)
+%string(255) selected,type,kind,choices,choice
+%integer valid
+  selected=parameter(qualifier,type)
+  %if type->kind.(",").choices %and kind="lcword" %start
+    selected=folded(selected);valid=0
+    %cycle
+      %if choices->choice.(",").choices %start
+        %if choice=selected %then valid=1
+      %finish %else %start
+        %if choices=selected %then valid=1
+        %exit
+      %finish
+    %repeat
+    %signal 9,3 %if valid=0
+  %finish %else %start
+    %signal 9,3 %unless type="" %or type="file,object,exist" %or type="file,write"
+  %finish
+  %if type="file,object,exist" %and unix readable(selected)#0 %then %signal 9,4
+  copy result(value,capacity,selected)
+%end
+%externalroutine host getinteger(%string(255) qualifier,%integername value)
+%string(255) selected,type
+%record(statef)%name s
+  selected=parameter(qualifier,type)
+  %if type="route,out,char" %start
+    s==state;%signal 9,3 %if selected="" %or s_nextroute>255
+    openoutput(s_nextroute,selected);value=s_nextroute;s_nextroute=s_nextroute+1
+    %return
+  %finish
+  %signal 9,3 %unless type="" %or type="integer"
+  value=number(selected)
+%end

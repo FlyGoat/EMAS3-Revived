@@ -1,0 +1,177 @@
+!
+! FIRST THE OPERAND FLAG CONSTANTS
+!
+%CONSTINTEGER SCONST=0;                 ! CONST UPTO 64 BITS value is carried
+                                        ! in opnd_d and opnd_xtra
+%CONSTINTEGER LCONST=1;                 ! CONST LONGER THAN SCONST const can be
+                                        ! found elsewhere(at top of ar) by
+                                        ! meanse of base&offset inf in_d and _xtra
+%CONSTINTEGER DNAME=2;                  ! NAME BY DICTIONARY NO the base and disp in
+                                        ! the dictionary after adjusting by
+                                        ! possible offset for item in
+                                        ! in records lead to the variable
+%CONSTINTEGER ARNAME=3;                 ! NAME BY AR POINTER opnd_d the ar pointer
+                                        ! this form local to pass2
+                                        ! and used to identify functions
+                                        ! with params before the call
+                                        ! is planted
+%CONSTINTEGER VIAPTR=4;                 ! VIA TRIPLE WITHOFFSET TO POINTER
+                                        ! At an offset(_xtra) from address in
+                                        ! referenced triple can be found a
+                                        ! pointer to the required operand
+%CONSTINTEGER INDNAME=5;                ! INDIRECT VIA DICTIONARY base&disp
+                                        ! in dictionary identify a pointer
+                                        ! variable at possible offset from
+                                        ! this pointer
+%CONSTINTEGER INDIRECT=6;               ! INDIRECT VIA TRIPLE WITH OFFSET
+                                        ! the refenced triple has computed
+                                        ! the (32bit) address of an item
+                                        ! an offset may have to be applied
+                                        ! before the fetch or store
+%CONSTINTEGER LOCALIR=7;                ! BASE DISP REF IN CURRENT STACK FRAME
+                                        ! opnd_b=base<<16!offset used only for
+                                        ! compiler generated temporaries
+%CONSTINTEGER REFTRIP=8;                ! REFERENCE TO A TRIPLE the operand is the result of 
+                                        ! triple opnd_d
+%CONSTINTEGER INAREG=9;                 ! REGISTER OPERAND this form is local to the
+                                        ! code generating pass(es)
+%CONSTINTEGER developped=10;            ! also local to generator
+%CONSTINTEGER DEVADDR=11;               ! ALSO LOCAL TO GENERATOR
+%CONSTINTEGER BTREFMASK=1<<REFTRIP!1<<INDIRECT!1<<VIAPTR
+%CONSTINTEGER REFER NEEDED=1<<INDIRECT!1<<VIAPTR
+!
+! NOW THE DEFINITIONS OF ONE OPERAND TRIPLES <128
+!
+%CONSTINTEGER RTHD=1;                   ! ROUTINE-BLOCK HEADING
+%CONSTINTEGER RDSPY=2;                  ! ROUTINE ENTRY SET DISPLAY
+%CONSTINTEGER RDAREA=3;                 ! ROUTINE LEAVE DIAGNOSTIC SPACE
+%CONSTINTEGER RDPTR=4;                  ! SET DIAGNOSTIC POINTER
+%CONSTINTEGER RTBAD=5;                  ! ROUTINE-FN BAD EXIT
+%CONSTINTEGER RTXIT=6;                  ! "%RETURN"
+%CONSTINTEGER XSTOP=7;                  ! EXECUTE "%STO"
+%CONSTINTEGER NOTL=10;                  ! LOGICAL NOT
+%CONSTINTEGER LNEG=11;                  ! LOGICAL NEGATE
+%CONSTINTEGER IFLOAT=12;                ! CONVERT INTEGER TO REAL
+%CONSTINTEGER MODULUS=13;               ! AS USED BY IMOD&RMOD
+%CONSTINTEGER SHRTN=14;                 ! SHORTEN TO LOWER PRECISION
+%CONSTINTEGER LNGTHN=15;                ! LENGTHEN TO HIGHER PRECISION
+%CONSTINTEGER JAMSHRTN=16;              ! SHORTEN FOR JAM TRANSFER
+%CONSTINTEGER NULLT=18;                 ! FOR REDUNDANT TRIPLES
+%CONSTINTEGER PRELOAD=19;               ! PREFETCH FOR OPTIMISATION REASONS
+%CONSTINTEGER SSPTR=21;                 ! STORE STACK POINTER
+%CONSTINTEGER RSPTR=22;                 ! RESTORE STACK POINTER
+%CONSTINTEGER ASPTR=23;                 ! ADVANCE STACK PTR
+%CONSTINTEGER DARRAY=24;                ! DECLARE ARRAY(IE STORE HD)
+%CONSTINTEGER SLINE=25;                 ! UPDATE LINE NO
+%CONSTINTEGER STPCK=26;                 ! CHECK FOR ZERO STEPS
+%CONSTINTEGER FORPRE=27;                ! PREAMBLE FOR "FOR"
+%CONSTINTEGER FORPOST=28;               ! POSTAMBLE FOR "FOR"
+%CONSTINTEGER FORPR2=29;                ! FOR SECOND PREAMBLE
+%CONSTINTEGER PRECL=30;                 ! PREPARATION FOR CALL
+%CONSTINTEGER RCALL=31;                 ! THE CALL
+%CONSTINTEGER RCRFR=32;                 ! RECOVER FN RESULT
+%CONSTINTEGER RCRMR=33;                 ! RECOVER MAP RESULT
+%CONSTINTEGER GETAD=35;                 ! GET ADDRESS OF NAME
+%CONSTINTEGER RTOI1=36;                 ! REAL TO INTEGER AS INT
+%CONSTINTEGER RTOI2=37;                 ! REAL TO INTEGER INTPT
+%CONSTINTEGER ITOS1=38;                 ! INTEGER TO STRING AS TOSTRING
+%CONSTINTEGER MNITR=39;                 ! %MONITOR
+%CONSTINTEGER PPROF=40;                 ! PRINT PROFILE
+%CONSTINTEGER RTFP=41;                  ! TURN RT INTO FORMAL PARAMETER
+%CONSTINTEGER ONEV1=42;                 ! ON EVENT 1 PRIOR TO TRAP
+%CONSTINTEGER ONEV2=43;                 ! ON EVENT 2 AFTER TRAP
+%CONSTINTEGER DVSTT=44;                 ! START OF DOPE VECTOR
+%CONSTINTEGER DVEND=45;                 ! END OF DV EVALUATE TOTSIZE ETC
+%CONSTINTEGER FOREND=46;                ! END OF FOR LOOP
+%CONSTINTEGER DMASS=47;                 ! assign via bim warning to opt only
+%CONSTINTEGER RTOI3=48;                 ! real to integer as TRUNC
+!
+! CODES FOR USER WRITTEN ASSEMBLER. NATURALLY THESE ARE NOT
+! MACHINE INDEPENDENT
+!
+%CONSTINTEGER UCNOP=50;                 ! FOR CNOPS
+%CONSTINTEGER UCB1=51;                  ! ONE BYTE OPERATIONS
+%CONSTINTEGER UCB2=52;                  ! FOR 2 BYTE OPERATIONE
+%CONSTINTEGER UCB3=53;                  ! FOR 3 BYTE OPERATIONS
+%CONSTINTEGER UCW=54;                   ! FOR WORD OPERATIONS
+%CONSTINTEGER UCBW=55;                  ! FOR OPC,BYTEWORD OPERATIONE
+%CONSTINTEGER UCWW=56;                  ! FOR OPC,WORD,WORD OPERAIONS
+%CONSTINTEGER UCLW=57;                  ! FOR LONGWORD OPERATIONS
+%CONSTINTEGER UCB2W=58;                 ! FOR OPC,B1,B2,WORD OPERATIONS
+%CONSTINTEGER UCNAM=59;                 ! FOR ACESS TO NAMES FROM ASSEMBLER
+!
+! NOW THE BINARY OPERATIONS
+!
+%CONSTINTEGER ADD=128;                  ! ADDITION
+%CONSTINTEGER SUB=129;                  ! SUBTRACTION
+%CONSTINTEGER NONEQ=130;                ! INTEGER NONEQUIVALENCE
+%CONSTINTEGER ORL=131;                  ! LOGICAL OR
+%CONSTINTEGER MULT=132;                 ! MULTIPLICATION
+%CONSTINTEGER INTDIV=133;               ! INTEGER DIVISION
+%CONSTINTEGER REALDIV=134;              ! REAL DIVISION
+%CONSTINTEGER ANDL=135;                 ! LOGICAL AND
+%CONSTINTEGER RSHIFT=136;               ! LOGICAL RIGHT SHIFT
+%CONSTINTEGER LSHIFT=137;               ! LOGICAL LEFT SHIFT
+%CONSTINTEGER REXP=138;                 ! REAL EXPONENTIATION
+%CONSTINTEGER COMP=139;                 ! COMPARISONS
+%CONSTINTEGER DCOMP=140;                ! FIRST PART OF DSIDED(NEEDED?)
+%CONSTINTEGER VMY=141;                  ! VECTOR MULTIPLY
+%CONSTINTEGER COMB=142;                 ! COMBINE (IE ADD OF LA) ON VMY RESULTS
+%CONSTINTEGER VASS=143;                 ! VARAIABLE ASSIGN WITH CHECKING
+%CONSTINTEGER VJASS=144;                ! VARIABLE JAMMED ASSIGN
+%CONSTINTEGER IEXP=145;                 ! INTEGER EXPONENTIAITION
+%CONSTINTEGER BADJ=146;                 ! BASE ADJUST ARRAY INDEX
+%CONSTINTEGER AINDX=147;                ! INDEX ARRAY(COMBINE BS&IX)
+%CONSTINTEGER IFETCH=148;               ! NO LONGER USED
+%CONSTINTEGER LASS=149;                 ! ASSIGN LOCAL TEMPORARY
+%CONSTINTEGER FORCK=150;                ! VALIDATE FOR
+%CONSTINTEGER PRECC=151;                ! PRELIMINARY CONNCATENATION
+%CONSTINTEGER CONCAT=152;               ! CONCATENATION
+%CONSTINTEGER IOCPC=153;                ! CALL IOCP
+%CONSTINTEGER PASS1=154;                ! PRIMARY PARAMETER ASSIGNMENT
+%CONSTINTEGER PASS2=155;                ! PARAMETER PASSING POINTER PARAMS
+%CONSTINTEGER PASS3=156;                ! PARAMETERPASSING ARRAY PARAMETERS
+%CONSTINTEGER PASS4=157;                ! PASS A FORMAL PROCEDURE
+%CONSTINTEGER PASS5=158;                ! PASS AN UNTYPE(%NAME) PARAMETER
+%CONSTINTEGER PASS6=159;                ! PASS STRFN OR RECFN RESULT AREA
+%CONSTINTEGER BJUMP=160;                ! BACKWARDS JUMPS
+%CONSTINTEGER FJUMP=161;                ! FORWARD JUMPS
+%CONSTINTEGER REMLB=162;                ! REMOVE LAB FROM LABELIST
+                                        ! NEEDS TO BE TRIPLE IF COMBINED
+                                        ! LABEL LIST IS USED
+%CONSTINTEGER TLAB=163;                 ! TO ENTER A LABEL
+%CONSTINTEGER DCLSW=164;                ! DECLARE A SWITCH ARRAY
+%CONSTINTEGER SETSW=165;                ! SET A SWITCH TO "CA"
+%CONSTINTEGER GOTOSW=166;               ! GO TO A SWITCH LABEL
+%CONSTINTEGER STRASS1=167;              ! STRING GENERAL ASSIGNMET
+%CONSTINTEGER STRASS2=168;              ! STRING FIXED LENGTH ASSNMENT
+%CONSTINTEGER STRJT=169;                ! STRING JAM TRANSFER
+%CONSTINTEGER AHASS=170;                ! ASSIGNMENT OF ARRAYHEADS
+%CONSTINTEGER PTRAS=171;                ! ASSIGNMENT OF POINTERS
+%CONSTINTEGER MAPRES=172;               ! ASSIGN MAPPING FN RESULT
+%CONSTINTEGER FNRES=173;                ! ASSIGN FN RESULT
+%CONSTINTEGER SCOMP=174;                ! STRING COMPARISON
+%CONSTINTEGER SDCMP=175;                ! FIRST PART OF STRING D-SIDED
+%CONSTINTEGER PRES1=176;                ! PRE RESOLUTION 1
+%CONSTINTEGER PRES2=177;                ! PRE RESOLUTION 2
+%CONSTINTEGER RESLN=178;                ! STRING RESOLUTION
+%CONSTINTEGER RESFN=179;                ! RESOLUTION FINALE
+%CONSTINTEGER SIGEV=180;                ! SIGNAL EVENT
+%CONSTINTEGER RECASS=181;               ! WHOLE RECORD ASSIGNMENT
+%CONSTINTEGER AAINC=182;                ! ARRAY ADDRESS ADJUST FOR
+                                        ! RECORD RELATIVE TO ABSOLUTE
+%CONSTINTEGER AHADJ=183;                ! MODIFY HEAD FOR MAPPING
+%CONSTINTEGER CTGEN=184;                ! CREATE TYPE GENERAL PARAMETER
+%CONSTINTEGER GETPTR=185;               ! POINTER FOR PASSING BY NAME
+%CONSTINTEGER SINDX=186;                ! INDEX STRING IE CHARNO
+                                        ! SAME AS AINDX FOR ALL TARGETS
+                                        ! BUT PNX !
+%CONSTINTEGER ZCOMP=187;                ! COMPARISONS WITH ZERO
+                                        ! GENERATED BY OPTIMISER
+%CONSTINTEGER CLSHIFT=188;              ! CONSTANT LOGICAL SHIFT
+                                        ! GENERATED BY OPTIMISER
+%CONSTINTEGER CASHIFT=189;              ! CONSTANT ARITHMETIC SHIFT
+                                        ! GENERATED BYOPTIMISER
+%CONSTINTEGER DVBPR=190;                ! GENERATE DV ENTRY FOR BOUND PAIR
+%CONSTINTEGER RSTORE=191;               ! REGISTER TO STORE OPERATION
+%CONSTINTEGER MULTX=192;                ! MULTIPLY AND EXTEND PRECISION

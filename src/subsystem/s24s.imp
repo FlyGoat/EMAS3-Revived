@@ -1,0 +1,2441 @@
+! S24 - Fortran Diagnostics
+! Modified    14/April/87   19.00
+
+
+
+
+%EXTERNALROUTINE FDIAG  %ALIAS "S#FDIAG"            {---if Amdahl}    %C
+                                                                      %C
+                       (%INTEGER     LOCAL POINTER,
+                        %INTEGER    GLOBAL POINTER,
+                        %INTEGER           PCOUNT ,
+                       {%INTEGER  SYMTABLE POINTER, {---if PERQ or PNX}
+                       {%INTEGER  SYMTABLE DISP   , {---if PERQ       }
+                       {%INTEGER           DIAG   , {---if PERQ       }
+                        %INTEGER           ASIZE  , {---if PERQ or IBM}
+                       {%INTEGER           FIRST  , {---if PERQ or PNX}
+                        %INTEGERNAME        NEXT  )
+                        !
+                        !
+                        !
+!
+!*********************************************************************%C
+!*********************************************************************%C
+                                                                      %C
+                                                                      %C
+     a PROCEDURE                                                      %C
+                                                                      %C
+           which provides diagnostic information pertaining           %C
+                                                                      %C
+                 to a single FORTRAN77 code component                 %C
+                                                    (version 2.0)     %C
+                                                                      %C
+!*********************************************************************%C
+!*********************************************************************%C
+
+!---History:
+    !
+    !
+    !F77BFDIAG9   derived from ERCC04.S24, and modified the reference
+          !            of INT PT to LINT PT (this corrects any /s that
+          !            may appear in formatted real numbers).
+
+!derived from AccentFdiag3
+
+
+
+
+
+
+
+
+
+
+!---Conditional Compilation Variables:
+    !
+    !
+    %constinteger  EMAS= 0
+    %constinteger  PERQ= 1
+    %constinteger  PNX = 2
+    %constinteger  IBM = 3
+
+    %constinteger False= 0
+    %constinteger True = 1
+
+
+
+
+
+!               +---------------------------------------+
+                !                                       !
+                !                                       !
+                !   CONDITIONAL COMPILATION CONSTANTS   !
+                !                                       !
+                !                                       !
+!               +---------------------------------------+
+
+                       %CONSTINTEGER TARGET= IBM
+                       %CONSTINTEGER   HOST= IBM
+
+                       %CONSTINTEGER  Relax Ansi= False
+
+
+
+%IF TARGET=EMAS %THENSTART
+          !
+          !
+          !   Define Conditional Compilation Constants for EMAS
+          !
+          !
+          %CONSTINTEGER k= 0                                               ;!%C
+                        k is set to the shift count required to convert      %C
+                          a byte displacement into an address displacement
+
+          %CONSTINTEGER HALFs= True                                        ;!%C
+                        HALFS= True implies that 16-bit entities are accessed%C
+                                    via the HALFINTEGER map and are unsigned
+
+          %CONSTINTEGER Byte Addressing= True                              ;!%C
+                        Byte Addressing= True implies that {address}+1       %C
+                             accesses the next byte and not the next word
+
+          %CONSTINTEGER CR Delimiter= False                                ;!%C
+                        CR Delimiter= False implies that the Carriage Return %C
+                           character is not an alternative record delimiter  %C
+                           to the Newline (NL) character in a formatted input%C
+                           field
+
+          %CONSTINTEGER Output Len= 120                                    ;!%C
+                        Output Len= the record length of the diagnostic      %C
+                                    stream. If the record length of          %C
+                                    this stream changes then only            %C
+                                    this variable need be altered
+
+          %FINISH
+
+
+
+
+%IF TARGET= IBM %THENSTART
+          !
+          !
+          !   Define Conditional Compilation Constants for Amdahl
+          !
+          !
+          %CONSTINTEGER k= 0
+
+
+          %CONSTINTEGER HALFs= False                                       ;!%C
+                        HALFS= False if 16-bit entities are accessed via     %C
+                                     the SHORTINTEGER map and they are signed
+
+          %CONSTINTEGER Byte Addressing= True
+
+
+          %CONSTINTEGER   CR Delimiter= False
+
+          %CONSTINTEGER     Output Len= 120
+          %FINISH
+
+
+
+%IF TARGET=PERQ %THENSTART
+          !
+          !
+          !   Define Conditional Compilation Constants for Accent
+          !
+          !
+          %CONSTINTEGER k= 1
+
+
+          %CONSTINTEGER HALFs= False
+
+
+          %CONSTINTEGER Byte Addressing= False                             ;!%C
+                        Byte Addressing= False implies that {address}+1      %C
+                             accesses the next word and not the next byte
+
+          %CONSTINTEGER CR Delimiter= True                                 ;!%C
+                        CR Delimiter= True implies that the Carriage Return  %C
+                           character within a formatted input field is to be %C
+                           regarded as an alternative record delimiter to the%C
+                           Newline (NL) character
+
+          %CONSTINTEGER    Output Len= 84
+          %FINISH
+
+
+
+%IF TARGET= PNX %THENSTART
+          !
+          !
+          !   Define Conditional Compilation Constants for PNX
+          !
+          !
+          %CONSTINTEGER k= 1
+
+
+          %CONSTINTEGER HALFs= True
+
+
+          %CONSTINTEGER Byte Addressing= False
+
+
+          %CONSTINTEGER CR Delimiter= True
+
+          %CONSTINTEGER    Output Len= 84
+          %FINISH
+
+
+
+
+
+
+  %CONSTINTEGER Line No Mapping=   1 {=> available}
+
+
+
+
+
+%IF TARGET= PERQ %THENSTART
+          !
+!         !
+!***********************************************************************
+!
+!     SPECIFICATIONS OF EXTERNAL PASCAL PROCEDURES USED
+!
+!***********************************************************************
+!
+%EXTERNALINTEGERFNSPEC   TGT ADR %ALIAS "TGTAD"    (%INTEGER ADDRESS, LEN {in bytes})
+%EXTERNALINTEGERFNSPEC  VALIDATE %ALIAS "TGTTOUCH" (%INTEGER ADDRESS                )
+    !
+    !
+   %FINISH; !if PERQ
+
+
+
+%IF TARGET\= IBM %THENSTART
+             !
+!            !
+!***********************************************************************
+!
+!     SPECIFICATIONS OF EXTERNAL IMP PROCEDURES USED
+!
+!***********************************************************************
+!
+%EXTERNALLONGREALFNSPEC INTO RANGE (%LONGREAL VALUE,  %INTEGERNAME SCALE)
+
+%IF TARGET= PNX %THENSTART
+          !
+          !
+   %EXTERNALROUTINESPEC COPY (%INTEGER LENGTH, FROM, FROM INC,
+                              %INTEGER           TO,   TO INC)
+   %FINISH
+   %FINISH
+
+
+
+%IF TARGET= IBM %THENSTART
+            !
+!           !
+!***********************************************************************
+!
+!     SPECIFICATIONS OF EXTERNAL IMP PROCEDURES USED
+!
+!***********************************************************************
+!
+%EXTERNALINTEGERFNSPEC DVALIDATE (%INTEGERNAME Address, Length, Access)
+
+%EXTERNALROUTINESPEC ETOI %ALIAS "S#ETOI" (%INTEGER Address, Length)
+%EXTERNALROUTINESPEC PHEX %ALIAS "S#PHEX" (%INTEGER I)
+    !
+    !
+   %FINISH
+
+
+
+!
+!***********************************************************************
+!
+!     SPECIFICATIONS FOR MAIN UTILITY ROUTINES
+!
+!***********************************************************************
+!
+
+        %ROUTINESPEC SORT AND PRINT NAMES(%INTEGER SYMTABS,NO OF NAMES)
+
+    %INTEGERFNSPEC  UNASSIGNED           (%INTEGER DATA AD, DATA LEN  {in bytes})
+
+      %ROUTINESPEC   PROPAGATE (    %INTEGER           LENGTH  ,
+                                %BYTEINTEGERARRAYNAME  AREA    ,
+                                    %INTEGER           AREA PTR, WITH)
+
+
+%UNLESS Line No Mapping= 0 {unavailable} %THENSTART
+                !
+       %INTEGERFNSPEC LINE NO FROM PCOUNT
+       %FINISH
+
+
+%UNLESS Byte Addressing= True %THENSTART
+             !
+       %INTEGERFNSPEC BYTE AT (%INTEGER DATA AD, DATA INC {in bytes})
+       %FINISH
+
+
+%UNLESS TARGET=EMAS %OR TARGET= IBM %THENSTART
+              !
+       %INTEGERFNSPEC NOT A REAL (%INTEGER DATA AD, DATA LEN  {in bytes})
+       %FINISH
+
+
+%UNLESS TARGET=PERQ %OR TARGET= PNX %THENSTART
+              !
+       %LONGLONGREALFNSPEC INTO RANGE (%LONGLONGREAL VALUE, %INTEGERNAME SCALE)
+
+       %INTEGERFNSPEC UNASSIGNED CHARACTER (%INTEGER DATA AD, DATA LEN)
+       %FINISH
+
+
+
+
+
+
+!***********************************************************************
+!
+!     CONSTANTS
+!
+!***********************************************************************
+!
+%CONSTINTEGER   Dot   =  '.'
+%CONSTINTEGER   Plus  =  '+'
+%CONSTINTEGER   Blank =  ' '
+%CONSTINTEGER   Quote =  ''''
+%CONSTINTEGER   Minus =  '-'
+%CONSTINTEGER   Nought=  '0'
+
+%CONSTINTEGER   None   = 0,  Off= 0
+%CONSTINTEGER   Not Set= 0
+%CONSTINTEGER   Nil    = 0
+%CONSTINTEGER   Given  = 1,  Not Given= 0
+                         !
+                         !Values taken by 'boolean' variables
+                         !            (ie. Integers used as flags)
+
+
+
+%IF TARGET=EMAS %OR TARGET= IBM %THENSTART
+          !
+          !   Define 'Excess-64' Notation Real Constants (for EMAS or Amdahl)
+          !
+          %CONSTLONGLONGREAL Ten To The  7= R'46989680000000000000000000000000'
+          %CONSTLONGLONGREAL Ten To The 15= R'4D38D7EA4C6800000000000000000000'
+          %CONSTLONGLONGREAL Ten To The 30= R'59C9F2C9CD04674E00DEA40000000000'
+          %CONSTLONGLONGREAL  Point One   = R'40199999999999990099999999999999'
+
+%FINISHELSESTART
+
+%IF HOST=EMAS %OR HOST= IBM %THENSTART
+        !
+        !   Define IEEE Real Constants in 2900 Terms
+        !
+        %CONSTLONGREAL Ten To The  7= R'4698968000000000'
+        %CONSTLONGREAL Ten To The 15= R'4D38D7EA4C680000'
+        %CONSTLONGREAL Ten To The 30= R'59C9F2C9CD04674F'
+        %CONSTLONGREAL  Point One   = R'401999999999999A'
+        %FINISH
+
+%IF HOST= PNX %THENSTART
+        !
+        !   Define IEEE Real Constants in PNX Terms
+        !
+        %CONSTLONGREAL Ten To The  7= R'416312D000000000'
+        %CONSTLONGREAL Ten To The 15= R'430C6BF526340000'
+        %CONSTLONGREAL Ten To The 30= R'46293E5939A08CE9'
+        %CONSTLONGREAL  Point One   = R'3FB999999999999A'
+        %FINISH
+
+%IF HOST=PERQ %THENSTART
+        !
+        !   Define IEEE Real Constants in Accent Terms
+        !
+        %CONSTLONGREAL Ten To The  7= R'00000000416312D0'
+        %CONSTLONGREAL Ten To The 15= R'26340000430C6BF5'
+        %CONSTLONGREAL Ten To The 30= R'39A08CE946293E59'
+        %CONSTLONGREAL  Point One   = R'9999999A3FB99999'
+        %FINISH
+%FINISH
+
+
+%IF TARGET= IBM %THENSTART
+          !
+          !   Define the Unassigned Pattern for Amdahl
+          !
+          %CONSTINTEGER Unassigned Word= X'81818181'
+          %CONSTINTEGER Unassigned Half= X'FFFF8181'
+          %CONSTINTEGER Unassigned Byte=   0
+          %constinteger Oldunassigned Word=x'80808080'
+          %constinteger Oldunassigned Half=x'FFFF8080'
+
+%CONSTLONGLONGREAL Oldunassigned R16= R'80808080808080808080808080808080'
+%CONSTLONGLONGREAL Unassigned R16= R'81818181818181818181818181818181'
+
+%FINISHELSESTART
+       !
+       !   Define the Unassigned Pattern for Other Targets
+       !
+       %CONSTINTEGER Unassigned Word= X'81818181'
+       %CONSTINTEGER Unassigned Half= X'FFFF8181'
+       %CONSTINTEGER Unassigned Byte= X'81'
+       %FINISH
+
+
+
+%OWNSTRING(12) NOT ASSIGNED TEXT= "Not Assigned"
+                      !
+                      !used when a value being
+                      !     output is not assigned
+
+
+%IF TARGET=PERQ %OR TARGET=PNX %THENSTART
+          !
+          !
+   %OWNSTRING(12) NOT A NUMBER TEXT= "Not A Number"                   ;!%C
+                  NOT A NUMBER TEXT is used when a floating-point       %C
+                                    number being output is illegal
+   %FINISH
+
+
+!
+!   Types of FORTRAN Procedures
+!
+%CONSTSTRING(13) %ARRAY   SUBPROG TYPES(0:3)= " "             ,
+                                              "MAIN PROGRAM " ,
+                                              "Function "     ,
+                                              "Subroutine "
+
+%CONSTSTRING(10) %ARRAY  FUNCTION TYPES(0:5)= ""         ,
+                                              "Integer " , "Real "    ,
+                                              "Complex " , "Logical " ,
+                                              "Character "
+
+
+
+
+!***********************************************************************
+!
+!     RECORD FORMATS
+!
+!***********************************************************************
+!
+
+%RECORDFORMAT HEADER OF SYMBOL TABLES (                               %C
+                                                                      %C
+                        %INTEGER     FOUR HASHES                    ,
+                        %INTEGER     LINE NO DISP {in bytes}        ,
+                        %INTEGER     OPTIONS                        ,
+                   %SHORTINTEGER     ASIZE                          ,
+                    %BYTEINTEGER     SUBPROG SIZETYPE               ,
+                    %BYTEINTEGER     SUBPROG TYPE                   ,
+                         %STRING(32) SUBPROG NAME )
+
+%RECORD (HEADER OF SYMBOL TABLES) %NAME  SYMBASE
+
+
+%RECORDFORMAT FORM OF AN IDENTIFIER RECORD (                          %C
+                                                                      %C
+                       %BYTEINTEGER SIZE TYPE        ,
+                       %BYTEINTEGER      FLAGS       ,
+                      %SHORTINTEGER      LENGTH      ,
+                           %INTEGER      DISPLACEMENT,
+                            %STRING(32)  IDENTIFIER  )
+
+
+
+
+!***********************************************************************
+!
+!     UTILITY ROUTINES
+!
+!***********************************************************************
+!
+
+%IF Byte Addressing= True %THENSTART
+
+   %ROUTINE COPY (%INTEGER LENGTH, SOURCE, SOURCE INC, DEST, DEST INC)
+   %INTEGER FROM
+   %INTEGER   TO
+              TO=   DEST +   DEST INC
+            FROM= SOURCE + SOURCE INC
+
+   %WHILE LENGTH> 0 %CYCLE
+                !
+                BYTEINTEGER(TO)= BYTEINTEGER(FROM)
+                            TO =     TO + 1
+                          FROM =   FROM + 1
+                        LENGTH = LENGTH - 1
+   %REPEAT
+   %END; !of COPY
+         !
+         !
+        %FINISH
+
+
+
+%IF TARGET=PERQ %THENSTART
+
+   %ROUTINE COPY(%INTEGER LEN,SBASE, SbyteDISP, TBASE, TbyteDISP)
+   %integer l
+   %shortinteger sdisp,tdisp
+   %constinteger max=(32*1024)-2
+   %integer I,From,To
+   %byteintegerarrayformat bafm(0:100000)
+   %byteintegerarrayname f,t
+   %if Len<=0 %then %return
+
+     t == array(tbase,bafm)
+     f == array(sbase,bafm)
+     %cycle i = 0,1,len-1
+        t(tbytedisp+i) = f(sbytedisp+i)
+     %repeat
+
+   %return
+
+!    sdisp = sbytedisp
+!    tdisp = tbytedisp
+!    %if len+1>max %Start
+!      l=max
+!      **@TBASE
+!      *LDDW
+!     **TDISP
+!     **@SBASE
+!      *LDDW
+!      **SDISP
+!      **L    { note: this loads the least significant half of L }
+!      *MVBW
+!      len=len-l
+!      tbase=tbase+(l>>1)
+!      sbase=sbase+(l>>1)
+!      %finish
+
+
+!    **@TBASE
+!    *LDDW
+!    **TDISP
+!    **@SBASE
+!    *LDDW
+!    **SDISP
+!    **LEN    { note this loads the least significant half of len }
+!    *MVBW
+   %END; !of COPY
+         !
+         !
+        %FINISH
+
+
+
+
+
+!***********************************************************************
+!
+!     GLOBAL VARIABLES
+!
+!***********************************************************************
+!
+
+
+!
+!   Addresses of Internal Data Areas
+!
+%INTEGER GLA ADDR         ; !GLA address of failing routine
+%INTEGER SYMTABS          ; !Ptr to Local identifier table
+%INTEGER PTR TO NEXT TABLE; !Ptr to start of (next) Common Block
+                            !                       Identifier records
+!
+!   Addresses of Areas within User program
+!
+%INTEGERARRAY AREA ADR (0:11)
+
+        !Each Fortran program may have up to 11 internal areas
+        !       which are identified as follows:
+                        !                                   %C
+                        0 => Stack                    ,
+                        1 => Code                     ,
+                        2 => Gla                      ,
+                        3 => Plt                      ,
+                        4 => Sst                      ,
+                        5 => Gst (initialised arrays) ,
+                        6 => Diagnostic Tables        ,
+                        7 => Scalar Area              ,
+                        8 => I/O Tables               ,
+                        9 => Uninitialised Arrays     ,
+                       10 => Constants Area           ,
+                      (11 is used for the current COMMON block - if any)
+
+
+!
+!   Variables associated with the failing line number
+!
+%INTEGER LINE NO        ; !the failing line number
+
+!
+!   Values set in the Symbol Table Header
+!
+    %INTEGER  EBCDIC MODE; !set to False if PARM(EBCDIC) was not used
+    %INTEGER SUBPROG SIZE                                             %C
+                     TYPE; !set to standard SIZE/TYPE of a function
+    %INTEGER SUBPROG TYPE; !set to indicate the type of FORTRAN procedure
+                               !as follows:
+                                          ! =1 =>Main Program
+                                          ! =2 =>Function
+                                          ! =3 =>Subroutine
+    %INTEGER  NO OF NAMES; !number of Local identifiers or Common identifiers
+
+!
+!   Utility Variables
+!
+%INTEGER STATE     ; !set as follows:
+                        !=-1 =>Local variables  to be/being printed
+                        != 0 =>Common variables to be printed
+                        != 1 =>Common variables being printed
+%INTEGER I
+
+!
+!   String variables
+!
+%STRING(32)  MODULE NAME; !name of the procedure
+%STRING(51) SUBPROG NAME; !descriptive text of the procedure
+%STRING(10) S
+
+
+
+%IF TARGET= IBM %AND SHORTINTEGER(LOCAL POINTER)= 0 %THENSTART
+                     !
+                     !
+                     PRINT STRING("
+Stack Corrupt - no diagnostics available for subprogram
+");                  NEXT=LOCAL POINTER
+     %FOR I= 0, 4, 28 %CYCLE
+          PHEX (INTEGER(LOCAL POINTER+I)); SPACE
+          NEWLINE %IF I= 12
+     %REPEAT
+                  %RETURN
+                  %FINISH
+
+
+!Initialise Variables:
+                    !
+                  GLA ADDR=   GLOBAL POINTER
+
+                  SYMTABS = SYMTABLE POINTER                 %IF TARGET= PNX
+                  SYMTABS = SYMTABLE POINTER + SYMTABLE DISP %IF TARGET= PERQ
+
+                  SYMTABS = INTEGER(GLOBAL POINTER+88) + (SHORTINTEGER(LOCAL POINTER) & X'FFFF') %IF TARGET= IBM
+
+ SYMBASE== RECORD(SYMTABS)
+
+!
+!   COLLECT SUBPROGRAM TYPE (AND NAME)
+!
+     MODULE NAME<-       SYMBASE_SUBPROG NAME
+    SUBPROG TYPE=        SYMBASE_SUBPROG TYPE
+    SUBPROG NAME<-SUBPROG TYPES (SUBPROG TYPE)
+%IF SUBPROG TYPE= 1 %THEN{START} -> A
+    !
+    SUBPROG NAME<- SUBPROG NAME . MODULE NAME
+
+%IF SUBPROG TYPE= 2 %THENSTART
+                !
+                !   Extract Function Type
+                !
+                    SUBPROG SIZETYPE= SYMBASE_SUBPROG SIZETYPE
+                %IF SUBPROG SIZETYPE= X'31' %THEN S= "Byte "                          %C
+                                            %ELSE S= FUNCTION TYPES (SUBPROG SIZETYPE&15)
+    SUBPROG NAME= S . SUBPROG NAME
+   %FINISH
+A:{%FINISH}
+
+   %IF TARGET= IBM %THEN EBCDIC MODE= SYMBASE_OPTIONS & 2   %C
+                   %ELSE EBCDIC MODE= False
+
+!
+!   PICK UP THE LINE NUMBER (AT POINT OF FAILURE)
+!
+%IF SYMBASE_OPTIONS & 1= Off %OR Line No Mapping=None {not available} %THENSTART
+               !
+               LINE NO= INTEGER(TGT ADR(LOCAL POINTER + (SYMBASE_LINE NO DISP>> k),4)) %IF TARGET= PERQ
+               LINE NO= INTEGER(        LOCAL POINTER + (SYMBASE_LINE NO DISP>> k)   ) %IF TARGET= EMAS %OR TARGET=PNX
+               LINE NO= SHORTINTEGER (LOCAL POINTER+2) & X'FFFF' %IF TARGET= IBM
+   %FINISHELSE LINE NO= LINE NO FROM PCOUNT
+
+               NEWLINE
+
+!
+!   PRINT 'DIAGNOSTICS ENTERED FROM .....'
+!
+    PRINT STRING ("Diagnostics ") %UNLESS TARGET=IBM %OR FIRST= False
+    PRINT STRING ("Entered From ".SUBPROG NAME)
+
+    PRINT STRING ("  Line ")  %AND  WRITE(LINE NO,1) %IF LINE NO>0
+
+!
+!   POINT TO START OF LOCAL IDENTIFIER RECORDS
+!
+      SYMTABS= ADDR(SYMBASE_SUBPROGNAME) + ((LENGTH(SYMBASE_SUBPROGNAME) & (-4))>>k + (4>>k))
+             !
+            STATE=  -1
+
+!
+!   Initialise Table of Area Addresses
+!
+    AREA ADR ( 0 {stack})= LOCAL POINTER                            ;!%C
+    AREA ADR ( 1 {code} )=   not used
+    AREA ADR ( 2 {gla}  )=   GLA ADDR                               ;!%C
+    AREA ADR ( 3 {plt}  )=   not used                               ;!%C
+    AREA ADR ( 4 {sst}  )=   not used
+    AREA ADR ( 5 {gst}  )= INTEGER(GLA ADDR + 4) %IF TARGET= PNX
+
+    COPY ( 24 {bytes},         GLA ADDR   ,    84 {byte offset}, ADDR(AREA ADR(0)),20) %IF TARGET= IBM
+    COPY ( 20 {bytes},         GLA ADDR   ,    24 {7'th word  }, ADDR(AREA ADR(0)),24) %IF TARGET= PNX
+    COPY ( 24 {bytes}, TGT ADR(GLA ADDR,4), 32+84 {byte offset}, ADDR(AREA ADR(0)),20) %IF TARGET= PERQ
+         !
+         ! initialise AREA ADR ( 5) to address of GST (if not PNX)
+                    ! AREA ADR ( 6) to address of diagnostics tables
+                    ! AREA ADR ( 7) to address of scalar area
+                    ! AREA ADR ( 8) to address of I/O tables
+                    ! AREA ADR ( 9) to address of uninitialised arrays
+                    ! AREA ADR (10) to address of constants table
+
+
+!
+!   Determine the Number of Local Names
+!
+NEXT SECTION:
+     !
+     NO OF NAMES= INTEGER(SYMTABS) - {for efficiency only} 1
+         SYMTABS= SYMTABS + (4>> k)
+         NEWLINE
+         !
+         !
+         !   SORT AND PRINT THE IDENTIFIERS IN ALPHABETIC ORDER
+         !
+         !
+         %IF NO OF NAMES<None %THEN    PTR TO NEXT TABLE=SYMTABS            %C
+                              %ELSE SORT AND PRINT NAMES(SYMTABS, NO OF NAMES)
+!
+!
+!   HANDLE A(nother) COMMON BLOCK
+!
+!
+%IF INTEGER(PTR TO NEXT TABLE)>0 %THENSTART
+    SYMTABS     = PTR TO NEXT TABLE + (4>> k)
+   AREA ADR (11)= INTEGER (TGT ADR(GLA ADDR,4) + INTEGER(SYMTABS)) %IF TARGET = PERQ
+   AREA ADR (11)= INTEGER (        GLA ADDR    + INTEGER(SYMTABS)) %IF TARGET\= PERQ
+    SUBPROG NAME= STRING(SYMTABS + (4>> k))
+    SYMTABS     = SYMTABS + ( LENGTH(SUBPROG NAME) & (-4) )>>k + (8>>k)
+    STATE       = 0
+               !=>a COMMON to be printed
+    -> NEXT SECTION
+%FINISH
+
+!
+!   Determine the next (earlier) stack frame
+!
+%IF TARGET= IBM %THEN NEXT= LOCAL POINTER                             %C
+                %ELSESTART
+
+%IF SUBPROG TYPE= 1 %THEN NEXT= None    {if a Main Program}           %C
+                    %ELSE NEXT= True    {if a function or subroutine}
+                    %FINISH
+
+                    %RETURN
+
+
+
+%IF Line No Mapping= True %THENSTART
+
+%INTEGERFN LINE NO FROM PCOUNT
+!
+!
+!
+!
+!   THIS IS A LOCAL ROUTINE TO DETERMINE THE LINE NUMBER
+!
+!        FROM THE P-COUNTER AT THE POINT OF FAILURE WHEN
+!
+!        A STORE MAP HAS BEEN PROVIDED.
+!
+!
+!
+%INTEGER TABLE BEGIN; !Start address of Line Number Store Map Table
+%INTEGER TABLE START; !Addr of first entry in Store Map Table (variable)
+%INTEGER TABLE END  ; !Addr of last  entry in Store Map Table (variable)
+%INTEGER MOD PCOUNT ; !PCOUNT adjusted to look like entries in Table
+!
+%INTEGER PTR; !Scanning pointer through Table
+%INTEGER I,J; !Entries of Table currently under examination
+%INTEGER PC ; !Relative PCOUNT from start of code
+
+!
+!   INITIALISE VARIABLES
+!
+ TABLE BEGIN= SYMTABS + (SYMBASE_LINE NO DISP>> k)
+ TABLE END  =(INTEGER(TABLE BEGIN) << (2-k)) + TABLE BEGIN
+ TABLE START= TABLE BEGIN + (4>>k)
+     PC    = PCOUNT & X'0000FFFF'
+ MOD PCOUNT= PC    << 15
+!
+!   CHECK VALIDITY OF P-COUNTER
+!
+%IF MOD PCOUNT<=INTEGER(TABLE START) & X'7FFF8000' %THENRESULT= 0
+%IF MOD PCOUNT>=INTEGER(TABLE END  ) & X'7FFF8000'                      %C
+       %THEN I= INTEGER(TABLE END  ) & X'7FFF' %AND -> ADD ON LINE BASE
+ -> START SEARCH
+!
+!   SCAN TABLE USING A BINARY SEARCH PATTERN
+!
+LOOP:
+!
+    I= INTEGER(PTR)
+%IF I<MOD PCOUNT %THENSTART
+                  TABLE START= PTR + 4>>k
+                  J          = INTEGER(TABLE START)
+              %IF J>MOD PCOUNT %THENSTART
+                       %IF J&X'7FFF8000'<MOD PCOUNT %THEN ->LINE IN J %C
+                                                    %ELSE ->LINE IN I
+                       %FINISH
+START SEARCH:     PTR= TABLE START + ((((TABLE END - TABLE START)>>1) %C
+                                                   + (2>>k)) & (-(4>>k)))
+                  -> LOOP
+                 %FINISH
+
+%IF I>MOD PCOUNT %THENSTART
+                  TABLE END= PTR - 4>>k
+                  J        = INTEGER(TABLE END)
+              %IF J<MOD PCOUNT %THENSTART
+                       %IF I&X'7FFF8000'>MOD PCOUNT %THEN ->LINE IN J %C
+                                                    %ELSE ->LINE IN I
+                       %FINISH
+                  PTR= TABLE END - ((((TABLE END - TABLE START) >> 1) %C
+                                                 + (2>>k)) & (-(4>>k)))
+                  -> LOOP
+                 %FINISH
+LINE IN I:   I= I & X'7FFF'; -> ADD ON LINE BASE
+LINE IN J:   I= J & X'7FFF'
+!
+!   ADD THE LINE NUMBERING BASE
+!
+ADD ON LINE BASE:
+    !
+   %RESULT= I + INTEGER(TABLE BEGIN - 4>>k)
+
+%END; !of LINE NO FROM PCOUNT
+
+%FINISH; !if Line Number Mapping is available
+
+
+
+
+
+
+%ROUTINE SORT AND PRINT NAMES(%INTEGER SYMTABS,NO OF NAMES)
+!
+!
+!
+!
+!     A routine to construct a list of addresses of
+!
+!           the variable names, and then to sort the
+!
+!           names into alphabetic order. Each name
+!
+!           is then printed.
+!
+!
+!
+%INTEGERFNSPEC ARRAY ADDRESS
+  %ROUTINESPEC PRINT NAME    (%STRINGNAME NAME)
+  %ROUTINESPEC   SET NAME
+!
+%INTEGERARRAY ADDRESS(0:NO OF NAMES)
+              !
+              !Each entry in this array is to be set to the address
+              !     of each variable name. These entries will then
+              !     be sorted, so that the names appear in
+              !     alphabetic order.
+              !
+!
+!   Control Variables
+!
+   %INTEGER    NAME CNT ; !cycle control variable through
+                          !      the identifier records
+!
+!   Variables used for sorting the variable names
+!
+    %INTEGER MIN ADDR ; !ptr to smallest name found so far
+    %INTEGER MAX ADDR ; !ptr to largest  name found so far
+    %INTEGER PTR ADDR ; !ptr to name currently under examination
+    %INTEGER SAVE ADDR; !save area for an address
+    %INTEGER MIN PTR  ; !ptr to entry in array ADDRESS to smallest name
+    %INTEGER MAX PTR  ; !ptr to entry in array ADDRESS to largest  name
+    %INTEGER PTR      ; !ptr to entry in array ADDRESS to current  name
+
+ %STRINGNAME MIN      ; !smallest name found so far
+ %STRINGNAME MAX      ; !largest  name found so far
+ %STRINGNAME PTR NAME ; !current  name under examination
+ %STRINGNAME SAVE NAME; !temporary save area for a name
+!
+!   Variables for identifying the next variable to output
+!
+    %INTEGER  AN ARRAY; !>0 if variable is an array
+    %INTEGER REFERENCE; !>0 if variable is to be referenced indirectly
+      !
+%RECORD (Form of an Identifier Record) %NAME  R
+!
+!   Characteristics of next name to be printed
+!
+    %INTEGER DATA AD   ; !store address of the item
+    %INTEGER DATA INC  ; ! byte displacement from DATA AD to the item
+    %INTEGER DATA TYPE ; !FORTRAN type of the item, which may
+                               !be one of the following:
+                               !                       :
+                         %constinteger AN INTEGER  = 1,
+                                        A REAL     = 2,
+                                        A COMPLEX  = 3,
+                                        A LOGICAL  = 4,
+                                        A CHARACTER= 5
+                                        !
+    %INTEGER DATA LEN  ; !the length attribute of the item in bytes
+         !
+%INTEGER NUM DATA ITEMS; !number of values associated with the item
+
+%STRINGNAME NAME
+
+!
+!   SET UP THE LIST OF ADDRESSES
+!
+ R==RECORD(SYMTABS); %FOR NAME CNT = 0,1,NO OF NAMES %CYCLE
+                      !
+                  ADDRESS(NAME CNT)= ADDR(R_IDENTIFIER)
+ R==RECORD(ADDR(R_IDENTIFIER) + ( LENGTH(R_IDENTIFIER) & (-4))>>k + (4>>k) )
+                      !
+                     %REPEAT
+
+    PTR TO NEXT TABLE= ADDR(R)
+!
+!
+!     INITIALISE VARIABLES FOR THE SORT OPERATION
+!
+!
+ MAX PTR= NO OF NAMES
+ MIN PTR= 0
+!
+!   INITIALISE VARIABLES FOR (NEXT) SCAN THROUGH THE LIST
+!
+NEW SCAN:
+!
+ MIN ADDR= ADDRESS(MIN PTR); MIN==STRING(MIN ADDR)
+ MAX ADDR= ADDRESS(MAX PTR); MAX==STRING(MAX ADDR)
+%IF MIN>MAX %THENSTART
+             SAVE ADDR= MIN ADDR; MIN ADDR= MAX ADDR
+                                  MAX ADDR= SAVE ADDR
+             SAVE NAME==MIN     ; MIN     ==MAX
+                                  MAX     ==SAVE NAME
+            %FINISH
+
+       PTR=MIN PTR + 1
+%WHILE PTR<MAX PTR %CYCLE
+!
+!   SELECT THE NEXT NAME
+!
+ PTR ADDR= ADDRESS(PTR)
+ PTR NAME==STRING (PTR ADDR)
+!
+!   TEST IF THE NEW NAME SHOULD BE THE MINIMUM
+!
+%IF MIN>PTR NAME %THENSTART
+                  MIN         ==PTR NAME
+                  ADDRESS(PTR)= MIN ADDR
+                  MIN ADDR    = PTR ADDR
+                 %FINISHELSESTART
+!
+!   TEST IF THE NEW NAME SHOULD BE THE MAXIMUM
+!
+%IF MAX<PTR NAME %THENSTART
+                  MAX         ==PTR NAME
+                  ADDRESS(PTR)= MAX ADDR
+                  MAX ADDR    = PTR ADDR
+                 %FINISH
+%FINISH
+ PTR= PTR + 1
+%REPEAT
+
+
+!
+!   TEST FOR END OF SEARCH
+!
+    ADDRESS (MIN PTR)= MIN ADDR  %AND  ADDRESS(MAX PTR)= MAX ADDR
+    MAX PTR= MAX PTR - 1
+    MIN PTR= MIN PTR + 1
+%IF MIN PTR< MAX PTR %THEN -> NEW SCAN
+
+
+
+!   START OUTPUTTING THE VARIABLE NAMES AND VALUES:
+                     !
+                    {!Initialise}   NUM DATA ITEMS= 1
+                                        NAME CNT  = 0
+%CYCLE
+!
+!   GET THE CHARACTERISTICS OF THE NEXT VARIABLE
+!
+          SET NAME;       !      Establish Area of the Identifier
+          !       !
+%UNLESS REFERENCE= False %THENSTART
+        !
+        !
+        !   Handle an Indirect Reference to a Variable
+        !
+        !
+
+        %IF TARGET=PERQ %OR TARGET= IBM %THENSTART
+                  !
+                  DATA AD = -1 %AND -> A                                %C
+                               %IF DVALIDATE (DATA AD, 6{bytes}, 1)\= 0 %AND TARGET= IBM
+                  DATA AD =          TGT ADR (DATA AD, 6{bytes})        %IF  TARGET= PERQ
+              %IF DATA LEN= 0 %THEN DATA LEN= SHORTINTEGER(DATA AD + 6>>k)
+
+        %FINISHELSESTART
+                    !PNX or EMAS
+
+        %IF DATA LEN=Not Set %THENSTART
+
+        %IF AN ARRAY= False  %THEN DATA LEN= INTEGER(DATA AD + 4>>k)        %C
+                             %ELSE DATA LEN= INTEGER(DATA AD - 8>>k)
+! Note that DATA LEN will not
+!   be set for an assumed-size CHARACTER array or scalar
+           %FINISH
+           %FINISH
+                 !
+                 DATA AD= INTEGER(DATA AD)
+        %FINISH
+
+%UNLESS AN ARRAY=FALSE %THENSTART
+        !
+        !
+        !   Handle an Array
+        !
+        !
+             DATA AD= ARRAY ADDRESS
+                    !
+         NUM DATA ITEMS=SYMBASE_ASIZE %IF SYMBASE_ASIZE<NUM DATA ITEMS %AND (TARGET=PERQ %OR TARGET= PNX)
+         NUM DATA ITEMS=        ASIZE %IF         ASIZE<NUM DATA ITEMS %AND (TARGET=EMAS %OR TARGET= IBM)
+               AN ARRAY=FALSE    %UNLESS NUM DATA ITEMS>1
+%FINISH
+
+%IF TARGET= PERQ %THENSTART
+    !
+    !
+    !   Finalise Address Processing
+    !
+    !
+        DATA AD = DATA AD + (DATA INC>> 1)
+        DATA INC= DATA INC & 1
+                !
+         %IF VALIDATE(DATA AD)= 0 %THEN DATA AD= TGT ADR (DATA AD, NUM DATA ITEMS * DATA LEN) %C
+                                  %ELSE DATA AD= -1
+    %FINISH                                   {=> invalid address}
+
+%IF TARGET= IBM %THENSTART
+          !
+          !   Validate Address of Variable if Amdahl
+          !
+              DATA AD= -1 %IF DVALIDATE (DATA AD,NUM DATA ITEMS * DATA LEN, 1 {write})\= 0
+          %FINISH
+
+A:
+
+%IF STATE=0 %THENSTART
+    !
+    !   PRINT THE COMMON NAME
+    !
+    %IF SUBPROG NAME="F#BLCM" %THEN SUBPROG NAME= "Blank Common"      %C
+                              %ELSE SUBPROG NAME= "Labelled Common "  %C
+                                                   .SUBPROG NAME
+                     PRINT STRING ( SUBPROG NAME. "
+");                  STATE=1
+        %FINISH;         !=>COMMON name printed
+
+         PRINT NAME (NAME)
+NEXT NAME:           NAME CNT= NAME CNT + 1
+      %REPEAT %UNTIL NAME CNT>NO OF NAMES
+
+
+
+%ROUTINE SET NAME
+!
+!
+!
+!   A UTILITY ROUTINE TO PICK UP THE NEXT SCALAR NAME,
+!
+!                 AND TO DETERMINE ITS CHARACTERISTICS.
+!
+!
+!
+%INTEGER FLAGS
+
+ R==RECORD(ADDRESS(NAME CNT) - 8>>k)
+         !
+         NAME ==R_IDENTIFIER
+    DATA TYPE = R_SIZE TYPE & 15
+
+         FLAGS= R_FLAGS
+     REFERENCE=   FLAGS & X'80'
+      AN ARRAY=   FLAGS & X'20'
+
+     DATA AD  = AREA ADR (FLAGS&15)
+     DATA LEN = R_LENGTH
+
+%IF (DATA TYPE= A CHARACTER %ORC
+     DATA LEN = 1)          %AND FLAGS<=15 %THEN DATA INC= R_DISPLACEMENT           %C
+                                           %ELSE DATA AD = R_DISPLACEMENT + DATA AD %C
+                                           %AND  DATA INC=   Nil
+%END; !of SET NAME
+
+
+
+
+%IF TARGET=PERQ %THENSTART
+
+%INTEGERFN ARRAY ADDRESS
+!
+!
+!
+!
+!     THIS PROCEDURE DETERMINES THE ADDRESS OF THE FIRST ACTUAL
+!
+!              ARRAY ELEMENT AND THE NUMBER OF ARRAY ELEMENTS
+!
+!              USING THE DOPE VECTOR ADDRESS (Data Ad) AND THE
+!
+!              VARIABLE TYPE (Data Type).
+!
+!
+!The Form of a Dope Vector is as follows:
+     !
+     !     Integer:  Address of 1st actual element
+     ! HalfInteger:   Offset from Address to 1st byte
+     ! HalfInteger:   Length of an array element
+     !     Integer:   Number of array elements  {for word-orientated items}
+     !                    or of array bytes     {for byte-orientated items}
+     !
+     DATA AD= TGT ADR (DATA AD, 12{bytes}) %IF TARGET=PERQ
+
+              DATA INC  = SHORTINTEGER (DATA AD + 4>>k) {if BYTE or CHARACTER types}
+          NUM DATA ITEMS=      INTEGER (DATA AD + 8>>k)
+          NUM DATA ITEMS=           NUM DATA ITEMS // DATA LEN %IF DATA TYPE=A Character
+                        !
+                 %RESULT=      INTEGER (DATA AD)
+
+%END; !of ARRAY ADDRESS
+      !
+      !
+      !
+     %FINISHELSESTART
+
+
+%INTEGERFN ARRAY ADDRESS
+!
+!
+!
+!
+!     THIS PROCEDURE DETERMINES THE ADDRESS OF THE FIRST ACTUAL
+!
+!              ARRAY ELEMENT AND THE NUMBER OF ARRAY ELEMENTS
+!
+!              USING THE DOPE VECTOR ADDRESS (Data Ad) AND THE
+!
+!              VARIABLE TYPE (Data Type).
+!
+!
+!The Form of a Dope Vector is as follows:
+     !                                                                %C
+     Integer:  Address of 1st actual element                          %C
+     Integer:   Number of array elements {for non-characters}         %C
+                    or of array bytes    {for characters    }
+
+
+ NUM DATA ITEMS= INTEGER(DATA AD + 4>>k)
+ NUM DATA ITEMS= NUM DATA ITEMS//DATA LEN %IF DATA TYPE=A CHARACTER %and data len # 0
+               !
+        %RESULT= INTEGER(DATA AD    )
+
+%END; !of ARRAY ADDRESS
+      !
+      !
+      !
+     %FINISH; !if PNX or Amdahl
+
+
+
+
+
+
+%ROUTINE PRINT NAME (%STRINGNAME NAME)
+!
+!
+!
+!
+!     This local routine is used to output the name of a
+!
+!          variable together with its associated value(s).
+!
+!
+!
+%ROUTINESPEC OUTPUT CHARACTER
+%ROUTINESPEC OUTPUT LOGICAL
+%ROUTINESPEC OUTPUT NUMERIC
+!
+!Field Widths for Various Item Types:
+       !
+       %IF TARGET=EMAS %OR TARGET= IBM %THENSTART
+
+            %CONSTINTEGERARRAY INTEGER WIDTHS (0:4)=  4,  6, 11, Nil, 20
+            %CONSTINTEGERARRAY COMPLEX WIDTHS (0:2)= 31, 47, 77
+            %CONSTINTEGERARRAY    REAL WIDTHS (0:2)= 14, 22, 37
+            %CONSTINTEGERARRAY  DECS PER SIZE (0:2)=  7, 15, 30
+            %FINISHELSESTART
+                    !if PERQ or PNX
+
+            %CONSTINTEGERARRAY INTEGER WIDTHS (0:2)=  4,  6, 11 {,20}
+            %CONSTINTEGERARRAY COMPLEX WIDTHS (0:1)= 31, 49{,77}
+            %CONSTINTEGERARRAY    REAL WIDTHS (0:1)= 14, 23{,37}
+            %CONSTINTEGERARRAY  DECS PER SIZE (0:1)=  7, 15{,30}
+            %FINISH
+!
+!
+%BYTEINTEGERARRAY         BUFFER (0:Output Len);                     !%C
+                          BUFFER is used either as a workarea for     %C
+                                 printing a character value or as     %C
+                                 a buffer when outputting floating    %C
+                                 point values.
+                                 !
+      {Note that BUFFER(0) is always         }
+      {          reserved  as a string length}
+
+
+!Buffer Pointers:
+        !
+        !
+        %INTEGER  BSTART; !address of the buffer
+        %INTEGER    BPTR; !relative ptr through the buffer
+        %INTEGER    BLEN; !relative end of the buffer
+
+%INTEGER LINE LEN   ; !length of unused part of the output buffer
+%INTEGER      INDENT; !number of spaces reqd at the start of
+                          !        a continuation line
+%INTEGER I ; !utility variable
+!
+!   Format Control Variables
+!
+%INTEGER     FMTCODE ; !type of formatting to be performed on a value
+%INTEGER     WIDTH   ; !maximum number of digits to output
+%INTEGER EXP WIDTH   ; !number of trailing spaces to follow the value
+%INTEGER     DECIMALS; !number of digits reqd to the right of the '.'
+!
+%SWITCH PRINT VALUE OF (AN INTEGER:A CHARACTER)
+
+!
+!   FIRST PRINT 'NAME='
+!
+    PRINT STRING ( NAME)
+        I=LENGTH ( NAME); %IF I<8 %THEN SPACES (8-I)  %AND I=8
+   INDENT= I+3
+ LINE LEN=Output Len - INDENT
+    PRINT STRING (" = ");
+
+{Then check data item address is valid} %IF DATA AD=Unassigned Word   %C
+                                                                      %C
+            %OR DATA AD=Oldunassigned Word                            %C
+            %OR DATA AD=-1 %THEN PRINT STRING ("Not Defined")         %C
+                           %AND  NUM DATA ITEMS= 1                    %C
+                           %AND     -> RETURN
+
+{Then go and output its value(s)} BSTART=ADDR(BUFFER(0))
+               !
+            -> PRINT VALUE OF (DATA TYPE)
+
+
+!
+!   PRINT THE VALUE OF A CHARACTER SCALAR OR ARRAY
+!
+PRINT VALUE OF (A CHARACTER):
+            !
+           OUTPUT CHARACTER ;  -> RETURN
+
+
+!
+!   PRINT THE VALUE OF A LOGICAL SCALAR OR ARRAY
+!
+PRINT VALUE OF (A LOGICAL):
+            !
+           OUTPUT LOGICAL ;    -> RETURN
+
+
+!
+!   PRINT THE VALUE OF AN INTEGER SCALAR OR ARRAY
+!
+PRINT VALUE OF (AN INTEGER):  EXP WIDTH=None
+             !
+             FMTCODE='I'
+               WIDTH= INTEGER WIDTHS (DATA LEN >> 1)
+
+           %IF WIDTH< 12 %AND AN ARRAY\=False %THEN WIDTH= 12
+                         !
+                         !Ensure that an unassigned array element does
+                         !       not upset the columns in which the
+                         !       array is output
+ -> USE OUTPUT NUMERIC
+
+
+!
+!   PRINT THE VALUE OF A COMPLEX SCALAR OR ARRAY
+!
+PRINT VALUE OF (A COMPLEX):
+            !
+            EXP WIDTH= None
+                WIDTH= COMPLEX WIDTHS (DATA LEN >> 3)  %AND -> PRINT A REAL
+
+
+!
+!   PRINT THE VALUE OF A REAL SCALAR OR ARRAY
+!
+PRINT VALUE OF (A REAL):
+      !
+      %UNLESS AN ARRAY=False %THEN EXP WIDTH= 4                       %C
+                             %ELSE EXP WIDTH= None
+
+                 WIDTH=  REAL WIDTHS (DATA LEN >> 3)
+PRINT A REAL: DECIMALS=DECS PER SIZE (DATA LEN >> 3)
+              FMTCODE = 'G'
+              !
+              USE OUTPUT NUMERIC:
+                         !
+                BPTR= 1 %AND  BLEN= BPTR + LINE LEN
+                 !
+    OUTPUT NUMERIC
+
+
+RETURN:       NEWLINE
+
+
+
+%ROUTINE OUTPUT CHARACTER
+!
+!
+!
+!
+!     A local procedure to output the value
+!
+!        of a Character scalar or array.
+!
+!
+!    (Values are output using PRINT STRING's).
+!
+!
+!
+%INTEGER  WIDTH       ; !amount of output line still unused
+%INTEGER    LEN       ; !amount of current variable still to output
+%INTEGER  VALUE LENGTH; !length of the complete value to output
+%INTEGER SPACES REQD  ; !number of spaces to preceed each value
+%INTEGER   DATA PTR   ; !relative scanning ptr through a Character variable
+                                                         ! (scalar or array)
+!
+!   Initialise Variables
+!
+    VALUE LENGTH= DATA LEN + {for opening quote} 1                    %C
+                           + {for closing quote} 1
+%IF VALUE LENGTH< 12    %AND                                          %C
+       AN ARRAY\= False %THENSTART
+                         !
+                         SPACES REQD = 12 - VALUE LENGTH
+                         VALUE LENGTH= 12
+      {As arrays are output in columns we must ensure that any}
+      {   unassigned texts do not upset this format, and hence}
+      {   a minimum of 12 character positions are reserved for}
+      {   each array element with SPACES REQD filling what is }
+      {   not used                                            }
+                        %FINISHELSE SPACES REQD= None
+
+       DATA PTR= DATA AD  & 1 {convert byte address                    } %ANDC
+       DATA AD = DATA AD // 2 {   into word address + byte displacement}   %IF TARGET= PNX
+
+       DATA PTR= DATA INC %IF TARGET\= PNX
+
+!
+!   Acquire the (next) Character Value
+!
+AT START OF LINE: WIDTH= LINE LEN
+                       !
+                       ! set length of current line available
+NEXT VALUE:
+     !
+     !   Check for an Unassigned Character Variable
+     !
+                         DATA AD = DATA AD + (DATA PTR>> k)
+                         DATA PTR=            DATA PTR & k
+                         !
+     %IF (Byte Addressing= True  %AND UNASSIGNED CHARACTER(DATA AD+DATA PTR,DATA LEN)= True) %ORC
+         (Byte Addressing= False %AND              BYTE AT(DATA AD,DATA PTR)= X'81') %THENSTART
+                     !
+                     PRINT STRING ( Not Assigned Text)
+              %IF AN ARRAY= False %OR   WIDTH< VALUE LENGTH           %C
+                                  %THEN WIDTH= WIDTH - 12             %C
+                                  %ELSE WIDTH= WIDTH - VALUE LENGTH   %C
+                                         %AND  SPACES (VALUE LENGTH-12)
+                  DATA AD = DATA AD  + (DATA LEN>> k)
+                  DATA PTR= DATA PTR + (DATA LEN & k)
+%FINISHELSESTART
+
+!
+!   Prepare to Output the (next) Character Value
+!
+%IF SPACES REQD\=None %THEN SPACES(SPACES REQD)
+    !
+    PRINT SYMBOL (QUOTE)
+           WIDTH =WIDTH - SPACES REQD - {for the quote} 1
+             LEN = DATA LEN
+                {= characters of variable still to output}
+
+!
+!   Output the Character Value while it is longer than a line
+!
+%WHILE LEN>=WIDTH %CYCLE
+           !
+       COPY(WIDTH,DATA AD,DATA PTR,BSTART,1) {copy WIDTH bytes of I/O item }
+                                             {               into the buffer}
+       ETOI(BSTART+1, WIDTH) %IF TARGET= IBM %AND EBCDIC MODE\= False
+            BUFFER(0)=WIDTH       ; !Write out
+      PRINT STRING(STRING(BSTART)); !      one
+            NEWLINE               ; !      line's
+            SPACES(INDENT)        ; !      worth
+            !
+ DATA PTR=DATA PTR+ WIDTH         ; !point
+ DATA AD =DATA AD + (DATA PTR>> k); !   to the
+ DATA PTR=           DATA PTR & k ; ! next chunk
+      LEN=     LEN-WIDTH          ; !        and adjust bytes left to output
+    WIDTH=LINE LEN                ; !        and reset line width available
+%REPEAT
+
+      !
+      !   Output (the rest of) the Character Value if it is shorter than a line
+      !
+          COPY(LEN,DATA AD,DATA PTR,BSTART,1)
+          ETOI(BSTART+1,LEN) %IF TARGET= IBM %AND EBCDIC MODE\= False
+                        !
+               BUFFER(0)= LEN
+         PRINT STRING(STRING(BSTART))
+         PRINT SYMBOL(QUOTE)
+
+          DATA PTR= DATA PTR + LEN
+             WIDTH=    WIDTH - LEN - {for the quote} 1
+%FINISH; !Outputting the Character Value
+
+!
+!   Test if there are more values
+!
+%IF NUM DATA ITEMS<=1 %THENRETURN
+    NUM DATA ITEMS =  NUM DATA ITEMS - 1
+
+    !
+    !   Prepare for the next Character Value
+    !
+    %IF WIDTH>    0  %THEN PRINT SYMBOL(',') %AND WIDTH=WIDTH-1
+    %IF WIDTH>VALUE                                                   %C
+              LENGTH %THEN -> NEXT VALUE
+              !
+              !   Get a new record
+              !
+                  NEWLINE
+                   SPACES (INDENT)
+              -> AT START OF LINE
+                 !
+%END; !of OUTPUT CHARACTER
+
+
+
+
+
+%ROUTINE OUTPUT LOGICAL
+!
+!
+!
+!
+!     A utility procedure to output the value
+!
+!            of a logical scalar or array.
+!
+!
+!    (Values are written out using PRINT STRING's)
+!
+!
+!
+%STRING(12) VALUE;   %INTEGER BOOLEAN VALUE
+!
+%INTEGER DATA DISP; !displacement to be added to DATA AD to point to next array element
+%INTEGER      PTR ; !a note of where we are within the current output line
+
+!Initialise Variables:
+       !
+       DATA DISP= DATA LEN>> k
+
+ BEGIN:      PTR= INDENT
+
+  LOOP: !Perform unassigned checking
+        !
+        VALUE=Not Assigned Text %AND -> PRINT                                        %C
+                                %IF DATA LEN>1 %AND UNASSIGNED(DATA AD, DATA LEN)= True
+
+!Extract the Boolean Value:
+      !
+      !
+     %IF DATA LEN=2 %THENSTART
+
+                     BOOLEAN VALUE=SHORTINTEGER(DATA AD) %IF HALFs= False
+                     BOOLEAN VALUE= HALFINTEGER(DATA AD) %IF HALFs= True
+              %FINISHELSESTART
+
+     %IF DATA LEN=1 %THENSTART
+
+                     BOOLEAN VALUE= BYTEINTEGER(DATA AD+DATA INC) %IF Byte Addressing= True
+                     BOOLEAN VALUE=     BYTE AT(DATA AD,DATA INC) %IF Byte Addressing= False
+
+                        DATA INC  = 1 + DATA INC %IF Byte Addressing= False
+              %FINISHELSESTART
+
+    {%IF DATA LEN=4 %THENSTART}
+
+                     BOOLEAN VALUE=     INTEGER(DATA AD)
+                   {%FINISH}
+        %FINISH
+    %FINISH
+
+!Examine the Boolean Value:
+          !
+        %IF AN ARRAY\= False %THEN SPACES(BOOLEAN VALUE + 7)
+                             !
+   %IF BOOLEAN VALUE = False %THEN VALUE="FALSE"                      %C
+                             %ELSE VALUE="TRUE"
+
+        PRINT:  PRINT STRING (VALUE); %RETURN %IF NUM DATA ITEMS<=1
+!
+!   Select the next Logical array element
+!
+    NUM DATA ITEMS= NUM DATA ITEMS - 1
+        DATA AD   =     DATA DISP  + DATA AD
+  PRINT SYMBOL (',');   PTR=   PTR + 13
+                    %IF PTR<Output Len-13 %THEN -> LOOP
+                    !
+      {and output the current line}  NEWLINE
+                                      SPACES (INDENT)
+                                   -> BEGIN
+%END; !of OUTPUT LOGICAL
+
+
+
+
+
+%ROUTINE OUTPUT NUMERIC
+!
+!
+!
+!
+!     A utility procedure to output the value of
+!
+!         a Real, Integer, or Complex scalar or array.
+!
+!
+!    (Values of an array are accumulated in a record)
+!    (       before they are output.                )
+!
+!
+!
+%ROUTINESPEC  OUTPUT REAL
+%ROUTINESPEC  OUTPUT COMPLEX
+!
+!
+%STRINGNAME FAULT TEXT {might be mapped onto NOT ASSIGNED TEXT}
+!                                         or NOT A NUMBER TEXT}
+%CONSTLONGLONGREALARRAY POWERS OF TEN (0:2)=                          %C
+                                                                      %C
+                           Ten To The  7,
+                           Ten To The 15,
+                           Ten To The 30
+
+     !The values are used to determine whether a REAL*4 or REAL*8
+     ! or REAL*16 constant will be output in E format or F format.
+     !
+!
+!
+%INTEGER LENGTH
+         LENGTH= WIDTH; !copy field width (for complex values)
+
+ CYCLE: !through each element of the current I/O item
+        !         and output each in turn
+        !
+        WIDTH=LENGTH
+              PROPAGATE (LENGTH,BUFFER,BPTR,BLANK) {space-fill the output}
+                                                   {               field }
+!
+!   Test for an unassigned INTEGER or REAL or COMPLEX (real part only)
+!
+%IF DATA LEN> 1 %AND UNASSIGNED (DATA AD,DATA LEN)=True %THEN -> UNASSIGNED VARIABLE
+                          !
+%IF DATA TYPE\=AN INTEGER %AND  TARGET\=EMAS                          %C
+                          %AND  TARGET\= IBM                          %C
+                          %AND     NOT A REAL (DATA AD,DATA LEN)= True%C
+                          %THEN -> NOT A REAL
+
+%IF DATA TYPE=A COMPLEX %THENSTART
+                        !
+                        !   Test for an unassigned imaginary part
+                        !
+  -> UNASSIGNED COMPLEX %IF  UNASSIGNED(DATA AD + DATA LEN>>k,DATA LEN)= 1
+       -> NOT A COMPLEX %IF (TARGET=PNX                                   %C
+                        %OR  TARGET=PERQ)                                 %C
+                        %AND NOT A REAL(DATA AD + DATA LEN>>k,DATA LEN)= 1
+                            !
+                            OUTPUT COMPLEX
+                                  {otherwise}
+%FINISHELSESTART
+       !
+       !   Output an Integer or Real Value
+       !
+           OUTPUT REAL
+       %FINISH
+
+NEXT VALUE:    -> RETURN %IF NUM DATA ITEMS<=1
+                         !-> if there are no more values to print
+     !
+     !   Select the next value
+     !
+     NUM DATA ITEMS= NUM DATA ITEMS - 1
+         DATA AD   =     DATA LEN>> k + DATA AD
+                   !
+                   BUFFER(BPTR)= ','    ; !then insert the
+                          BPTR =BPTR + 1; !     trailing comma
+!
+!   Decide if we need another record
+!
+%IF BPTR+LENGTH<BLEN %THEN -> CYCLE
+                        !
+                        !
+                        BUFFER(0)= BPTR-1
+                        PRINT STRING (STRING(BSTART))
+                     NEWLINE; SPACES (INDENT)
+                     !
+             BPTR= 1 %AND  -> CYCLE
+
+%IF TARGET=PERQ %OR TARGET= PNX %THENSTART
+
+    NOT A COMPLEX: !Report an Illegal
+    NOT A REAL:    !          Floating Point Number
+                   !
+                   FAULT TEXT== NOT A NUMBER TEXT
+                -> PRINT TEXT
+   %FINISH
+
+UNASSIGNED VARIABLE: !Report an Unassigned
+UNASSIGNED COMPLEX : !          Real, Integer, or Complex
+                     !
+                     FAULT TEXT== Not Assigned Text
+
+PRINT TEXT:         %IF AN ARRAY= False %THEN PRINT STRING(FAULT TEXT)%C
+                                        %ANDRETURN
+                                        !
+   {For an Array Element:} COPY (12,ADDR(FAULT TEXT),1,
+                                              BSTART,BPTR+LENGTH-12)
+
+    DATA AD=DATA AD + DATA LEN>>k %IF DATA TYPE=A COMPLEX
+       BPTR= LENGTH + BPTR
+           !
+           -> NEXT VALUE
+
+!
+!   TIDY UP --- PRINT THE (final) LINE
+!
+RETURN:       BUFFER (0)=    BPTR-1
+        PRINT STRING (STRING(BSTART))
+             %RETURN
+
+
+
+%ROUTINE OUTPUT COMPLEX
+!
+!
+!
+!     A LOCAL PROCEDURE WHICH OUTPUTS A COMPLEX VALUE
+!
+!
+!
+%INTEGERFNSPEC WIDTH FOR (%INTEGER DATA AD)
+               !
+%INTEGER       WIDTH1; !field width reserved for the real part
+%INTEGER       WIDTH2; !field width reserved for the imaginary part
+%INTEGER       WIDTH3; !least width required for the complex value
+      !
+      !Note that, if possible, the field width used is twice the
+      !     field required for a real value plus space for the
+      !     opening and closing bracket and the separating comma
+            !
+%INTEGER SPACES REQD
+                 !to right-justify the value within the determined field
+
+!
+!   Determine the field widths for each complex part
+!
+    WIDTH1= WIDTH FOR (DATA AD)
+    WIDTH2= WIDTH FOR (DATA AD + DATA LEN>>k)
+    WIDTH3= WIDTH1 + WIDTH2 + 3; !=Width(imaginary part)  + '('
+                                 !+Width(real part) + ',' + ')'
+
+!
+!   Note any leading spaces required to right-justify the value
+!
+    SPACES REQD  =LENGTH - WIDTH3
+%IF SPACES REQD \= None  %AND                                         %C
+        AN ARRAY\=False  %THEN BPTR= BPTR + SPACES REQD
+       {no leading spaces reqd}
+       {if an ordinary scalar }
+
+!
+!   Now Output the Real Part
+!
+    BUFFER(BPTR)= '('   %AND  BPTR=BPTR+1
+          WIDTH = WIDTH1
+                  OUTPUT REAL
+    BUFFER(BPTR)= ','   %AND  BPTR=BPTR+1
+
+!
+!   Then Output the Imaginary Part
+!
+   DATA AD=DATA AD + DATA LEN>> k
+     WIDTH=WIDTH2
+           OUTPUT REAL
+
+!
+!   Finally Return
+!
+    BUFFER(BPTR)= ')'
+           BPTR = BPTR+1
+        %RETURN
+
+
+%INTEGERFN WIDTH FOR (%INTEGER DATA AD)
+!
+!
+!
+!
+!     A LOCAL PROCEDURE WHICH RETURNS THE FIELD WIDTH TO BE USED
+!
+!          TO OUTPUT A PART OF A COMPLEX VALUE. THE FACTORS
+!
+!          INVOLVED ARE THE SCALE OF THE VALUE AND THE NUMBER
+!
+!          OF SIGNIFICANT DIGITS REQUIRED.
+!
+!
+!It should be noted that the value returned will be exactly
+!   sufficient to format the number without any leading spaces.
+!
+!
+!
+%LONGLONGREAL  A    ; !a copy of the value to be output
+     %INTEGER  SIGN ; !set to one if the value is -ve, else set to zero
+     %INTEGER  WIDTH; !----the result returned
+
+!
+!   Get a copy of the complex part
+!
+%IF (TARGET=EMAS  %OR                                                    %C
+     TARGET= IBM) %AND DATA LEN=16 %THEN A=LONGLONGREAL(DATA AD) %ELSESTART
+                   %IF DATA LEN= 4 %THEN A=        REAL(DATA AD)         %C
+                                   %ELSE A=    LONGREAL(DATA AD)
+                  %FINISH
+
+     %IF A<0.0 %THEN A=-A %AND  SIGN=True                                %C
+                          %ELSE SIGN=False
+!
+!   Determine whether 'F' or 'E' formatting will be used
+!
+%IF A>=Point One %AND A<Powers Of Ten(DATA LEN>> 3) %THENSTART
+           !
+          {!'F' formating will be used} WIDTH=DECIMALS+1
+                                        WIDTH=   WIDTH+1 %IF A<1.0
+                      %FINISHELSESTART; WIDTH=DECIMALS+6
+                                        WIDTH=   WIDTH+1 %IF DATA LEN=8 %AND (TARGET=PERQ %OR TARGET= PNX)
+                                      %FINISH
+%RESULT=WIDTH+SIGN
+             !(add on one if value is negative)
+%END; !of WIDTH FOR
+%END; !of OUTPUT COMPLEX
+
+
+
+
+
+%ROUTINE OUTPUT REAL
+!
+!
+!
+!
+!     A utility procedure to format a real or integer value (as
+!       described by the variables DATA TYPE, DATA AD, and DATA
+!       BYTES) at address BPTR according to the values in WIDTH,
+!       FMTCODE, and DECIMALS.
+!
+!    (In addition, the variable EXP WIDTH indicates the number)
+!    (of spaces required on the right of a real value.        )
+!
+!
+!
+%BYTEINTEGERARRAY OUTPUT AREA (0:47)
+                   !Work-area for assembling
+                   !          the digits to be output
+!
+!
+!
+%CONSTINTEGERARRAY MIN PER WIDTH (0:10)=   0,         -9,        -99,
+                            -999,      -9999,     -99999,    -999999,
+                        -9999999,  -99999999, -999999999, X'80000000'
+                        !
+                        !Each array element corresponds to a value of
+                        !     WIDTH, and denotes the largest negative
+                        !     integer that may be formatted given that
+                        !     value of WIDTH
+                        !
+!
+!   POINTERS
+!
+%INTEGER AREA PTR  {relative ptr through OUTPUT AREA           }  ,
+              PTR  {relative ptr through the output field      }  ,
+          PTR MAX  {relative ptr to the end of the output field}
+
+
+!
+!   LOCAL VARIABLES DESCRIBING THE FORMAT CODE
+!
+%INTEGER FORMAT    {initially set from FMTCODE }  ,
+           DECS    {initially set from DECIMALS}  ,
+           LENGTH  {initially set from WIDTH   }
+
+
+!
+!   VARIABLES DESCRIBING THE VALUE TO FORMAT
+!
+   %INTEGER   SIGN   ; !the sign to be output with the value
+                            !      = '+' or '-'
+                            ! else =  0  if no sign is required
+%LONGLONGREAL  A     ; !the REAL value to be formatted
+    %INTEGER   I     ; !the INTEGER value to be formatted
+    %INTEGER   EXP   ; !the magnitude of the value to be formatted
+                             !
+    %INTEGER   Q{uotient}  ; !integer/exponent
+    %INTEGER   M{ultiplier}; !        formatting
+                             !        utility variables
+
+
+!
+!   FORMATTING CONTROL VARIABLES
+!
+%INTEGER MAX INT DIGITS; !maximum number of digits that may be
+                         !        output left of the decimal point
+%INTEGER     INT DIGITS; !number of digits required left of the '.'
+%INTEGER LEADING ZEROS ; !number of zeros required right of the '.'
+%INTEGER   TOTAL CHARS ; !number of digits required both left
+                         !       and right of the decimal point
+
+!
+!   VARIABLES ASSOCIATED WITH FORMATTING AN EXPONENT
+!
+%INTEGER EXPONENT      ; !Value of exponent to format
+
+
+
+!
+!   INITIALISE VARIABLES
+!
+    LENGTH  = WIDTH
+    PTR     =  BPTR
+    PTR MAX =   PTR + LENGTH
+
+
+         FORMAT =FMTCODE
+
+
+!
+!
+!   PICK UP THE VALUE TO BE FORMATTED NUMERICALLY
+!
+!
+%IF FORMAT='G' %THENSTART;      !LOAD UP A REAL VALUE
+          !
+          !
+         %IF (TARGET=EMAS  %OR                                            %C
+              TARGET= IBM) %AND DATA LEN=16 %THEN A=LONGLONGREAL(DATA AD) %ELSESTART
+
+                            %IF DATA LEN= 4 %THEN A=        REAL(DATA AD) %C
+                                            %ELSE A=    LONGREAL(DATA AD)
+                            %FINISH
+
+%FINISHELSESTART
+       !
+       !   LOAD UP AN INTEGER VALUE
+       !
+       %IF DATA LEN= 4 %THEN  I=     INTEGER(DATA AD)          {if Integer*4}   %ELSESTART
+       %IF DATA LEN= 2 %THEN  I=SHORTINTEGER(DATA AD)          {if Integer*2}   %ELSESTART
+                      {%ELSE} I=     BYTE AT(DATA AD,DATA INC) {if Byte     }   %IF Byte Addressing= False
+                              I= BYTEINTEGER(DATA AD+DATA INC)                  %IF Byte Addressing= True
+                              I=I ! X'FFFFFF00' %IF I>127
+                       DATA INC=DATA INC + 1 %IF Byte Addressing=False
+                      %FINISH          { + 1 because OUTPUT NUMERIC wont do it}
+                      %FINISH
+                            !
+                         -> I FORMAT
+       %FINISH
+
+
+!
+!   HANDLE A NEGATIVE VALUE
+!
+%IF A<0.0 %THEN A=-A  %AND    SIGN=Minus  %AND LENGTH=LENGTH-1        %C
+                      %ELSE   SIGN= None
+
+{last bit of         }   AREA PTR= 0
+{     initialisation }
+{currently REALS only}        EXP= 1
+                              !
+                              !
+                              !FINISH; !preparing for numeric formatting
+
+
+!***********************************************************************
+!
+!     HANDLE 'G' FORMAT
+!
+!***********************************************************************
+!
+G FORMAT:                                  DECS= DECIMALS
+  !
+%IF A>= Point One %AND A< Powers Of Ten(DATA LEN>> 3) %THENSTART
+
+!
+!   OUTPUT THE VALUE WITHOUT AN EXPONENT (and left-justify it as well)
+!
+    A =INTO RANGE (A,EXP) + 5.0/Powers Of Ten(DATA LEN>> 3)
+%IF A>=10.0 %THENSTART
+               A=  A/10.0; !apply correction if rounding put
+             EXP=EXP+1   ; !  the value back out of range
+            %FINISH
+
+!
+!   Determine actual WIDTH and DECIMALS to use
+!
+    LENGTH= LENGTH - EXP WIDTH; !reduce LENGTH by spaces reqd on the right
+      DECS=   DECS - EXP      ; !reduce DECS by digits reqd left of '.'
+      !
+      -> COLLECT DIGITS
+                      !
+                      !
+%FINISH
+!
+!   OUTPUT THE NUMBER WITH AN EXPONENT
+!                                                                    !%C
+ -> E FORMAT                            ; !GO AND LET 'E' FORMATING
+                                          !    DO ALL THE WORK
+!***********************************************************************
+!
+!     HANDLE 'E' FORMAT
+!
+!***********************************************************************
+!
+E FORMAT:
+  !
+ {!Initialise variables}             DECS=DECS-1
+                 !
+                 %IF A=0.0 %THEN EXPONENT=None %AND EXP=None %ELSESTART
+
+!Bring the value into the range:  10.0> A >=1.0
+       !
+       A =INTO RANGE (A,EXP)  + 5.0/Powers Of Ten (DATA LEN>> 3)
+   %IF A>=10.0 %THENSTART ;                              !apply rounding
+                  A=A/10.0; !apply correction
+                EXP=EXP+1 ; !   if rounding took value back out of range
+               %FINISH
+
+ EXPONENT= EXP-1           ; !determine the value of the exponent part
+           EXP=1           ; %FINISH
+
+
+!
+!   PRODUCE THE DECIMAL PART
+!
+%IF DATA LEN= 4 %OR (TARGET=EMAS %OR   TARGET= IBM)                  %C
+                                 %THEN LENGTH= LENGTH-4 %AND M= -10  %C
+                                 %ELSE LENGTH= LENGTH-5 %AND M= -100
+                                             !
+                                       FORMAT= 'E'
+
+           -> COLLECT DIGITS
+                    ! expect a return with DR pointing to
+                    !        the remainder of the output field
+
+!OUTPUT THE EXPONENT:
+ OUTPUT THE EXPONENT:   !ANALYSE THE EXPONENT TO FORMAT:
+!OUTPUT THE EXPONENT:
+             !
+            %UNLESS EXPONENT<0 %THEN SIGN=Plus  %AND I=-EXPONENT       %C
+                               %ELSE SIGN=Minus %AND I= EXPONENT
+
+{Format     }       BUFFER(PTR  )='E'
+{   the     }       BUFFER(PTR+1)= SIGN
+{   exponent}              PTR   =  PTR+2
+{of the     }
+{   value   }    -> INTEGER FORMATTING
+
+
+!***********************************************************************
+!
+!     Perform formatting of Real values
+!
+!***********************************************************************
+!
+COLLECT DIGITS:
+    !
+    !
+    !     DETERMINE THE VARIABLES WHICH CONTROL FORMATTING
+    !
+    !
+    MAX INT DIGITS= LENGTH  -  DECS - 1       ; != number of digits that
+                                                !     may be output left
+                                                !     of the decimal pt.
+        INT DIGITS= EXP
+                  !
+                  !INT DIGITS is the number of digits that are
+                  !           required to the left of the decimal point
+
+%IF INT DIGITS<=0 %THENSTART
+    !
+    !   Determine how many leading zeros are required if value is < 1.0
+    !
+    %IF MAX INT DIGITS=None %THENSTART
+                            !
+                    LEADING ZEROS= -INT DIGITS %AND  INT DIGITS= None
+        %FINISHELSE LEADING ZEROS=1-INT DIGITS %AND  INT DIGITS= 1
+                      TOTAL CHARS=  INT DIGITS - LEADING ZEROS + DECS
+                                                                     !%C
+GENERATE LEADING ZEROS: !in the work area
+         !
+         PROPAGATE (LEADING ZEROS, OUTPUT AREA, 0, Nought) %IF LEADING ZEROS> 0
+          AREA PTR= LEADING ZEROS
+
+%FINISHELSESTART;
+           !
+           !   Determine total number of numerals required if value>=1.0
+           !
+               TOTAL CHARS= INT DIGITS + DECS
+              %FINISH
+
+
+FORMAT DIGITS:    !
+                  !
+                  !   CONVERT VALUE TO CHARACTERS (using machine
+                  !                                      independent code)
+                  !
+              %WHILE TOTAL CHARS> 0 %CYCLE
+                     TOTAL CHARS= TOTAL CHARS - 1
+                              !
+                              I = LINT PT (A)
+                              A =   10.0*(A - I)
+           OUTPUT AREA(AREA PTR)=    Nought + I
+                       AREA PTR =  AREA PTR + 1
+                              !
+                        %REPEAT
+
+
+!
+!
+!   FORM THE FORMATTED VALUE IN THE OUTPUT FIELD
+!
+!
+%UNLESS AN ARRAY= False %THEN PTR= PTR + (MAX INT DIGITS - INT DIGITS)
+                       !
+                       !point to where the first significant char should go
+                       !     (at the beginning if the variable is a scalar)
+
+%IF SIGN\=None %THENSTART
+               !
+               !   Move in a Sign
+               !
+                BUFFER(PTR)= SIGN
+                       PTR =PTR+1
+               %FINISH
+    !
+    !   Write out the digits to the left of the decimal point
+    !
+     COPY(INT DIGITS,ADDR(OUTPUT AREA(0)),0,BSTART, PTR)
+            AREA PTR=       INT DIGITS
+                 PTR= PTR + INT DIGITS
+
+             !
+             !   Write out the decimal point
+             !
+              BUFFER(PTR)=Dot
+                     PTR =PTR+1
+    !
+    !   Write out the digits to the right of the decimal point
+    !
+    %IF DECS>0 %THENSTART
+                     COPY(DECS,ADDR(OUTPUT AREA(0)),AREA PTR,BSTART,PTR)
+                      PTR=DECS+PTR
+               %FINISH
+
+{FINALISE FORMATTING}
+    !
+    !
+%IF FORMAT='E' %THEN -> OUTPUT THE EXPONENT
+               !
+               !Jump if format code is 'E' and continue
+               !     to format the exponent characteristic
+ -> EXIT
+       !
+       !
+!***********************************************************************
+!
+!     HANDLE 'I' FORMAT
+!
+!***********************************************************************
+!
+I FORMAT:
+        !
+%IF I=0 %THEN -> OUTPUT A ZERO INTEGER
+
+%IF I<0 %THEN SIGN=Minus %AND  LENGTH= LENGTH-1                       %C
+        %ELSE SIGN= None %AND       I=-I
+!
+!   Determine the Scale of the Value
+!
+    EXP=    1
+    EXP=EXP+1 %WHILE I<Min Per Width(EXP)
+
+!Prepare the Output Field
+         !
+         PTR = PTR + (LENGTH - EXP) %UNLESS AN ARRAY=False
+  BUFFER(PTR)=SIGN                                                    %C
+    %AND PTR = PTR + 1 %UNLESS SIGN=None
+
+         M   = Min Per Width (EXP-1) - 1 {initial value of Multiplier}
+!
+!   NOW PERFORM INTEGER FORMATTING
+!
+INTEGER FORMATTING:
+             !
+%CYCLE;      Q   = I// M       ; !extract the next digit
+             I   = I -(M*Q)    ; !    and adjust the Value accordingly
+             M   = M// 10      ; !    and adjust the Multiplier too
+      BUFFER(PTR)= Q + Nought  ; !insert the digit into
+             PTR =PTR+ 1       ; !       the output field
+%REPEAT %UNTIL M = 0           ; !       and repeat 'til all digits are acquired
+                 !
+                 !
+                 BPTR= PTR %ANDRETURN
+
+     OUTPUT A ZERO INTEGER:
+!    OUTPUT A ZERO INTEGER:
+!    OUTPUT A ZERO INTEGER:
+            !
+%IF AN ARRAY=False %THEN BUFFER (PTR)      = Nought %AND PTR= PTR+1   %C
+                   %ELSE BUFFER (PTR MAX-1)= Nought %AND PTR= PTR MAX
+
+
+!***********************************************************************
+!
+!     END OF HANDLING OUTPUT FORMATS
+!
+!***********************************************************************
+!
+
+EXIT:     BPTR= PTR + EXP WIDTH
+             !
+       %RETURN
+
+%END; !of OUTPUT REAL
+%END; !of OUTPUT NUMERIC
+%END; !of PRINT NAME
+%END; !of SORT AND PRINT NAMES
+
+
+
+
+
+!***********************************************************************
+!
+!     UTILITY PROCEDURES
+!
+!***********************************************************************
+!
+
+%INTEGERFN UNASSIGNED (%INTEGER DATA AD, DATA BYTES)
+!
+!
+!
+!
+!     THIS IS A UTILITY PROCEDURE TO PERFORM UNASSIGNED
+!
+!          VARIABLE CHECKING IN A MACHINE-INDEPENDENT FORM.
+!
+!
+!Note: The data type is assumed NOT to be of type CHARACTER or LOGICAL*1 or BYTE
+!
+!
+!
+%IF DATA BYTES = 16 %AND (TARGET=EMAS %OR TARGET=IBM) %THENSTART
+    !
+   %RESULT=False %IF LONGLONGREAL(DATA AD)= Unassigned R16 %C
+                 %OR LONGLONGREAL(DATA AD)= Oldunassigned R16
+
+   %FINISHELSESTART
+
+%IF DATA BYTES = 2   %THENSTART
+    !
+   %RESULT=False %IF HALFs= True  %AND  HALFINTEGER(DATA AD)\=Unassigned Half %C
+                         %AND HALFINTEGER(DATA AD)\=Oldunassgined Half
+   %RESULT=False %IF HALFs= False %AND SHORTINTEGER(DATA AD)\=Unassigned Half %C
+                         %AND SHORTINTEGER(DATA AD)\=Oldunassigned Half
+
+   %FINISHELSESTART; %RESULT=False %IF      INTEGER(DATA AD)\=Unassigned Word %C
+                         %AND INTEGER(DATA AD)\=Oldunassigned Word
+
+%IF DATA BYTES = 8   %THENSTART
+                     !
+    %RESULT=False %IF      INTEGER(DATA AD+ 4>>k)\=Unassigned Word %C
+                %AND INTEGER(DATA AD+4)\=Oldunassigned Word
+                     %FINISH
+            %FINISH
+   %FINISH
+
+%RESULT= True
+       !
+ %END; !of UNASSIGNED
+
+
+
+
+%IF TARGET=EMAS %OR TARGET= IBM %THENSTART
+
+%INTEGERFN UNASSIGNED CHARACTER (%INTEGER ADDRESS, LENGTH)
+!
+!
+!
+!
+!     A UTILITY PROCEDURE TO CHECK WHETHER A SPECIFIED
+!
+!       CHARACTER VARIABLE IS UNASSIGNED.
+!
+!
+!At Exit:  RESULT= 0 (false) if the character is assigned
+!          RESULT= 1 (true ) if the character is unassigned
+!
+!
+!
+%WHILE LENGTH>0 %CYCLE
+
+   %IF BYTEINTEGER(ADDRESS)= Unassigned Byte %THENRESULT= True
+          ADDRESS= ADDRESS+1
+         LENGTH=  LENGTH-1
+   %REPEAT
+
+%RESULT= False
+       !
+ %END; !of UNASSIGNED CHARACTER
+       !
+       !
+      %FINISH; !if Amdahl or EMAS
+
+
+
+
+
+%IF TARGET=EMAS %OR TARGET= IBM %THENSTART
+
+%LONGLONGREALFN INTO RANGE (%LONGLONGREAL X, %INTEGERNAME EXP)
+!
+!
+!
+!     A PROCEDURE WHICH BRINGS THE VALUE OF THE GIVEN
+!
+!       PARAMETER INTO THE RANGE   10.0> X >=1.0
+!
+!
+!Additionally, the variable EXP is changed to reflect the
+!              magnitude (scale of 10) of the parameter.
+!
+!
+!-----Floating Point Constants:
+      !
+      !
+     %CONSTLONGLONGREAL Ten To The 75= R'7F235FADD81C282200BB3F07877973CC'
+     %CONSTLONGLONGREAL Ten To The                                        %C
+                             Minus 74= R'03485EBBF9A41DDC00DCD8E37915AF48'
+
+!-----Utility Variables:
+      !
+      !
+     %LONGLONGREAL Y
+     %LONGLONGREAL Z
+          %INTEGER I
+
+
+%IF X>=10.0 %THENSTART
+    !
+    !   The value is too large
+    !
+    %IF X<Ten To The 75 %THENSTART
+        !
+        !   Find the scale of the number and bring it into range
+        !
+         I= 1;  Z= 10.0
+                Y=100.0
+                !
+                Z=Y %AND Y=Z*10.0 %AND I=I+1 %WHILE X>=Y
+                !
+                X=X/Z %AND EXP=EXP+ I
+        %FINISHELSE        EXP=EXP+75  %AND X=X/Ten To The 75
+        %FINISH
+
+%IF X<1.0 %THENSTART
+    !
+    !   The value is too small
+    !
+           X=X*10.0 %AND EXP=EXP-1 %WHILE X<Ten To The Minus 74
+            !
+           I=  1
+           Z=Point One
+            !
+           I=I+1 %AND Z=Z/10.0 %WHILE X<Z
+            !
+         EXP=EXP-I
+           X= X * (10.0**I)
+    %FINISH
+
+!
+!   Return
+!
+%RESULT= X
+      !
+%END; !of INTO RANGE
+      !
+      !
+     %FINISH; !if EMAS OR Amdahl
+
+
+
+%IF TARGET=PERQ %OR TARGET= PNX %THENSTART
+
+%INTEGERFN NOT A REAL (%INTEGER DATA AD, DATA BYTES)
+!
+!
+!
+!
+!     This Function is called to examine a Floating Point NUmber
+!
+!          to check its legality before an attempt is made to
+!
+!          format it.
+!
+!
+!RESULT=True if Value= +infinity,   RESULT=False if Value= zero
+!            if Value= -infinity                 if Value= denormalised
+!            if Value=  NaN                      if Value=   normalised
+!
+!
+!
+%INTEGER MASK
+
+%IF DATA BYTES= 4 %THEN MASK= X'7F800000'                             %C
+                  %ELSE MASK= X'7FF00000'
+
+%IF INTEGER(DATA AD) & MASK= MASK %THENRESULT= True                   %C
+                                  %ELSERESULT= False
+ %END; !of NOT A REAL
+       !
+       !
+      %FINISH {if Accent or PNX}
+
+
+
+%IF TARGET= PERQ %THENSTART
+          !
+          !
+%INTEGERFN BYTE AT (%INTEGER DATA AD, DATA INC)
+!
+!
+!
+%SHORTINTEGER I
+              I=SHORTINTEGER(DATA AD + DATA INC>>1)
+     %RESULT= I & 255  %IF (DATA INC&1)= 0
+     %RESULT= I >>  8
+%END; !of BYTE AT
+      !
+      !
+     %FINISH; !if PERQ
+
+
+
+%IF TARGET=PNX %THENSTART
+          !
+          !
+%INTEGERFN BYTE AT (%INTEGER DATA AD, DATA INC)
+!
+!
+!
+%RESULT=BYTEINTEGER(DATA AD + DATA AD + DATA INC)
+
+%END; !of BYTE AT
+      !
+      !
+     %FINISH; !if PNX
+
+
+
+
+%ROUTINE PROPAGATE (    %INTEGER           LENGTH ,
+                    %BYTEINTEGERARRAYNAME  AREA   ,
+                        %INTEGER           AREA PTR, WITH)
+!
+!
+!
+!
+!     A Procedure to fill part of an area with a specified character
+!
+!
+!
+%WHILE LENGTH> 0 %CYCLE
+     !
+     AREA(AREA PTR)= WITH
+          AREA PTR = AREA PTR + 1
+            LENGTH =   LENGTH - 1
+%REPEAT;
+   %END; !of PROPAGATE
+
+
+
+
+
+%END; !of FDIAG
+
+
+
+
+
+%ENDOFFILE

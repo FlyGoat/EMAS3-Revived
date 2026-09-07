@@ -1,0 +1,879 @@
+! S33 Commands
+%end %oflist
+%include "subarc:SSOWNF3"
+   %list
+
+!***********************************************************************
+!*                                                                     *
+!*                           Record formats                            *
+!*                                                                     *
+!***********************************************************************
+
+%record %format frecf(%string (11) name, %integer sp12, kbytes, %byte %integer arch, codes, cct,
+   ownp, eep, use, codes2, ssbyte, flags, phead, dayno, group)
+
+!***********************************************************************
+!*                                                                     *
+!*                              Constants                              *
+!*                                                                     *
+!***********************************************************************
+
+%const %integer clistsize=x'300000';     !MAX SIZE OF COMPILATION LISTING FILE
+%const %integer code=2
+%const %integer ssmaxworksize=x'200000'; !Max size for compiler workfile.
+!***********************************************************************
+!*                                                                     *
+!*                     %system Routine/fn/map spec                     *
+!*                                                                     *
+!***********************************************************************
+
+%external %routine %spec adjustloadlevel %alias "s#adjustloadlevel"(%integer p)
+%external %string %fn %spec failuremessage %alias "s#failuremessage"(%integer i)
+%external %routine %spec clearllists %alias "s#clearllists"
+%external %string %fn %spec nexttemp %alias "s#nexttemp"
+%external %routine %spec sendfile2 %alias "s#sendfile2"(%string (255) file, %string (16) dev,
+   %string (31) name, %integer copies, forms, %integer %name flag)
+%external %string %fn %spec ssversion %alias "s#ssversion"
+%external %routine %spec emas3(%string %name c, p, %integer %name flag)
+%external %integer %fn %spec dmessage(%string %name user, %integer %name len, act, invoc, fsys,
+   adr)
+%external %routine %spec scheckstring %alias "s#checkstring"(%string (255) txt, q,
+   %string %name value, %integer %name flag)
+%external %routine %spec scheckinteger %alias "s#checkinteger"(%string (255) txt, q,
+   %integer %name value, %integer %name flag)
+%external %routine %spec schecklongreal %alias "s#checklongreal"(%string (255) txt, q,
+   %long %real %name value, %integer %name flag)
+%external %routine %spec get rest of line %alias "s#getrestofline"(%string %name txt)
+%external %routine %spec printline %alias "s#printline"(%string (255) s)
+%external %routine %spec wrsn %alias "s#wrsn"(%string (255) s, %integer n)
+%external %routine %spec clearline %alias "s#line"(%string %name text)
+%external %integer %function %spec dtransfer(%string %name index1, index2, file1, file2,
+   %integer %name fsys1, fsys2, type)
+%external %integer %function %spec doffer(%string %name owner, to, file, %integer %name fsys)
+%external %integer %fn %spec dcreate(%string %name index, file, %integer %name fsys, nkb, type, da)
+%external %integer %fn %spec dfilenames(%string %name group, %integer %name f, m, n, fsys, type,
+   %record (frecf) %array %name inf)
+%external %routine %spec console %alias "S#CONSOLE"(%integer ep, %integer %name start, len)
+%external %integer %function %spec dsetpassword(%string %name user, %integer %name fsys, which,
+   %string %name old, new)
+%external %routine %spec getlongreal %alias "S#GETLONGREAL"(%string (255) vec,
+   %long %real %name val)
+%external %routine %spec get string %alias "s#getstring"(%string (255) vector, %string %name value)
+%external %routine %spec get integer %alias "s#getinteger"(%string (255) vector,
+   %integer %name value)
+%external %routine %spec sethelp %alias "s#sethelp"(%string (255) file)
+%external %integer %fn %spec checkname %alias "s#checkname"(%string %name name,
+   %integer %name type, qualifier)
+%external %integer %fn %spec dirtoss %alias "S#DIRTOSS"(%integer flag)
+%external %integer %fn %spec closenclear %alias "S#closenclear"(%integer chan)
+%external %integer %fn %spec loadep %alias "S#LOADEP"(%string (31) name, %integer %name type,
+   flag, %record (ent4f) %name ent4, %integer llevel)
+%external %routine %spec changeaccess %alias "S#CHANGEACCESS"(%string (255) file, %integer mode,
+   %integer %name flag)
+%external %routine %spec changefilesize %alias "S#CHANGEFILESIZE"(%string (255) file,
+   %integer newsize, %integer %name flag)
+%external %routine %spec connect %alias "S#CONNECT"(%string (255) file, %integer mode, hole,
+   prot, %integer %name fconad, ffiletype, fdatastart, fdataend, flag)
+%external %string %fn %spec confile %alias "S#CONFILE"(%integer ad)
+%external %routine %spec idefine %alias "S#IDEFINE"(%integer chan, %string (255) iden,
+   %integer %name afd, flag)
+%external %routine %spec emas3lastparam(%string %name p)
+%external %routine %spec enter %alias "S#ENTER"(%integer mode, %record (ent4f) %name ent4,
+   %string (255) param)
+%external %routine %spec fill %alias "S#FILL"(%integer nlength, nfrom, nfiller)
+%external %routine %spec finfo %alias "S#FINFO"(%string (255) file, %integer mode,
+   %record (frf) %name fr, %integer %name flag)
+%external %routine %spec move %alias "S#MOVE"(%integer length, nfrom, nto)
+%external %routine %spec moddirectory %alias "S#MODDIRECTORY"(%integer action,
+   %string (255) dirfile, %string (31) entry, %string (255) filename, %integer type,
+   %integer %name flag)
+%external %routine %spec setreturncode %alias "s#setreturncode"(%integer i)
+%external %routine %spec emas3 setwork(%integer %name ad, flag)
+%external %routine %spec unload2 %alias "S#UNLOAD2"(%integer locll, fail)
+%external %string %fn %spec itos %alias "s#itos"(%integer n)
+%external %string %fn %spec printparms %alias "S#PRINTPARMS"(%long %integer p)
+%external %integer %fn %spec ddonate(%string %name user, %integer %name fsys, units)
+%external %integer %fn %spec instream %alias "s#instream"
+%external %integer %fn %spec outstream %alias "s#outstream"
+%external %integer %fn %spec uinfi %alias "s#uinfi"(%integer n)
+%external %string %fn %spec uinfs %alias "s#uinfs"(%integer n)
+%external %routine %spec clear priv viol %alias "S#CLEARPRIVVIOL"(%string (255) file,
+   %integer %name flag)
+
+
+!-----------------------------------------------------------------------
+
+%routine expandfilenames(%string %name files)
+%integer i
+%string (255) next, s
+   s = files."+"
+   files = ""
+   %until s="" %cycle
+      s -> next.("+").s
+      %if next="" %or charno(next, 1)#'.' %then i = checkname(next, 1, 0)
+      %if files="" %then files = next %else files = files."+".next
+   %repeat
+%end;                                    !of expandfilenames
+
+!------------------------------------------------------------------------
+
+%external %routine compile2 %alias "S#COMPILE2"(%string (255) dummyparam, %string (31) entry,
+   %integer %name flag, %integer loadtype)
+
+!{SEQ} - which files should be sequential-connected for compilation?
+! LOADTYPE should be set to 0 for the compiler to be permanently loaded,
+! Anything else for temporary loading. Only affects new loader.
+
+%integer %array %format ldataaf(0:15)
+%integer %array %name ldata
+%integer i, lda, p, len, type, lep, la1p
+%integer dt, newsize, to a dev, doxref, historylen
+%record (ent4f) ent4
+%record (reportf) rr
+%record (fdf) %name f
+%integer awork, afd, cist, cost, dflag, moddir
+%string (6) usrn
+%string (255) source, holdsource, object, errstrm, listing, s, t
+%string (255) shortsource, shortobject, shortlisting, shorterrors
+
+%const %integer top entry point name= 9
+%const %integer first foreign= 7
+   %const %string (15) %array entry point name(1:top entry point name) = %c
+"ICL9CEZASSEMBLE",
+ "ICL9CEZIBMIMP",
+ "ICL9CEZAGOL",
+ "ICL9CEIBMF77",
+ "EMASZPASCAL",
+ "ICL9CECCOMP",
+ "ICL9CEZPNXIMP",
+ "ICL9CEZGOULDIMP",
+ "ICL9CEZDRSIMP"
+
+%integer obj type
+
+! The plan is for the listing and error streams to be NEGATIVE.  However, at
+! least the IMP compiler takes neagtive ssown_ssCOMREG(40) to mean no error stream and
+! also has 82 built in for the listing stream.  Until the compiler(s) get
+! sorted, we are leaving the following constants POSITIVE.  When sorted, they
+! should be made -82, -87 respectively, and the code for clearing these streams
+! can be deleted from near the end of this routine.
+
+%const %integer listingstream=82, errorstream=87
+
+   do xref = no
+   obj type = top entry point name+1
+   %cycle p = top entry point name, -1, 1
+      obj type = p %and %exit %if entry=entry point name(p)
+   %repeat
+
+   usrn = ssown_ssowner
+   cist = instream
+   cost = outstream
+   ssown_sscomreg(47) = 0;               !NO OF STATEMENTS OR FAULTS
+
+   get string("Source;filelist,exist,join,char;?;", source)
+
+   shortsource = ssown_shortname
+   connect(shortsource, X'200', 0, 4 {'soft perm'}, rr_conad, rr_filetype, rr_datastart,
+      rr_dataend, flag)
+   ->err %unless flag=0
+
+   idefine(-81, shortsource, afd, flag)
+   ->err %unless flag=0
+
+   ssown_sscomreg(46) = rr_conad
+   f == record(afd)
+   f_conad = rr_conad
+   f_currec = rr_conad+rr_datastart
+   f_end = rr_conad+rr_dataend
+   f_rectype = 4
+   f_modeofuse = 1
+
+   emas3lastparam(holdsource)
+   %if holdsource->("+") %start
+      expandfilenames(holdsource)
+      dt = 0
+   %else
+      holdsource = source
+      dt = integer(rr_conad+20);         !for file history
+   %finish
+
+   %if obj type < first foreign %then s = "object;t#object;" %else %c
+                      s = ";.null;"
+   get string("Object;file,write,or.null,".s, object)
+   short object = ssown_shortname
+
+   get string("Listing;fileordev,char,write;T#LIST;", listing)
+
+   to a dev = no
+   %if charno(listing, 1)='.' %start
+      %if listing=".NULL" %start
+         shortlisting = listing
+      %finish %else %start
+         to a dev = yes
+         shortlisting = "T#LIST".nexttemp
+      %finish
+   %finish %else shortlisting = ssown_shortname
+
+   t = "+".holdsource."+"
+   %if t->("+".listing."+") %then flag = 266 %and ->err; !inconsistent
+
+   get string("Errors;fileordev,char,write,or.null;.OUT;", errstrm)
+   %if errstrm#"" %and charno(errstrm, 1)='.' %then shorterrors = errstrm %else %c
+      shorterrors = ssown_shortname
+
+   %if errstrm=".NULL" %then ssown_sscomreg(27) = ssown_sscomreg(27)&x'FFDFFFFF'
+
+   %if t->("+".errstrm."+") %then flag = 266 %and ->err; !inconsistent
+   idefine(errorstream, shorterrors, afd, flag)
+   ->err %unless flag=0
+   ssown_sscomreg(27) = ssown_sscomreg(27)!x'200000'; ! temp indicator
+   ssown_sscomreg(40) = errorstream
+   ! Note: com(40) wqas formerly set -1 for erstrm .NULL (to March 88).  The
+   ! Fortran compiler was ignoring this indication of "null error stream"
+   selectoutput(errorstream)
+   selectoutput(0)
+
+   moddir = 0;                           ! Flag: whether to attempt to modify the active directory
+   selectinput(-81)
+
+   %if ssown_sscomreg(28)&x'00000100'#0 %then awork = ssmaxworksize %else awork = x'40000'
+   !MAX WORK SIZE IF PARM(MAXDICT) SELECTED
+   emas3 setwork(awork, flag)
+   %if flag#0 %then ->err
+
+   ssown_sscomreg(52) = addr(object)
+   ssown_sscomreg(53) = addr(listing)
+
+   type = code
+   i = loadep(entry, type, flag, ent4, loadtype); ! load compiler
+   %if flag#0 %then unload2(1, 1);       !unload all if compiler fails to load
+   ->err %if flag#0
+
+   idefine(listingstream, shortlisting, afd, flag)
+   ->err %if flag#0
+   f == record(afd)
+   f_maxsize = clistsize;                !MAXIMUM LISTING FILE SIZE
+   selectoutput(listingstream)
+   printline("Source: ".holdsource."         Compiled: ".date."   ".time)
+   printline("Object: ".object)
+   newline
+   printline("Parms set: ".printparms(longinteger(addr(ssown_sscomreg(27)))))
+
+   enter(1, ent4, "");                   ! enter compiler - no parameter
+   selectoutput(0)
+   %if ssown_sscomreg(24)=0 %start
+      %if ssown_sscomreg(47)#0 %start
+         write(ssown_sscomreg(47), 1)
+         printline(" Statements compiled")
+      %finish %else printline("Compilation successful")
+      %if object#".NULL" %and obj type<first foreign %start
+
+         moddir = 1;                     ! Will inspect active directory, below
+
+         connect(short object, 3, 0, 0, rr_conad, rr_filetype, rr_datastart, rr_dataend, flag)
+         %if flag=0 %start
+            i{save} = integer(rr_conad)
+            len = i&4095
+            len = 4096 %if len=0;        ! LEN = bytes in last page of file
+            t = uinfs(16) { put machine id on }
+            t -> (".").t
+            holdsource = t."::".holdsource
+            history len = 19+length(holdsource)
+            %if 4096-len<history len %start
+               newsize = (i+history len+4095)&(-4096)
+               changefilesize(shortobject, newsize, flag)
+               %if flag=0 %then connect(shortobject, 3, 0, 0, rr_conad, rr_filetype,
+                  rr_datastart, rr_dataend, flag)
+               %if flag#0 %then ->err
+               integer(rr_conad+8) = newsize { update file header }
+            %finish
+            lda = rr_conad+integer(rr_conad+24); !START OF LOADDATA
+            ldata == array(lda, ldataaf)
+            %if ldata(12)=0 %then %start
+               ! No history at present         each entry of format:  type, len, lenbytes
+               p = rr_conad+integer(rr_conad)
+               ldata(12) = integer(rr_conad)
+            %else
+               ! Some history already, find the end of it
+               p = rr_conad+ldata(12)
+               p = p+2+byteinteger(p+1) %while byteinteger(p)#0
+            %finish
+            byteinteger(p) = 1;          !TYPE=SOURCE
+            string(p+1) = holdsource
+            p = p+length(holdsource)+2
+            %if dt#0 %start
+               byteinteger(p) = 6;       !date last altered
+               byteinteger(p+1) = 4;     !length
+               move(4, addr(dt), p+2)
+               p = p+6
+            %finish
+            byteinteger(p) = 2;          !TYPE = PARM
+            byteinteger(p+1) = 8;        !LENGTH OF FIELD
+            ! Copy PARMS from ssown_ssCOMREG(27) and (28) into the record in the object file.
+            la1p = ssown_sscomreg(27)
+            %for lep = 0, 1, 3 %cycle
+               byte integer(p+2+lep) = byte integer(addr(la1p)+lep)
+            %repeat
+            la1p = ssown_sscomreg(28)
+            %for lep = 0, 1, 3 %cycle
+               byte integer(p+6+lep) = byte integer(addr(la1p)+lep)
+            %repeat
+            p = p+10
+            byteinteger(p) = 0;          !END OF LIST
+            integer(rr_conad) = p-rr_conad+1; ! SET LENGTH
+         %finish {Successful write-connect}
+
+         ! TIDYFILES will normally change access to read, but not for temporary
+         ! files.  EMAS3SETTRAP does checks which fail when an object file is not
+         ! in read-only mode, and arguably, executing object files connected in
+         ! write-mode is bad news.  To avoid this situation for temporary files, we
+         ! change the acces to read-mode anyway.
+         changeaccess(shortobject, 1 {R}, 0)
+         clear priv viol(shortobject, dflag)
+      %finish {wanted to add history}
+
+      %if moddir#0 %start
+         moddirectory(6, ssown_avd, "", short object, 0, dflag); ! Enquire whether re-insertion required
+         %if dflag=2 %start
+            moddirectory(3, ssown_avd, "", short object, 0, dflag); ! Remove
+            moddirectory(5, ssown_avd, "", short object, 0, dflag); ! Insert
+         %finish
+      %finish
+
+      do xref = yes %if objtype=2 { IMP } %and ssown_sscomreg(27)&X'802'=x'800' %and %c
+         listing#".NULL"
+      { XREF requested and LISTING not suppressed }
+
+   %finish {Compilation successful} %else %start
+
+      %if ssown_sscomreg(47)#0 %start
+         ssown_ssfname = itos(ssown_sscomreg(47))." compilation error"
+         %if ssown_sscomreg(47)>1 %then ssown_ssfname = ssown_ssfname."s"
+      %finish %else ssown_ssfname = "during analysis phase"
+      newline
+
+      flag = 100;                        ! Print the error message in SSFNAME
+   %finish
+
+err:
+
+   errstrm{used as a work variable now} = ssown_ssfname
+   select input(cist)
+   select output(cost) %unless cost=outstream
+
+   ! The following clears are here until COMPILERS stop having 82 and positive
+   ! assumptions built into them.  The plan is for these streams to be NEGATIVE.
+
+   %if listingstream>0 %or errorstream>0 %start
+      %if listingstream>0 %then i = closenclear(listingstream)
+      %if errorstream>0 %then i = closenclear(errorstream)
+      i = closenclear(-81)
+   %finish
+
+   %if do xref=yes %start
+      shortlisting = listing %if to a dev=no
+      emas3("XREF", shortlisting, 0)
+   %finish
+
+   %if to a dev=yes %start
+      sendfile2(shortlisting, listing, "Compilation Listing", 1, 0, 0)
+   %finish
+
+   ssown_ssfname = errstrm
+%end;                                    ! of COMPILE2
+
+!-----------------------------------------------------------------------
+
+%external %routine compile %alias "S#COMPILE"(%string (255) s, %string (31) entry,
+   %integer %name flag)
+! Permanently loads the compiler
+   compile2(s, entry, flag, 0)
+%end;                                    ! of COMPILE
+
+!-----------------------------------------------------------------------
+
+%external %routine assemble %alias "EMAS#assemble"
+%integer flag
+   compile("s", "ICL9CEZASSEMBLE", flag)
+   setreturncode(flag)
+%end;                                    ! of ASSEMBLE
+
+!-----------------------------------------------------------------------
+
+%external %routine ibmimp %alias "EMAS#IBMIMP"
+%integer flag
+   compile("s", "ICL9CEZIBMIMP", flag)
+   setreturncode(flag)
+%end;                                    ! of IBMIMP
+
+!-----------------------------------------------------------------------
+
+%external %routine imp %alias "EMAS#IMP"
+%integer flag
+   sethelp("call pamhelp(helper:three.three7)")
+   compile("s", "ICL9CEZIBMIMP", flag)
+   setreturncode(flag)
+%end;                                    ! of IMP
+
+!-----------------------------------------------------------------------
+
+%external %routine algol %alias "EMAS#ALGOL"
+%integer flag
+   sethelp("call pamhelp(helper:three.three1)")
+   compile2("s", "ICL9CEZALGOL", flag, 1)
+   setreturncode(flag)
+%end;                                    ! of ALGOL
+
+!-----------------------------------------------------------------------
+
+%external %routine fortran %alias "EMAS#FORTRAN"
+%integer flag
+   sethelp("call pamhelp(helper:three.three6)")
+   compile("s", "ICL9CEIBMF77", flag)
+   setreturncode(flag)
+%end;                                    ! of FORTRAN
+
+!-----------------------------------------------------------------------
+
+%external %routine pcheck %alias "EMAS#pcheck"
+%integer flag
+   sethelp("call pamhelp(helper:three.three111)")
+   compile("s", "EMASPASCHECK", flag)
+   setreturncode(flag)
+%end;                                    ! of pcheck
+
+!-----------------------------------------------------------------------
+
+%external %routine cc %alias "EMAS#cc"
+%integer flag
+   sethelp("call pamhelp(helper:three.three5)")
+   compile2("s", "ICL9CECCOMP", flag, 1)
+   setreturncode(flag)
+%end;                                    ! of CC
+
+!-----------------------------------------------------------------------
+
+%external %routine pascal %alias "EMAS#PASCAL"
+%integer flag
+   sethelp("call pamhelp(helper:three.three11)")
+   compile("s", "EMASZPASCAL", flag)
+   setreturncode(flag)
+%end;                                    ! of PASCAL
+
+!-----------------------------------------------------------------------
+
+%external %routine ssvsn %alias "EMAS#SSVSN"
+   printline(ssversion)
+%end;                                    ! of SSVSN
+
+!-----------------------------------------------------------------------
+
+%external %routine setdirmon %alias "EMAS#SETDIRMON"
+%external %integer %fn %spec dmonitor(%string %name s)
+%integer j
+%string (255) s
+   get integer("Count;any;-1;call pamhelp", j)
+   s = itos(j)
+   j = dmonitor(s)
+%end;                                    ! of setdirmon
+
+!-----------------------------------------------------------------------
+
+%external %routine emas3clearjournal
+%integer aitbuffer, aiostat, conad, j
+%record (fhf) %name r
+%record (itf) %name it
+%record (frf) f
+%string (255) file
+   console(13, aitbuffer, aiostat);      ! Get vital addresses
+   %return %if aitbuffer=0;              ! Not interactive
+
+   it == record(aitbuffer)
+   conad = it_jnbase;                    ! Address of journal file
+   %return %if conad=0;                  ! No journal
+   %if conad<0 %then %start
+      conad = -conad;                    ! Turn journal back on
+      it_jnbase = conad
+   %finish
+   file = confile(conad)
+   finfo(file, 0, f, j)
+   setreturncode(j) %and %return %unless j=0
+   r == record(conad);                   ! Map journal file header
+   r_start = 32;                         ! Reset header for safety
+   fill(f_size-32, conad+32, 0)
+   r_end = 32
+   it_jncur = conad+32
+   byteinteger(it_jnmax-1) = 0;          ! Kill wraparaound
+%end;                                    ! of emas3 clearjournal
+
+!-----------------------------------------------------------------------
+
+%external %routine clearjournal %alias "EMAS#CLEARJOURNAL"
+   emas3 clearjournal
+%end
+
+!-----------------------------------------------------------------------
+
+%external %routine journal off %alias "S#JOURNALOFF"
+   %if uinf_reason=2 {batch} %then ssown_dataecho = 0 %else %start
+      %if ssown_it_inbase>0 %start
+         ssown_it_jnbase = -ssown_it_jnbase %unless ssown_it_jnbase<0
+      %finish
+   %finish
+%end
+
+!-----------------------------------------------------------------------
+
+%external %routine emas3journaloff
+   journal off
+%end
+
+!-----------------------------------------------------------------------
+
+%external %routine journal on %alias "S#JOURNALON"
+   %if uinf_reason=2 {batch} %then ssown_dataecho = ssown_dataechooption %else console(14, 0, 0)
+%end
+
+!-----------------------------------------------------------------------
+
+%external %routine emas3journalon
+   journal on
+%end
+
+!-----------------------------------------------------------------------
+
+%external %routine soffer %alias "S#OFFER"(%string (255) file, %string (6) to, %integer %name flag)
+%string (19) index
+%string (255) stemp
+
+   %unless to="" %start
+      flag = checkname(to, 16, 0)
+      %return %unless flag=0
+   %finish
+
+   file -> index.(usep).file
+   %if file->stemp.("T#") %and stemp="" %start
+      flag = 483
+      ssown_ssfname = file
+   %else
+      ! disconnect it or any contained files if its a group
+      adjustloadlevel(+1);                      ! Protect files if use by calling  program
+      emas3("DISCONNECT", ".ALL", flag)
+      flag = dirtoss(doffer(index, to, file, -1 {ssown_ssownfsys subsid index!!}))
+      adjustloadlevel(-1)
+   %finish
+%end;                                    !OF SOFFER
+
+!-----------------------------------------------------------------------
+
+
+%external %routine offer %alias "EMAS#OFFER"
+%string (255) file, user, t
+%integer flag, j
+
+   getstring("File or group;fileorgroup,exist;;call pamhelp(helper:two.two7);FILE", file)
+   getstring("User;user,ornull;;;USER", user)
+   soffer(file, user, flag)
+
+   %if flag=0 %and user#"" %and ssown_erte process=no %start
+      t = file." is on offer to you"
+      j = dmessage(user, length(t), 1, 0, -1, addr(t)+1)
+   %finish
+   ssown_ssfname = file %unless flag=0
+   setreturncode(flag)
+%end;                                    !OF OFFER
+
+!-----------------------------------------------------------------------
+
+
+%external %routine saccept %alias "S#ACCEPT"(%string (255) file, newname, %integer %name flag)
+%string (19) from, to, fileind
+%string (255) stemp
+%record (frf) fr
+
+%integer %fn %spec transfer group(%string (255) from, to)
+
+   %if file->from.(":").file %start
+      %if newname="" %then newname = ssown_pathtobeused.file
+      fileind = ""
+      %if newname->to.(":").newname %and %not (to->(ssown_ssowner).fileind) %start
+         flag = 258;                     ! illegal use of another user's file
+         ssown_ssfname = to.":".newname
+      %else
+         finfo(from.usep.file, 2, fr, flag)
+         %if flag#0 %start
+            ssown_ssfname = from.usep.file
+            %return
+         %finish
+         %if charno(newname, length(newname))='.' %then %c
+            newname = substring(newname, 1, length(newname)-1)
+         %if fr_size#0 %start
+            %if newname->stemp.("T#") %and stemp="" %start
+               flag = 484
+               ssown_ssfname = newname
+            %else
+               flag = dirtoss(dtransfer(from, ssown_ssowner.fileind, file, newname, -1,
+                  ssown_ssownfsys, 0))
+               %if flag#0 %start
+                  %if flag=346 %start
+                     ! Group does not exist.  Drop filename part (last 11) from
+                     ! NEWNAME, and report that.  This may not be accurate, as
+                     ! this flag can arise from the non-existence of any intermediate groupname.
+                     %if newname->(".") {It *should*!} %start
+                        length(newname) = length(newname)-1 %while %c
+                           charno(newname, length(newname))#'.'
+                        length(newname) = length(newname)-1
+                     %finish
+                     ssown_ssfname = newname
+                  %finish %else %if flag=218 %or flag=278 %or flag=505 %then %c
+                     ssown_ssfname = from.":".file %else ssown_ssfname = file
+               %finish
+            %finish
+         %else
+            ! file will already have a . tacked on the end from checkname
+            ! newname may or may not dpending on whther it was specified
+            %if charno(newname, length(newname))#'.' %then newname = newname.gsep
+            flag = transfer group(file, newname)
+         %finish
+         clearllists
+      %finish
+   %else
+      flag = 259;                        ! illegal use of own file
+      ssown_ssfname = file
+   %finish
+
+%integer %fn transfer group(%string (255) fromprefix, toprefix)
+%record (frecf) %array descs(0:127)
+%record (frecf) %name desc
+%integer skip, maxrec, nfiles, flag, i
+%const %integer topbit=x'80000000'
+
+   flag = dcreate(ssown_ssowner.fileind, toprefix, -1, 0, 0, 0)
+   %unless flag=0 %start
+      ssown_ssfname = ssown_ssowner.fileind.usep.toprefix
+      %result = dirtoss(flag)
+   %finish
+   skip = 0
+   nfiles = 1
+   %while skip<nfiles %cycle
+      maxrec = 128!topbit
+      flag = dfilenames(from.usep.fromprefix, skip, maxrec, nfiles, -1, 0, descs)
+      %unless flag=0 %start
+         ssown_ssfname = from.usep.fromprefix
+         %result = dirtoss(flag)
+      %finish
+      skip = skip+maxrec
+      %unless maxrec=0 %start;           ! zero first time only
+         %for i = 0, 1, maxrec-1 %cycle
+            desc == descs(i)
+            %if desc_group=0 %start;     ! its a file (as opposed to a group)
+               flag = dirtoss(dtransfer(from, ssown_ssowner.fileind, fromprefix.desc_name,
+                  toprefix.desc_name, -1, ssown_ssownfsys, 0))
+               %if flag#0 %start
+                  printstring("ACCEPT ".from.usep.fromprefix.desc_name." as ".toprefix.desc_name. %c
+                     " fails - ".failuremessage(flag))
+                  newline
+               %finish
+            %finish %else %start;        ! a group
+               flag = transfer group(fromprefix.desc_name.gsep, toprefix.desc_name.gsep)
+               %if flag#0 %then %result = flag
+            %finish
+         %repeat
+      %finish
+   %repeat;                              ! next batch
+   %result = 0
+%end;                                    ! transfer group
+
+%end;                                    !OF SACCEPT
+
+!-----------------------------------------------------------------------
+
+
+%external %routine accept %alias "EMAS#ACCEPT"
+%integer flag, j
+%string (255) file, newname, t
+
+   getstring("File or group;fileorgroup,exist;;call pamhelp(helper:two.two7);FILE", file)
+   getstring("Newname;fileorgroup,ornull,notexist;;;NEWNAME", newname)
+   saccept(file, newname, flag)
+
+   %if flag=0 %and ssown_erte process=no %start
+      file -> newname.(":").file
+      t = ssown_ssowner." has accepted ".file
+      j = dmessage(newname, length(t), 1, 0, -1, addr(t)+1)
+   %finish
+   setreturncode(flag)
+%end;                                    !OF ACCEPT
+
+!-----------------------------------------------------------------------
+
+%external %routine password %alias "C#PASSWORD"
+%integer flag, which, j
+%string (255) pass1, pass2, oldpass
+%string (255) line
+   %const %string (10) %array ground(0:2)= "foreground", "background", "transfer"
+%const %string (255) vec= "Which password do you want to change?
+(F for foreground, B for background, T for transfer)
+F, B, T or FBT;options2,FBT,1:7;?"
+
+   set help("call pamhelp(helper:one.one1)")
+   clearline(line)
+   line = "" { for potential error message }
+
+   %if uinfi(2)#1 %start
+      line = "Passwords may only be changed from an interactive terminal"
+      ->err
+   %finish
+
+   getinteger(vec, which)
+
+
+! Read in the current foreground password (needed by dsetpassword)
+
+   printstring("Passwords will not be echoed.".snl)
+   getstring("Type in your current FOREGROUND password;literal,secret", oldpass)
+
+
+   %cycle j = 2, -1, 0
+      %if which&1>0 %start
+         printline(snl."Change ".ground(j)." password -")
+         getstring("Type in your new ".ground(j)." password;literal,secret", pass1)
+         newline
+         getstring("Please type new ".ground(j)." password again to confirm;literal,secret", pass2)
+         newline
+         %if pass1#pass2 %start
+            line = "You gave two different forms for your new ".ground(j)." password."
+            %exit
+         %finish
+         %if length(pass1)>11 %start
+            line = "The password you typed was too long.".snl. %c
+               "Passwords may not be more than 11 characters long."
+            %exit
+         %finish
+         !
+         pass2 = oldpass
+         flag = dsetpassword(uinfs(1), uinfi(1), j, pass2, pass1)
+         %if flag#0 %start
+            %if flag=8 %start
+               line = "You did not give your current foreground password correctly."
+               ->err
+            %else
+               flag = flag+500
+               ->out
+            %finish
+         %finish
+         printline("Password changed.")
+      %finish
+      which = which>>1
+   %repeat
+
+err:
+   %unless line="" %start
+      ssown_ssfname = "The password has not been changed
+".line
+      flag = 100
+   %finish
+out:
+   set return code(flag)
+%end;                                    ! of password
+
+!-----------------------------------------------------------------------
+
+%external %routine donatefunds %alias "EMAS#DONATEFUNDS"
+%integer amount, flag
+%long %real ramount
+%string (6) user
+   getlongreal("Amount;any;;call pamhelp(helper:one.one3);AMOUNT", ramount)
+   amount = intpt(ramount*100)
+   %if amount<0 %start
+      ssown_ssfname = itos(amount)
+      flag = 357
+   %else
+      amount = amount*100
+      getstring("User;user;;;USER", user)
+      flag = ddonate(user, -1, amount)
+      flag = 60 {user has no funds} %if flag=638 {invalid units}
+      flag = dirtoss(flag)
+   %finish
+   setreturncode(flag)
+%end
+
+!-----------------------------------------------------------------------
+
+
+
+%external %routine warnings %alias "EMAS#WARNINGS"
+%integer val
+
+   getinteger("On/Off;word,on,off,yes,no;on", val)
+   %if val>1 %then val = val-2
+   wrsn("Value=", val)
+   ssown_nowarnings = val
+%end;                                    ! warnings
+
+!-----------------------------------------------------------------------
+
+%external %routine check integer %alias "EMAS#CHECKINTEGER"
+%string (255) txt, qual
+%integer val, flag
+   getstring("Text;any,ornull;?;", txt)
+   getstring("Qualifier", qual)
+   ssown_ssfname = txt
+   scheckinteger(txt, qual, val, flag)
+   %if flag=0 %start
+      printstring("Value =")
+      write(val, 1)
+      newline
+   %finish
+   setreturncode(flag)
+%end;                                    ! check integer
+
+!-----------------------------------------------------------------------
+
+%external %routine check string %alias "EMAS#CHECKSTRING"
+%string (255) txt, qual, val
+%integer flag
+   getstring("Text;any,verbatim,ornull;?;", txt)
+   getstring("Qualifier", qual)
+   getrestofline(val)
+   %if val#"" %then qual = qual.",".val
+   ssown_ssfname = txt
+   scheckstring(txt, qual, val, flag)
+   %if flag=0 %start
+      printstring("Value = ")
+      printline(val)
+   %finish
+   setreturncode(flag)
+%end;                                    ! check string
+
+!-----------------------------------------------------------------------
+
+%external %routine check long real %alias "EMAS#CHECKlongREAL"
+%string (255) txt, qual
+%integer flag
+%long %real val
+   getstring("Text", txt)
+   getstring("Qualifier", qual)
+   ssown_ssfname = txt
+   schecklongreal(txt, qual, val, flag)
+   %if flag=0 %start
+      printstring("Value =")
+      print(val, 0, 9)
+      newline
+   %finish
+   setreturncode(flag)
+%end;                                    ! check long real
+
+!-----------------------------------------------------------------------
+
+%external %routine usegroup %alias "EMAS#usegroup"
+%string (255) group
+   getstring("Group;path,exist,orequals;;call pamhelp(helper:two.two4)", group)
+   ssown_path to be used = group %unless group="="
+   printline(ssown_path to be used)
+%end;                                    ! usegroup
+
+!-----------------------------------------------------------------------
+
+%end %of %file

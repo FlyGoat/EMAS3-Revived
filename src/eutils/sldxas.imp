@@ -1,0 +1,158 @@
+         TITLE 'EMAS 370/XA self loading dump'
+*
+* R.D. Eager   University of Kent   MCMLXXXVI
+*
+SLD      START
+*
+         BALR  12,0          * set up base register
+         USING *,12
+*
+         L     1,184(0)      * get IPL subsystem ID
+*
+         LA    2,8           * make upper half of EC mode PSW
+         SLL   2,16          * generates X80000
+         LA    3,IOINT       * address of I/O interrupt handler
+         STM   2,3,120(0)    * set up I/O interrupt vector
+         LA    3,PEINT       * address of program interrupt handler
+         STM   2,3,104(0)    * set up program interrupt vector
+*
+         SR    13,13         * clear interrupt state
+         SR    3,3           * point to real address zero
+         DC    X'B2290003'   * ISKE 0,3 - get key to GR0
+         STC   0,KEYS        * save for later dump
+         LA    14,KEYS+1     * initialise for dump loop
+*
+         LA    2,SCHIB       * get subchannel information
+         DC    X'B2342000'   * STSCH 0(2)
+         L     3,4(2)        * get word with enable bit
+         O     3,ENBIT       * set it
+         ST    3,4(2)        * put back in SCHIB
+         DC    X'B2322000'   * MSCH 0(2) - enable subchannel
+*
+         LA    2,CR6         * point to value for control register 6
+         DC    X'B7662000'   * LCTL 6,6,0(2) - enable interrupts
+         LA    2,ORB         * point to ORB for start
+         LA    3,CCW         * get CCW address
+         ST    3,8(2)        * put into ORB
+*
+FIRE     DC    X'B2332000'   * SSCH 0(2) - start subchannel
+WAIT     LA    7,WPSW        * point to new PSW value
+         DC    X'82007000'   * LPSW 0(7) - wait for interrupt
+*
+* I/O interrupt handler
+*
+IOINT    C     1,184(0)      * interrupt on IPL subchannel?
+         BNE   WAIT          * j if not - ignore
+         LA    4,IRB         * point to IRB for test
+         DC    X'B2354000'   * TSCH 0(4) - test subchannel
+         L     6,8(4)        * get SCSW2
+         SRL   6,16          * isolate upper half
+         CH    6,IOK         * did it work?
+         BNE   IOF           * j if not
+         LTR   13,13         * test dump state
+         BCR   7,13          * j if finished dump, and in postscript
+*
+IOOK     L     5,CCW         * get CCW used for last page
+         SLL   5,8           * remove the...
+         SRL   5,8           * ...command code
+         AH    5,CCW+6       * x1000 - add page size
+         ST    5,CCW         * update CCW - program int at store end
+         DC    X'B2290005'   * ISKE 0,5 - get key to GR0
+         STC   0,0(14)       * save for later dump
+         LA    14,1(14)      * point to next key slot
+         MVI   CCW,1         * set write command code
+         B     FIRE          * dump next page
+*
+* Program interruption handler
+*
+PEINT    LH    0,142(0)      * get error code
+         CH    0,PE5         * address error?
+         BNE   NOK           * j if not - some other error
+         LA    0,KEYS        * set up to write out...
+         ST    0,CCW         * ...the block of storage keys
+         MVI   CCW,1         * set write command code
+         LA    13,WKEY       * set new dump state
+         B     FIRE          * write the key block
+*
+WKEY     LA    13,TM         * keys written; set new dump state
+         LA    3,WTM         * CCW to write tape mark
+         ST    3,8(2)        * put real address into ORB
+         B     FIRE          * write the tape mark
+*
+TM       LA    2,ZERO        * new value for CR6
+         DC    X'B7662000'   * LCTL 6,6,0(2) - disable ints
+         LA    3,REW         * CCW to rewind tape
+         ST    3,8(2)        * put real address into ORB
+         DC    X'B2332000'   * SSCH 0(2) - start subchannel
+         LA    0,NOK         * new PSW for program interruption
+         ST    0,108(0)      * set it up
+         LA    2,OPSW        * point to PSW for load
+         DC    X'82002000'   * LPSW 0(2) - wait with interrupts off
+*
+NOK      LA    2,FPSW        * point to PSW for load
+         DC    X'82002000'   * LPSW 0(2) - wait with interrupts off
+*
+IOF      L     6,8(4)        * get SCSW
+         N     6,ERRM        * isolate error bits
+         BNZ   NTM           * j if error detected
+         LTR   13,13         * finished the actual dump?
+         BNZ   NWR           * j if so
+         SRL   6,27          * isolate bits 0-4
+         LTR   6,6           * check value
+         BNZ   WAIT          * may be busy - keep waiting
+         B     IOOK          * else it was OK
+*
+NWR      ST    13,124(0)     * redirect I/O interrupt
+         LA    7,WPSW        * point to PSW for load
+         DC    X'82007000'   * LPSW 0(7) - wait for device end
+*
+NTM      LA    2,SNSDAT      * area to receive sense data
+         ST    2,SENSE       * put into CCW
+         MVI   SENSE,4       * fill in sense command
+         LA    13,SNSINT     * new interrupt handler
+         ST    13,124(0)     * redirect interrupts
+         LA    2,ORB         * point to ORB for sense
+         LA    3,SENSE       * CCW address for sense
+         ST    3,8(2)        * put into ORB
+         DC    X'B2332000'   * SSCH 0(2) - start subchannel
+         LA    7,WPSW        * point to new PSW value
+         DC    X'82007000'   * LPSW 0(7) - wait for interrupt
+*
+SNSINT   LA    7,GPSW        * point to PSW for load
+         DC    X'82007000'   * LPSW 0(7) - wait with ints off
+*
+ORB      DC    F'0'          * Interruption parameter (not used)
+         DC    X'0000FF00'   * Flags; set all LPM bits
+         DS    F             * CCW address - filled in later
+PE5      DC    X'0005'       * Code for address error
+IOK      DC    X'0C00'       * Channel end/device end
+ERRM     DC    X'73FF0000'   * Mask for SCSW error bits
+         DS    0D            * CCWs must be double word aligned
+CCW      DC    X'01000000'   * CCW format 0, write from real address 0
+         DC    X'20001000'   * Suppress length indication, count 4096
+REW      DC    X'07000000'   * CCW format 0, rewind
+         DC    X'20000001'   * As above
+WTM      DC    X'1F000000'   * CCW format 0, write tape mark
+         DC    X'20000001'   * As above
+SENSE    DC    X'04000000'   * Sense command - address filled in later
+         DC    X'20000020'   * 32 bytes, SLI
+ZERO     DC    F'0'          * Used to set CR6
+ENBIT    DC    X'00800000'   * Bit to enable subchannel
+SCHIB    DS    13F           * Subchannel information block
+IRB      DS    16F           * Interrupt response block
+SNSDAT   DS    8F            * Area for sense data
+CR6      DC    X'FF000000'   * Value for control register 6
+         DS    0D            * PSWs must be double word aligned
+WPSW     DC    X'020A0000'   * EC mode, allow I/O ints, wait
+         DC    F'0'          * Irrelevant
+OPSW     DC    X'000A0000'   * EC mode, I/O ints off, wait
+         DC    X'00000042'   * Signals success
+FPSW     DC    X'000A0000'   * EC mode, I/O ints off, wait
+         DC    X'0000D1ED'   * Signals failure 1
+GPSW     DC    X'000A0000'   * EC mode, I/O ints off, wait
+         DC    X'0000DEAD'   * Signals failure 2
+*
+KEYS     EQU   *             * Keys saved from here onwards
+*
+         END
+

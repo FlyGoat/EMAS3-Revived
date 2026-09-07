@@ -1,0 +1,4434 @@
+! S88 EMAS3 routines
+%end %oflist
+%include "subarc:SSOWNF3"
+   %list
+
+!***********************************************************************
+!*                                                                     *
+!*                              Constants                              *
+!*                                                                     *
+!***********************************************************************
+
+%const %real timefactor= 1000.0;         ! SECONDS = DCPUTIME/TIMEFACTOR.
+%const %integer days70=25567;            ! DAYS FROM JAN1 1900 TO JAN1 1970
+%const %integer kshift= 10;              !SHIFT BYTES TO KBYTES
+%const %integer secsin24hrs=86400;       ! SECS IN DAY
+
+%const %long %integer secs70=X'0000000083AA7E80'; ! SECS DITTOM
+
+%external %integer %fn %spec dcputime
+%external %integer %fn %spec uinfi %alias "s#uinfi"(%integer n)
+%external %string %fn %spec uinfs %alias "s#uinfs"(%integer n)
+%external %routine %spec setpar %alias "s#setpar"(%string (255) s)
+%routine %spec setreturncode(%integer flag)
+%external %routine %spec printline %alias "s#printline"(%string (255) line)
+%external %routine %spec wrsn %alias "s#wrsn"(%string (255) s, %integer n)
+%external %string %fn %spec spar %alias "s#spar"(%integer n)
+%external %integer %fn %spec samebytes %alias "s#samebytes"(%integer len, adr1, adr2)
+%external %integer %fn %spec dflag(%integer %name flag, %string %name txt)
+%external %integer %fn %spec outstream %alias "s#outstream"
+%external %integer %fn %spec dsfi(%string %name fileindex, %integer %name fsys, type, set,
+   %string %name s, %integer %array %name i)
+%external %long %real %fn %spec cputime %alias "S#CPUTIME"
+%external %integer %fn %spec dvalidate(%integer %name adr, len, rw)
+
+%external %integer %fn %spec findchan %alias "S#FINDCHAN"(%string (255) iden, %integer %name pos)
+
+%external %routine %spec define %alias "S#IDEFINE"(%integer chan, %string (255) iden,
+   %integer %name afd, flag)
+%external %routine %spec disconnect %alias "S#DISCONNECT"(%string (255) file, %integer %name flag)
+%external %routine %spec halt %alias "S#HALT"
+%external %integer %fn %spec iocp %alias "s#iocp"(%integer ep, p)
+%external %integer %fn %spec stoi %alias "s#stoi"(%string (255) s, %integer %name i)
+
+!***********************************************************************
+!*                                                                     *
+!*                         End of declarations                         *
+!*                                                                     *
+!***********************************************************************
+
+
+%const %string (8) version= "SS 4.02X"
+%const %integer lvm= 9;                  !include special segs 9..15..was 64  SH.
+%const %integer uvm= 495
+%external %routine %spec tojournal %alias "s#tojournal"(%integer from, len)
+%external %integer %fn %spec dprintstring(%string %name s)
+%external %routine %spec phex %alias "s#phex"(%integer i)
+%routine %spec ssenter(%string %name sstart, %integer %name istart, %string %name template)
+%routine %spec ssexit(%string %name sstart, %integer %name istart, %string %name template)
+%routine %spec emas3movestring(%string %name from, to, %integer %name flag)
+%routine %spec show caller(%integer lnb1)
+%external %routine %spec etoi %alias "S#ETOI"(%integer nad, nl)
+%external %routine %spec itoe %alias "s#itoe"(%integer ad, len)
+%external %routine %spec changefilesize %alias "s#changefilesize"(%string (255) file,
+   %integer newsize, %integer %name flag)
+%external %routine %spec changeaccess %alias "s#changeaccess"(%string (255) file, %integer mode,
+   %integer %name flag)
+%external %integer %fn %spec checkname %alias "s#checkname"(%string %name name,
+   %integer %name type, qualifier)
+%external %routine %spec connect %alias "s#connect"(%string (255) file, %integer mode, hole,
+   prot, %integer %name conad, filetype, datastart, dataend, flag)
+%external %routine %spec destroy %alias "s#destroy"(%string (255) file, %integer %name flag)
+%string %fn %spec failure message(%integer n)
+%external %routine %spec fill %alias "s#FILL"(%integer len, from, filler)
+%external %string %fn %spec htos %alias "s#HTOS"(%integer h, places)
+%external %string %fn %spec itos %alias "s#ITOS"(%integer i)
+%external %routine %spec move %alias "s#MOVE"(%integer len, from, to)
+%external %routine %spec newgen %alias "s#newgen"(%string (255) file, newfile, %integer %name flag)
+%external %routine %spec outfile %alias "s#outfile"(%string (255) file, %integer filesize, hole,
+   prot, %integer %name conad, flag)
+%external %routine %spec rename %alias "s#rename"(%string (255) file, newfile, %integer %name flag)
+%external %string %fn %spec sprintfl %alias "s#sprintfl"(%long %real x, %integer n)
+%external %string %fn %spec sprint %alias "s#sprint"(%long %real x, %integer m, n)
+%external %string %fn %spec swrite %alias "s#swrite"(%integer val, n)
+%external %routine %spec trim %alias "s#trim"(%string (255) file, %integer %name flag)
+%external %routine %spec uctranslate %alias "s#UCTRANSLATE"(%integer adr, len)
+%external %string %fn %spec translateshortname %alias "s#translateshortname"(%string %name short,
+   %integer mode)
+
+%external %integer %fn caller %alias "s#caller"(%integer lnb)
+%integer lnb1, gla
+
+   lnb1 = integer(lnb+4*10)
+   gla = integer(lnb+4*13)
+   %result = 12+integer(gla+20)+short integer(lnb1)&x'ffff'
+%end;                                    ! caller
+
+!-------------------------------- TERMINALPRINT --------------------------------
+
+%external %routine terminalprint %alias "S#TERMINALPRINT"(%string (255) s1)
+! Outputs to stream 0 then selects original output stream.
+! Used to ensure that load monitoring and messages during the loading
+! liable to be done for a dynamic call are written to the console and not
+! the current output file.
+%integer curout
+   %return %if s1=""
+   curout = outstream
+   selectoutput(0)
+   %if iocp(20, 1) {outpos}#0 %then newline
+   %if charno(s1, length(s1))=nl %then length(s1) = length(s1)-1
+   printline(s1)
+   selectoutput(curout)
+%end;                                    ! OF TERMINALPRINT
+
+
+!-----------------------------------------------------------------------
+
+%external %routine note %alias "s#note"(%string (255) s)
+
+   %return %if s=""
+   s = s.snl %if length(s)<255
+   %if ssown_ssreason=batchreason %then terminalprint(s) %else tojournal(addr(s)+1, length(s))
+%end;                                    ! note
+
+!-----------------------------------------------------------------------
+
+%external %routine shout %alias "s#shout"(%string (255) s)
+%integer j
+
+   %return %if ssown_ssnote=0
+   %return %if ssown_shoutactive>0
+   ssown_shoutactive = 1
+   s = s.snl
+
+   %if ssown_ssnote&256>0 %start
+      j = dprintstring(s)
+   %finish %else %start
+      %if ssown_ssnote&1=1 %or ssown_ssreason=batchreason %then terminalprint(s) %else %c
+         tojournal(addr(s)+1, length(s))
+   %finish
+
+   ssown_shoutactive = 0
+%end;                                    ! of SHOUT
+
+!------------------------------------ MONOUT -----------------------------------
+
+%external %routine monout %alias "s#monout"(%string (255) s)
+%long %real tim
+%string (11) stim
+
+   ssown_montimebase = cputime %if ssown_montimebase=0
+   %if ssown_sscomreg(39)&16=0 %start { put time on front }
+      tim = cputime-ssown_montimebase
+      stim = itos(intpt(fracpt(tim)*1000))
+      stim = "0".stim %while length(stim)<3
+      s = itos(intpt(tim)).".".stim."   ".s
+   %finish
+   shout(s)
+%end;                                    ! OF MONOUT
+
+!-----------------------------------------------------------------------
+
+%string %fn timestamp
+%long %integer millisecs
+   *stck_millisecs
+   millisecs = millisecs>>22
+   %result = "ELAP".swrite(millisecs&x'FFFF', 1)." PT".swrite(integer(ssown_apageturns),
+      1).swrite(dcputime, 1)."ms "
+%end;                                    ! timestamp
+
+!-----------------------------------------------------------------------
+
+%external %routine sstrace %alias "s#sstrace"
+%integer lnb
+
+   *st_10, lnb
+   shout(timestamp."Trace: ".string(caller(lnb)))
+%end
+
+!-----------------------------------------------------------------------
+
+%routine out(%string (255) s, %integer %name p, %byte %integer %array %name b)
+%integer k
+
+   %return %if p>559
+   length(s) = 560-p %if p+length(s)>559
+   move(length(s), addr(s)+1, addr(b(p)))
+   p = p+length(s)
+%end;                                    ! out
+
+!-----------------------------------------------------------------------
+
+%external %routine emas3 mon params(%string %name xtemplate)
+
+! This routine performs monitoring of the parameters passed to the routine
+! calling it.  A template of the parameters of the calling routine is
+! supplied, in the same order as they appear in its spec, so that monparams
+! can find them on the stack.  As some parameters are only of interest on
+! entry to a routine and others only on exit, a means of specifying this is
+! given.  As well as parameters, a text string supplied by the calling
+! program can be added to the output.
+
+! The parameters are defined in monparam's TEMPLATE parameter.  This takes
+! the form:
+
+!       <direction> [<type print>] [*<comments>]
+
+! DIRECTION is encoded as one character and indicates whether monparams is
+! being called on entry to the calling routine or just before exit from it.
+! The value '>' indicates a call on entry (requesting display of input params
+! significant on entry); '<' is used where monparams is called just before
+! exit from the routine to be monitored (display output params).
+! Alternatively, where only a single call is to be made (rather than both at
+! entry and exit), or where a one-off message is to be displayed, the
+! direction should be specified as '='.
+
+! TYPE/PRINT is encoded as a pair of characters.  The first char defines TYPE
+! and the second defines whether the parameter is input only, output only, or
+! set both at input and output.  For each parameter of the calling routine, a
+! pair of TYPE/PRINT characters is specified.
+
+! A COMMENT can be added to the end of the template (perhaps to indicate the
+! %result of a function) following the character pairs.  This is defined by
+! giving '*' in place of the TYPE character.  The comment is printed
+! following the parameter monitoring.
+
+! In more detail, the DIRECTION character is one of the following:
+
+!       >  for a call on entry
+!       <  for a call on exit
+!       =  where only a single call is made
+
+! The first character of each successive pair defines TYPE:
+
+!       s  for a stringname (imp only)
+!       t  for a string(255) (imp only)
+!       u  for a string(31) (imp only)
+!       i  for an integername
+!       j for an integer
+
+! The second character of each successive pair defines whether the parameter
+! is PRINTed on this call:
+
+!       'r' for an input only param   ('>')
+!       'w' for an output only param   ('<' or '=')
+!       'b' for a param both input and output   ('>' or '<' or '=')
+
+! Where there are no interesting parameters and the name of the calling
+! routine is not required, %externalroutine SHOUT can be called as an
+! alternative to MONPARAMS.  Calls of either of these routines should be
+! controlled by a test of ssown_ssnote.  The following bit settings are
+! suggested:
+
+!        1   output to terminal (0 = to recall file only)
+!        2   reserved for application programs
+!        4   s#routines, especially file-handling (connect, disconnect)
+!        8   s#routines, very frequently called (findfn, tidyfiles)
+!       16   trace 1 level back
+!       32   trace 2 levels back
+!       64   miscellaneous subsystem information messages
+!      128   console i/o (to dirlog only)
+!      256   output to dirlog (privilege required)
+
+! Examples:
+
+! %externalroutine x(%string(255) s, %integername flag)
+!    %if ssown_ssnote&64#0 %then monparams(">triw")
+!    .
+!    .
+!    .
+!    %if ssown_ssnote&64#0 %then monparams("<triw")
+! %end
+
+! or,
+%c
+!    monparams("<triw*res=".itos(res))
+
+! or,
+%c
+!    monparams("=triw")
+
+! Switch on monitoring with #note; the bigger the number, the more you get:
+
+!    Command:#note 7
+
+! is usually plenty.
+
+%integer lnb, lnb1, lnb2, base, fn
+%integer outpt, flag, pt, endpt, unwanted, direction
+%integer type, slen, rwb, integer32, len, adr, sp, ch, k
+%switch sw('D':'T')
+%switch from(0:4)
+%string (255) s, template, text
+%byte %integer %array msg(0:560)
+%real real32
+%long %real real64
+
+   %return %if ssown_ssnote&2=0
+   emas3 move string(xtemplate, template, flag)
+   %return %unless flag=0
+   text = "" %unless template->template.("*").text
+   uctranslate(addr(template)+1, length(template)) %unless template=""
+   *st_10, lnb
+   lnb1 = integer(lnb+4*10)
+   base = lnb1+64
+   flag = 0
+   fn = caller(lnb)
+   outpt = 1
+   s = "          "
+   %if ssown_ssnotespaces<10 %then length(s) = ssown_ssnotespaces
+   direction = charno(template, 1)
+   %if direction='>' %start
+      unwanted = 'W';                    !enter, want 'r' & 'b'
+      ssown_ssnotespaces = ssown_ssnotespaces+1
+      s = s."-> "
+   %else
+      unwanted = 'R';                    !exit (or one-off call), want 'w' & 'b'
+      %if direction='<' %start
+         %if ssown_ssnotespaces>0 %then ssown_ssnotespaces = ssown_ssnotespaces-1
+         %if ssown_ssnotespaces<10 %then length(s) = ssown_ssnotespaces
+         s = s."<- "
+      %else
+         %if direction#'=' %then shout("monparams ".string(fn)." fails: bad template") %and %return
+         s = s."== "
+      %finish
+   %finish
+   out(s.string(fn)."  ", outpt, msg)
+   pt = addr(template)+2
+   endpt = addr(template)+length(template)
+
+   %while pt<endpt %cycle
+      type = byteinteger(pt)
+      pt = pt+1
+      %if type='T' %start { allow Tn for strings other than 255 }
+         slen = 0
+         slen = 10*slen+byteinteger(pt)-'0' %and pt = pt+1 %while '0'<=byteinteger(pt)<='9'
+         slen = 255 %if slen=0
+      %finish
+      rwb = byteinteger(pt)
+      pt = pt+1
+      type = 'F' %unless 'D'<=type<='T'
+      ->sw(type)
+
+sw('D'): { long real name }
+      %unless rwb=unwanted %start
+         real64 = longreal(integer(base))
+         out(sprintfl(real64, 11).", ", outpt, msg)
+      %finish
+      base = base+4
+      %continue
+
+sw('E'): { real name }
+      %unless rwb=unwanted %start
+         real32 = real(integer(base))
+         out(sprintfl(real32, 6).", ", outpt, msg)
+      %finish
+      base = base+4
+      %continue
+
+sw('I'): { integer name }
+      integer32 = integer(integer(base))
+sw('J'): { integer }
+      integer32 = integer(base) %if type='J'
+      %unless rwb=unwanted %start
+         %if integer32=x'80808080' %then s = "unassd" %else %start
+            %if-1<=integer32<=32 %then s = itos(integer32) %else %start
+               s = "x'".htos(integer32, 8)."'"
+               %if integer32>>16=0 %then s = s." ".itos(integer32)
+            %finish
+            out(s.", ", outpt, msg)
+         %finish
+      %finish
+      base = base+4
+      %continue
+
+sw('S'): { stringname }
+      %unless rwb=unwanted %start
+         type = shortinteger(base)
+         len = shortinteger(base+2)
+         adr = integer(base+4)
+         ->from(type)
+
+from(0): { imp }
+         s = string(adr)
+         ->outstring
+from(2): { iso }
+         sp = ' '
+from(3): { ebcdic }
+         sp = 64 %if type=3
+         %while len>0 %cycle
+            ch = byteinteger(adr+len-1)
+            %exit %unless ch=sp
+            len = len-1
+         %repeat
+         len = 255 %if len>255
+         length(s) = len
+         %if len>0 %start
+            move(len, adr, addr(s)+1)
+            etoi(addr(s)+1, len) %if type=3
+         %finish
+         ->outstring
+from(4): { C }
+         k = 0
+         %cycle
+            %exit %if byteinteger(adr+k)=0
+            k = k+1
+            %exit %if k=len
+         %repeat
+         k = 255 %if k>255
+         length(s) = k
+         move(k, adr, addr(s)+1) %if k>0
+outstring:
+         s = translateshortname(s, 1)
+         out(s.", ", outpt, msg)
+      %finish
+      base = base+8
+      %continue
+
+sw('T'): { imp string }
+      %unless rwb=unwanted %start
+         s = string(base)
+         s = translateshortname(s, 1)
+         out("""".s.""", ", outpt, msg)
+      %finish
+      base = base+slen+1
+      %continue
+
+sw(*): { failure }
+      %return
+
+   %repeat
+
+   %if text="" %then outpt = outpt-2 %else out(text, outpt, msg)
+   %for pt = 0, 80, 480 %cycle
+      %if pt+80<=outpt %then msg(pt) = 80 %else msg(pt) = outpt-pt-1
+      shout(string(addr(msg(pt))))
+      %if pt+msg(pt)+1>=outpt %then %exit
+   %repeat
+   %if ssown_ssnote&48#0 %and direction#'<' %start
+      show caller(lnb1)
+      %if ssown_ssnote&32#0 %start
+         lnb2 = integer(lnb1+4*10)
+         show caller(lnb2)
+      %finish
+   %finish
+
+%end;                                    !of mon params
+
+!----------------------------------------------------------------------
+
+%external %routine show caller %alias "s#showcaller"(%integer lnb1)
+%integer lnb, i, j, gla, sstptr, fline, dtable, fbline, ad
+%string (11) name
+%string (255) s
+   ad = lnb1+4*10
+   %if dvalidate(ad, 4, 1)#0 %then %return
+   lnb = integer(ad)
+   %cycle i = 9, -1, 5
+      ad = lnb1+4*i
+      %if dvalidate(ad, 4, 1)#0 %then %return
+      j = integer(ad)
+      %exit %if j>lnb1-64 %or j<=lnb
+      ad = j+44
+      %if dvalidate(ad, 4, 1)#0 %then %return
+      %exit %if j#integer(ad)
+      lnb = j
+   %repeat
+
+   ad = lnb1+4*13
+   %if dvalidate(ad, 4, 1)#0 %then %return
+   gla = integer(ad)
+   %if dvalidate(lnb, 4, 1)#0 %then %return
+   sstptr = shortinteger(lnb)&x'ffff';   ! ptr to diags for this block
+   fline = shortinteger(lnb+2);          ! failing line no.
+   %if dvalidate(gla+20, 4, 0)#0 %then %return
+   dtable = integer(gla+20)+sst ptr
+   %if dvalidate(dtable, 12, 0)#0 %then %return
+   fbline = shortinteger(dtable);        ! routine/block start
+   name = "block"
+   %if byteinteger(dtable+12)>0 %then name <- string(dtable+12)
+   %if fbline>0 %start
+      s = "   (called from "
+      %if fline>fbline %start
+         s = s."line ".itos(fline)." of "
+      %finish
+      shout(s.name." starting at line ".itos(fbline).")")
+   %finish
+%end;                                    !of show caller
+
+!-----------------------------------------------------------------------
+
+%external %routine ss enter %alias "s#ssenter"(%string %name sstart, %integer %name istart,
+   %string %name temp)
+
+! Copies the parameters of the calling routine from the stack to a sequence
+! of string variables (starting with sstart) and integers (starting with
+! istart).  'Template' describes the stringname/integername parameters -
+! each represented by a pair of chars in a string.  The first char is
+
+!      's' for a stringname
+!      'i' for an integername
+
+! The second char is
+
+!      'r' for an input only param (convert if string and copy)
+!      'w' for an output only param (in exit, convert [if string] and copy back)
+!      'b' for a param both input and output
+
+%integer lnb, lnb1, lnb2, base, type, len, from, sp, fn, ch, k, flag, pno, to str, to int, pt
+%integer outpt
+%byte %integer %array msg(0:560)
+%string (255) template
+%integer mon
+%string (63) sep
+%switch sw(0:7)
+   %const %string (22) %array err(1:3)= "longstring not allowed", "string too long", "unknown string type"
+
+   outpt = 1
+   *st_10, lnb
+   lnb1 = integer(lnb+4*10)
+   fn = caller(lnb)
+   sep = "-> ".string(fn)." "
+   mon = ssown_ssnote&2
+   base = lnb1+64
+   flag = 0
+   pno = 1
+   to str = addr(sstart)
+   to int = addr(istart)
+   pt = addr(template)+1
+
+   template = temp
+   uctranslate(addr(template)+1, length(template)) %unless template=""
+
+   %for pt = pt, 2, pt+length(template)-2 %cycle
+      out(sep, outpt, msg) %unless mon=0
+      %if byteinteger(pt)='S' %start;    !string param
+         %if byteinteger(pt+1)#'W' %start; !input or both
+            type = shortinteger(base)
+            len = shortinteger(base+2)
+            from = integer(base+4)
+            ->sw(type&7)
+
+sw(0):                                   !normal imp string
+            string(to str) = string(from)
+            ->contin
+sw(1):                                   !imp longstring
+            flag = 1
+            ->fail
+sw(2):                                   !fortran ascii, fixed length, space filled
+            sp = ' '
+sw(3):                                   !fortran ebcdic, fixed length, space filled
+            sp = 64 %if type=3
+            %while len>0 %cycle
+               ch = byteinteger(from+len-1)
+               %exit %unless ch=sp
+               len = len-1
+            %repeat
+            %if len>255 %then flag = 2 %and ->fail
+            byteinteger(to str) = len
+            %if len>0 %start
+               move(len, from, to str+1)
+               etoi(to str+1, len) %if type=3
+            %finish
+            ->contin
+sw(4):                                   !'C' string, ascii, variable length, zero terminated
+            byteinteger(to str) = 255
+            %for k = 0, 1, len-1 %cycle
+               ch = byteinteger(from+k)
+               %exit %if ch=0
+               %if k=255 %then flag = 2 %and ->fail
+               byteinteger(to str+k+1) = ch
+            %repeat
+            byteinteger(to str) = k
+            ->contin
+sw(*):
+            flag = 3;                    ! invalid type
+fail:
+            k = ssown_ssnote
+            %if k=0 %then ssown_ssnote = 1
+            sep <- string(fn)
+            uctranslate(addr(sep)+1, length(sep))
+            shout(sep." fails -  param ".itos(pno).", ".err(flag))
+            show caller(lnb1)
+            lnb2 = integer(lnb1+4*10)
+            show caller(lnb2)
+            ssown_ssnote = k
+            %stop
+contin:
+            out(string(to str), outpt, msg) %unless mon=0
+         %finish
+         to str = to str+256
+         base = base+8
+      %else;                             !integer parameter
+         %if byteinteger(pt+1)#'W' %start; !input or both
+            integer(to int) = integer(integer(base))
+            %unless mon=0 %start
+               k = integer(to int)
+               %if-100<k<100 %then out(itos(k), outpt, msg) %else out(" X".htos(k, 8), outpt, msg)
+            %finish
+         %finish
+         to int = to int+4
+         base = base+4
+      %finish
+      pno = pno+1
+      sep = ","
+   %repeat
+   %return %if mon=0
+
+   %for pt = 0, 80, 480 %cycle
+      %if pt+80<=outpt %then msg(pt) = 80 %else msg(pt) = outpt-pt-1
+      shout(string(addr(msg(pt))))
+      %exit %if pt+msg(pt)+1>=outpt
+   %repeat
+%end;                                    !ss enter
+
+!-----------------------------------------------------------------------
+
+%external %routine ss exit %alias "s#ssexit"(%string %name sstart, %integer %name istart,
+   %string %name temp)
+
+%integer lnb, lnb1, lnb2, base, type, len, from, fn, k, flag, pno, to int, to str, pt
+%string (255) template
+%integer mon
+%string (63) sep
+%switch sw(0:7)
+   %const %string (22) %array err(1:3)= "longstring not allowed", "string too short", "unknown string type"
+
+   *st_10, lnb
+   lnb1 = integer(lnb+4*10)
+   fn = caller(lnb)
+   mon = ssown_ssnote&2
+   sep = "<- ".string(fn)." " %unless mon=0
+   base = lnb1+64
+%integer outpt
+%byte %integer %array msg(0:560)
+
+   outpt = 1
+   flag = 0
+   pno = 1
+   to str = addr(sstart)
+   to int = addr(istart)
+   pt = addr(template)+1
+
+   template = temp
+   uctranslate(addr(template)+1, length(template)) %unless template=""
+
+   %for pt = pt, 2, pt+length(template)-2 %cycle
+      out(sep, outpt, msg) %unless mon=0
+      %if byteinteger(pt)='S' %start;    !string param
+         %if byteinteger(pt+1)#'R' %start; !output or both
+            type = shortinteger(base)
+            len = shortinteger(base+2)
+            from = integer(base+4)
+            %if byteinteger(to str)>len %then flag = 2 %and ->fail
+            ->sw(type&7)
+
+sw(0):                                   !normal imp string
+            %if byteinteger(to str)=len %then flag = 2 %and ->fail
+            string(from) = string(to str)
+            ->contin
+sw(1):                                   !imp longstring
+            flag = 1
+            ->fail
+sw(2):                                   !fortran ascii, fixed length, space filled
+sw(3):                                   !fortran ebcdic, fixed length, space filled
+            k = byteinteger(to str)
+            move(k, to str+1, from) %if k>0
+            fill(len-k, from+k, ' ') %if len>k
+            itoe(from, len) %if type=3
+            ->contin
+sw(4):                                   !'C' string, ascii, variable length, zero terminated
+            k = byteinteger(to str)
+            move(k, to str+1, from) %if k>0
+            byteinteger(from+k) = 0 %if len>1
+            ->contin
+sw(*):
+            flag = 3;                    ! invalid type
+fail:
+            k = ssown_ssnote
+            %if k=0 %then ssown_ssnote = 1
+            sep <- string(fn)
+            uctranslate(addr(sep)+1, length(sep))
+            shout(sep." fails -  param ".itos(pno).", ".err(flag))
+            show caller(lnb1)
+            lnb2 = integer(lnb1+4*10)
+            show caller(lnb2)
+            ssown_ssnote = k
+            %stop
+contin:
+            out(string(to str), outpt, msg) %unless mon=0
+         %finish
+         to str = to str+256
+         base = base+8
+      %else;                             !integer parameter
+         %if byteinteger(pt+1)#'R' %start; !output or both
+            integer(integer(base)) = integer(to int)
+            %unless mon=0 %start
+               k = integer(to int)
+               %if-100<k<100 %then out(itos(k), outpt, msg) %else out(" X".htos(k, 8), outpt, msg)
+            %finish
+         %finish
+         to int = to int+4
+         base = base+4
+      %finish
+      pno = pno+1
+      sep = ","
+   %repeat
+   %return %if mon=0
+
+   %for pt = 0, 80, 480 %cycle
+      %if pt+80<=outpt %then msg(pt) = 80 %else msg(pt) = outpt-pt-1
+      shout(string(addr(msg(pt))))
+      %exit %if pt+msg(pt)+1>=outpt
+   %repeat
+%end;                                    !ss exit
+
+!-----------------------------------------------------------------------
+
+%external %routine emas3movestring(%string %name fromstring, tostring, %integer %name flag)
+
+%integer lnb, a, sp, ch, k
+%integer type, len, adr, type2, len2, adr2
+%switch from, to(0:4)
+
+   *st_10, lnb
+   a = lnb+64
+
+   type = shortinteger(a) { characteristics of 'fromstring' }
+   len = shortinteger(a+2)
+   adr = integer(a+4)
+
+   type2 = shortinteger(a+8)
+   len2 = shortinteger(a+10)
+   adr2 = integer(a+12)
+
+   flag = 999 %and %return %unless 0<=type<=4 %and type#1
+   flag = 999 %and %return %unless 0<=type2<=4 %and type2#1
+   flag = 0
+   ->from(type)
+
+from(0): { imp }
+   len = byteinteger(adr)
+   adr = adr+1
+   ->check
+
+from(2):                                 !sp = ' '    { Fortran ISO }
+from(3):                                 !sp = 64 %if type = 3
+!   %while len > 0 %cycle
+!      ch = byteinteger(adr + len - 1)
+!      %exit %unless ch = sp
+!      len = len - 1
+!   %repeat
+   ->check
+
+from(4): { C }
+   k = 0
+   %cycle
+      len = k %and %exit %if byteinteger(adr+k)=0
+      k = k+1
+      %exit %if k=len
+   %repeat
+   ->check
+
+check:
+   { have now located the input string precisely, it starts at }
+   { adr and has length len                                    }
+   ->too long %if len>len2 %or (len=len2 %and type2=0)
+
+   byteinteger(adr2) = len %and adr2 = adr2+1 %if type2=0
+   %if len>0 %start
+      move(len, adr, adr2)
+      etoi(adr2, len) %if type=3 %and type2#3
+      itoe(adr2, len) %if type#3 %and type2=3
+   %finish
+   ->to(type2)
+
+to(0): %return
+to(2): sp = ' '
+to(3): sp = 64 %if type2=3
+   fill(len2-len, adr2+len, sp) %if len2>len
+   %return
+to(4):
+   byteinteger(adr2+len) = 0 %if len2>len
+   %return
+
+too long:
+   flag = 9999
+%end;                                    ! emas3movestring
+
+!-----------------------------------------------------------------------
+
+%external %routine emas3movestringin(%string %name from, to, %integer %name flag)
+   emas3movestring(from, to, flag)
+%end;                                    ! emas3movestringin
+
+!-----------------------------------------------------------------------
+
+%external %routine emas3movestringout(%string %name from, to, %integer %name flag)
+   emas3movestring(from, to, flag)
+%end;                                    ! emas3movestringout
+
+!-----------------------------------------------------------------------
+
+%external %routine mon params %alias "s#monparams"(%string (255) template)
+
+! This routine performs monitoring of the parameters passed to the routine
+! calling it.  A template of the parameters of the calling routine is
+! supplied, in the same order as they appear in its spec, so that monparams
+! can find them on the stack.  As some parameters are only of interest on
+! entry to a routine and others only on exit, a means of specifying this is
+! given.  As well as parameters, a text string supplied by the calling
+! program can be added to the output.
+
+! The parameters are defined in monparam's TEMPLATE parameter.  This takes
+! the form:
+
+!       <direction> [<type print>] [*<comments>]
+
+! DIRECTION is encoded as one character and indicates whether monparams is
+! being called on entry to the calling routine or just before exit from it.
+! The value '>' indicates a call on entry (requesting display of input params
+! significant on entry); '<' is used where monparams is called just before
+! exit from the routine to be monitored (display output params).
+! Alternatively, where only a single call is to be made (rather than both at
+! entry and exit), or where a one-off message is to be displayed, the
+! direction should be specified as '='.
+
+! TYPE/PRINT is encoded as a pair of characters.  The first char defines TYPE
+! and the second defines whether the parameter is input only, output only, or
+! set both at input and output.  For each parameter of the calling routine, a
+! pair of TYPE/PRINT characters is specified.
+
+! A COMMENT can be added to the end of the template (perhaps to indicate the
+! %result of a function) following the character pairs.  This is defined by
+! giving '*' in place of the TYPE character.  The comment is printed
+! following the parameter monitoring.
+
+! In more detail, the DIRECTION character is one of the following:
+
+!       >  for a call on entry
+!       <  for a call on exit
+!       =  where only a single call is made
+
+! The first character of each successive pair defines TYPE:
+
+!       s  for a stringname (imp only)
+!       t  for a string(255) (imp only)
+!       u  for a string(31) (imp only)
+!       v  for a string(11) (imp only)
+!       i  for an integername
+!       j for an integer
+
+! The second character of each successive pair defines whether the parameter
+! is PRINTed on this call:
+
+!       'r' for an input only param   ('>' or '=')
+!       'w' for an output only param   ('<' or '=')
+!       'b' for a param both input and output   ('>' or '<' or '=')
+
+! Where there are no interesting parameters and the name of the calling
+! routine is not required, %externalroutine SHOUT can be called as an
+! alternative to MONPARAMS.  Calls of either of these routines should be
+! controlled by a test of ssown_ssnote.  The following bit settings are
+! suggested:
+
+!        1   output to terminal (0 = to recall file only)
+!        2   reserved for application programs
+!        4   s#routines, especially file-handling (connect, disconnect)
+!        8   s#routines, very frequently called (findfn, tidyfiles)
+!       16   trace 1 level back
+!       32   trace 2 levels back
+!       64   miscellaneous subsystem information messages
+!      128   console i/o (to dirlog only)
+!      256   output to dirlog (privilege required)
+
+! Examples:
+
+! %externalroutine x(%string(255) s, %integername flag)
+!    %if ssown_ssnote&64#0 %then monparams(">triw")
+!    .
+!    .
+!    .
+!    %if ssown_ssnote&64#0 %then monparams("<triw")
+! %end
+
+! or,
+%c
+!    monparams("<triw*res=".itos(res))
+
+! or,
+%c
+!    monparams("=triw")
+
+! Switch on monitoring with #note; the bigger the number, the more you get:
+
+!    Command:#note 7
+
+! is usually plenty.
+
+%integer lnb, lnb1, lnb2, base, from, gla, fn
+%integer outpt, flag, pno, inc, pt, endpt, unwanted, direction
+%string (255) s
+%byte %integer %array msg(0:560)
+
+   *st_10, lnb
+   lnb1 = integer(lnb+4*10)
+   base = lnb1+64
+   flag = 0
+   gla = integer(lnb+4*13)
+   %unless dvalidate(gla+20, 4, 0)=0=dvalidate(lnb1, 4, 1) %then %return
+   fn = 12+integer(gla+20)+shortinteger(lnb1)&x'ffff'
+   %unless dvalidate(fn, 4, 0)=0 %then %return
+   outpt = 1
+   s = "          "
+   %if ssown_ssnotespaces<10 %then length(s) = ssown_ssnotespaces
+   direction = charno(template, 1)
+   %if direction='>' %start
+      unwanted = 'w';                    !enter, want 'r' & 'b'
+      ssown_ssnotespaces = ssown_ssnotespaces+1
+      s = s."-> "
+   %else
+      %if direction='<' %start
+         unwanted = 'r';                 !exit want 'w' & 'b'
+         %if ssown_ssnotespaces>0 %then ssown_ssnotespaces = ssown_ssnotespaces-1
+         %if ssown_ssnotespaces<10 %then length(s) = ssown_ssnotespaces
+         s = s."<- "
+      %else
+         %if direction#'=' %then %c
+            shout("monparams ".string(fn)." fails: bad template: ".template) %and %return
+         unwanted = 'z'
+         s = s."== "
+      %finish
+   %finish
+   s = timestamp.s %if ssown_ssnote&8>0
+   out(s.string(fn)."  ", outpt, msg)
+   pno = 1
+   pt = addr(template)+2
+   endpt = addr(template)+length(template)
+
+   %while pt<endpt %cycle
+      %if byteinteger(pt)='*' %start
+         s = substring(template, pt-addr(template), length(template))
+         out(s."  ", outpt, msg)
+         %exit
+      %finish
+      %if 'i'#byteinteger(pt)#'j' %start; !string param
+         %if byteinteger(pt)='s' %start; !stringname
+            %if shortinteger(base)&7#0 %start; !wrong string type
+               shout(string(fn)." param ".itos(pno)." invalid string type")
+               show caller(lnb1)
+               %exit
+            %finish
+            inc = 8
+            from = integer(base+4)
+         %else;                          !string(255) or string(31)
+            from = base
+            inc = 256 {t}
+            inc = 32 %if byteinteger(pt)='u'
+            inc = 12 %if byteinteger(pt)='v'
+         %finish
+         %if byteinteger(pt+1)#unwanted %start
+            s = string(from)
+            s = translateshortname(s, 1)
+!            %if string(from)="}{|~" %then s = "{last=}".ssown_curfile %else
+            out("""".s.""", ", outpt, msg)
+         %finish
+         base = base+inc
+
+      %else;                             !integer param
+
+         %if byteinteger(pt)='i' %then from = integer(base) %else from = base
+         %if byteinteger(pt+1)#unwanted %start
+            %if integer(from)=x'80808080' %then s = "unassd" %else %start
+               %if-1<=integer(from)<=32 %then s = itos(integer(from)) %else %start
+                  s = "x'".htos(integer(from), 8)."'"
+                  %if-32768<=integer(from)<=32767 %then s = s." ".itos(integer(from))
+               %finish
+               out(s.", ", outpt, msg)
+            %finish
+         %finish
+         base = base+4
+      %finish
+      pno = pno+1
+      pt = pt+2
+   %repeat
+
+   outpt = outpt-2
+   %for pt = 0, 80, 480 %cycle
+      %if pt+80<=outpt %then msg(pt) = 80 %else msg(pt) = outpt-pt-1
+      shout(string(addr(msg(pt))))
+      %if pt+msg(pt)+1>=outpt %then %exit
+   %repeat
+   %if ssown_ssnote&48#0 %and direction#'<' %start
+      show caller(lnb1)
+      %if ssown_ssnote&32#0 %start
+         %if dvalidate(lnb1+4*10, 4, 1)#0 %then %return
+         lnb2 = integer(lnb1+4*10)
+         show caller(lnb2)
+      %finish
+   %finish
+%end;                                    !of mon params
+
+%integer %fn find(%integer ad, len, b1)
+! This function looks at up to len bytes starting at AD.  If byte B1 is found
+! then the result is the address of that byte, otherwise zero.
+%integer i, res
+%byte %integer %array trtab(0:255)
+   %result = 0 %if len<=0
+   res = 0
+   i = addr(trtab(0))
+   *l_1, i; *xc_0(256, 1), 0(1)
+   byteinteger(i+b1&255) = 1;            ! set up required function byte.
+   *la_0, 256; *l_1, len; *l_2, ad; *l_3, i
+   *basr_15, 0; *using_15
+   *cr_1, 0; *bc_4, <lt256>;             ! < 256 bytes left
+   *trt_0(256, 2), 0(3); *bc_6, <found>; ! -> 1st occurrence found
+   *ar_2, 0; *sr_1, 0; *bcr_15, 15;      ! -> process next chunk
+lt256:
+   *ltr_1, 1; *bc_12, <nf>;              ! -> <=0 bytes left
+   *bctr_1, 0; *ex_1, <trt>; *bc_8, <nf>; ! -> not in last chunk
+found:
+   *st_1, res;                           ! address of 1st occurrence
+nf:
+   *drop_15
+   %result = res
+trt:
+   *trt_0(0, 2), 0(3)
+%end;                                    ! Of %integer %function find.
+
+%routine special move(%integer len, from, to)
+! Move all characters but NOT a certain special character, turning it into LF
+%integer intermediate, bytes done
+   %cycle
+      intermediate = find(from, len, 11 {VT})
+      ! Retruns address at which special character found, else zero if not found
+      %if intermediate=0 %then intermediate = from+len
+      bytes done = intermediate-from
+      move(bytes done, from, to)
+      len = len-bytes done
+      from = from+bytes done
+      to = to+bytes done
+      %if len>0 %start
+         byteinteger(to) = nl
+         from = from+1; to = to+1
+         len = len-1
+      %finish
+   %repeat %until len<=0
+%end;                                    ! special move
+
+
+!----------------------------------------------------------------------
+
+%external %routine emas3 getjournal(%string %name file, %integer %name flag)
+!THIS ROUTINE IS USED BY RECALL AND RECAP
+%integer len, start, conad, wrap, afm, lfm, lep, lap, ssmp
+   %if ssown_it_jnbase<=0 %then flag = 304 {journal not selected} %and ->err
+   wrap = byteinteger(ssown_it_jnmax-1); !WRAPPED ROUND IF NON-ZERO
+   ! IF LAST BYTE IN JOURNAL FILE NON ZERO THEN WRAP ROUND
+   %if wrap=0 %then len = ssown_it_jncur-ssown_it_jnbase %else %c
+      len = ssown_it_jnmax-ssown_it_jnbase-1
+   ! The byte at SSOWN_IT_JNCUR is a marker (X'FF')
+   ! and we don't want it in the output file.
+   file = "T#TMPJN"
+   outfile(file, len, 0, 0, conad, flag)
+   ->err %if flag#0
+   ssmp = ssown_sscomreg(2);             ! This is TEMPORARY, you understand
+   integer(conad) = len
+   integer(conad+12) = 3;                !TYPE=CHARACTER
+   start = conad+32
+   %if wrap#0 %then %start;              !MUST HAVE WRAPPED AROUND
+      afm = ssown_it_jncur+1
+      lfm = ssown_it_jnmax-afm
+      %if ssmp=0 %then move(lfm, afm, start) %else special move(lfm, afm, start)
+      start = start+lfm
+      len = len-lfm
+   %finish
+   lep = len-32
+   lap = ssown_it_jnbase+32
+   %if ssmp=0 %then move(lep, lap, start) %else special move(lep, lap, start)
+   disconnect(ssown_shortname, flag)
+err:
+   ssown_it_jnbase = -ssown_it_jnbase;   !TO INHIBIT JOURNAL DURING RECALL AND RECAP
+%end;                                    ! of GETJOURNAL
+
+!-----------------------------------------------------------------------
+
+%external %routine emas3 get journal pointers(%integer %name nbase, nmax, ncur, nflag)
+%integer base, max, cur, flag
+
+   ssenter("", base, "iwiwiwiw")
+   flag = 0
+   base = ssown_it_jnbase
+   max = ssown_it_jnmax-1
+   cur = ssown_it_jncur
+   %if base>0 %then ssown_it_jnbase = -base %else flag = 304
+   ssexit("", base, "iwiwiwiw")
+%end;                                    ! emas3 get journal pointers
+
+!-----------------------------------------------------------------------
+
+%external %routine emas3 returncode(%integer %name flag)
+   flag = ssown_lastrcode
+%end;                                    ! of RETURNCODE
+
+!----------------------------- SENDFILE ----------------------------------------
+
+%external %routine emas3 setcomreg(%integer %name xreg, xval)
+%integer reg, val
+   ss enter("", reg, "irir")
+   reg = 0 %unless 0<=reg<=60
+   ssown_sscomreg(reg) = val
+   ss exit("", reg, "irir")
+%end;                                    ! emas3 setcomreg
+
+!-----------------------------------------------------------------------
+
+%routine printlongmess(%string (255) caller, mess)
+%integer i, len
+   printstring(caller." fails  -")
+   len = length(caller)+9
+   %if len+length(mess)>79 %start
+      %for i = 79-len, -1, 1 %cycle
+         %if charno(mess, i)=' ' %then %exit
+      %repeat
+      %if i>1 %start
+         printstring(substring(mess, 1, i))
+         newline
+         spaces(len+2)
+         printstring(substring(mess, i+1, length(mess)))
+      %finish %else printstring(mess)
+   %finish %else printstring(mess)
+%end;                                    !of printlongmess
+
+!----------------------------------------------------------------------
+
+%routine setreturncode inner(%integer flag, fn)
+%integer save, j, print, len, i
+%string (255) rcaller, wk, mess
+
+! Here is an array of the COMMAND names which are longer than 11 characters.
+! The compiler stores only 11 chars of the procedure name in the symbol tables
+! so to make it look better to the user, we are going to make a special check
+! against these when the procedure name appears to be exactly eleven characters
+
+%const %integer maxlongc=17
+   %const %string (15) %array long command names(1:maxlongc)= %c
+"AWAITRESTORES",
+ "CHECKINTEGER",
+ "CHECKLONGREAL",
+ "CHECKSTRING",
+ "CHERISHGROUP",
+ "CLEARJOURNAL",
+ "CURRENTREFS",
+ "DESTROYGROUP",
+ "DONATEFUNDS",
+ "HAZARDGROUP",
+ "LOADEDENTRIES",
+ "LOADEDFILES",
+ "NEWDIRECTORY",
+ "PERMITGROUP",
+ "RENAMEGROUP",
+ "RESETLOADER",
+ "TERMINALTYPE"
+
+   j = 0 { potential rcode }
+   print = no
+
+   %if flag>0 %then j = flag %and print = 1 %else %if flag=topbit %then print = 2 %else %if %c
+      flag<0 %then j = -flag
+
+   ssown_rcode = j
+   ssown_lastrcode = j
+   %return %if print=no %or ssown_inhibitmessages&4 {subsys}#0
+
+   save = outstream
+   select output(0) %unless save=0
+   newline
+
+   %if print=1 %start
+      rcaller <- string(fn)
+      uctranslate(addr(rcaller)+1, length(rcaller))
+
+      ! Is it (likely) one of the "too long" command names?
+      %if length(rcaller)=11 %start
+         %for j = 1, 1, maxlongc %cycle
+            wk = long command names(j); length(wk) = 11
+            %if rcaller=wk %then rcaller = long command names(j) %and %exit
+         %repeat
+      %finish
+
+      printlongmess(rcaller, failuremessage(flag))
+   %else
+      printline(ssown_ssfname)
+   %finish
+   select output(save) %unless save=0
+%end;                                    ! setreturncode inner
+
+!-----------------------------------------------------------------------
+
+%external %routine emas3 setreturncode(%integer %name flag)
+
+%integer lnb, gla, lnb1, fn
+
+   *st_10, lnb
+   gla = integer(lnb+4*13)
+   lnb1 = integer(lnb+4*10)
+   fn = 12+integer(gla+20)+(shortinteger(lnb1)&X'FFFF')
+   setreturncode inner(flag, fn)
+%end;                                    ! emas3 setreturncode
+
+!-----------------------------------------------------------------------
+
+%string %fn term string(%record (termf) %name term, %byte %integer ptr)
+
+   %if ptr=0 %then %result = "" %else %result = string(addr(term_string space)+ptr)
+%end;                                    ! term string
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn vdui %alias "s#vdui"(%integer n)
+
+! This  function  returns  various  integer   characteristics   of   the
+! terminal. A result of zero is usually an error.
+
+!     n = 1   Terminal type
+!     n = 2   Columns per line
+!     n = 3   Lines per page (zero for hard copy)
+!     n = 4   ASCII code for recommended interrupt character
+!     n = 5   Base character for X position
+!     n = 6   Base character for Y position
+%constant %integer maxvdui= 6
+%switch sw(1:maxvdui)
+
+
+   %result = 0 %unless ssown_term valid=1 %and 1<=n<=maxvdui
+   !
+   ->sw(n)
+   !
+sw(1):                                   ! Terminal type
+   %result = ssown_ssterminaltype
+   !
+sw(2):                                   ! Columns per line
+   %result = ssown_term_columns
+   !
+sw(3):                                   ! Lines per page
+   %result = ssown_term_lines
+   !
+sw(4):                                   ! Interrupt character
+   %result = ssown_term_int
+   !
+sw(5):                                   ! Base for X position
+   %result = ssown_term_xbase
+   !
+sw(6):                                   ! Base for Y position
+   %result = ssown_term_ybase
+%end;                                    ! of vdui
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn vdub %alias "s#vdub"(%integer n)
+
+! This function returns various boolean characteristics of the terminal.
+! A  result  of  zero  indicates  'no'  or  'false',  and  a result of 1
+! indicates 'yes' or 'true'.  A result of -1 indicates an error.
+
+!     n = 1    Home moves cursor to top line
+!     n = 2    Terminal can operate in page mode
+!     n = 3    Y coordinate comes first
+!     n = 4    Terminal auto wraps at line end
+%constant %integer maxvdub= 4
+%switch sw(1:maxvdub)
+
+
+   %result = -1 %unless ssown_term valid=1 %and 1<=n<=maxvdub
+   !
+   ->sw(n)
+   !
+sw(1):                                   ! Home at top
+   %result = ssown_term_home at top
+   !
+sw(2):                                   ! Terminal can operate in page mode
+   %result = ssown_term_can do page mode
+   !
+sw(3):                                   ! Y coordinate comes first
+   %result = ssown_term_yfirst
+   !
+sw(4):                                   ! Terminal auto wraps at line end
+   %result = ssown_term_auto wrap
+%end;                                    ! of vdub
+
+!-----------------------------------------------------------------------
+
+%external %string %fn vdus %alias "s#vdus"(%integer n)
+
+! This function returns a string.  Sometimes this is a name, but usually
+! it  is a value which must be 'printch'd to achieve a particular effect
+! on the terminal. A null result indicates that  the  operation  is  not
+! supported by that terminal.
+
+!     n = 0   Terminal name
+!     n = 1   Clear screen (cursor moved to home)
+!     n = 2   Cursor home
+!     n = 3   Clear to end of line
+!     n = 4   Clear to end of screen
+!     n = 5   Initialise terminal
+!     n = 6   Cursor up
+!     n = 7   Cursor down
+!     n = 8   Cursor left
+!     n = 9   Cursor right
+!     n = 10  Insert line
+!     n = 11  Delete line
+!     n = 12  Set terminal into page mode
+!     n = 13  Set terminal into roll mode
+!     n = 14  String to append to start of cursor X movement
+!     n = 15  String to append to start of cursor Y movement
+!     n = 16  Two character Unix name for terminal type
+!     n = 17  Start standout mode
+!     n = 18  End standout mode
+!     n = 19  Raw cursor positioning string
+%constant %integer maxvdus= 19
+%byte %integer key
+%switch sw(0:maxvdus)
+
+
+   %result = "" %unless ssown_term valid=1 %and 0<=n<=maxvdus
+   !
+   ->sw(n)
+   !
+sw(0):                                   ! Terminal name
+   key = ssown_term_name
+   ->get
+   !
+sw(1):                                   ! Clear screen
+   key = ssown_term_clearscreen
+   ->get
+   !
+sw(2):                                   ! Home
+   key = ssown_term_home
+   ->get
+   !
+sw(3):                                   ! End of line
+   key = ssown_term_endofline
+   ->get
+   !
+sw(4):                                   ! End of screen
+   key = ssown_term_endofscreen
+   ->get
+   !
+sw(5):                                   ! Initialisation string
+   key = ssown_term_init
+   ->get
+   !
+sw(6):                                   ! Cursor up
+   key = ssown_term_cursor up
+   ->get
+   !
+sw(7):                                   ! Cursor down
+   key = ssown_term_cursor down
+   ->get
+   !
+sw(8):                                   ! Cursor left
+   key = ssown_term_cursor left
+   ->get
+   !
+sw(9):                                   ! Cursor right
+   key = ssown_term_cursor right
+   ->get
+   !
+sw(10):                                  ! Insert line
+   key = ssown_term_insert line
+   ->get
+   !
+sw(11):                                  ! Delete line
+   key = ssown_term_delete line
+   ->get
+   !
+sw(12):                                  ! Set page mode
+   key = ssown_term_page mode
+   ->get
+   !
+sw(13):                                  ! Set roll mode
+   key = ssown_term_roll mode
+   ->get
+   !
+sw(14):                                  ! String for start of cursor X movement
+   key = ssown_term_xintro
+   ->get
+   !
+sw(15):                                  ! String for start of cursor Y movement
+   key = ssown_term_yintro
+   ->get
+   !
+sw(16):                                  ! Unix name for terminal
+   key = ssown_term_uname
+   ->get
+   !
+sw(17):                                  ! String to start standout mode
+   key = ssown_term_start standout
+   ->get
+   !
+sw(18):                                  ! String to end standout mode
+   key = ssown_term_end standout
+   ->get
+   !
+sw(19):                                  ! Raw cursor positioning
+   key = ssown_term_cursor pos
+   ->get
+   !
+get:
+   %result = term string(ssown_term, key)
+%end;                                    ! of vdus
+
+!-----------------------------------------------------------------------
+
+%external %string %fn vduc %alias "s#vduc"(%integer y, x)
+
+! This  function  returns  a string which, if sent to the terminal, will
+! move the cursor to specified coordinates. A null result indicates that
+! the terminal is incapable of controlled cursor positioning.
+
+! The values 'x' and 'y' have an origin of zero (e.g. top left is 0,0).
+! Note  that  the formal parameters 'x' and 'y' are inverted because the
+! cursor positioning string is 'back to front'. This is so that the same
+! string is used as that on a UNIX system (for convenience).
+%integer i, temp, c, max, next
+%string (255) res, s, work
+
+   s = ""
+   %if ssown_term valid=1 %start
+      s = term string(ssown_term, ssown_term_cursor pos)
+   %finish
+   %result = "" %if s=""
+
+   res = ""
+   next = x
+   max = length(s)
+
+   %for i = 1, 1, max %cycle
+      c = charno(s, i)
+      !
+      %if c#'%' %or i=max %then %start
+         res = res.tostring(c)
+      %else
+         i = i+1;                        ! Move to next character
+         c = charno(s, i);               ! Flag character
+         %if 'A'<=c<='Z' %then c = c-'A'+'a'
+         %if c='%' %then %start
+            res = res."%"
+         %finish %else %if c='d' %then %start
+            res = res.itos(next)
+            next = y
+         %finish %else %if c='2' %or c='3' %then %start
+            work = itos(next)
+            work = "0".work %while length(work)<c-'0'
+            res = res.work
+            next = y
+         %finish %else %if c='.' %then %start
+            res = res.tostring(next)
+            next = y
+         %finish %else %if c='h' %then %start { special for haseltine 1 }
+            next = next+96 %if next<32
+            res = res.tostring(next)
+            next = y
+         %finish %else %if c='r' %then %start
+            temp = x
+            x = y
+            next = y
+            y = temp
+         %finish %else %if c='i' %then %start
+            next = next+1
+            y = y+1
+         %finish %else %if c='+' %then %start
+            i = i+1
+            %if i<=max %then c = charno(s, i) %else c = 0
+            res = res.tostring(next+c)
+            next = y
+         %finish
+      %finish
+   %repeat
+
+   %result = res
+%end;                                    ! of vduc
+
+!-----------------------------------------------------------------------
+
+%external %routine dump2 %alias "s#dump2"(%integer start, finish)
+%integer same, adr, j, k, a, l, sameas, lim, ch
+%string (31) zeroes
+   start = start&(\3)
+   finish = finish&(\3)
+   lim = 16
+
+   same = 0;                             ! number of consecutive lines which are the same
+   adr = start&(\(lim-1));               ! start of first 'line'
+
+   %while adr<finish %cycle
+      k = adr+lim-4;                     ! useful number
+
+      a = adr;                           ! validation limits
+      l = lim
+      %if adr<start %then l = l-(start-adr) %and a = start
+      %if adr+lim>finish %then l = l-(adr+lim-finish)
+!         %unless VAL(A, L, 0, 0) = 0 !         %then WRS("DDUMP Address Validation Fails") %and -> OUT
+
+      %if start+lim<=adr<=finish-lim %start
+         ! at least one whole line before and still to do
+         sameas = same+1
+         zeroes = "ZEROES"
+         %cycle j = adr, 4, k
+            sameas = 0 %and %exit %unless integer(j-lim)=integer(j)
+            zeroes = "SAME AS ABOVE" %unless integer(j)=0
+         %repeat
+         same = sameas
+      %finish %else same = 0
+
+      %if same<2 %start;                 ! print address of line
+         printstring("(")
+         phex(adr)
+         printstring(")  ")
+      %finish
+
+      printline(zeroes) %if same=1
+
+      %if same=0 %start
+         %cycle j = adr, 4, k
+            printstring("  ")
+            %if start<=j<finish %then phex(integer(j)) %else printstring("        ")
+         %repeat
+         printstring("  ")
+         %cycle j = adr, 1, k+3
+            ch = 32
+            %if start<=j<finish %start
+               ch = byteinteger(j)
+               ch = 32 %unless 32<ch<126
+            %finish
+            printsymbol(ch)
+         %repeat
+         printsymbol(nl)
+      %finish
+      adr = adr+lim
+   %repeat
+%end;                                    ! DUMP2
+
+!-----------------------------------------------------------------------
+
+%external %routine cxdump %alias "S#CXDUMP"(%integer start, n, df)
+! DF=1 for a character dump, DF=2 for a hex dump, DF=3 for both.
+%string (64) wks
+%integer i, j, perline, count, bytes, stage, filler, lap, smb, spb
+   %if df=1 %start
+      %if ssown_ssitwidth>80 %then perline = 64 %else perline = 32
+      bytes = perline
+      filler = ' '
+   %finish %else %if df=2 %start
+      %if ssown_ssitwidth>90 %then perline = 8 %else perline = 4
+      bytes = perline*4
+      ! FILLER not used.
+   %else
+      perline = 8
+      bytes = 32
+      filler = '_'
+   %finish
+   ! ROUTINE  ACCEPTS PARAMS AS START,N OR AS START,LENGTH
+   %if n<start %or start<0<n %start;     !MEANS START,LENGTH
+      n = (n+(start&X'7FFFFFFF')-1)!(start&X'80000000')
+   %finish
+   start = start&(-4)
+   n = (n&(-4))+3
+   %return %if n<start
+   count = n-start
+!!
+!!   VALIDATE CODE AREA TO BE DUMPED
+!!
+   %if 0#0 { the address fails validation } %start
+      printstring("
+INACCESSIBLE AREA TO BE DUMPED - ")
+      phex(start)
+      printstring(" TO ")
+      phex(n)
+      %return
+   %finish
+   length(wks) = bytes
+   count = 0
+   %cycle
+      newline
+      %if count#0 %start
+         %if df=3 %then write(count, 50) %else write(count, 16)
+         printstring(" line(s) as above")
+         count = 0
+      %else
+
+         %if dvalidate(start, bytes, 0)#0 %start
+            newline
+            printline("Address validation fails")
+            %return
+         %finish
+
+         stage = df
+         %cycle
+            %if df=3 %then print symbol('*')
+            %if stage>=3 %start
+               lap = addr(wks)+1
+               fill(bytes, lap, filler)
+               %for i = bytes, -1, 1 %cycle
+                  j = byte integer(start+i-1)
+                  %if 32<=j<127 %then charno(wks, i) = j
+               %repeat
+               print string(wks)
+            %else
+               %if df=3 %then spaces(2)
+               print symbol('(')
+               phex(start)
+               printstring(")   ")
+            %finish
+            stage = 5-stage
+         %repeat %until stage&1#0
+         %if df=1 %then start = start+bytes %else %start
+            %for i = perline, -1, 1 %cycle
+               lap = integer(start)
+               phex(lap)
+               spaces(df-1)
+               start = start+4
+               %exit %if start>n
+            %repeat
+         %finish
+         smb = start-bytes
+         spb = start+bytes
+         %while spb<=n %and samebytes(bytes, start, smb)=bytes %and %c
+            dvalidate(start, bytes, 0)=0 %cycle
+            count = count+1
+            smb = start
+            start = spb
+            spb = spb+bytes
+         %repeat
+      %finish
+!     %if DF=2 %then NEWLINE
+   %repeat %until start>n
+   %if df#2 %then newline
+%end;                                    ! of CXDUMP
+
+!-----------------------------------------------------------------------
+
+
+%external %routine dump %alias "S#DUMP"(%integer start, finish)
+   cxdump(start, finish, 3)
+%end;                                    ! of DUMP
+
+!-----------------------------------------------------------------------
+
+%external %routine ncode %alias "S#NCODE"(%integer xstart, finish, cax)
+
+!  Parameters  start, finish  are the virtual addresses between which recoding
+!                             is to be performed.
+!  Parameter   ca             is the address, corresponding to start, which is to
+!                             be printed at the first instruction recoded (and incremented
+!                             for following instructions).
+%const %integer target machine=370
+%const %integer oneh=1, twoh=2, threeh=3
+%const %integer no ops=0<<2, one op=1<<2, two ops=2<<2, three ops=3<<2
+%const %integer null=oneh
+
+%const %integer rr=1, rrb=2, rre=3, rx=4, rs=5, si=6, sfm=7, ssa=8, ssb=9, ssc=10, sse=11
+%const %integer extend1=12, extend2=13, extend3=14{this latter for the (*370*) opcodes}
+
+%const %integer lastc=extend3
+
+
+   %const %byte %integer %array types(0:255)= %c
+{00} null,
+{01} null,
+{02} null,
+{03} null,
+{04 SET PROGRAM MASK               } rr<<4  !one op  !oneh,
+{05 BRANCH AND LINK                } rr<<4  !two ops  !oneh,
+{06 BRANCH ON COUNT                } rr<<4  !two ops  !oneh,
+{07 BRANCH ON CONDITION            } rr<<4  !two ops  !oneh,
+{08 SET STORAGE KEY                } rr<<4  !two ops  !oneh,
+{09 INSERT STORAGE KEY        *370*} rr<<4  !two ops  !oneh,
+{0A SUPERVISOR CALL           *370*} rrb<<4 !one op   !oneh,
+{0B BRANCH AND SET MODE            } rr<<4  !two ops  !oneh,
+{0C BRANCH AND SAVE AND SET MODE   } rr<<4  !two ops  !oneh,
+{0D BRANCH AND SAVE                } rr<<4  !two ops  !oneh,
+{0E MOVE LONG                      } rr<<4  !two ops  !oneh,
+{0F COMPARE LOGICAL LONG           } rr<<4  !two ops  !oneh,
+{10 LOAD POSITIVE                  } rr<<4  !two ops  !oneh,
+{11 LOAD NEGATIVE                  } rr<<4  !two ops  !oneh,
+{12 LOAD AND TEST                  } rr<<4  !two ops  !oneh,
+{13 LOAD COMPLEMENT                } rr<<4  !two ops  !oneh,
+{14 AND                            } rr<<4  !two ops  !oneh,
+{15 COMPARE LOGICAL                } rr<<4  !two ops  !oneh,
+{16 OR                             } rr<<4  !two ops  !oneh,
+{17 EXCLUSIVE OR                   } rr<<4  !two ops  !oneh,
+{18 LOAD                           } rr<<4  !two ops  !oneh,
+{19 COMPARE                        } rr<<4  !two ops  !oneh,
+{1A ADD                            } rr<<4  !two ops  !oneh,
+{1B SUBTRACT                       } rr<<4  !two ops  !oneh,
+{1C MULTIPLY                       } rr<<4  !two ops  !oneh,
+{1D DIVIDE                         } rr<<4  !two ops  !oneh,
+{1E ADD LOGICAL                    } rr<<4  !two ops  !oneh,
+{1F SUBTRACT LOGICAL               } rr<<4  !two ops  !oneh,
+{20 LOAD POSITIVE (LONG)           } rr<<4  !two ops  !oneh,
+{21 LOAD NEGATIVE (LONG)           } rr<<4  !two ops  !oneh,
+{22 LOAD AND TEST (LONG)           } rr<<4  !two ops  !oneh,
+{23 LOAD COMPLEMENT                } rr<<4  !two ops  !oneh,
+{24 HALVE (LONG)                   } rr<<4  !two ops  !oneh,
+{25 LOAD ROUNDED (EXTENDED TO LONG)} rr<<4  !two ops  !oneh,
+{26 MULTIPLY (EXTENDED)            } rr<<4  !two ops  !oneh,
+{27 MULTIPLY (LONG TO EXTENDED)    } rr<<4  !two ops  !oneh,
+{28 LOAD (LONG)                    } rr<<4  !two ops  !oneh,
+{29 COMPARE (LONG)                 } rr<<4  !two ops  !oneh,
+{2A ADD NORMALISED (LONG)          } rr<<4  !two ops  !oneh,
+{2B SUBTRACT NORMALISED (LONG)     } rr<<4  !two ops  !oneh,
+{2C MULTIPLY (LONG)                } rr<<4  !two ops  !oneh,
+{2D DIVIDE (LONG)                  } rr<<4  !two ops  !oneh,
+{2E ADD UNNORMALISED (LONG)        } rr<<4  !two ops  !oneh,
+{2F SUBTRACT UNNORMALISED (LONG)   } rr<<4  !two ops  !oneh,
+{30 LOAD POSITIVE (SHORT)          } rr<<4  !two ops  !oneh,
+{31 LOAD NEGATIVE (SHORT)          } rr<<4  !two ops  !oneh,
+{32 LOAD AND TEST (SHORT)          } rr<<4  !two ops  !oneh,
+{33 LOAD COMPLEMENT (SHORT)        } rr<<4  !two ops  !oneh,
+{34 HALVE (SHORT)                  } rr<<4  !two ops  !oneh,
+{35 LOAD ROUNDED (LONG TO SHORT)   } rr<<4  !two ops  !oneh,
+{36 ADD NORMALISED (EXTENDED)      } rr<<4  !two ops  !oneh,
+{37 SUBTRACT NORMALISED (EXTENDED) } rr<<4  !two ops  !oneh,
+{38 LOAD (SHORT)                   } rr<<4  !two ops  !oneh,
+{39 COMPARE (SHORT)                } rr<<4  !two ops  !oneh,
+{3A ADD NORMALISED (SHORT)         } rr<<4  !two ops  !oneh,
+{3B SUBTRACT NORMALISED (SHORT)    } rr<<4  !two ops  !oneh,
+{3C MULTIPLY (SHORT TO LONG)       } rr<<4  !two ops  !oneh,
+{3D DIVIDE (SHORT)                 } rr<<4  !two ops  !oneh,
+{3E ADD UNNORMALISED (SHORT)       } rr<<4  !two ops  !oneh,
+{3F SUBTRACT UNNORMALISED (SHORT)  } rr<<4  !two ops  !oneh,
+{40 STORE HALFWORD                 } rx<<4  !two ops  !twoh,
+{41 LOAD ADDRESS                   } rx<<4  !two ops  !twoh,
+{42 STORE CHARACTER                } rx<<4  !two ops  !twoh,
+{43 INSERT CHARACTER               } rx<<4  !two ops  !twoh,
+{44 EXECUTE                        } rx<<4  !two ops  !twoh,
+{45 BRANCH AND LINK                } rx<<4  !two ops  !twoh,
+{46 BRANCH ON COUNT                } rx<<4  !two ops  !twoh,
+{47 BRANCH ON CONDITION            } rx<<4  !two ops  !twoh,
+{48 LOAD HALFWORD                  } rx<<4  !two ops  !twoh,
+{49 COMPARE HALFWORD               } rx<<4  !two ops  !twoh,
+{4A ADD HALFWORD                   } rx<<4  !two ops  !twoh,
+{4B SUBTRACT HALFWORD              } rx<<4  !two ops  !twoh,
+{4C MULTIPLY HALFWORD              } rx<<4  !two ops  !twoh,
+{4D BRANCH AND SAVE                } rx<<4  !two ops  !twoh,
+{4E CONVERT TO DECIMAL             } rx<<4  !two ops  !twoh,
+{4F CONVERT TO BINARY              } rx<<4  !two ops  !twoh,
+{50 STORE                          } rx<<4  !two ops  !twoh,
+{51} null,
+{52} null,
+{53} null,
+{54 AND                            } rx<<4  !two ops  !twoh,
+{55 COMPARE LOGICAL                } rx<<4  !two ops  !twoh,
+{56 OR                             } rx<<4  !two ops  !twoh,
+{57 EXCLUSIVE OR                   } rx<<4  !two ops  !twoh,
+{58 LOAD                           } rx<<4  !two ops  !twoh,
+{59 COMPARE                        } rx<<4  !two ops  !twoh,
+{5A ADD                            } rx<<4  !two ops  !twoh,
+{5B SUBTRACT                       } rx<<4  !two ops  !twoh,
+{5C MULTIPLY                       } rx<<4  !two ops  !twoh,
+{5D DIVIDE                         } rx<<4  !two ops  !twoh,
+{5E ADD LOGICAL                    } rx<<4  !two ops  !twoh,
+{5F SUBTRACT LOGICAL               } rx<<4  !two ops  !twoh,
+{60 STORE (LONG)                   } rx<<4  !two ops  !twoh,
+{61} null,
+{62} null,
+{63} null,
+{64} null,
+{65} null,
+{66} null,
+{67 MULTIPLY (LONG TO EXTENDED)    } rx<<4  !two ops  !twoh,
+{68 LOAD (LONG)                    } rx<<4  !two ops  !twoh,
+{69 COMPARE (LONG)                 } rx<<4  !two ops  !twoh,
+{6A ADD NORMAILSED (LONG)          } rx<<4  !two ops  !twoh,
+{6B SUBTRACT NORMALISED (LONG)     } rx<<4  !two ops  !twoh,
+{6C MULTIPLY (LONG)                } rx<<4  !two ops  !twoh,
+{6D DIVIDE (LONG)                  } rx<<4  !two ops  !twoh,
+{6E ADD UNNORMAILSED (LONG)        } rx<<4  !two ops  !twoh,
+{6F SUBTRACT UNNORMALISED (LONG)   } rx<<4  !two ops  !twoh,
+{70 STORE (SHORT)                  } rx<<4  !two ops  !twoh,
+{71} null,
+{72} null,
+{73} null,
+{74} null,
+{75} null,
+{76} null,
+{77} null,
+{78 LOAD (SHORT)                   } rx<<4  !two ops  !twoh,
+{79 COMPARE (SHORT)                } rx<<4  !two ops  !twoh,
+{7A ADD NORMALISED (SHORT)         } rx<<4  !two ops  !twoh,
+{7B SUBTRACT NORMALISED (SHORT)    } rx<<4  !two ops  !twoh,
+{7C MULITPLY (SHORT TO LONG)       } rx<<4  !two ops  !twoh,
+{7D DIVIE (SHORT)                  } rx<<4  !two ops  !twoh,
+{7E ADD UNNORMALISED (SHORT)       } rx<<4  !two ops  !twoh,
+{7F SUBTRACT UNNORMALISED (SHORT)  } rx<<4  !two ops  !twoh,
+{80 SET SYSTEM MASK                } sfm<<4  !one op  !twoh,
+{81} null,
+{82 LOAD PSW                       } sfm<<4  !one op  !twoh,
+{83 DIAGNOSE                       } sfm<<4  !one op  !twoh,
+{84} null,
+{85} null,
+{86 BRANCH ON INDEX HIGH           } rs<<4  !three ops  !twoh,
+{87 BRANCH ON INDEX LOW OR EQUAL   } rs<<4  !three ops  !twoh,
+{88 SHIFT RIGHT SINGLE LOGICAL     } rs<<4  !two ops  !twoh,
+{89 SHIFT LEFT SINGLE LOGICAL      } rs<<4  !two ops  !twoh,
+{8A SHIFT RIGHT SINGLE             } rs<<4  !two ops  !twoh,
+{8B SHIFT LEFT SINGLE              } rs<<4  !two ops  !twoh,
+{8C SHIFT RIGHT DOUBLE LOGICAL     } rs<<4  !two ops  !twoh,
+{8D SHIFT LEFT DOUBLE LOGICAL      } rs<<4  !two ops  !twoh,
+{8E SHIFT RIGHT DOUBLE             } rs<<4  !two ops  !twoh,
+{8F SHIFT LEFT DOUBLE              } rs<<4  !two ops  !twoh,
+{90 STORE MULTIPLE                 } rs<<4  !three ops  !twoh,
+{91 TEST UNDER MASK                } si<<4  !two ops  !twoh,
+{92 MOVE (IMMEDIATE)               } si<<4  !two ops  !twoh,
+{93 TEST AND SET                   } sfm<<4  !one op  !twoh,
+{94 AND (IMMEDIATE)                } si<<4  !two ops  !twoh,
+{95 COMPARE LOGICAL (IMMEDIATE)    } si<<4  !two ops  !twoh,
+{96 OR (IMMEDIATE)                 } si<<4  !two ops  !twoh,
+{97 EXCLUSIVE OR (IMMEDIATE)       } si<<4  !two ops  !twoh,
+{98 LOAD MULTIPLE                  } rs<<4  !three ops  !twoh,
+{99 TRACE                          } rs<<4  !three ops  !twoh,
+{9A} null,
+{9B} null,
+{9C00 START I/O                    } extend3<<4  !one op  !twoh,
+{9D00 TEST I/O                     } extend3<<4  !one op  !twoh,
+{9E00 HALT I/O                     } extend3<<4  !one op  !twoh,
+{9F00 TEST CHANNEL                 } extend3<<4  !one op  !twoh,
+{A0} null,
+{A1} null,
+{A2} null,
+{A3} null,
+{A4} null,
+{A5} null,
+{A6} null,
+{A7} null,
+{A8} null,
+{A9} null,
+{AA} null,
+{AB} null,
+{AC STORE THEN AND SYSTEM MASK     } si<<4  !two ops  !twoh,
+{AD STORE THEN OR SYSTEM MASK      } si<<4  !two ops  !twoh,
+{AE SIGNAL PROCESSOR               } rs<<4  !three ops  !twoh,
+{AF MONITOR CALL                   } si<<4  !two ops  !twoh,
+{B0} null,
+{B1 LOAD REAL ADDRESS              } rx<<4  !two ops  !twoh,
+{B202 STORE CPU ID                 } extend1<<4  !one op  !twoh,
+{B3} null,
+{B4} null,
+{B5} null,
+{B6 STORE CONTROL                  } rs<<4  !three ops  !twoh,
+{B7 LOAD CONTROL                   } rs<<4  !three ops  !twoh,
+{B8} null,
+{B9} null,
+{BA COMPARE AND SWAP               } rs<<4  !three ops  !twoh,
+{BB COMPARE DOUBLE AND SWAP        }  rs<<4  !three ops  !twoh,
+{BC}  null,
+{BD COMPARE LOGICAL CHARACTERS UNDER MASK }  rs<<4  !three ops  !twoh,
+{BE STORE CHARACTERS UNDER MASK    }  rs<<4  !three ops  !twoh,
+{BF INSERT CHARACTERS UNDER MASK   }  rs<<4  !three ops  !twoh,
+{C0}  null,
+{C1}  null,
+{C2}  null,
+{C3}  null,
+{C4}  null,
+{C5}  null,
+{C6}  null,
+{C7}  null,
+{C8}  null,
+{C9}  null,
+{CA}  null,
+{CB}  null,
+{CC}  null,
+{CD}  null,
+{CE}  null,
+{CF}  null,
+{D0}  null,
+{D1 MOVE NUMERICS                  }  ssb<<4  !two ops  !threeh,
+{D2 MOVE (CHARACTER)               }  ssa<<4  !two ops  !threeh,
+{D3 MOVE ZONES                     }  ssb<<4  !two ops  !threeh,
+{D4 AND (CHARACTER)                }  ssa<<4  !two ops  !threeh,
+{D5 COMPARE LOGICAL (CHARACTER)    }  ssa<<4  !two ops  !threeh,
+{D6 OR (CHARACTER)                 }  ssa<<4  !two ops  !threeh,
+{D7 EXCLUSIVE OR (CHARACTER)       }  ssa<<4  !two ops  !threeh,
+{D8}  null,
+{D9 MOVE WITH KEY                  }  ssc<<4  !three ops  !threeh,
+{DA MOVE TO PRIMARY                }  ssc<<4  !three ops  !threeh,
+{DB MOVE TO SECONDARY              }  ssc<<4  !three ops  !threeh,
+{DC TRANSLATE                      }  ssa<<4  !two ops  !threeh,
+{DD TRANSLATE AND TEST             }  ssa<<4  !two ops  !threeh,
+{DE EDIT                           }  ssa<<4  !two ops  !threeh,
+{DF EDIT AND MARK                  }  ssa<<4  !two ops  !threeh,
+{E0}  null,
+{E1}  null,
+{E2}  null,
+{E3}  null,
+{E4}  null,
+{E500 LOAD ADDRESS SPACE PARAMETERS }  extend2<<4  !two ops  !threeh,
+{E6}  null,
+{E7}  null,
+{E8}  null,
+{E9}  null,
+{EA}  null,
+{EB}  null,
+{EC}  null,
+{ED}  null,
+{EE}  null,
+{EF}  null,
+{F0 SHIFT AND ROUND DECIMAL        }  ssc<<4  !three ops  !threeh,
+{F1 MOVE WITH OFFSET               }  ssb<<4  !two ops  !threeh,
+{F2 PACK                           }  ssb<<4  !two ops  !threeh,
+{F3 UNPACK                         }  ssb<<4  !two ops  !threeh,
+{F4}  null,
+{F5}  null,
+{F6}  null,
+{F7}  null,
+{F8 ZERO AND ADD                   }  ssb<<4  !two ops  !threeh,
+{F9 COMPARE DECIMAL                }  ssb<<4  !two ops  !threeh,
+{FA ADD DECIMAL                    }  ssb<<4  !two ops  !threeh,
+{FB SUBTRACT DECIMAL               }  ssb<<4  !two ops  !threeh,
+{FC MULTIPLY DECIMAL               }  ssb<<4  !two ops  !threeh,
+{FD DIVIDE DECIMAL                 }  ssb<<4  !two ops  !threeh,
+{FE}  null,
+{FF}  null
+
+
+
+   %const %string (5) %array mnems(0:255)= %c
+"","","","","SPM","BALR","BCTR","BCR","SSK","ISK","SVC","BSM","BASSM","BASR",
+ "MVCL","CLCL", "LPR","LNR","LTR","LCR","NR","CLR","OR","XR","LR","CR","AR",
+ "SR","MR","DR","ALR","SLR", "LPDR","LNDR","LTDR","LCDR","HDR","LRDR","MXR",
+ "MXDR","LDR","CDR","ADR","SDR","MDR","DDR","AWR", "SWR", "LPER","LNER","LTER",
+ "LCER","HER","LRER","AXR","SXR","LER","CER","AER","SER","MER","DER","AUR",
+ "SUR", "STH","LA","STC","IC","EX","BAL","BCT","BC","LH","CH","AH","SH","MH",
+ "BAS","CVD","CVB", "ST","","","","N","CL","O","X","L","C","A","S","M","D","AL",
+ "SL", "STD","","","","","","","MXD","LD","CD","AD","SD","MD","DD","AW","SW",
+ "STE","","","","","","","","LE","CE","AE","SE","ME","DE","AU","SU",
+ "SSM","","LPSW","DG","","","BXH","BXLE","SRL","SLL","SRA","SLA","SRDL","SLDL","SRDA","SLDA",
+ "STM","TM","MVI","TS","NI","CLI","OI","XI","LM","TRACE","","","","","","",
+ "","","","","","","","","","","","","STNSM","STOSM","SIGP","MC",
+ "","LRA","STIDP","","","","STCTL","LCTL","","","CS","CDS","","CLM","STCM","ICM",
+ "","","","","","","","","","","","","","","","",
+ "","MVN","MVC","MVZ","NC","CLC","OC","XC","","MVCK","MVCP","MVCS","TR","TRT","ED","EDMK",
+ "","","","","","LASP","","","","","","","","","","",
+ "SRP","MVO","PACK","UNPK","","","","","ZAP","CP","AP","SP","MP","DP","",""
+
+
+! The following array contains type for the extended mnemonics. X'02'-X'3C' are for the
+! B2 opcodes.  X'3C'+1 to X'3C'+2 are for the E5 opcodes.  X'3C'+3 to X'3C'+5
+! are for the 9C (*370*) opcodes.  X'3C'+5 to X'3C'+6 are for the 9D (*370*).
+! X'3C'+7 to X'3C'+8 are for the 9E  (*370*) opcodes.  X'3C'+9 to X'3C'+A are
+! for the 9F (*370*) opcodes.
+
+   %const %byte %integer %array etypes(X'02':X'3C'+2+3+2+2+2)= %c
+{B202 STORE CPU ID                 } sfm<<4  !one op  !twoh,
+{B203 STORE CHANNEL ID        *370*} sfm<<4  !one op  !twoh,
+{B204 SET CLOCK                    } sfm<<4  !one op  !twoh,
+{B205 STORE CLOCK                  } sfm<<4  !one op  !twoh,
+{B206 SET CLOCK COMPARATOR         } sfm<<4  !one op  !twoh,
+{B207 STORE CLOCK COMPARATOR       } sfm<<4  !one op  !twoh,
+{B208 SET CPU TIMER                } sfm<<4  !one op  !twoh,
+{B209 STORE CPU TIMER              } sfm<<4  !one op  !twoh,
+{B20A SET PSW KEY FROM ADDRESS     } sfm<<4  !two ops !twoh,
+{B20B INSERT PSW KEY               } sfm<<4  !no ops  !twoh,
+{B20C} null,
+{B20D PURGE TLB                    } sfm<<4  !no ops  !twoh,
+{B20E-B20F} null,null,
+{B210 SET PREFIX                   } sfm<<4  !one op  !twoh,
+{B211 STORE PEFIX                  } sfm<<4  !one op  !twoh,
+{B212 STORE CPU ADDRESS            } sfm<<4  !one op  !twoh,
+{B213 RESET REFERENCE BIT     *370*} sfm<<4  !one op  !twoh,
+{B214 START INTERPRETIVE EXXCUTION } sfm<<4  !one op  !twoh,
+{B215-B217} null,null,null,
+{B218 PROGRAM CALL                 } sfm<<4  !one op  !twoh,
+{B219 SET ADDRESS SPACE CONTROL    } sfm<<4  !one op  !twoh,
+{B21A-20} null(7),
+{B221 INVALIDATE PAGE TABLE ENTRY  } rre<<4  !two ops !twoh,
+{B222 INSERT PROGRAM MASK          } rre<<4  !one op  !twoh,
+{B223 INSERT VIRTUAL STORAGE KEY   } rre<<4  !two ops !twoh,
+{B224 INSERT ADDRESS SPACE CONTROL } rre<<4  !one op  !twoh,
+{B225 SET SECONDARY ASN            } rre<<4  !one op  !twoh,
+{B226 EXTRACT PRIMARY ASN          } rre<<4  !one op  !twoh,
+{B227 EXTRACT SECONDARY ASN        } rre<<4  !one op  !twoh,
+{B228 PROGRAM TRANSFER             } rre<<4  !two ops !twoh,
+{B229 INSERT STORAGE KEY EXTENDED  } rre<<4  !two ops !twoh,
+{B22A RESET REFERENCE BIT EXTENDED } rre<<4  !two ops !twoh,
+{B22B SET STORAGE KEY EXTENDED     } rre<<4  !two ops !twoh,
+{B22C TEST BLOCK                   } rre<<4  !two ops !twoh,
+{B22D DIVIDE (EXTENDED)            } rre<<4  !two ops !twoh,
+{B22E} null,
+{B22F} null,
+{B230 CLEAR SUBCHANNEL             } sfm<<4  !one op  !twoh,
+{B231 HALT SUBCHANNEL              } sfm<<4  !one op  !twoh,
+{B232 MODIFY SUBCHANNEL            } sfm<<4  !one op  !twoh,
+{B233 START SUBCHANNEL             } sfm<<4  !one op  !twoh,
+{B234 STORE SUBCHANNEL             } sfm<<4  !one op  !twoh,
+{B235 TEST SUBCHANNEL              } sfm<<4  !one op  !twoh,
+{B236 TEST PENDING INTERRUPTION    } sfm<<4  !one op  !twoh,
+{B237 SET ADDRESS LIMIT            } sfm<<4  !one op  !twoh,
+{B238 RESUME SUBCHANNEL            } sfm<<4  !one op  !twoh,
+{B239 STORE CHANNEL REPORT WORD    } sfm<<4  !one op  !twoh,
+{B23A STORE CHANNEL PATH STATUS    } sfm<<4  !one op  !twoh,
+{B23B RESET CHANNEL PATH           } sfm<<4  !one op  !twoh,
+{B23C SET CHANNEL MONITOR          } sfm<<4  !one op  !twoh,
+{E500 LOAD ADDRESS SPACE PARAMETERS } sse<<4  !two ops !threeh,
+{E501 TEST PROTECTION              } sse<<4  !two ops !threeh,
+{9C00 START I/O               *370*} sfm<<4  !one op  !twoh,
+{9C01 START I/O FAST RELEASE  *370*} sfm<<4  !one op  !twoh,
+{9C02 RESUME I/O              *370*} sfm<<4  !one op  !twoh,
+{9D00 TEST I/O                *370*} sfm<<4  !one op  !twoh,
+{9D01 CLEAR I/O               *370*} sfm<<4  !one op  !twoh,
+{9E00 HALT I/O                *370*} sfm<<4  !one op  !twoh,
+{9E01 HALT DEVICE             *370*} sfm<<4  !one op  !twoh,
+{9F00 TEST CHANNEL            *370*} sfm<<4  !one op  !twoh,
+{9F01 CLEAR CHANNEL           *370*} sfm<<4  !one op  !twoh
+
+! The following array contains the extended mnemonics. X'02'-X'3C' are for the
+! B2 opcodes.  X'3C'+1 to X'3C'+2 are for the E5 opcodes.  X'3C'+3 to X'3C'+5
+! are for the 9C (*370*) opcodes.  X'3C'+5 to X'3C'+6 are for the 9D (*370*).
+! X'3C'+7 to X'3C'+8 are for the 9E  (*370*) opcodes.  X'3C'+9 to X'3C'+A are
+! for the 9F (*370*) opcodes.
+
+   %const %string (5) %array emnems(X'02':X'3C'+2+3+2+2+2)= %c
+ "STIDP", "STIDC"{B203 *370*}, "SCK", "STCK", "SCKC", "STCKC", "SPT",
+ "STPT", "SPKA", "IPK", ""{B20C}, "PTLB", ""(2){B20E,B20F}, "SPX",
+ "STPX", "STAP", "RRB"{B213 *370*}, "SIE", ""(3){B215-B217}, "PC", "SAC", ""(7){B21A-B220}, "IPTE",
+ "IPM", "IVSK", "IAC", "SSAR", "EPAR", "ESAR", "PT",
+ "ISKE", "RRBE", "SSKE", "TB", "DXR", ""(2){B22E,B2F}, "CSCH",
+ "HSCH", "MSCH", "SSCH", "STSCH", "TSCH", "TPI", "SAL",
+ "RSCH", "STCRW", "STCPS", "RCHP", "SCHM", "LASP", "TPROT",
+ {9C}  "SIO", "SIOF", "RIO", {9D} "TIO", "CLRIO", {9E} "HIO", "HDV", {9F} "TCH",  "CLRCH"
+
+
+%integer halfwords, type, jj, nopds, opcode, ix, curbasereg, yy, vhs, eight
+%integer b2, b3, b4, b5, b6, h2, h3, hex1, hex2, testval, printthisline, basereg
+%integer lineno
+%string (255) wk
+%switch isw(0:lastc)
+
+
+!-----------------------------------------------------------------------
+
+%routine printcode(%integer halfwords) {param must be one, two or three}
+%string (8) htosres
+%integer htosv, htosl
+%string (6) wk
+%switch ap(1:3)
+   phex(xstart)
+   htosv = cax&((-1)<<(32-segshift)>>(32-segshift))
+   htosl = 6
+   space; wk = htos(htosv, htosl)
+   %if charno(wk, 1)='0' %start
+      charno(wk, 1) = ' '
+      %if charno(wk, 2)='0' %then charno(wk, 2) = ' '
+   %finish
+   printstring(wk)
+   spaces(5)
+   htosl = 2
+   htosv = byteinteger(xstart)
+   htosres = htos(htosv, htosl)
+   printstring(htosres)
+   htosv = byteinteger(xstart+1)
+   htosres = htos(htosv, htosl)
+   printstring(htosres)
+   ->ap(halfwords)
+ap(1):
+   spaces(12)
+   %return
+ap(2):
+   htosv = byteinteger(xstart+2)
+   htosres = htos(htosv, htosl)
+   printstring(htosres)
+   htosv = byteinteger(xstart+3)
+   htosres = htos(htosv, htosl)
+   printstring(htosres)
+   spaces(8)
+   %return
+ap(3):
+   htosv = byteinteger(xstart+2)
+   htosres = htos(htosv, htosl)
+   printstring(htosres)
+   htosv = byteinteger(xstart+3)
+   htosres = htos(htosv, htosl)
+   printstring(htosres)
+   htosv = byteinteger(xstart+4)
+   htosres = htos(htosv, htosl)
+   printstring(htosres)
+   htosv = byteinteger(xstart+5)
+   htosres = htos(htosv, htosl)
+   printstring(htosres)
+   spaces(4)
+%end;                                    ! of PRINTCODE
+
+!-----------------------------------------------------------------------
+
+
+%routine bd(%integer half)
+%integer twelve bits
+   twelve bits = half&x'FFF'
+   %if twelve bits>36 %start
+      %if hex1=0 %then hex1 = twelve bits %else hex2 = twelve bits
+   %finish
+   write(twelve bits, 4); printstring("(")
+   write(half>>12, 2); printstring(")")
+%end;                                    ! of BD
+
+!-----------------------------------------------------------------------
+
+
+%routine xbd(%integer x, half)
+%integer twelve bits
+   twelve bits = half&x'FFF'
+   %if twelve bits>36 %start
+      %if hex1=0 %then hex1 = twelve bits %else hex2 = twelve bits
+   %finish
+   write(twelve bits, 4); printstring("(")
+   write(x, 2); printstring(",")
+   write(half>>12, 2); printstring(")")
+%end;                                    ! of XBD
+
+!-----------------------------------------------------------------------
+
+
+%routine establish full lineno
+%integer kstart, halfwords, opcode, y, b2, b3, h2, basereg
+   y = xstart
+   kstart = xstart-1024
+   kstart = xstart>>segshift<<segshift %if kstart<xstart>>segshift<<segshift
+   %while kstart<y %cycle
+      opcode = byteinteger(kstart)
+      b2 = byteinteger(kstart+1); b3 = byteinteger(kstart+2);
+      h2 = b3<<8!byteinteger(kstart+3)
+      halfwords = types(opcode)&3
+      ! Update lineno, if poss
+      %if opcode=x'92' {mvi} %start
+         basereg = b3>>4
+         %if 5<=basereg<=10 %start
+            %if basereg#curbasereg %then lineno = 0 %and curbasereg = basereg
+            %if h2&x'FFF'=2 %then lineno = (lineno&x'FFFF00FF')!b2<<8 %else %if h2&x'FFF'=3 %then %c
+               lineno = (lineno&x'FFFFFF00')!b2
+         %finish
+      %finish
+      kstart = kstart+halfwords<<1
+   %repeat
+%end;                                    ! of ESTABLISH FULL LINENO
+
+!-----------------------------------------------------------------------
+
+
+!-------------------------------------------------------------------------------
+!                              |         H2        |        H3     |
+!       ilc          |    B2   |   B3    |   B4    |   B5   |  B6  |
+
+!           0        |8        |16       |24       |32
+!          +---------+----+----+
+!   RRa   0|   OP    | R1 | R2 |
+!          +---------+----+----+
+
+!          +---------+---------+
+!     b   0|   OP    |   R1    |
+!          +---------+---------+
+
+!          +-------------------+----+----+----+----+
+!   RREa  2|        OP         |\\\\\\\\\| R1 | R2 |
+!          +-------------------+----+----+----+----+
+
+!          +-------------------+----+----+----+----+
+!      b  2|        OP         |\\\\\\\\\| R1 |\\\\|
+!          +-------------------+----+----+----+----+
+
+!          +---------+----+----+----+--------------+
+!   RX    1|   OP    | R1 | X1 | B2 |      D2      | Note: ilc is 2 for LRA
+!          +---------+----+----+----+--------------+       instruction only
+
+!          +---------+----+----+----+--------------+
+!   RS    2|   OP    | R1 | R3 | B2 |      D2      |
+!          +---------+----+----+----+--------------+
+
+!          +---------+----+----+----+--------------+
+!   SI    2|   OP    |    I2   | B1 |      D1      |
+!          +---------+----+----+----+--------------+
+
+!          +-------------------+----+--------------+
+!   S     2|          OP       | B2 |      D2      |
+!   (sfm)  +-------------------+----+--------------+
+
+!          +---------+----+----+----+--------------+----+-------------+
+!   SSa   3|   OP    |    L    | B1 |      D1      | B2 |      D2     |
+!          +---------+----+----+----+--------------+----+-------------+
+
+!                    +----+----+
+!     b              | L1 | L2 |
+!                    +----+----+
+
+!                    +----+----+
+!     c              | R1 | R3 |
+!                    +----+----+
+
+!          +-------------------+----+--------------+----+-------------+
+!   SSE   3|         OP        | B1 |      D1      | B2 |      D2     |
+!          +-------------------+----+--------------+----+-------------+
+
+
+!-------------------------------------------------------------------------------
+
+
+!--------------------------------- body ----------------------------------------
+
+   lineno = 0; curbasereg = -1; printthisline = 0
+   eight = 8
+
+   xstart = xstart&(\1); cax = cax&(\1)
+   yy = finish-xstart; yy = 6 %if yy<6
+   hex1 = 0; hex2 = 0
+
+   ! Validate the area
+   testval = 0 { whole area accessible }
+   %unless dvalidate(xstart, yy, 0)=0 %start
+      ->nonvalid area %unless dvalidate(xstart, 6, 0)=0
+      testval = 1
+   %finish
+
+   %while xstart<finish %cycle
+      ->nonvalid area %unless testval=0 %or dvalidate(xstart, 6, 0)=0
+      opcode = byteinteger(xstart)
+      b2 = byteinteger(xstart+1); b3 = byteinteger(xstart+2);
+      b4 = byteinteger(xstart+3); b5 = byteinteger(xstart+4)
+      b6 = byteinteger(xstart+5)
+      h2 = b3<<8!b4
+      h3 = b5<<8!b6
+      jj = types(opcode)
+      type = jj>>4
+      halfwords = jj&3
+      nopds = (jj>>2)&3
+      %if type<extend1 %start
+         printcode(halfwords)
+         printstring(mnems(opcode))
+         wk = mnems(opcode)
+         spaces(5-length(wk))
+      %finish
+      ->isw(type)
+
+isw(rrb):
+      write(b2, 4)
+      ->ghex
+
+isw(rre):
+      b2 = b4
+isw(rr):
+      write(b2>>4, 4)
+      %if nopds>1 %then printstring(",") %and write(b2&15, 1)
+      ->ghex
+
+isw(rx):
+      write(b2>>4, 4)
+      %if nopds>1 %then printstring(",") %and xbd(b2&15, h2)
+      ->ghex
+
+isw(rs):
+      write(b2>>4, 4)
+      %if nopds>2 %then printstring(",") %and write(b2&15, 2)
+      %if nopds>1 %then printstring(",") %and bd(h2)
+      ->ghex
+
+isw(si):
+      ! Update lineno, if poss
+      %if opcode=x'92' {mvi} %start
+         basereg = h2>>12&15
+         %if 5<=basereg<=10 %start
+            %if curbasereg<0 %then establish full lineno
+            %if basereg#curbasereg %then lineno = 0 %and curbasereg = basereg
+            %if h2&x'FFF'=2 %then lineno = (lineno&x'FFFF00FF')!b2<<8 %else %if h2&x'FFF'=3 %then %c
+               lineno = (lineno&x'FFFFFF00')!b2
+            %if b5=x'92' {mvi} {also} %then printthisline = 0 {defer printing} %else %c
+               printthisline = 1
+         %finish
+      %finish
+
+      bd(h2)
+      %if nopds>1 %then printstring(",") %and write(b2, 1)
+      ->ghex
+
+isw(sfm):
+      bd(h2)
+      ->ghex
+
+isw(ssa):
+      xbd(b2+1, h2)
+      %if nopds>1 %then printstring(",") %and bd(h3)
+      ->ghex
+
+isw(ssb):
+isw(ssc):
+      xbd(b2>>4+1, h2)
+      %if nopds>1 %then printstring(",") %and xbd(b2&15+1, h3)
+      %if nopds>2 %then printstring(",") %and write(b2&15, 2)
+      ->ghex
+
+isw(sse):
+      bd(h2)
+      %if nopds>1 %then printstring(",") %and bd(h3)
+      ->ghex
+
+isw(extend3):
+      %if X'00'<=b2<=X'02' %start
+         ix = x'3C'+2+1+b2
+         %if opcode>x'9C' %start
+            %if b2=2 %then ->fail
+            ix = ix+3
+         %finish
+         %if opcode>x'9D' %then ix = ix+2
+         %if opcode>x'9E' %then ix = ix+2
+         ->ext1
+      %finish
+      ->fail
+
+isw(extend2):
+      %if X'00'<=b2<=X'01' %then ix = X'3C'+1+b2 %and ->ext1
+      ->fail
+
+isw(extend1):
+      %unless X'02'<=b2<=X'3C' %and etypes(b2)#null %then printcode(1) %and ->fail
+      ix = b2
+ext1:
+      jj = etypes(ix)
+      type = jj>>4
+      halfwords = jj&3
+      nopds = (jj>>2)&3
+      printcode(halfwords)
+      printstring(emnems(ix))
+      wk = emnems(ix)
+      spaces(5-length(wk))
+      %if nopds=no ops %then ->ghex
+      ->isw(type)
+isw(*):
+fail:
+      halfwords = 1
+ghex:
+      %if hex1>0 %or hex2>0 %start
+         spaces(68-iocp(20, 1) {outpos})
+         printstring("[x")
+         wk = htos(hex1, eight)
+         wk = substring(wk, 2, length(wk)) %while charno(wk, 1)='0'
+         printstring(wk)
+         %if hex2>0 %start
+            wk = htos(hex2, eight)
+            wk = substring(wk, 2, length(wk)) %while charno(wk, 1)='0'
+            printstring(" x")
+            printstring(wk)
+         %finish
+         hex1 = 0; hex2 = 0
+      %finish
+      %if printthisline#0 %start
+         printthisline = iocp(20, 1) {outpos}
+         %if printthisline<61 %start
+            spaces(61-printthisline)
+            printstring("Code for line"); write(lineno, 1)
+            printthisline = 0
+         %finish {else defer printing till there's room}
+      %finish
+      newline
+      cax = cax+halfwords<<1
+      xstart = xstart+halfwords<<1
+   %repeat
+   %return
+nonvalid area:
+   printline("RECODE: address validation fails")
+   %list
+%end;                                    ! of NCODE
+
+!-----------------------------------------------------------------------
+
+%routine conf
+%integer j, lines
+%record (conff) %name cur
+
+   lines = 0
+   %cycle j = 0, 1, maxconf
+      %if ssown_conf(j)>0 %start
+         printline(" Pos Def Seg fsys   rup  Size  Lev File") %if lines=0
+         cur == record(ssown_conf(j))
+         write(j, 3)
+         write(cur_defines, 3)
+         write(cur_conad>>segshift, 3)
+         write(cur_fsys, 4)
+         write(cur_rup, 4)
+         write(cur_size>>10, 6)
+         write(cur_conlevel, 4)
+         space
+         printline(cur_file)
+         lines = lines+1
+         lines = 0 %if lines>=22 %and ssown_sscomreg(25)&1>0; ! Repeat on screen
+      %finish
+   %repeat
+%end;                                    ! conf
+
+!-----------------------------------------------------------------------
+
+%routine dumpstring(%integer %name adr, %string %name s)
+
+%routine %spec bytes
+%routine %spec halves
+%routine %spec integers
+%routine %spec strings
+%routine %spec records
+
+%integer p, ch, n, c, len
+
+   p = 1
+   %cycle
+      %exit %if p>length(s)
+      ch = charno(s, p); p = p+1
+      n = 1
+      %if '0'<=ch<='9' %start
+         n = ch-'0'
+         %cycle
+            ch = charno(s, p); p = p+1
+            %exit %unless '0'<=ch<='9'
+            n = 10*n+ch-'0'
+         %repeat
+      %finish
+
+      %if ch='b' %then bytes %and %continue
+      %if ch='h' %then halves %and %continue
+      %if ch='i' %then integers %and %continue
+      %if ch='s' %or ch='r' %start
+         p = p+1 {skip '(' }
+         c = charno(s, p); p = p+1
+         len = c-'0'
+         %cycle
+            c = charno(s, p); p = p+1
+            %exit %if c=')'
+            len = 10*len+c-'0'
+         %repeat
+         %if ch='s' %then strings %else records
+         %continue
+      %finish
+      %if ch='*' %start
+         %cycle
+            ch = charno(s, p); p = p+1
+            %exit %if ch='*'
+            printsymbol(ch)
+         %repeat
+         %continue
+      %finish
+   %repeat
+   newline
+   %return
+
+%routine bytes
+%integer j
+
+   %cycle j = 1, 1, n
+      printstring(htos(byteinteger(adr), 2))
+      space
+      adr = adr+1
+   %repeat
+%end
+
+%routine halves
+%integer j
+
+   adr = (adr+1)&(-2)
+   %cycle j = 1, 1, n
+      printstring(htos(shortinteger(adr), 4))
+      space
+      adr = adr+2
+   %repeat
+%end
+
+%routine integers
+%integer j
+
+   adr = (adr+3)&(-4)
+   %cycle j = 1, 1, n
+      printstring(htos(integer(adr), 8))
+      space
+      adr = adr+4
+   %repeat
+%end
+
+%routine strings
+%integer j
+
+   %cycle j = 1, 1, n
+      printsymbol('"')
+      printstring(string(adr))
+      printsymbol('"')
+      space
+      adr = adr+len+1
+   %repeat
+%end
+
+%routine records
+%integer j
+
+   %cycle j = 1, 1, n
+!      printstring(htos(c(adr), 2))
+!      space
+      adr = adr+len
+   %repeat
+%end
+
+%end
+
+%routine dump record(%integer adr, %string %array %name s)
+%integer lo, hi, j
+
+   *lm_0, 2, s
+   *lm_0, 1, 12(2)
+   *stm_0, 1, lo
+   %cycle j = lo, 1, hi
+      dumpstring(adr, s(j))
+   %repeat
+%end
+
+%routine printuinf
+
+   %const %string (31) %array s(0:14) = %c
+"*User     *s(6)s(31)b",
+ "*Mark     *8i",
+ "*I2       *8i",
+ "*I3       *is(15)s(31)",
+ "*I4       *8i",
+ "*Scarcity *2is(11)",
+ "*Funds    *6i",
+ "*Tmodes   *r(32)",
+ "*Pslot    *is(63)",
+ "*Fclosing *8i",
+ "*Context4 *2is(15)",
+ "*Hiseg    *is(31)",
+ "*Instream *6i4b",
+ "*Isepl    *4s(1)",
+ "*Class    *2i2s(31)"
+   dumprecord(uinfseg<<segshift, s)
+%end;                                    ! printuinf
+
+!-----------------------------------------------------------------------
+
+%routine printssown
+
+   %const %string (31) %array ss(0:29) = %c
+"*Dynent4  *r(16)r(16)",
+ "*Topstk   *8i",
+ "*CurrentFD*8i",
+ "*Dynpc    *8i",
+ "*Indefault*8i",
+ "*MaxUgla  *8i",
+ "*Rcode    *8i",
+ "*InitWsize*8i",
+ "*SSMPctl3 *8i",
+ "*tempIstk *8i",
+ "*lastRcode*3i",
+ "*Basefile *16b",
+ "*Last fep *16b",
+ "*SSownfsys*14b",
+ "*CLIparm  *s(255)s(11)",
+ "*Commandpr*s(255)",
+ "*End comm *s(7)s(11)s(255)",
+ "*Path     *s(255)",
+ "*Prompt   *s(255)",
+ "*Shortname*s(255)",
+ "*SSfname  *s(255)s(255)",
+ "*SSowner  *s(6)s(3)s(7)r(1840)",
+ "*COMREG(0)*8i",
+ "*      (8)*8i",
+ "*     (16)*8i",
+ "*     (24)*8i",
+ "*     (32)*8i",
+ "*     (40)*8i",
+ "*     (48)*8i",
+ "*     (56)*5i"
+
+   dumprecord(X'4C38000', ss)
+%end;                                    ! printssown
+
+!-----------------------------------------------------------------------
+
+%routine printcom
+
+   %const %string (31) %array s(0:7)= %c
+"*OCPtype  *8i",
+ "*SLDEVtaba*6ir(3)s(8)",
+ "*TIME     *r(3)s(8)4i",
+ "*NOCPS    *8i",
+ "*SecstoCD *8i",
+ "*STOREaad *8i",
+ "*OUTptr   *8i",
+ "*CPUid    *4i"
+
+   dumprecord(comseg<<segshift, s)
+%end;                                    ! printcom
+
+!-----------------------------------------------------------------------
+
+%external %routine pvm %alias "s#pvm"
+
+%integer i, seg, nfiles, lines
+%record (conff) %name cur
+%integer %array point(lvm:uvm);          !TO HOLD POINTERS TO SSOWN_CONF
+
+   %for i = lvm, 1, uvm %cycle
+      point(i) = -1
+   %repeat
+
+   nfiles = 0
+   %for i = 0, 1, maxconf %cycle
+      %if ssown_conf(i)>0 %start
+         cur == record(ssown_conf(i))
+         %if cur_conlevel<=toploadlevel %start
+            nfiles = nfiles+1
+            seg = cur_conad>>segshift
+            %if lvm<=seg<=uvm %then point(seg) = i
+         %finish
+      %finish
+   %repeat
+
+   lines = 0
+   %for seg = lvm, 1, uvm %cycle
+      %if point(seg)>=0 %start
+         printline(" SEG HOLE  CONAD     MODE LEV    K  FSYS TYPE    FILE") %if lines=0
+         cur == record(ssown_conf(point(seg)))
+         write(seg, 3)
+         write(cur_hole>>segshift, 4)
+         spaces(2)
+         i = seg<<segshift
+         phex(cur_conad)
+         %if cur_mode>19 %then printstring(" x".htos(cur_mode, 3)) %else write(cur_mode, 4)
+         write(cur_con level, 4)
+         space
+         write(cur_size>>10, 4);         !SIZE IN KBYTES
+         write(cur_fsys, 4)
+         write(cur_type, 3)
+         spaces(3)
+         printstring(cur_file)
+         %if ssown_ssnote&8#0 %start
+            spaces(15-length(cur_file)); phex(ssown_conf(point(seg)))
+         %finish
+         newline
+         lines = lines+1
+         lines = 0 %if lines>=22 %and ssown_sscomreg(25)&1>0; ! Repeat on screen
+      %finish
+   %repeat
+   printstring("No of files in VM ="); write(ssown_connfiles, 1)
+   %if nfiles#ssown_connfiles %start
+      printstring("  BUT Nfiles in S10 is"); write(nfiles, 1)
+   %finish
+   newlines(2)
+%end;                                    ! of PVM
+
+!-----------------------------------------------------------------------
+
+
+%routine getnum(%integer %name i, flag)
+%string (80) s
+   s = spar(0)
+   flag = stoi(s, i)
+   flag = 1 %unless flag=0
+%end;                                    ! of GETNUM
+
+!-----------------------------------------------------------------------
+
+%routine giveintinfo
+%integer i, flag
+
+%constinteger topei = 22
+%const %string (24) %array pei(0:topei)= %c
+      "Floating point overflow",
+      "Floating point underflow",
+      "Fixed point overflow",
+      "Decimal underflow",
+      "Zero divide",
+      "Bound check",
+      "Size",
+      "B overflow",
+      "Stack",
+      "Privilege",
+      "Descriptor",
+      "String",
+      "Instruction",
+      "Accumulator",
+      "Esr errors",
+      "--15--",
+      "System call",
+      "Instruction counter",
+      "Disc transfer fail",
+      "Block wrong length",
+      "Hard store fault",
+      "Illegal OUT",
+      "Local Controller Error"
+
+   getnum(i, flag)
+   %if flag = 0 %and 0 <= i <= topei %start
+      printline(pei(i))
+   %finish %else %start
+      %cycle i = 0, 1, topei
+         write(i,2); space; printline(pei(i))
+      %repeat
+   %finish
+%end; ! giveintinfo
+
+!-----------------------------------------------------
+
+%external %routine regs %alias "s#regs"(%integer control, p)
+
+%integer flag
+
+%routine %spec outline(%string (8) name, %integer i)
+%routine %spec printregs(%integer lim)
+
+   newline
+   %unless-3<=p<=0 %then p = 0
+   p = (ssown_saveidpointer+p-1)&3
+   %if ssown_saveidata(p)_timeofday="" %then printline("No info.") %and %return
+   printline("Contingency at ".ssown_saveidata(p)_timeofday)
+   printstring("Class "); phex(ssown_saveidata(p)_class)
+   printstring("  Subclass "); phex(ssown_saveidata(p)_subclass)
+   printstring("  PSW0 "); phex(ssown_saveidata(p)_psw0)
+   printstring("  PSW1 "); phex(ssown_saveidata(p)_psw1)
+   printstring("  ILC=".itos(ssown_saveidata(p)_ilc))
+   printline("  CC=".itos((ssown_saveidata(p)_psw0>>12)&3))
+
+   %if control=0 %then control = 12 %else control = 36
+   printregs(control)
+   outline("Timer", integer(addr(ssown_saveidata(p)_timer)))
+   space
+   phex(integer(addr(ssown_saveidata(p)_timer)+4))
+   newline
+
+%routine outline(%string (8) name, %integer i)
+   newline
+   printstring(name.": ")
+   phex(i)
+%end;                                    ! of OUTLINE
+
+!-----------------------------------------------------------------------
+
+%routine printregs(%integer lim)
+! Bit 2**n when set means print reg n, with 16,18,20,22 meaning FPRs
+%integer j, k, reg, xx, ptd, pp, unass, kj, adr
+%long %real %array %format lfprf(0:3)
+%long %real %array %name lfpr
+%integer %array %format grf(0:47)
+%integer %array %name gr
+%string (15) tt
+%routine %spec printr(%integer xx)
+
+   j = x'FDFFFFF'
+   *ipm_1;                               ! *balr_1,0
+   *n_1, j
+   *spm_1;                               ! Mask out Underflow (Should already be masked)
+
+   gr == array(addr(ssown_saveidata(p)_gr(0)), grf)
+   lfpr == array(addr(gr(15))+4, lfprf)
+   ptd = 0
+   %for j = 0, 4, lim %cycle
+      xx = j
+      %if j<16 %start
+         %if ptd=0 %start
+            ptd = 1
+            spaces(5)
+            %for pp = 0, 1, 3 %cycle
+               printstring("G")
+               printr(xx+pp); spaces(9)
+            %repeat
+            newline
+         %finish
+         printstring("G")
+      %finish %else %if j<24 %start
+         printstring("F")
+         xx = xx-16
+         ptd = 0
+      %else
+         printstring("C")
+         xx = xx-24
+      %finish
+      printr(xx)
+      %for k = 0, 1, 3 %cycle
+         ! Avoid unassigned pattern
+         unass = 1
+         adr = addr(gr(j+k))
+         %for kj = 0, 1, 3 %cycle
+            %if byteinteger(adr+kj)#x'80' %then unass = 0
+         %repeat
+         %if unass=0 %start
+            reg = gr(j+k)
+            phex(reg)
+            tt = itos(reg)
+            tt = " ".tt %while length(tt)<3
+            %if 16<reg<=999 %then printstring("(".tt.") ") %else spaces(6)
+         %finish %else printstring("80808080      ")
+      %repeat
+      newline
+      !
+      ! FPRS as real nos
+      %if 16<=j<=23 %start
+         spaces(5)
+         %for k = 0, 2, 2 %cycle
+            printfl(lfpr((k+j-16)>>1), 13)
+            spaces(35-iocp(20, 1) {outpos}) %if k=0
+         %repeat
+         newline
+      %finish
+      !
+   %repeat
+
+%routine printr(%integer xx)
+%string (15) tt
+   tt = "R".itos(xx)."  "
+   %if xx>=10 %then length(tt) = length(tt)-1
+   printstring(tt)
+%end;                                    ! of PRINTR
+
+!-----------------------------------------------------------------------
+
+%end;                                    ! of PRINTREGS
+
+!-----------------------------------------------------------------------
+
+%end;                                    ! of REGS
+
+!-----------------------------------------------------------------------
+
+
+%routine hashregs(%integer control, %string (255) param)
+
+%integer p, flag
+
+   p = 0
+   getnum(p, flag) %unless param=""
+   regs(control, p)
+%end;                                    ! hashregs
+
+!-----------------------------------------------------------------------
+
+%routine outhex
+%integer i, flag
+   getnum(i, flag)
+   %return %if flag#0
+   printstring("X=")
+   phex(i); newline
+%end;                                    ! of OUTHEX
+
+!-----------------------------------------------------------------------
+
+
+%routine dec
+%integer i, flag
+   getnum(i, flag)
+   %return %if flag#0
+   wrsn("N=", i)
+%end;                                    ! of DEC
+
+!-----------------------------------------------------------------------
+
+
+%external %routine sprintfd %alias "s#printfd"(%integer afd, mode)
+! mode = 0 ordinary printstrings
+!        1 use shout
+%record (fdf) %name f
+%routine %spec outline(%string (12) s, %integer n)
+
+   f == record(afd)
+   outline("LINK", f_link)
+   outline("DSNUM", f_dsnum)
+   outline("STATUS", f_status)
+   outline("F77STATUS", f_f77status)
+   outline("ACCESS ROUTE", f_accessroute)
+   outline("VALID ACTION", f_validaction)
+   outline("CUR STATE", f_cur state)
+   outline("MODE OF USE", f_modeofuse)
+   outline("MODE", f_mode)
+   outline("DEV CODE", (f_devcode upper<<8)!f_devcode)
+   outline("RECTYPE", f_rectype)
+   outline("FLAGS", f_flags)
+   outline("ASVAR", f_asvar)
+   outline("AREC", f_arec)
+   outline("RECSIZE", f_recsize)
+   outline("MINREC", f_minrec)
+   outline("MAXREC", f_maxrec)
+   outline("MAXSIZE", f_maxsize)
+   outline("LASTREC", f_lastrec)
+   outline("CONAD", f_conad)
+   outline("CURREC", f_currec)
+   outline("CUR", f_cur)
+   outline("END", f_end)
+   outline("TRANSFERS", f_transfers)
+   outline("DARECNUM", f_darecnum)
+   outline("CURSIZE", f_cursize)
+   outline("DATASTART", f_datastart)
+   %if mode=0 %then printline("IDEN: ".translateshortname(f_iden, 1)) %else %c
+      shout("IDEN: ".translateshortname(f_iden, 1))
+
+%routine outline(%string (12) s, %integer n)
+%string (63) w
+   %if n=0 %then %return
+   w = s.":"
+   w = w." " %while length(w)<14
+   w = w.htos(n, 8)
+   w = w.swrite(n, 5) %if-1024<=n<=1023
+   %if mode=0 %then printline(w) %else shout(w)
+%end;                                    ! of OUTLINE
+%end;                                    ! sprintfd
+
+!-----------------------------------------------------------------------
+
+%routine printfd
+%integer afd, chan, j, pos, flag
+%record (fchanf) %name cur
+
+   getnum(chan, flag)
+   j = findchan(itos(chan), pos)
+   %if j=0 {found} %start
+      cur == record(ssown_chan(pos))
+      afd = cur_afd
+      sprintfd(afd, 0)
+   %finish
+%end;                                    ! of PRINTFD
+
+!-----------------------------------------------------------------------
+
+
+%routine pcom
+%integer i, flag
+   getnum(i, flag)
+   %return %if flag#0
+   printline("sscomreg(".itos(i).") = ".htos(ssown_sscomreg(i),8))
+%end;                                    ! of PCOM
+
+!-----------------------------------------------------------------------
+
+
+%routine scom
+%integer i, j, flag
+   getnum(i, flag)
+   %return %if flag#0
+   getnum(j, flag)
+   %if flag#0 %then %return
+   ssown_sscomreg(i) = j
+%end;                                    ! of SCOM
+
+!-----------------------------------------------------------------------
+
+
+%routine snap(%integer mode)
+!MODE=2 FOR SNAP MODE=1 FOR SNAPCH
+%integer start, n, flag
+   getnum(start, flag)
+   %return %if flag#0
+   getnum(n, flag)
+   %return %if flag#0
+   cxdump(start, n, mode)
+%end;                                    ! of SNAP
+
+!-----------------------------------------------------------------------
+
+
+%routine outdump
+!     #DUMP ADDR,LEN,OUT
+%integer start, len, afd, flag
+%string (255) out
+   getnum(start, flag)
+   %return %if flag#0
+   getnum(len, flag)
+   %return %if flag#0
+   out = spar(3)
+   %if out="" %then out = ".LP"
+   define(-82, out, afd, flag)
+   selectoutput(-82)
+   cxdump(start, len, 3)
+   selectoutput(0)
+%end;                                    ! of OUTDUMP
+
+!-----------------------------------------------------------------------
+
+
+%routine snc {SNAPCODE}
+%string (255) out
+%integer start, finish, n, afd, flag
+   getnum(start, flag)
+   %return %if flag#0
+   getnum(n, flag)
+   %return %if flag#0
+   out = spar(3)
+   %if out#"" %start
+      define(-82, out, afd, flag)
+      %if flag=0 %then selectoutput(-82)
+   %finish
+   start = start&X'FFFFFFFC'
+   finish = start+n
+   ncode(start, finish, start)
+   selectoutput(0)
+%end;                                    ! of SNAPCODE
+
+!-----------------------------------------------------------------------
+
+
+%routine sbyte
+%integer i, j, flag
+   getnum(i, flag)
+   %return %if flag#0
+   getnum(j, flag)
+   %return %if flag#0
+   byteinteger(i) = j
+%end;                                    ! of SBYTE
+
+!-----------------------------------------------------------------------
+
+
+%routine sword
+%integer i, j, flag
+   getnum(i, flag)
+   %return %if flag#0
+   getnum(j, flag)
+   %return %if flag#0
+   %if i&3#0 %start
+      printstring("
+WORD ALIGN IT!
+")
+      %return
+   %finish
+   integer(i) = j
+%end;                                    ! of SWORD
+
+!-----------------------------------------------------------------------
+
+
+%routine sstring
+%integer i, lep, lap, flag
+%string (63) s
+   getnum(i, flag)
+   %return %if flag#0
+   s = spar(2)
+   lep = length(s)+1
+   lap = addr(s)
+   move(lep, lap, i)
+%end;                                    ! of SSTRING
+
+!-----------------------------------------------------------------------
+
+
+%routine stext
+%integer i, lep, lap, flag
+%string (63) s
+   getnum(i, flag)
+   %return %if flag#0
+   s = spar(2)
+   lep = length(s)
+   lap = addr(s)+1
+   move(lep, lap, i)
+%end;                                    ! of STEXT
+
+!-----------------------------------------------------------------------
+
+
+%routine con
+%string (5) smode
+%string (63) s
+%record (reportf) r
+%integer i, j, flag
+   flag = 0
+   %cycle
+      s = spar(0)
+      %exit %if s=""
+      j = 3
+      i = 0
+      connect(s, 3, 0, 2, r_conad, r_filetype, r_datastart, r_dataend, j); !with conlevel=0
+      %if j=0 %then smode = "WRITE" %else %start
+         connect(s, 0, 0, 2, r_conad, r_filetype, r_datastart, r_dataend, j); !with conlevel=0
+         %if j=0 %then smode = "READ" %else %start
+            flag = j
+            %continue
+         %finish
+      %finish
+      i = r_conad
+      printstring(s." CONNECTED IN ".smode." MODE AT ")
+      phex(i); newline
+   %repeat
+   setreturncode(flag)
+%end;                                    ! of CON
+
+!-----------------------------------------------------------------------
+
+
+%routine dumpfile
+%record (fdf) %name f
+%record (conff) %name cur
+%record (reportf) r
+%string (32) file, out
+%integer offset, len, afd, dummy, j, flag
+!  #DUMPFILE FILE,OFFSET,LENGTH,OUT
+   file = spar(0)
+   getnum(offset, flag)
+   %return %if flag#0
+   %if offset<0 %then flag = 1 %and %return
+   getnum(len, flag)
+   %return %if flag#0
+   %if len<=0 %then len = 16
+   j = 0
+   connect(file, 0, 0, 2, r_conad, r_filetype, r_datastart, r_dataend, j); !with conlevel=0
+   %if j#0 %start
+      setreturncode(j)
+      %return
+   %finish
+   cur == record(ssown_conf(ssown_confpos))
+   %if offset+len-cur_size>0 %start
+      printstring("
+INVALID OFFSET OR LENGTH
+")
+      disconnect(ssown_shortname, j)
+      %return
+   %finish
+   out = spar(4)
+   %if out="" %then out = ".LP"
+   define(-82, out, afd, flag)
+   f == record(afd)
+   f_maxsize = X'100000';                !ALLOW 1 MBYTE FILE
+   selectoutput(-82)
+   printstring("
+
+DUMP FROM FILE ".file."
+
+")
+   cxdump(r_conad+offset, len, 3)
+   disconnect(ssown_shortname, j)
+   selectoutput(0)
+%end;                                    ! of DUMPFILE
+
+!-----------------------------------------------------------------------
+
+%external %routine hashcommand %alias "S#HASHCOMMAND"(%string (255) command, param)
+%integer start, n
+%string (255) s1, s2, outf
+%integer %array dsfipa(0:0)
+%integer i, flag
+%const %integer maxlen= 10
+%const %integer maxcom= 38
+   %const %string (maxlen) %array com(1:maxcom)= %c
+"SNAP","HEX","DEC","PCOM","SCOM","SBYTE","SWORD","SSTRING","SETBASE","CONNECT",
+
+ "SNAPCH","SSTOP","N","SNAPCODE","LISTFD","MONITOR","PVM","DUMPFILE","REGS",
+
+ "MON","QUIT","PMESS","DUMP","DUMPVM","MONLOAD","NOTE","LQUIET","STEXT",
+  "DMESS","CREGS","SPACETRACE", "UINFI", "UINFS", "CONF", "UINF", "SSOWN",
+ "COM", "INT"
+%switch csw(1:maxcom)
+
+   %if length(command)>maxlen %then length(command) = maxlen
+   !TRUNCATE IF NEC
+   flag = 0;                             !DEFAULT
+   setpar(param);                        !FOR ANALYSIS BY SPAR
+   %for i = maxcom, -1, 1 %cycle
+      %if command=com(i) %then ->csw(i)
+   %repeat
+   printline("#".command." NOT VALID")
+   ->exit
+csw(1):                                  !SNAP
+   snap(2)
+   ->exit
+csw(2):
+
+!HEX
+   outhex
+   ->exit
+csw(3):                                  !DEC
+   dec
+   ->exit
+csw(4):                                  !PCOM
+   pcom
+   ->exit
+csw(5):                                  !SCOM
+   scom
+   ->exit
+csw(6):                                  !SBYTE
+   sbyte
+   ->exit
+csw(7):                                  !SWORD
+   sword
+   ->exit
+csw(8):                                  !SSTRING
+   sstring
+   ->exit
+csw(9):                                  !SETBASE
+   %unless param->s1.(":").s2 %or param="" %then param = ssown_ssowner.":".param
+   flag = dsfi(ssown_ssowner, ssown_ssownfsys, 0, 1, param, dsfipa); !SET BASEFILE IN SFI
+   ->exit
+csw(10):                                 !CONNECT
+   con
+   ->exit
+csw(11):                                 !SNAPCH
+   snap(1)
+   ->exit
+csw(12):                                 !SSTOP -INHIBIT SPOOLER
+   ssown_inhibitspooler = 1
+   ->exit
+csw(13):                                 !N - SWITCH OFF  SPECIALS
+   ssown_job space trace = 0
+   ssown_inhibitspooler = 0
+   ssown_ssmonitor = 0
+   ssown_loadmonitor = 0
+   ssown_ssnote = 0
+   ssown_nowarnings = 0
+   ->exit
+csw(14):                                 !SNAPCODE
+   snc
+   ->exit
+csw(15):                                 !   #LISTFD(CHANNEL)
+   printfd
+   ->exit
+csw(16):                                 !MONITOR
+   %monitor
+   ->exit
+csw(17):                                 !PVM
+   pvm
+   ->exit
+csw(18):                                 !DUMPFILE
+   dumpfile
+   ->exit
+csw(19):                                 !REGS
+   hashregs(0, param);                   ! GRs only
+   ->exit
+csw(20):                                 !MON
+   ssown_ssmonitor = ssown_ssmonitor!1;  !SET MON CPU AND PAGETURNS BIT
+   ->exit
+csw(21):                                 !QUIT
+   halt
+csw(22):                                 !PMESS
+   getnum(i, flag)
+   %if flag=0 %start
+      ssown_ssfname = "<xxx>"
+      ssown_ssfname2 = ""
+      printstring(failuremessage(i))
+   %finish
+   ->exit
+csw(23):                                 !DUMP
+   outdump
+   ->exit
+csw(24): { dumpvm }
+   getnum(start, flag)
+   ->exit %unless flag=0
+   getnum(n, flag)
+   ->exit %unless flag=0
+   n = start+n %if n<1<<20
+   dump2(start, n)
+   ->exit
+csw(25):                                 !MONLOAD (N)
+   %if spar(1)="=" %start
+      %if ssown_loadmonitor#0 %start
+         printstring("Load monitor setting X")
+         phex(ssown_loadmonitor)
+         newline
+      %finish %else printline("Load monitoring off")
+      ->exit
+   %finish
+   ! Not a query if here
+   ! Check for legal number for first param
+   getnum(i, flag)
+   %if flag=0 %start
+      ssown_loadmonitor = i
+      %unless i=0 %start
+         ssown_ssnote = ssown_ssnote!1 %if ssown_ssnote&257=0
+      %finish
+   %finish %else %start
+      ssown_loadmonitor = 0
+      %if spar(1)#"" %then printline("Illegal integer ".spar(1))
+   %finish
+   ->exit
+csw(26):                                 !#NOTE
+   getnum(i, flag)
+   %if flag=0 %start
+      i = i!128 %if i&257=0
+      ssown_ssnote = i
+   %finish %else ssown_ssnote = 0
+   ->exit
+csw(27):                                 ! LQUIET
+   ssown_nowarnings = 1
+   ->exit
+csw(28):                                 ! STEXT
+   stext
+   ->exit
+csw(29):                                 !DMESS
+   getnum(i, flag)
+   %if flag=0 %start
+      flag = dflag(i, s1)
+      printstring(snl.s1.snl)
+   %finish
+   ->exit
+csw(30):                                 ! CREGS
+   hashregs(1, param);                   ! GRs, FPRs & Control regs
+   ->exit
+csw(31): { spacetrace }
+   getnum(i, flag)
+   i = 0 %unless flag=0
+   ssown_jobspacetrace = i
+   ->exit
+csw(32): { uinfi }
+   getnum(i, flag)
+   i = 0 %unless flag=0
+   wrsn("uinfi(".itos(i).")=", uinfi(i))
+   ->exit
+csw(33): { uinfs }
+   getnum(i, flag)
+   i = 0 %unless flag=0
+   printline("uinfs(".itos(i).")='".uinfs(i)."'")
+   ->exit
+csw(34): { conf }
+   conf
+   ->exit
+csw(35): { printuinf }
+   printuinf
+   ->exit
+csw(36): { printssown }
+   printssown
+   ->exit
+csw(37): { com }
+   printcom
+   ->exit
+csw(38):  { int }
+   giveintinfo
+   -> exit
+
+exit:
+%end;                                    ! of HASHCOMMAND
+
+!-----------------------------------------------------------------------
+
+
+%const %integer minmess=1
+%const %integer maxmess= 485
+
+! To update the list of messages:
+! 1 edit the file errortexts, ensuring that the last message is 'fault no'
+! 2 call COMPRESS errortexts, out, report
+! 3 edit out into S88
+%STRINGFN MESSAGE(%INTEGER N)
+!*****************************************************************************
+!*       1   Real overflow                                                   *
+!*       2   Real underflow                                                  *
+!*       3   Integer overflow                                                *
+!*       4   Decimal overflow                                                *
+!*       5   Zero divide                                                     *
+!*       6   Array bounds exceeded                                           *
+!*       7   Capacity exceeded                                               *
+!*       8   Illegal operation                                               *
+!*       9   Address error                                                   *
+!*      10   Interrupt of class                                              *
+!*      11   Unassigned variable                                             *
+!*      12   Time exceeded                                                   *
+!*      13   No more space for output &                                      *
+!*      14   Operator termination                                            *
+!*      15   Illegal exponentiation                                          *
+!*      16   Switch label not set                                            *
+!*      17   Corrupt dope vector                                             *
+!*      18   Illegal cycle                                                   *
+!*      19   Int pt too large                                                *
+!*      20   Array inside out                                                *
+!*      21   No result                                                       *
+!*      22   Param not destination                                           *
+!*      23   Arrays too large or too much recursion                          *
+!*      24   Stream not defined                                              *
+!*      25   Input ended &                                                   *
+!*      26   Symbol in data                                                  *
+!*      27   IOCP error                                                      *
+!*      28   SUB character in data                                           *
+!*      29   Stream in use                                                   *
+!*      30   Graph fault                                                     *
+!*      31   Diagnostics fail                                                *
+!*      32   Resolution fault                                                *
+!*      33   Invalid margins                                                 *
+!*      34   Symbol instead of string                                        *
+!*      35   String inside out                                               *
+!*      36   Wrong params provided                                           *
+!*      37   Unsatisfied reference                                           *
+!*      38   Unassigned switch variable                                      *
+!*      39   Illegal system call                                             *
+!*      40   Unrecoverable disc fault                                        *
+!*      41   Unrecoverable store or processor fault                          *
+!*      50   SQRT arg negative                                               *
+!*      51   LOG arg negative                                                *
+!*      52   LOG arg zero or negative                                        *
+!*      53   EXP arg out of range                                            *
+!*      54   SIN arg out of range                                            *
+!*      55   COS arg out of range                                            *
+!*      56   TAN arg out of range                                            *
+!*      57   TAN arg inappropriate                                           *
+!*      58   ASIN arg out of range                                           *
+!*      59   ACOS arg out of range                                           *
+!*      60   ATAN2 args zero                                                 *
+!*      61   SINH arg out of range                                           *
+!*      62   COSH arg out of range                                           *
+!*      63   LGAMMA arg not positive                                         *
+!*      64   LGAMMA arg too large                                            *
+!*      65   GAMMA arg out of range                                          *
+!*      66   COT arg out of range                                            *
+!*      67   COT arg inappropriate                                           *
+!*      68   Real exponentiation fault                                       *
+!*      69   Complex exponentiation fault                                    *
+!*      70   RADIUS args too large                                           *
+!*      71   ARCTAN args zero                                                *
+!*      72   ARCSIN arg out of range                                         *
+!*      73   ARCCOS arg out of range                                         *
+!*      74   HYPSIN arg out of range                                         *
+!*      75   HYPCOS arg out of range                                         *
+!*      76   Matrix bound zero or negative                                   *
+!*      77   Invalid parameter type                                          *
+!*     100   &                                                               *
+!*     101   Missing left bracket                                            *
+!*     102   Missing right bracket                                           *
+!*     103   Negative sign incorrect                                         *
+!*     104   Invalid format                                                  *
+!*     105   Decimal field too wide                                          *
+!*     106   Format width zero invalid                                       *
+!*     107   Repetition factor invalid                                       *
+!*     108   Null literal invalid                                            *
+!*     109   Integer field too large                                         *
+!*     110   No width field allowed                                          *
+!*     111   Literal in input format                                         *
+!*     112   Minimum digits greater than width                               *
+!*     113   Sorry - SSMP is not available at your terminal                  *
+!*     114   Non-repeatable edit desc                                        *
+!*     115   Comma required                                                  *
+!*     116   Decimal point not allowed                                       *
+!*     117   Unit not connected                                              *
+!*     118   File already connected                                          *
+!*     119   Access conflict                                                 *
+!*     120   RECL conflict                                                   *
+!*     121   Form conflict                                                   *
+!*     122   Status conflict                                                 *
+!*     123   Invalid status                                                  *
+!*     124   Form not suitable                                               *
+!*     125   Specifier not recognised                                        *
+!*     126   Specifiers inconsistent                                         *
+!*     127   Illegal specifier value                                         *
+!*     128   Invalid filename                                                *
+!*     129   No filename specified                                           *
+!*     130   Record length not specified                                     *
+!*     131   Max nested SSMP levels                                          *
+!*     132   Value separator missing                                         *
+!*     133   No digits specified                                             *
+!*     134   Invalid scaling                                                 *
+!*     135   Invalid logical value                                           *
+!*     136   Invalid character value                                         *
+!*     137   Value not recognised                                            *
+!*     138   Invalid repetition value                                        *
+!*     139   Illegal repetition factor                                       *
+!*     140   Invalid integer                                                 *
+!*     141   Invalid real                                                    *
+!*     142   Invalid subscript(s)                                            *
+!*     143   Invalid complex constant                                        *
+!*     144   Variable is not an array                                        *
+!*     145   Equals sign missing after name                                  *
+!*     146   Variable not in NAMELIST list                                   *
+!*     147   Invalid item                                                    *
+!*     148   Invalid character                                               *
+!*     149   Invalid variable name                                           *
+!*     150   Literal not terminated                                          *
+!*     151   Channel & not defined                                           *
+!*     152   File does not exist                                             *
+!*     153   Input file ended                                                *
+!*     154   Wrong length record                                             *
+!*     155   Incompatible format descriptor                                  *
+!*     156   Read after write                                                *
+!*     157   Write after ENDFILE                                             *
+!*     158   Record number out of range                                      *
+!*     159   No format descriptor for data item                              *
+!*     160   DECODE/ENCODE buffer fault                                      *
+!*     161   Invalid record size                                             *
+!*     162   No write permission for file &                                  *
+!*     163   Physical end of tape                                            *
+!*     164   Invalid channel number                                          *
+!*     165   Too many files defined                                          *
+!*     166   Invalid record size                                             *
+!*     167   Invalid filename &                                              *
+!*     168   File already exists                                             *
+!*     169   Output file capacity exceeded                                   *
+!*     170   Unrecoverable system I/O error                                  *
+!*     171   Invalid operation on file                                       *
+!*     172   Wrong length record                                             *
+!*     173   No access permission to file &                                  *
+!*     174   Invalid file description                                        *
+!*     175   File not available                                              *
+!*     176   File already open                                               *
+!*     177   Addresses inside out                                            *
+!*     178   File not open                                                   *
+!*     179   File description incorrect for D.A.                             *
+!*     180   File record size incorrect for D.A.                             *
+!*     181   Facility not available                                          *
+!*     182   I/O error-unspecified                                           *
+!*     183   Illegal I/O operation                                           *
+!*     184   Format text too large                                           *
+!*     185   File has conflicting use                                        *
+!*     186   Blank field not permitted                                       *
+!*     187   Invalid format specification                                    *
+!*     188   RECL too large                                                  *
+!*     189   NREC too large                                                  *
+!*     190   No more SSMP workspace                                          *
+!*     191   F77JINIT not called                                             *
+!*     192   Delete status invalid                                           *
+!*     193   Not connected for unformatted I/O                               *
+!*     194   Not connected for formatted I/O                                 *
+!*     195   BACKSPACE not allowed                                           *
+!*     196   Illegal BACKSPACE                                               *
+!*     197   DA workfiles not available                                      *
+!*     198   No filetype for a new DA file                                   *
+!*     199   Number of DA records not specified                              *
+!*     200   Direct-access not a file property                               *
+!*     201   Invalid username &                                              *
+!*     202   Invalid parameter &                                             *
+!*     203   CPU limit exceeds permitted maximum                             *
+!*     204   Output limit exceeds permitted maximum                          *
+!*     205   Resource allowance exceeded                                     *
+!*     206   Invalid control statement                                       *
+!*     207   No file access allowed                                          *
+!*     208   Data file not on-line                                           *
+!*     209   Tape access not allowed                                         *
+!*     210   Tape not available                                              *
+!*     211   CPU time exceeded                                               *
+!*     212   Job output limit exceeded                                       *
+!*     213   Termination requested                                           *
+!*     214   Invalid keyword                                                 *
+!*     215   Too many parameters                                             *
+!*     216   User not registered for file use                                *
+!*     217   Spool data area full                                            *
+!*     218   & does not exist                                                *
+!*     219   File already exists                                             *
+!*     220   Invalid filename &                                              *
+!*     221   Source library not defined                                      *
+!*     222   No object file                                                  *
+!*     223   Invalid channel number &                                        *
+!*     224   File name too long                                              *
+!*     225   Failed to create area                                           *
+!*     226   Corrupt object file                                             *
+!*     227   Too many external names                                         *
+!*     228   Program too large                                               *
+!*     229   File names must be different                                    *
+!*     230   File facilities not available                                   *
+!*     231   Invalid filename for level two user                             *
+!*     232   Files in library still connected                                *
+!*     233   VM full (Subsystem table)                                       *
+!*     234   File & in use at a lower level                                  *
+!*     235   File & is permanently connected                                 *
+!*     236   File & is not permanently connected                             *
+!*     237   Read profile fails - no SS#PROFILE                              *
+!*     238   Read profile fails - record in SS#PROFILE > caller's            *
+!*     239   Read profile fails - record in SS#PROFILE < caller's            *
+!*     240   Read profile fails - key not found                              *
+!*     241   Read profile fails - SS#PROFILE corrupt                         *
+!*     242   Read profile fails - null key supplied                          *
+!*     243   Write profile fails - record length > 4060                      *
+!*     244   Write profile fails - too many profiles                         *
+!*     256   File & not connected                                            *
+!*     257   File & not inserted                                             *
+!*     258   Illegal use of another user's file - &                          *
+!*     259   Illegal use of own file                                         *
+!*     260   Invalid connect mode                                            *
+!*     261   VM hole too small for file &                                    *
+!*     262   VM full (Director CONLIST full)                                 *
+!*     263   Wrong number of parameters                                      *
+!*     264   Invalid device code &                                           *
+!*     265   Attempt to re-define open channel                               *
+!*     266   Inconsistent file use                                           *
+!*     267   Invalid filetype &                                              *
+!*     268   Multiple BACKSPACE not allowed                                  *
+!*     269   Illegal use of PD file member                                   *
+!*     270   Invalid membername &                                            *
+!*     271   Attempt to write to PD member                                   *
+!*     272   Subsystem error                                                 *
+!*     273   File & on offer                                                 *
+!*     274   File not on offer                                               *
+!*     275   File system full                                                *
+!*     276   No free descriptors in file index                               *
+!*     277   Too many input files                                            *
+!*     278   File connected in another VM                                    *
+!*     279   Conflicting use of file & in another process                    *
+!*     280   User individual file-size limit exceeded                        *
+!*     281   Too many permissions                                            *
+!*     282   User not in permission list                                     *
+!*     283   Own permission insufficient                                     *
+!*     284   Spooler failure                                                 *
+!*     285   Looping on alias &                                              *
+!*     286   & is not a PD file                                              *
+!*     287   Member already exists                                           *
+!*     288   Member & does not exist                                         *
+!*     289   Entry & not found                                               *
+!*     290   Entry & already in directory                                    *
+!*     291   Too many entries                                                *
+!*     292   Point list full                                                 *
+!*     293   Inconsistent directory entry for &                              *
+!*     294   Illegal use of .NULL                                            *
+!*     295   Attempt to DEFINE too large file                                *
+!*     296   Inconsistent length for data area &                             *
+!*     297   Inconsistent parameters                                         *
+!*     298   No main entry in file                                           *
+!*     299   Attempt to load FORTRAN dynamically                             *
+!*     300   Table too small                                                 *
+!*     301   Channel not open                                                *
+!*     302   Channel is open                                                 *
+!*     303   Requested access not available for file &                       *
+!*     304   RECALL option not selected                                      *
+!*     305   No input files                                                  *
+!*     306   Duplicate request                                               *
+!*     307   Illegal call from within program                                *
+!*     308   User total filespace limit exceeded                             *
+!*     309   Too many files connected (Director table full)                  *
+!*     310   Attempt to overwrite PD file                                    *
+!*     311   Corrupt file &                                                  *
+!*     312   Too little space for initialised stack                          *
+!*     313   Directory & not in SEARCHDIR list                               *
+!*     314   SEARCHDIR list full                                             *
+!*     315   Cannot OBEY within OBEY                                         *
+!*     316   Cannot call macro from program                                  *
+!*     317   Document & belongs to another user                              *
+!*     318   Document & not queued or active                                 *
+!*     319   Attempt to write - no Write Ring requested                      *
+!*     320   Illegal parameter format                                        *
+!*     321   Ambiguous keyword                                               *
+!*     322   Keyword not recognised                                          *
+!*     323   Too many parameters                                             *
+!*     324   Duplicated parameter                                            *
+!*     325   Missing keyword                                                 *
+!*     326   Invalid value for & parameter                                   *
+!*     327   No such stream                                                  *
+!*     328   No input selected                                               *
+!*     329   No output selected                                              *
+!*     330   No format information supplied in DEFINEMT                      *
+!*     331   Spooler queue full                                              *
+!*     332   Invalid access permission                                       *
+!*     333   Group members cannot donate funds                               *
+!*     334   Insufficient funds                                              *
+!*     335   Insufficient privilege to use device &                          *
+!*     336   Invalid macro header                                            *
+!*     337   Too many input levels                                           *
+!*     338   Invalid parameter for READ                                      *
+!*     339   OUT parameter invalid                                           *
+!*     340   Cannot set own permission for all files                         *
+!*     341   Cannot remove all own permissions                               *
+!*     342   Cannot set .ALL archived files permission                       *
+!*     343   Cannot set self permission for archived files                   *
+!*     344   & is a filename, used where a groupname is required             *
+!*     345   & is a groupname, used where a filename is required             *
+!*     346   group & does not exist                                          *
+!*     347   Files (or groups) must be in the same file index                *
+!*     348   SIZE parameter exceeds caller's maximum filesize                *
+!*     350   File & already loaded                                           *
+!*     351   Maximum load level exceeded                                     *
+!*     352   Chain of aliases too long                                       *
+!*     353   Entry & not loaded                                              *
+!*     354   Entry & already loaded                                          *
+!*     355   Data area not wholly within file                                *
+!*     356   Overlaps previously defined data area &                         *
+!*     357   & not positive integer                                          *
+!*     358   Not callable from within user program                           *
+!*     359   Too many separate USEFOR requests                               *
+!*     360   There is no alias inserted for &                                *
+!*     361   Parameter mis-match                                             *
+!*     362   Cannot permit all files to everyone                             *
+!*     363   Unsatisfied reference &                                         *
+!*     365   A null string is not acceptable                                 *
+!*     366   File name omitted &                                             *
+!*     367   Member name omitted &                                           *
+!*     368   Member name too long &                                          *
+!*     369   Invalid character in member name &                              *
+!*     370   Name omitted                                                    *
+!*     371   No digits in number &                                           *
+!*     372   Invalid character in number &                                   *
+!*     373   Number too big &                                                *
+!*     374   Length of user name & not 6                                     *
+!*     375   Invalid character in user name &                                *
+!*     376   No file index name &                                            *
+!*     377   Invalid file index name &                                       *
+!*     378   Length of filename & > 11                                       *
+!*     379   Invalid character in filename &                                 *
+!*     380   Intermediate groupname & invalid                                *
+!*     381   Invalid date &                                                  *
+!*     382   Word & not in list                                              *
+!*     383   Ambiguous word &                                                *
+!*     384   Number not in range &                                           *
+!*     385   & is not a valid option character                               *
+!*     386   Invalid document number &                                       *
+!*     387   User & does not exist                                           *
+!*     388   Invalid device &                                                *
+!*     389   Length of user mask & not 6                                     *
+!*     390   Invalid character in user mask &                                *
+!*     391   Group name & does not end with .                                *
+!*     392   Attempting to & file of different type                          *
+!*     393   Group & already exists                                          *
+!*     394   Path & already exists                                           *
+!*     395   Interactive access to tapes not permitted                       *
+!*     396   Existing file & has different filetype                          *
+!*     397   File & has wrong filetype                                       *
+!*     398   Cannot create non-standard filename &                           *
+!*     399   Inconsistent options selected                                   *
+!*     400   Number expected for parameter &                                 *
+!*     401   Unassigned variable                                             *
+!*     402   Adjustable dimension bound is unassigned                        *
+!*     403   Assigned value is invalid                                       *
+!*     404   Assigned label is not in specified list                         *
+!*     405   Integer is not assigned with a format label                     *
+!*     406   Array bound exceeded                                            *
+!*     407   Array parameter upper bound is less than lower bound            *
+!*     408   Array parameter declared size is greater than actual            *
+!*     409   Assumed size array requires zero last dimension                 *
+!*     410   Character array param only valid for FORT77 call                *
+!*     411   Invalid character substring position value                      *
+!*     412   Character param declared size is greater than actual            *
+!*     413   Inconsistent permission &                                       *
+!*     414   T# files may not be PERMITted                                   *
+!*     415   Do loop increment is zero                                       *
+!*     418   Recursive call to a procedure                                   *
+!*     419   Wrong type or size of function                                  *
+!*     421   Wrong number of parameters                                      *
+!*     422   Wrong type or size of parameter                                 *
+!*     423   File & is marked for archiving                                  *
+!*     424   Negative unit number specified                                  *
+!*     426   A contained file is currently in use                            *
+!*     427   Max depth of nested Pdmembers                                   *
+!*     428   Filename already in directory                                   *
+!*     429   Max file definitions for single filename                        *
+!*     430   Load fail ("Maxcommon") (Should not occur)                      *
+!*     431   Load fail ("Duplicate area") (Should not occur)                 *
+!*     432   Load fail ("Area absent") (Should not occur)                    *
+!*     433   Monitor file already set                                        *
+!*     434   No free list cells on heap                                      *
+!*     435   No hole big enough on heap                                      *
+!*     436   No data on heap here to dispose of                              *
+!*     437   No heap with this ID                                            *
+!*     438   OPTION Ustacksize insufficient                                  *
+!*     452   Variable name longer than 11                                    *
+!*     454   Too many variables                                              *
+!*     455   Empty expression                                                *
+!*     456   Unrecognised character                                          *
+!*     457   Invalid string resolution construct                             *
+!*     458   * is not a string operator                                      *
+!*     459   / is not a string operator                                      *
+!*     460   Unassigned variable                                             *
+!*     461   No right hand side in boolean expr                              *
+!*     462   Boolean operator invalid                                        *
+!*     463   String resolution fails                                         *
+!*     464   Name & not known                                                *
+!*     465   Missing operator                                                *
+!*     466   Invalid statement                                               *
+!*     467   This function needs parameters                                  *
+!*     468   Function name must be followed by '('                           *
+!*     469   Bad syntax in parameter list                                    *
+!*     470   No closing quote in string                                      *
+!*     471   Consecutive operators                                           *
+!*     472   Not a unary operator                                            *
+!*     473   Missing left bracket                                            *
+!*     474   Could not evaluate expression                                   *
+!*     475   Too many requests queued                                        *
+!*     476   & is a Pdmember name used where a filename is required          *
+!*     477   Filename & has length > 9                                       *
+!*     478   Length of groupname & > 11                                      *
+!*     479   Groupname & contains illegal characters                         *
+!*     480   & is not a valid groupname                                      *
+!*     481   Contradictory use of device &                                   *
+!*     482   MP devices only accept F132 format files                        *
+!*     483   Cannot offer temporary file &                                   *
+!*     484   Cannot accept into temporary file &                             *
+!*     485   Fault no.                                                       *
+!*****************************************************************************
+%endoflist
+%CONSTINTEGER WORDMAX= 2217,DEFAULT= 2214
+%CONSTSHORTINTEGERARRAY WORD(0:WORDMAX)= %C
+          10001,     0,     1, 10002,     0,     3, 10003,     5,
+              1, 10004,     7,     1, 10005,     9,    10, 10006,
+             12,    13,    15, 10007,    17,    15, 10008,    19,
+             21, 10009,    23,    25, 10010,    26,    28,    29,
+          10011,    30,    32, 10012,    34,    15, 10013,    35,
+             36,    37,    38,    39,    41, 10014,    42,    44,
+          10015,    19,    47, 10016,    50,    52,    53,    54,
+          10017,    55,    57,    58, 10018,    19,    60, 10019,
+             61,    56,    62,    63, 10020,    12,    64,    66,
+          10021,    35,    67, 10022,    69,    53,    70, 10023,
+             73,    62,    63,    75,    62,    76,    77, 10024,
+             79,    53,    81, 10025,    83,    84,    41, 10026,
+             85,    87,    88, 10027,    89,    25, 10028,    90,
+             91,    87,    88, 10029,    79,    87,    93, 10030,
+             94,    95, 10031,    96,    99, 10032,   100,    95,
+          10033,   102,   104, 10034,    85,   106,    28,   108,
+          10035,   110,    64,    66, 10036,   112,   113,   115,
+          10037,   117,   120, 10038,    30,   122,    32, 10039,
+             19,   124,   126, 10040,   127,   130,    95, 10041,
+            127,   131,    75,   132,    95, 10050,   134,   135,
+            136, 10051,   138,   135,   136, 10052,   138,   135,
+            139,    75,   136, 10053,   140,   135,    66,    28,
+            141, 10054,   142,   135,    66,    28,   141, 10055,
+            143,   135,    66,    28,   141, 10056,   144,   135,
+             66,    28,   141, 10057,   144,   135,   145, 10058,
+            148,   135,    66,    28,   141, 10059,   149,   135,
+             66,    28,   141, 10060,   150,   152,   139, 10061,
+            153,   135,    66,    28,   141, 10062,   154,   135,
+             66,    28,   141, 10063,   155,   135,    53,   157,
+          10064,   155,   135,    62,    63, 10065,   159,   135,
+             66,    28,   141, 10066,   160,   135,    66,    28,
+            141, 10067,   160,   135,   145, 10068,     0,    47,
+             95, 10069,   161,    47,    95, 10070,   163,   152,
+             62,    63, 10071,   165,   152,   139, 10072,   167,
+            135,    66,    28,   141, 10073,   169,   135,    66,
+             28,   141, 10074,   171,   135,    66,    28,   141,
+          10075,   173,   135,    66,    28,   141, 10076,   175,
+            177,   139,    75,   136, 10077,   102,   178,   180,
+          10100,    41, 10101,   181,   183,   184, 10102,   181,
+            186,   184, 10103,   187,   189,   190, 10104,   102,
+            192, 10105,     7,   194,    62,   195, 10106,   196,
+            198,   139,   199, 10107,   201,   203,   199, 10108,
+            205,   206,   199, 10109,     5,   194,    62,    63,
+          10110,    35,   198,   194,   208, 10111,   210,    87,
+            212,   192, 10112,   213,   215,   217,   219,   198,
+          10113,   220,   221,   222,   223,    53,   224,   226,
+            227,   228, 10114,   230,   233,   234, 10115,   235,
+            236, 10116,     7,   238,    53,   208, 10117,   239,
+             53,   240, 10118,   242,   243,   240, 10119,   245,
+            247, 10120,   249,   247, 10121,   250,   247, 10122,
+            251,   247, 10123,   102,   253, 10124,   250,    53,
+            255, 10125,   257,    53,   259, 10126,   261,   263,
+          10127,    19,   266,   268, 10128,   102,   269, 10129,
+             35,   269,   271, 10130,   273,   275,    53,   271,
+          10131,   277,   278,   222,   280, 10132,   282,   283,
+            285, 10133,    35,   215,   271, 10134,   102,   287,
+          10135,   102,   289,   268, 10136,   102,    91,   268,
+          10137,   282,    53,   259, 10138,   102,   291,   268,
+          10139,    19,   291,   203, 10140,   102,   293, 10141,
+            102,   295, 10142,   102,   296, 10143,   102,   299,
+            301, 10144,   303,   223,    53,   305,   306, 10145,
+            307,   189,   285,   309,   310, 10146,   303,    53,
+             87,   311,   313, 10147,   102,   314, 10148,   102,
+             91, 10149,   102,    32,   310, 10150,   210,    53,
+            315, 10151,   317,    41,    53,    81, 10152,   242,
+            319,    53,   320, 10153,    83,   321,    84, 10154,
+            112,   275,   322, 10155,   324,   192,   327, 10156,
+            329,   309,   330, 10157,   331,   309,   332, 10158,
+            273,   334,    66,    28,   141, 10159,    35,   192,
+            327,    38,    88,   314, 10160,   336,   339,    95,
+          10161,   102,   322,   341, 10162,    35,   330,   342,
+             38,   321,    41, 10163,   344,   346,    28,   347,
+          10164,   102,   348,   334, 10165,   350,   351,   352,
+             81, 10166,   102,   322,   341, 10167,   102,   269,
+             41, 10168,   242,   243,   353, 10169,   355,   321,
+            357,    15, 10170,   127,   124,   359,    25, 10171,
+            102,    21,   360,   321, 10172,   112,   275,   322,
+          10173,    35,   361,   342,   363,   321,    41, 10174,
+            102,   321,   364, 10175,   242,    53,   224, 10176,
+            242,   243,   367, 10177,   368,    64,    66, 10178,
+            242,    53,   367, 10179,   242,   364,   190,    38,
+            370, 10180,   242,   322,   341,   190,    38,   370,
+          10181,   372,    53,   224, 10182,   359,   374, 10183,
+             19,   359,    21, 10184,   196,   378,    62,    63,
+          10185,   242,   379,   380,    93, 10186,   383,   194,
+             53,   384, 10187,   102,   192,   386, 10188,   249,
+             62,    63, 10189,   389,    62,    63, 10190,    35,
+             36,   222,   390, 10191,   392,    53,   394, 10192,
+            396,   253,   199, 10193,   398,   240,    38,   399,
+            359, 10194,   398,   240,    38,   402,   359, 10195,
+            404,    53,   208, 10196,    19,   404, 10197,   406,
+            407,    53,   224, 10198,    35,   409,    38,   411,
+            412,   406,   321, 10199,   413,    28,   406,   415,
+             53,   271, 10200,   417,    53,   411,   321,   420,
+          10201,   102,   422,    41, 10202,   102,   178,    41,
+          10203,   424,   425,   426,   384,   428, 10204,   355,
+            425,   426,   384,   428, 10205,   430,   432,    15,
+          10206,   102,   434,   436, 10207,    35,   321,   361,
+            208, 10208,   438,   321,    53,   439, 10209,   441,
+            361,    53,   208, 10210,   441,    53,   224, 10211,
+            424,   442,    15, 10212,   443,    39,   425,    15,
+          10213,   444,   447, 10214,   102,   449, 10215,   350,
+            351,   451, 10216,   453,    53,   454,    38,   321,
+             93, 10217,   456,    88,   457,   458, 10218,    41,
+            319,    53,   320, 10219,   242,   243,   353, 10220,
+            102,   269,    41, 10221,   459,   461,    53,    81,
+          10222,    35,   463,   321, 10223,   102,   348,   334,
+             41, 10224,   242,   310,    62,   465, 10225,   466,
+            363,   468,   457, 10226,    55,   463,   321, 10227,
+            350,   351,   470,   472, 10228,   473,    62,    63,
+          10229,   242,   472,   475,   476,   477, 10230,   242,
+            479,    53,   224, 10231,   102,   269,    38,   481,
+            482,   483, 10232,   484,    87,   461,   485,   240,
+          10233,   486,   458,   487,   490, 10234,   242,    41,
+             87,    93,   226,   411,   492,   481, 10235,   242,
+             41,   223,   493,   240, 10236,   242,    41,   223,
+             53,   493,   240, 10237,   329,   496,   498,   221,
+            499,   500, 10238,   329,   496,   498,   221,   322,
+             87,   500,   503,   504, 10239,   329,   496,   498,
+            221,   322,    87,   500,   506,   504, 10240,   329,
+            496,   498,   221,   507,    53,   508, 10241,   329,
+            496,   498,   221,   500,   509, 10242,   329,   496,
+            498,   221,   511,   507,   512, 10243,   331,   496,
+            498,   221,   322,   275,   503,   514, 10244,   331,
+            496,   498,   221,    62,   351,   516, 10256,   242,
+             41,    53,   240, 10257,   242,    41,    53,   518,
+          10258,    19,    93,    28,   520,   522,   321,   221,
+             41, 10259,    19,    93,    28,   524,   321, 10260,
+            102,   525,   527, 10261,   486,   528,    62,   529,
+             38,   321,    41, 10262,   486,   458,   530,   532,
+            534, 10263,   112,   334,    28,   451, 10264,   102,
+            536,   538,    41, 10265,   539,   363,   541,   367,
+            348, 10266,   543,   321,    93, 10267,   102,   409,
+             41, 10268,   546,   404,    53,   208, 10269,    19,
+             93,    28,   548,   321,   549, 10270,   102,   551,
+             41, 10271,   539,   363,   330,   363,   548,   549,
+          10272,   553,    25, 10273,   242,    41,   360,   555,
+          10274,   242,    53,   360,   555, 10275,   242,   124,
+            458, 10276,    35,   556,   557,    87,   321,   560,
+          10277,   350,   351,   212,   352, 10278,   242,   240,
+             87,   520,   486, 10279,   561,    93,    28,   321,
+             41,    87,   520,   564, 10280,   453,   566,   568,
+            425,    15, 10281,   350,   351,   570, 10282,   453,
+             53,    87,   342,   313, 10283,   573,   342,   574,
+          10284,   577,   579, 10285,   581,   360,   583,    41,
+          10286,    41,   223,    53,   411,   548,   321, 10287,
+            584,   243,   353, 10288,   584,    41,   319,    53,
+            320, 10289,   586,    41,    53,   508, 10290,   586,
+             41,   243,    87,   587, 10291,   350,   351,   589,
+          10292,   591,   313,   458, 10293,   543,   587,   592,
+             38,    41, 10294,    19,    93,    28,   593, 10295,
+            539,   363,   595,    62,    63,   321, 10296,   543,
+            275,    38,    88,   457,    41, 10297,   543,   451,
+          10298,    35,   597,   592,    87,   321, 10299,   539,
+            363,   598,   599,   601, 10300,   604,    62,   529,
+          10301,   317,    53,   367, 10302,   317,   223,   367,
+          10303,   605,   361,    53,   224,    38,   321,    41,
+          10304,   607,   609,    53,   611, 10305,    35,   212,
+            352, 10306,   613,   615, 10307,    19,   126,   617,
+            618,   620, 10308,   453,   622,   623,   425,    15,
+          10309,   350,   351,   352,   240,   530,   232,   534,
+          10310,   539,   363,   625,   548,   321, 10311,    55,
+            321,    41, 10312,   350,   627,    37,    38,   629,
+            632, 10313,   633,    41,    53,    87,   635,   313,
+          10314,   635,   313,   458, 10315,   637,   639,   618,
+            639, 10316,   637,   126,   640,   617,   620, 10317,
+            641,    41,   643,   363,   520,   483, 10318,   641,
+             41,    53,   645,    75,   647, 10319,   539,   363,
+            330,   221,   499,   331,   649,   447, 10320,    19,
+            178,   192, 10321,   650,   449, 10322,   652,    53,
+            259, 10323,   350,   351,   451, 10324,   654,   178,
+          10325,   181,   449, 10326,   102,   268,    38,    41,
+            178, 10327,    35,   656,   657, 10328,    35,   212,
+            611, 10329,    35,    39,   611, 10330,    35,   192,
+            659,   512,    87,   662, 10331,   577,   664,   458,
+          10332,   102,   361,   342, 10333,   665,   666,   668,
+            670,   672, 10334,   673,   672, 10335,   673,   676,
+            363,    93,   536,    41, 10336,   102,   640,   678,
+          10337,   350,   351,   212,   280, 10338,   102,   178,
+             38,   680, 10339,   681,   178,   199, 10340,   637,
+             54,   524,   342,    38,   682,   352, 10341,   637,
+            683,   682,   524,   570, 10342,   637,    54,   685,
+            686,   352,   342, 10343,   637,    54,   688,   342,
+             38,   686,   352, 10344,    41,   223,   411,   689,
+            691,   692,   411,   693,   223,   236, 10345,    41,
+            223,   411,   695,   691,   692,   411,   269,   223,
+            236, 10346,   698,    41,   319,    53,   320, 10347,
+            484,   699,   700,   475,   476,    87,   702,   703,
+            321,   560, 10348,   704,   178,   426,   504,   428,
+            705, 10350,   242,    41,   243,   707, 10351,   709,
+            598,   481,    15, 10352,   711,    28,   712,    62,
+            465, 10353,   586,    41,    53,   707, 10354,   586,
+             41,   243,   707, 10355,   438,   457,    53,   714,
+            618,   321, 10356,   716,   718,    81,    88,   457,
+             41, 10357,    41,    53,   157,   293, 10358,   398,
+            720,   617,   618,   483,   620, 10359,   350,   351,
+            722,   724,   726, 10360,   728,   223,   499,   583,
+            518,    38,    41, 10361,   729,   731, 10362,   637,
+            733,   682,   352,   363,   735, 10363,   117,   120,
+             41, 10365,   156,   511,   108,   223,    53,   737,
+          10366,   242,   310,   739,    41, 10367,   584,   310,
+            739,    41, 10368,   584,   310,    62,   465,    41,
+          10369,   102,    91,    87,   549,   310,    41, 10370,
+            741,   739, 10371,    35,   215,    87,   334,    41,
+          10372,   102,    91,    87,   334,    41, 10373,   413,
+             62,   742,    41, 10374,   743,    28,   483,   310,
+             41,    53,   745, 10375,   102,    91,    87,   483,
+            310,    41, 10376,    35,   321,   560,   310,    41,
+          10377,   102,   321,   560,   310,    41, 10378,   743,
+             28,   269,    41,   503,   746, 10379,   102,    91,
+             87,   269,    41, 10380,   747,   693,    41,   199,
+          10381,   102,   750,    41, 10382,   751,    41,    53,
+             87,   313, 10383,   650,   752,    41, 10384,   413,
+             53,    87,   141,    41, 10385,    41,   223,    53,
+            411,   753,   609,    91, 10386,   102,   754,   334,
+             41, 10387,   453,    41,   319,    53,   320, 10388,
+            102,   536,    41, 10389,   743,    28,   483,   756,
+             41,    53,   745, 10390,   102,    91,    87,   483,
+            756,    41, 10391,   665,   310,    41,   319,    53,
+            346,   757,   758, 10392,   759,   363,    41,   321,
+             28,   477,   180, 10393,   665,    41,   243,   353,
+          10394,   761,    41,   243,   353, 10395,   762,   361,
+            363,   765,    53,   384, 10396,   766,   321,    41,
+            379,   477,   409, 10397,   242,    41,   379,   768,
+            409, 10398,   637,   468,   769,   269,    41, 10399,
+            543,   772,   611, 10400,   413,   774,    38,   178,
+             41, 10401,    30,    32, 10402,   776,   778,   177,
+            223,   780, 10403,   782,   268,   223,   199, 10404,
+            782,    52,   223,    53,    87,   271,   313, 10405,
+              5,   223,    53,   784,   757,   411,   192,    52,
+          10406,    12,   177,    15, 10407,    12,   178,   786,
+            177,   223,   787,   219,   492,   177, 10408,    12,
+            178,   788,   341,   223,   217,   219,   790, 10409,
+            792,   341,   306,   794,   139,   796,   778, 10410,
+            797,   306,   799,   800,   753,    38,   801,   126,
+          10411,   102,    91,   803,   805,   268, 10412,   797,
+            799,   788,   341,   223,   217,   219,   790, 10413,
+            543,   342,    41, 10414,   807,   352,   808,    53,
+            476,   809, 10415,   811,   812,   813,   223,   139,
+          10418,   815,   126,   363,   411,   817, 10419,   112,
+            180,    75,   341,    28,   819, 10421,   112,   334,
+             28,   451, 10422,   112,   180,    75,   341,    28,
+            178, 10423,   242,    41,   223,   821,    38,   823,
+          10424,   187,   825,   334,   271, 10426,   156,   826,
+            321,   223,   828,    87,    93, 10427,   277,   830,
+             28,   278,   831, 10428,   833,   243,    87,   587,
+          10429,   277,   321,   835,    38,   838,   269, 10430,
+            840,    99,   841,   845,    53,   847, 10431,   840,
+             99,   849,   852,   845,    53,   847, 10432,   840,
+             99,   854,   856,   845,    53,   847, 10433,   858,
+            321,   243,    54, 10434,    35,   556,   313,   860,
+            360,   861, 10435,    35,   528,   742,   862,   360,
+            861, 10436,    35,    88,   360,   861,   864,   363,
+            865,    28, 10437,    35,   861,   757,   867,   868,
+          10438,   869,   871,   574, 10452,   303,   310,   873,
+            219,   746, 10454,   350,   351,   875, 10455,   877,
+            878, 10456,   880,    91, 10457,   102,   108,   883,
+            885, 10458,   887,   223,    53,   411,   108,   888,
+          10459,   890,   223,    53,   411,   108,   888, 10460,
+             30,    32, 10461,    35,   186,   891,   892,    87,
+            893,   895, 10462,   896,   888,   199, 10463,   110,
+            883,   498, 10464,   741,    41,    53,   898, 10465,
+            181,   888, 10466,   102,   436, 10467,   899,   819,
+            900,   451, 10468,   901,   310,   475,   476,   903,
+            905,   906, 10469,   908,   909,    87,   178,   313,
+          10470,    35,   911,   913,    87,   108, 10471,   914,
+            917, 10472,   398,   411,   919,   888, 10473,   181,
+            183,   184, 10474,   920,    53,   921,   878, 10475,
+            350,   351,   726,   645, 10476,    41,   223,   411,
+            923,   310,   691,   692,   411,   269,   223,   236,
+          10477,   833,    41,   379,   275,   503,   925, 10478,
+            743,    28,   693,    41,   503,   746, 10479,   926,
+             41,   928,   930,   932, 10480,    41,   223,    53,
+            411,   753,   693, 10481,   934,    93,    28,   536,
+             41, 10482,   937,   938,   800,   940,   942,   192,
+            352, 10483,   637,   555,   944,   321,    41, 10484,
+            637,   940,   946,   944,   321,    41, 10485,   947,
+            948, 10000
+%CONSTINTEGERARRAY LETT(0: 948)= %C
+          X'00B21952',X'A6CA5DAF',X'00037BEC',X'B2964BB5',
+          X'00DEFB26',X'A7974B89',X'00000CA5',X'ADA63944',
+          X'00000B21',X'00BF295A',X'A4A76A64',X'00000025',
+          X'39872C81',X'A4BB5BE2',X'00000033',X'A5963E25',
+          X'00024964',X'A3870843',X'00039D29',X'A796CB09',
+          X'00000B21',X'A1CA5C2F',X'00BAFA74',X'A5CA4901',
+          X'00000CF3',X'32BF2CA5',X'B2974B89',X'00D30D72',
+          X'000009AF',X'33CE1B23',X'B3CE1B95',X'2496E9E9',
+          X'A1A72876',X'00025B22',X'0096DA54',X'00000BCE',
+          X'00972BED',X'258E1C33',X'00032BE6',X'B5C34D6F',
+          X'00000034',X'000001FF',X'A1CA5C0F',X'00032BF4',
+          X'A9B72974',X'AFA7486E',X'0000002E',X'AEBF0E25',
+          X'A1A74BA5',X'00BAFA74',X'A3D29DD3',X'00000028',
+          X'2C96286C',X'00034BEE',X'00034973',X'B5CB2BC3',
+          X'00000D30',X'00970BE4',X'AFD23976',X'00000032',
+          X'25B23E63',X'00034B89',X'0002FBF4',X'259F286C',
+          X'A4A73BA9',X'00000025',X'00034D6F',X'ACD73972',
+          X'00000034',X'2D872850',X'A9D33964',X'AFA7486E',
+          X'0000002E',X'B9872C81',X'00000033',X'00000CAF',
+          X'00A23D6D',X'B2D63972',X'00BAFA73',X'A1972D13',
+          X'0000002D',X'AEA66964',X'00000925',X'34D70B89',
+          X'24964BA5',X'AF8ADE53',X'0000002C',X'00000BA9',
+          X'00874864',X'004033C9',X'00002553',X'A1CA1A23',
+          X'00CA5D23',X'00025CF5',X'28C21C87',X'34B35866',
+          X'AE9E1A44',X'A3A74CEF',X'00000033',X'00B29866',
+          X'ACBF3952',X'2EBE9D35',X'AC876B89',X'00000929',
+          X'A99F286D',X'00000CEE',X'A5D33BA9',X'00000921',
+          X'AEA72D33',X'00000027',X'AEA72D13',X'00000027',
+          X'27BAFC97',X'AD872870',X'00000033',X'A9DAFCB0',
+          X'00024964',X'B4873B95',X'A5A66CE9',X'00000024',
+          X'B2966972',X'00963BA5',X'A3D29DF3',X'00000028',
+          X'A5D33E73',X'0000002D',X'00B2C863',X'A3972B95',
+          X'A1CA5DAF',X'00025B22',X'008F3A64',X'25CAFD33',
+          X'A58EFCB0',X'00CAFCF3',X'00512453',X'00027CA1',
+          X'B486796E',X'00025DA9',X'000073CC',X'00BF297A',
+          X'00010605',X'259EE872',X'0000E253',X'000133C3',
+          X'0000E054',X'B0C21BA9',X'A9CB0BF2',X'00025D21',
+          X'003894C1',X'004CF0C1',X'BF381501',X'00000013',
+          X'00CE7CA1',X'0020E253',X'002133C3',X'8D3411CC',
+          X'00000001',X'B4A73BF0',X'00025DA9',X'0134D047',
+          X'000143C3',X'ACC2DBC3',X'00000E25',X'95244052',
+          X'00000013',X'81503481',X'0000000E',X'894C3481',
+          X'0000000E',X'8F0C3481',X'00000013',X'894D0648',
+          X'0000000E',X'8F0D0648',X'00000013',X'A9CB484D',
+          X'00000038',X'24BB5BE2',X'AD872870',X'00CA5D25',
+          X'00970E74',X'A9CF3A4D',X'000009EE',X'00D2696C',
+          X'AB8E1CA2',X'00000D25',X'34A27A72',X'B486794E',
+          X'00025DA9',X'00BA7A73',X'B2BE3BA9',X'00D23972',
+          X'A1B72BE6',X'00000034',X'24B25A66',X'00964A77',
+          X'A1B72BC6',X'00000034',X'28D24A77',X'AC876BA9',
+          X'00000929',X'B4970952',X'2EBE9D29',X'AFD23866',
+          X'00000032',X'00B2CD4E',X'B2974A6C',X'00000B21',
+          X'B7BECB21',X'00000925',X'B2974A4C',X'00000B21',
+          X'34D70BA9',X'ADA6EA4D',X'00000B75',X'B4A67A64',
+          X'00000033',X'B4865CA7',X'00000CA5',X'00BA1A34',
+          X'39CB2BD3',X'000003BF',X'0040D4D3',X'00000CE9',
+          X'ACA61DA1',X'0096C8A1',X'00000D21',X'00CB5BF9',
+          X'A9B72974',X'0002C86E',X'8EFEEBCE',X'A1970972',
+          X'25B22874',X'00D29925',X'008F3964',X'21B6DBC3',
+          X'A9D71972',X'00024972',X'34BA9BF0',X'00D29B95',
+          X'A5BAEBE3',X'00925D23',X'0096CA46',X'A1972B21',
+          X'00000E64',X'B39638C1',X'00000033',X'AC9AEBE3',
+          X'000348E9',X'00303152',X'00B72BC6',X'B5D21D13',
+          X'00000033',X'B5D21D33',X'00000033',X'A1D29D73',
+          X'00025B22',X'A98E5C13',X'00CA5A66',X'A7BE3972',
+          X'24973A6E',X'A98E5C13',X'33CA5A66',X'AEBE3BA9',
+          X'A5D33A73',X'00000D2E',X'A98E5C33',X'00CA5A66',
+          X'25D6C876',X'AE96CA66',X'00025B61',X'A98E5C33',
+          X'00925A66',X'B2BE3952',X'00000024',X'B49EE96C',
+          X'00000028',X'0003884D',X'A5D3396E',X'00000024',
+          X'AC97696C',X'00000033',X'25D6C856',X'B2870973',
+          X'00CAFD21',X'A9CF3A6D',X'000009EE',X'A9B218F3',
+          X'000009EE',X'A3A67BEC',X'00000B21',X'B4970972',
+          X'2EBE9D29',X'A7974BA9',X'00000CA5',X'00B21972',
+          X'A3CE2D73',X'BFD30A72',X'002BFCC9',X'ACC2DBE3',
+          X'00000E25',X'B4CEEBE3',X'00034BA1',X'A1A72856',
+          X'00025B22',X'00000BA1',X'39872CA1',X'AC875C45',
+          X'00000033',X'329749A1',X'0096D86E',X'8C14D04E',
+          X'000144C9',X'00D33A6C',X'00B65D29',X'A9B72974',
+          X'2497486E',X'AEBA1A03',X'00000B25',X'00CE5BE4',
+          X'34CE9E25',X'0096CA66',X'B2BE3972',X'00000024',
+          X'ADBE3B89',X'A2A74870',X'0000096C',X'B28F3964',
+          X'32BF4C29',X'00921952',X'25D29CB7',X'25D29C97',
+          X'89184385',X'0000014C',X'A58ADD6E',X'00000032',
+          X'843C3144',X'8E150FC5',X'001443C3',X'A59A6D62',
+          X'00000032',X'0097AA73',X'A9B72970',X'2EBE9CF3',
+          X'A9CF9A10',X'0002C863',X'00024BA5',X'00970874',
+          X'AEBA1A23',X'00000B25',X'0002FBD4',X'00E6E86D',
+          X'3396CA66',X'B4CE9E25',X'00000033',X'B5C34D4F',
+          X'00000034',X'A3870863',X'00039D29',X'003D0FC9',
+          X'00000BAF',X'B39638E1',X'00000033',X'00000BF4',
+          X'B28F3964',X'AFA74C29',X'0000002E',X'00BA5C2F',
+          X'A5CA4901',X'00CE5CF3',X'BF04FFC4',X'0000000F',
+          X'ACA63846',X'00039D29',X'B2BF2CA5',X'B3BB53BF',
+          X'A6A63970',X'00024969',X'00D38974',X'00033868',
+          X'AC9AEBE3',X'AEA748E9',X'00000027',X'2BBA1B02',
+          X'A9B72970',X'00925D34',X'A98E5C33',X'B4863A66',
+          X'0002EBE9',X'000C548E',X'B3AF2BF7',X'00963870',
+          X'98FD8FC6',X'1424E24A',X'A5B2C863',X'00000024',
+          X'B496C944',X'00000025',X'00034BCE',X'B2BE6BB5',
+          X'A5D3486D',X'00000024',X'A1B72BE6',X'00925D34',
+          X'932C3042',X'00143050',X'00000044',X'A6AF2BF7',
+          X'00CE5B29',X'B496CA66',X'00025C39',X'00000021',
+          X'0003796E',X'A58ADD4E',X'00000032',X'B2BE3972',
+          X'00000CE4',X'A3972A44',X'A384EFF4',X'00CF3963',
+          X'A5C2FCB0',X'00039D32',X'AECA5CF5',X'00025B61',
+          X'00015403',X'34A6DA6C',X'A5963E25',X'00000CE4',
+          X'ADA7886D',X'00000B75',X'B5BF3952',X'000258F2',
+          X'B7BECB21',X'00963BA1',X'B2D2EBE3',X'00000B2F',
+          X'A5D21D33',X'00D2E96D',X'00874844',X'AC3BFBAF',
+          X'00025BA9',X'00970854',X'0096DA74',X'00022BCA',
+          X'A9B72954',X'AFA7486E',X'0000002E',X'A5D71972',
+          X'00925D33',X'AFDF996B',X'00000932',X'AD872870',
+          X'33CA5D25',X'00CA5CD5',X'B3A67972',X'24972974',
+          X'2CBEFC13',X'00865CA1',X'00B2CD66',X'A3CB5BD3',
+          X'00000025',X'A1CA2A6C',X'00000E72',X'A396A8AF',
+          X'00000034',X'009EEBEC',X'A5B29846',X'00000024',
+          X'B4865CA3',X'00000025',X'B2974E25',X'0002C86E',
+          X'3396D86E',X'B29EFC90',X'00000B61',X'00D33D6D',
+          X'00000962',X'A59A6A64',X'00D2E972',X'ACA63866',
+          X'33969D29',X'2C97696C',X'0002FDF4',X'00CA5CF5',
+          X'3396CA46',X'2CB29D33',X'00000356',X'A2D5327F',
+          X'A5D33E73',X'0000002D',X'A5B22874',X'000002BF',
+          X'32977BEC',X'A1B72970',X'ACD2E96E',X'00000039',
+          X'A99AFCB0',X'0000096C',X'33B29866',X'00000BEE',
+          X'9013F4D3',X'8C2463D2',X'00000005',X'000007FF',
+          X'A5B2C863',X'00CC8FF2',X'0000077F',X'0003996B',
+          X'24BB5BE6',X'B5CB2BE3',X'00000D30',X'00B2CD6E',
+          X'ACC30D73',X'00024969',X'BF47F57F',X'00011FD7',
+          X'A99AFCB0',X'0003396C',X'B2973BA9',X'00024974',
+          X'A8D2FBA1',X'00000CA5',X'BFCA5CF5',X'00000CC8',
+          X'0002EDEF',X'A5BAEBE3',X'00000D23',X'00964BED',
+          X'0096CBE8',X'2CB21B73',X'B2A4427F',X'32BF48E5',
+          X'8930E3C3',X'00000513',X'BFB2CD66',X'0000000A',
+          X'A3A76964',X'00000025',X'00964BE3',X'AD974D01',
+          X'00000D30',X'A43BF972',X'25BA99A5',X'AEBE3B89',
+          X'A5D33A73',X'00000D2E',X'A9D2CD4D',X'00025B30',
+          X'00000110',X'A58AD96D',X'00000032',X'A58AD96D',
+          X'25B61BB2',X'B9CE2D53',X'00B65D33',X'329669AF',
+          X'00965CA6',X'B28F3964',X'B2BF4C29',X'00000033',
+          X'38964BA9',X'AC9AEBC3',X'AEA748E9',X'00000027',
+          X'A58EFCB0',X'00000CF3',X'B6A64BA9',X'2C875929',
+          X'BF96CA66',X'25EA9CCE',X'A9B72970',X'AEBE9CF3',
+          X'00000033',X'0002EDCF',X'A6D73BA9',X'A5A63A66',
+          X'00000D2E',X'ACBEFC13',X'00000CA5',X'B5B29866',
+          X'00000972',X'A9C2FBCC',X'000009EE',X'33869B21',
+          X'A58AD94D',X'00000032',X'39CB4B85',X'A3972A64',
+          X'00E72BF4',X'A9CB4BA5',X'00000CE5',X'34BA9BD0',
+          X'39CB4BA5',X'8C54E3FF',X'0000000C',X'8E246144',
+          X'00000005',X'00BA986D',X'00921BEC',X'925123C6',
+          X'00000381',X'AD86EE64',X'ACB218E9',X'00000039',
+          X'25B22854',X'A5D71952',X'00925D33',X'8C043152',
+          X'0000000C',X'AFA74C2F',X'0000002E',X'A396C973',
+          X'00024974',X'A9B30D44',X'00974863',X'A5D71972',
+          X'00000D33',X'00B6FCA6',X'A9A34A77',X'0000002E',
+          X'B29EFCB0',X'00000B61',X'2C874BF4',X'B396CA66',
+          X'00963870',X'B7CA5DAF',X'00974A72',X'ACD34A6C',
+          X'00000025',X'A9D29BA9',X'A5CE9B21',X'00000024',
+          X'2B8E1D33',X'A3972A44',X'00E72BF4',X'83481153',
+          X'00489108',X'AFBAE843',X'00000034',X'0064508F',
+          X'2FCA386D',X'ADD63BC4',X'00034BA5',X'AEBEC962',
+          X'00000CE7',X'A5D65D71',X'00000024',X'B6A748E1',
+          X'00000025',X'009EEA52',X'A7A62B41',X'00CF5BF5',
+          X'AFDF994B',X'00000932',X'A9B30D44',X'24974863',
+          X'00A23D73',X'A1972D33',X'0000002D',X'B2BE6BA9',
+          X'AFA7486D',X'0000002E',X'8E246144',X'00014345',
+          X'25D65D71',X'30D6FC87',X'A58AD96D',X'00000CF2',
+          X'AFBAE863',X'00000034',X'B486EBE4',X'00000025',
+          X'3392ED66',X'A6D73B89',X'A5A63A66',X'00000D2E',
+          X'A9DA9CB0',X'0096796C',X'A5921968',X'00000032',
+          X'00101152',X'0001454F',X'0002CB21',X'B6BED972',
+          X'00000025',X'0C3013FF',X'A9A23CA1',X'00024976',
+          X'009AC973',X'AE96CA66',X'0DFE5B61',X'00925CF5',
+          X'25CA5A37',X'B0D6FCA7',X'0096D86E',X'B0D6FCA7',
+          X'BF96D86E',X'0000000D',X'30D6FCA7',X'00CAF27F',
+          X'B0D6FCA7',X'0000AFF3',X'00025A34',X'0096D873',
+          X'0015A253',X'B396CA66',X'00025EA9',X'A5921BEC',
+          X'00000024',X'ADA7884D',X'00000B75',X'2EA61A03',
+          X'B3869B21',X'00000CE5',X'ACB2FA37',X'00000039',
+          X'ACCA5D8F',X'00033C21',X'A9DA5CB0',X'39B33D6F',
+          X'A1B2C863',X'00025B22',X'B2870973',X'00025D21',
+          X'8F1854D5',X'00000012',X'A5D71972',X'00033D33',
+          X'25CA5A14',X'AD872850',X'00CA5D25',X'8EFF3A6D',
+          X'288F486D',X'A9B72970',X'00000034',X'B9CA5DA5',
+          X'00025BAF',X'B09638E1',X'25B22874',X'B4D29B6F',
+          X'00000925',X'0096D84E',X'00027A62',X'B49EE94C',
+          X'00000028',X'000005FF',X'004BF4BF',X'B2974B89',
+          X'A1A6496D',X'00000974',X'00974864',X'00932BD7',
+          X'00932BF7',X'24A6C876',X'ADD63BE4',X'00034BA5',
+          X'00AF386D',X'00A34A77',X'000003FF',X'AD974D01',
+          X'27BA9D30',X'00A34850',X'B2974B89',X'B6A748E1',
+          X'00000025',X'33970874',X'B4CE9E05',X'00027BA9',
+          X'27BAFCB7',X'8EFEEBEE',X'A4BA1D33',X'00024CA1',
+          X'AFA74C2F',X'00000CEE',X'A3970E25',X'00024974',
+          X'B3D6A901',X'25B22874',X'AE96DA64',X'00BAFA73',
+          X'B3CE1BB5',X'2496E9E9',X'A7A73CC1',X'0002496E',
+          X'A7A73CE1',X'0002496E',X'32970C35',X'00CF396C',
+          X'A1B23964',X'00024972',X'A1D748E1',X'0000002C',
+          X'ADD73CC1',X'00000925',X'A9D71972',X'00033972',
+          X'00D3386C',X'A1CA1A03',X'00CA5D23',X'2D872870',
+          X'00E6CBAF',X'BF5123C6',X'00018FD8',X'B4CE2D73',
+          X'009EEA72',X'B4A73BF0',X'0002EBE9',X'00004FD4',
+          X'0003986D',X'89352150',X'00925D14',X'00000BC4',
+          X'00C2FBEC',X'A5CA3BA9',X'00D2E96D',X'B2D63952',
+          X'00976A73',X'A58EFCB0',X'00972D64',X'B48EED66',
+          X'0002EBE9',X'A5AF286D',X'00000024',X'A9A23CA1',
+          X'009EEA76',X'00D29BB5',X'A1D2EBE3',X'00925BA9',
+          X'A5CB2D63',X'00E6CD2E',X'28D30964',X'AD96D910',
+          X'00CF2962',X'AE96CA46',X'00025B61',X'AEA66964',
+          X'AEBE9D29',X'00000033',X'AC9EEA73',X'00000025',
+          X'00921BCC',X'8D0FF27F',X'ADBE3E21',X'83FEEBED',
+          X'000002BF',X'AFA1327F',X'00024B35',X'B2D638EF',
+          X'000002BF',X'840FF27F',X'A3A6CC35',X'00025D21',
+          X'BF865CA1',X'0000AFC3',X'810FF27F',X'00021972',
+          X'AE9738A1',X'0AFC3FF4',X'B4A6EBCD',X'00000CAF',
+          X'33B2C963',X'00C21968',X'A7D6FBA5',X'00000028',
+          X'00972968',X'AFC33A64',X'00000973',X'00CE9A34',
+          X'00000109',X'8F25440F',X'0000000E',X'A3874CD5',
+          X'25EA9CEB',X'A59EEBEC',X'00000032',X'A1A72876',
+          X'00CE5B22',X'39D30B45',X'A5CB0E25',X'2EBE9CF3',
+          X'A3972B95',X'B3A6E9EF',X'00000925',X'ACBF3972',
+          X'2EBE9D35',X'B4CEEBE3',X'00D23D72',X'000002FF',
+          X'A1CA5C2F',X'00032BF4',X'0000043F',X'0092E868',
+          X'00964A73',X'A5B2FBE2',X'00000BA1',X'00CB0E25',
+          X'A5B2FBC2',X'00000BA1',X'2EDEFBAB',X'00CE9A14',
+          X'3392596E',X'B48EED46',X'0002EBE9',X'AFB2CBE6',
+          X'00024977',X'00000E62',X'BF27F23F',X'00000008',
+          X'00024842',X'A1D2EE73',X'00000038',X'A9CEFB23',
+          X'000009EE',X'25D2FD71',X'A5CEEBC3',X'B6A74D63',
+          X'00000025',X'A1CA5C2F',X'00CF2BF4',X'39CA1BB5',
+          X'24B35BC3',X'B5B21DA5',X'00025D21',X'AD96D910',
+          X'00032962',X'000006BF',X'B0D6FC87',X'0096D86E',
+          X'A1D2EBE3',X'00033BA9',X'A796CB29',X'00000B21',
+          X'A1CA1A23',X'33CA5D23',X'B2D2EBC3',X'B48E9921',
+          X'00039CAF',X'0000040D',X'A3A76964',X'00000CE5',
+          X'B09638E1',X'00000034',X'94FD2FC6',X'000004FF',
+          X'AFC2D974',X'00E72872',X'00BF4BA9',X'34B35846',
+          X'003FFBEE'
+%list
+%INTEGER I,K,M,Q,S,SHIFT
+%STRING(70)OMESS
+      OMESS=""
+      K = N + 10000
+      %FOR I=0,1,WORDMAX-1 %CYCLE
+         -> FOUND %IF K=WORD(I)
+      %REPEAT
+      I=DEFAULT
+FOUND:
+      SHIFT=64
+      %CYCLE
+         I = I + 1
+         K=WORD(I)
+         %EXIT %IF K > 9999
+         OMESS=OMESS." "
+         %CYCLE
+            M=LETT(K)
+            %CYCLE S = 4, -1, 0
+               Q=M&63
+               %EXIT %IF Q = 0
+               M = M >> 6
+               %IF Q=63 %C
+               %THEN SHIFT=31 %C
+               %ELSE OMESS=OMESS.TOSTRING(Q+SHIFT) %AND SHIFT=64
+            %REPEAT
+            K=K+1
+         %REPEAT %UNTIL M=0
+      %REPEAT
+      %RESULT=OMESS
+%END; ! of message
+
+!-----------------------------------------------------------------------
+
+%const %integer highdss= 1160
+%external %string %fn failuremessage %alias "S#FAILUREMESSAGE"(%integer mess)
+%integer j
+%string (255) s1, s2, res, ssfname
+
+   ssfname = ssown_ssfname
+   j = length(ssfname)
+   length(ssfname) = j-1 %if j>0 %and charno(ssfname, j)='.'
+   length(ssfname) = 200 %if j>200
+
+   ssfname = s2 %if ssfname->s1.(":").s2 %and s1=ssown_ssowner
+
+   %if (mess=178 %and (ssown_sslastdfn=25 %or ssown_sslastdfn=40 %or ssown_sslastdfn=42)) %or %c
+      (mess=176 %and (ssown_sslastdfn=15 %or ssown_sslastdfn=17 %or ssown_sslastdfn=36 %or %c
+      ssown_sslastdfn=43)) %or (mess=174 %and ssown_sslastdfn=9) %or (mess=119 %and %c
+      ssown_sslastdfn=16) %or (mess=180 %and ssown_sslastdfn=41) %then mess = 500+ssown_sslastdfn
+
+   %if minmess<=mess<=maxmess %start
+      res = message(mess)
+      %unless res="" %start
+         res = res." ".itos(mess) %if res=" Fault no."
+         ! SPECIAL FOR FILE DOES NOT EXIST
+         %if mess=218 %and length(ssfname)>7 %and charno(ssfname, 7)=':' %then %c
+            res = res." or no access"
+         res = s1.ssfname.s2 %if res->s1.("&").s2
+      %finish
+   %finish %else %if (500<mess<600) %or (1120<=mess<=highdss) %then %c
+      j = dflag(mess-500, res) %else res = "Failure No. ".itos(mess)
+   res = res.snl.ssown_ssfname2 %and ssown_ssfname2 = "" %unless ssown_ssfname2=""
+   %result = res."
+"
+%end;                                    ! of FAILUREMESSAGE
+
+!-----------------------------------------------------------------------
+
+%external %routine setfname %alias "S#SETFNAME"(%string (255) name)
+   ssown_ssfname <- name
+%end;                                    ! of SETFNAME
+%external %routine setfname2 %alias "s#setfname2"(%string (255) name)
+   ssown_ssfname2 <- name
+%end;                                    ! setfname2
+
+!-----------------------------------------------------------------------
+
+%external %string %fn fname %alias "s#fname"
+   %result = ssown_ssfname
+%end
+%external %string %fn fname2 %alias "s#fname2"
+   %result = ssown_ssfname2
+%end;                                    ! fname2
+
+!-----------------------------------------------------------------------
+
+%external %integer %function dirtoss %alias "S#DIRTOSS"(%integer flag)
+   %constant %byte %integer %array lowdss(1:99)= %c
+   { 1-}    0, 245, 0, 0, 0, 173, 0, 0, 174, 175,
+   {11-}    101, 0, 0, 0, 176, 119, 176, 120, 0, 173,
+   {21-}    0, 0, 0, 246, 178, 244, 0, 162, 162, 0,
+   {31-}    0, 118, 179, 0, 0, 176, 101, 0, 156, 178,
+   {41-}    180, 178, 176, 0(5), 181, 182,
+   {51-}    183, 0(9),
+   {61-}    0(10),
+   {71-}    0(10),
+   {81-}    0,0,208,0(7),
+   {91-}    0(9)
+
+   %result = 0 %if flag<=0 { 0 is most likely, <0 should not occur }
+   %if monitoring possible=yes %and ssown_ssnote&64#0 %then monparams("=jb")
+   ssown_sslastdfn = flag
+   %result = lowdss(flag)+100 %if flag<100 %and lowdss(flag)#0
+   %result = 426 %if flag=650
+   %result = 274 %if flag=659
+   %result = flag+500 { giving values 501-599, 1120-1160 }
+%end;                                    ! of DIRTOSS
+
+!-----------------------------------------------------------------------
+
+%external %routine setreturncode %alias "s#setreturncode"(%integer flag)
+
+%integer lnb, gla, lnb1, fn
+   *st_10, lnb
+   gla = integer(lnb+4*13)
+   lnb1 = integer(lnb+4*10)
+   fn = 12+integer(gla+20)+(shortinteger(lnb1)&X'FFFF')
+   setreturncode inner(flag, fn)
+%end;                                    ! of setreturncode
+
+!-----------------------------------------------------------------------
+
+%external %routine psysmess %alias "s#psysmess"(%string (255) caller, %integer flag)
+
+%integer save
+
+   %if flag<0 %start
+      ssown_rcode = -flag
+      ssown_lastrcode = -flag
+      %return
+   %finish
+
+   ssown_rcode = flag
+   ssown_lastrcode = flag
+   %return %if flag=0 %or ssown_inhibitmessages&4 {subsys}#0
+
+   uctranslate(addr(caller)+1, length(caller))
+   save = outstream
+   selectoutput(0) %if save#0
+   newline
+   printlongmess(caller, failuremessage(flag))
+   selectoutput(save) %if save#0
+%end;                                    !of psysmess
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn returncode %alias "s#returncode"
+   %result = ssown_lastrcode
+%end
+
+!-----------------------------------------------------------------------
+
+%end %of %file

@@ -1,0 +1,1002 @@
+
+!*************************************************************************
+!THIS version is only compatable with Versions of SPOOLER equal or greater
+!than 0488
+!*************************************************************************
+!
+%constant %string (1) snl= "
+"
+
+%constant %integer amdahl= 369, xa = 371
+%include ":TARGET"
+
+%if target=2900 %start { machine specific constants }
+   %constant %integer max line= 132
+   %constant %string %name date= X'80C0003F'
+   %constant %string %name time= X'80C0004B'
+   %constant %integer seg shift= 18
+   %constant %string (1) sep= "."
+%finish { 2900 }
+
+%if target=370 %start
+   %constant %integer seg shift= 16
+%finish
+
+%if target=xa %or target=amdahl %start
+   %constant %integer seg shift= 20
+%finish
+
+%unless target=2900 %start
+   %constant %integer com seg= 31
+   %constant %string %name date= com seg << seg shift + X'3B'
+   %constant %string %name time= com seg << seg shift + X'47'
+   %constant %integer max line= 80  { for convenience on terminals }
+   %constant %string (1) sep= ":"
+%finish
+
+%record %format pe(%integer dest, srce, p1, p2, p3, p4, p5, p6)
+
+%if target=2900 %start
+   %external %string %function %spec derrs(%integer flag)
+   %external %integer %function %spec ddap(%integer %function a(%integer a, b, c), %integer act, addr)
+   %external %integer %function %spec dchsize(%string (6) user, %string (11) file, %integer fsys, newsize)
+   %external %routine %spec get av fsys(%integer %name n, %integer %array %name a)
+   %external %integer %function %spec dpermission(%string (6) owner, user, %string (8) date, %string (11) file,
+    %integer fsys, type, adrprm)
+   %external %integer %function %spec ddestroy(%string (6) user, %string (11) file, %string (8) date,
+    %integer fsys, type)
+   %external %integer %function %spec ddisconnect(%string (6) user, %string (11) file, %integer fsys, destroy)
+   %external %integer %function %spec drename(%string (6) user, %string (11) oldname, newname, %integer fsys)
+   %external %integer %function %spec dcreate(%string (6) user, %string (11) file, %integer fsys, nkb, type)
+   %external %integer %function %spec dconnect(%string (6) user, %string (11) file, %integer fsys, mode, apf,
+    %integer %name seg, gap)
+   %external %integer %function %spec dnewgen(%string (6) user, %string (11) file, newgen of file, %integer fsys)
+%finish %else %start
+   %external %integer %function %spec dchsize(%string %name file index, file, %integer %name fsys, nkb)
+   %external %integer %function %spec dconnect(%string %name file index, file, %integer %name fsys, mode, seg, gap)
+   %external %integer %function %spec dcreate(%string %name file index, file, %integer %name fsys, nkb, type, da)
+   %external %integer %function %spec ddestroy(%string %name file index, file, date, %integer %name fsys, type)
+   %external %integer %function %spec ddisconnect(%string %name file index, file, %integer %name fsys, dstry)
+   %external %integer %function %spec dflag(%integer %name flag, %string %name txt)
+   %external %integer %function %spec dnewgen(%string %name file index, file, newgen, %integer %name fsys)
+   %external %integer %function %spec dpermission(%string %name file index, user, date, file, %integer %name fsys,
+    type, adr)
+   %external %integer %function %spec drename(%string %name file index, oldname, newname, %integer %name fsys)
+%finish
+
+%constant %integer not assigned= x'80808080'
+%constant %integer yes=1, no=0
+%constant %integer file hdr size= 32
+%constant %integer already exists= 16; ! DIRECTOR FLAG
+%constant %integer r= b'00000001'; ! READ PERMISSION
+%constant %integer w= b'00000010'; ! WRITE PERMISSION
+%constant %integer shared= b'00001000'; ! ALLOW OTHERS ACCESS
+%if target=2900 %start
+   %constant %integer link list entries= 1000
+%finish %else %start
+   %constant %integer link list entries= 3000
+%finish
+%constant %integer link list entry size= 28
+%constant %integer max fep= 7; ! MAXIMUM FEPS CURRENTLY ALLOWED.
+%constant %integer max queues= 255; ! MAX QUEUES ALLOWED IN CONFIGURATION
+%constant %integer max remotes= 128; ! MAX REMOTES ALLOWED IN CONFIGURATION
+%constant %integer max streams= 255; ! MAX STREAMS ALLOWED IN CONFIGURATION
+%constant %integer queue entry size= 148; ! NUMBER OF BYTES IN A QUEUE DESCRIPTOR
+%constant %integer remote entry size= 428; ! NUMBER OF BYTES IN A REMOTE DESCRIPTOR
+ ! NOTE THIS INCLUDES SPACE FOR UP TO 8 FEPS, ADJUST FOR FURTHER IN GROUPS OF 4.
+%constant %integer stream entry size= 200; ! NUMBER OF BYTES IN A STREAM DESCRIPTOR
+%constant %integer name entry size= 24
+%constant %integer qdescriptors= 15
+%constant %integer rdescriptors= 5
+%constant %integer sdescriptors= 13
+%constant %string (11) temp outfile= "TEMPCFILE"
+%constant %string (11) link list name= "SPOOLLINK"
+%constant %string (15) %array qd(1:q descriptors)= %c
+ "QUEUE=",
+ "USER=",
+ "DELIVERY=",
+ "START=",
+ "PRIORITY=",
+ "TIME=",
+ "OUTPUTLIMIT=",
+ "FORMS=",
+ "MODE=",
+ "COPIES=",
+ "RERUN=",
+ "MAXLENGTH=",
+ "MAXACR=",
+ "QBY=",
+ "RESOURCELIMIT="
+%constant %byte %integer %array qdt(1:q descriptors)= %c
+ 15,7,31,0,5,0,0,0,3,0,3,0,0,15,0; ! A 0 SPECIFIES PARAMETER IS AN INTEGER ELSE LENGTH OF STRING
+%constant %string (15) %array rd(1:rdescriptors)= %c
+ "REMOTE=",
+ "STATUS=",
+ "FEP=",
+ "NETADDRESS=",
+ "PASSWORD="
+%constant %byte %integer %array rdt(1:rdescriptors)= %c
+ 15,12,0,255,7; ! A 0 SPECIFIES PARAMETER IS AN INTEGER ELSE LENGTH OF STRING
+%constant %string (15) %array sd(1:sdescriptors)= %c
+ "STREAM=",
+ "REMOTE=",
+ "STATUS=",
+ "DEVICETYPE=",
+ "DEVICENO=",
+ "LIMIT=",
+ "FORMS=",
+ "LOWESTPRIORITY=",
+ "TYPE=",
+ "QUEUE=",
+ "HEADER=",
+ "UNITSIZE=",
+ "UNITNAME="
+%constant %byte %integer %array sdt(1:sdescriptors)= %c
+ 15,17,11,2,0,0,0,5,6,255,15,0,7; ! A 0 SPECIFIES PARAMETER IS AN INTEGER ELSE LENGTH OF STRING
+%constant %string (13) %array stream types(0:5)= %c
+ "OUTDEV",
+ "", {was $OUTDEV}
+ "INDEV",
+ "JOB",
+ "PROC",
+ "" {was $PROC}
+%constant %string (3) %array modes(0:2)= %c
+ "ISO",
+ "EBC",
+ "BIN"
+%constant %string (15) %array remote status(0:3)= %c
+ "CLOSED",
+ "OPEN",
+ "PRELOGON",
+ "PRELOGONTIED"
+%constant %string (15) %array stream status(0:2)= %c
+ "UNALLOCATED",
+ "ALLOCATING",
+ "ALLOCATED"
+%constant %string (15) %array hdr types(1:4)= %c
+ "LINEPRINTER",
+ "TAPEPUNCH",
+ "CARDPUNCH",
+ "DOCTRANSFER"
+!NOTE: DOCTRANSFER is the way that the 'DO' type stream to another EMAS (which
+!      is the mechanism (from march '88) by which whole documents with 
+!      descriptors are transfered (binary) between EMAS systems) are identified and
+!      seen to be different from standard EMAS->other DO streams.
+!      In effect DOCTRANSFER header type instructs EMAS to send the DESCRIPTOR
+!      of a document as its 'banner' (there is no trailer).  Input DO streams
+!      are always assumed to be EMAS document conveyors and so are taken to be
+!      BINARY input with a descriptor at the head.
+
+%constant %string (2) %array device type(0:15)= %c
+ "NA","PP","PR","CP","CR","MT","LP","GP","OP","MP","DO",
+ "NA","CT","SU","FE","NA"
+%constant %string (5) %array priorities(1:5)= %c
+ "VLOW",
+ "LOW",
+ "STD",
+ "HIGH",
+ "VHIGH"
+
+%own %byte %integer %array temp qs name(0:2*name entry size-1)= %c
+           0(2*name entry size); ! AREA FOR DEFAULT CONFIGURATION OF 2 QUEUES
+%own %byte %integer %array temp rmts name(0:name entry size-1)= %c
+           0(name entry size); ! DITTO FOR ONE REMOTE
+%own %byte %integer %array temp strms name(0:name  entry size-1)= %c
+           0(name  entry size)
+ ! DITTO FOR ONE STREAM
+
+%own %byte %integer %array temp qs(0:2*queue entry size-1)= %c
+           0(2*queue entry size); ! AREA FOR DEFAULT CONFIGURATION OF 2 QUEUES
+%own %byte %integer %array temp rmts(0:remote entry size-1)= %c
+           0(remote entry size); ! DITTO FOR ONE REMOTE
+%own %byte %integer %array temp strms(0:stream entry size-1)= %c
+           0(stream entry size); ! DITTO FOR ONE STREAM
+
+%record %format pointers f(%integer queues, queue entry size, queue displ, queue name displ, streams,
+ stream entry size, stream displ, stream name displ, remotes, remote entry size, remote displ, remote name displ,
+ ftp stations, station entry size, ftp station displ)
+
+%if target=2900 %start
+   %record %format queuef(%string (15) name, %half %integer %array streams(0:15), %string (6) default user,
+    %byte %integer service, %string (31) default delivery, %integer default start, default priority, default time,
+    default output limit, default forms, default mode, default copies, default rerun, length, head, max length,
+    maxacr, %half %integer q by, general access, %integer resource limit, amount)
+%finish %else %start
+   %record %format queuef(%string (15) name,
+    (%short %integer %array streams(0:15) %or %short %integer %array lines(0:15)), %string (6) default user,
+    %byte %integer service, %string (31) default delivery, %integer default start, default priority, default time,
+    default output limit, default forms, default mode, default copies, default rerun, length, head, max length,
+    maxacr, %short %integer q by, general access, %integer resource limit, amount)
+%finish
+
+!*
+%recordformat r addr f ((%byteinteger network address len, %byteintegerarray network %c
+  add (0:62) %or %string(63) TS address))
+!*
+%recordformat remotef(%string (15) name,
+  %integer status, lowest stream, highest stream, fep, old fep,
+  prelog fep, prelog, timeout, polling, command lock,
+  %byteinteger unused1, unused2, network address type, address count,
+  %record(raddrf)%array addresses(1:5),
+  %byteintegerarray fep route value(0:max fep),
+  %string(31) description, ( %string(7) password %or %integer pic file, page ))
+!*
+
+
+%if TARGET = 2900 %start
+%recordformat stream f(%string(15) name, %string(7) unit name,
+  %integer q no, %halfintegerarray queues(0 : 15),
+  %integer status, bytes sent, bytes to go, block, part blocks,
+           document, %string(6) specific user, (%byteinteger reallocate %or %byteinteger logical dap),
+           %integer bin offset,  %byteinteger service, user abort, unit size, fep,
+  %byteinteger remote, address selector, fep selector, bspare01,
+  %byteinteger abort retry count, connect fail expected,
+           TS call accept, allodeallo count, %integer  offset,
+           (%integer in comms stream %or %integer comms stream),
+           %integer out comms stream,
+           (%integer in stream ident %or %integer ident),
+           %integer out stream ident,
+ (%integer limit, account,
+  %byteinteger device type, device no, forms, lowest priority,
+               header type, header number,
+               (%byteinteger batch enable, invoc %or %byteinteger new allocation, sole or barred),
+  %string(55) unused %or %integer transfer status, tcc subtype,
+           in block addr, out block addr,
+  %byteinteger activity, station type, station ptr, suspend,
+               in stream status, out stream status,
+               timer, output buffer status, output transfer pending, 
+               new ftp data record, sp2,sp3,
+  %integer aux document, pre abort status, bytes transferred,
+  %record(pe) output transfer record))
+%finish %else %start
+
+%recordformat stream f(%string(15) name, %string(7) unit name,
+  %integer q no, %shortintegerarray queues(0 : 15),
+  %integer status, bytes sent, bytes to go, block, part blocks,
+           document, %string(6) specific user, (%byteinteger reallocate %or %byteinteger logical dap),
+           %integer bin offset,  %byteinteger service, user abort, unit size, fep,
+  %byteinteger remote, address selector, fep selector, bspare01,
+  %byteinteger abort retry count, connect fail expected,
+           TS call accept, allodeallo count, %integer  offset,
+           (%integer in comms stream %or %integer comms stream),
+           %integer out comms stream,
+           (%integer in stream ident %or %integer ident),
+           %integer out stream ident,
+ (%integer limit, account,
+  %byteinteger device type, device no, forms, lowest priority,
+               header type, header number,
+               (%byteinteger batch enable, invoc %or %byteinteger new allocation, sole or barred),
+  %string(6)%array user profile(1:8) %or %integer transfer status, tcc subtype,
+           in block addr, out block addr,
+  %byteinteger activity, station type, station ptr, suspend,
+               in stream status, out stream status,
+               timer, output buffer status, output transfer pending,
+               new ftp data record, sp2,sp3,
+  %integer aux document, pre abort status, bytes transferred,
+  %record(pe) output transfer record))
+%finish
+
+!*
+
+
+%record %format fhf(%integer end, start, size, type, remotes, datetime, queues, streams)
+
+%own %string (255) ns1, ns2
+
+%external %integer %function %spec pack date and time(%string (8) date, time)
+%external %string %function %spec itos(%integer i)
+%external %integer %function %spec stoi(%string %name s)
+
+%external %routine read spool config(%string (6) infile owner, outfile owner, %integer in fsys, out fsys,
+ %string (11) infile, outfile, %integer %name queues, qconad, remotes, rconad, streams, sconad, qnconad, snconad,
+ rnconad, link list conad)
+   !***********************************************************************
+   !*                                                                     *
+   !*  PURPOSE OF THIS ROUTINE IS TO READ IN A SPOOLER CONFIGURATION FILE *
+   !*  WHICH IS IN TEXT FORMAT AND CREATE A FILE FOR PASSING ON TO THE    *
+   !*  SPOOLER PROCESS AS A DATA BASE.                                    *
+   !*                                                                     *
+   !***********************************************************************
+
+   %string %function %spec errs(%integer flag)
+   %record (fhf) %name file hdr
+   %record (queuef) %name queue entry
+   %record (remotef) %name remote entry
+   %record (streamf) %name stream entry
+   %record %format nf(%string (15) name, %string (7) user)
+   %record (nf) %array %format qaf(1:max queues)
+   %record (nf) %array %format saf(1:max streams)
+   %record (nf) %array %format raf(1:max remotes)
+   %record (nf) %array %name queue name entries
+   %record (nf) %array %name stream name entries
+   %record (nf) %array %name remote name entries
+   %record (pointers f) %name pointers
+
+   %string (255) line, temps, temp1, temp2
+   %integer text pointer, text end, seg, gap, flag, i, j, k, l, ok, value, conad, config size, hdrs, ptr conad
+  %integer address count, address pointer
+   %switch qswt(1:q descriptors), rswt(1:rdescriptors), sswt(1:sdescriptors)
+
+   %string %function errs(%integer flag)
+      %integer i; %string (63) error
+      %if target=2900 %then %result = derrs(flag) %else %start
+         i = dflag(flag, error)
+         %result = error
+      %finish
+   %end
+
+   %routine read line(%string %name line)
+      !***********************************************************************
+      !*                                                                     *
+      !*  READS A LINE OF TEXT TERMINATED BY A NEWLINE. SKIPPING LEADING     *
+      !*  NEWLINES AND SPACES. IGNORES SPACES IN LINE                        *
+      !*  WHEN TEXT POINTER = TEXT END (END OF FILE). RETURNS A NULL LINE IF *
+      !*  END OF FILE.                                                       *
+      !*                                                                     *
+      !***********************************************************************
+      %integer sym, comment
+      comment = no
+      line = ""
+      text pointer = text pointer+1 %while %c
+       text pointer<text end %and (byteinteger(text pointer)=' ' %or byteinteger(text pointer)=nl)
+      %return %if text pointer=text end
+      sym = byteinteger(text pointer); ! READ A SYMBOL
+      text pointer = text pointer+1
+      %while sym#nl %and text pointer<text end %cycle
+         line = line.to string(sym) %unless (sym=' ' %and comment=no); ! NOT SPACES EXCEPT WITHIN COMMENT
+         comment = yes %if sym='!'
+         sym = byteinteger(text pointer)
+         text pointer = text pointer+1
+      %repeat
+   %end; ! OF ROUTINE READ LINE
+
+   %routine create and connect(%string (6) name, %string (11) outfile, %integer fsys, size, mode,
+    %integer %name conad)
+      !***********************************************************************
+      !*                                                                     *
+      !*  DESTROYS A FILE IF IT EXISTS. THEN CREATES A NEW FILE AND THEN     *
+      !*  CONNECTS IT. CONAD = 0 IF UNSUCCESSFUL SIZE IS GIVEN IN BYTES.     *
+      !*                                                                     *
+      !***********************************************************************
+      %integer flag, seg, gap, ada
+      %string (31) filename
+      conad = 0; ! INITIALLY ZERO
+      filename = name.sep.outfile
+      flag = ddestroy(name, outfile, "", fsys, 0); ! IN CASE IT ALREADY EXISTED
+      %if target#2900 %then flag = dcreate(name, outfile, fsys, (size+1023)>>10, 4, ada) %else %c
+       flag = dcreate(name, outfile, fsys, (size+1023)>>10, 4)
+      ! CREATE FILE AND ZERO.
+      %if flag=0 %start
+         seg = 0; gap = 0
+         %if target#2900 %then flag = dconnect(name, outfile, fsys, mode, seg, gap) %else %c
+          flag = dconnect(name, outfile, fsys, mode, 0, seg, gap)
+         %if flag=0 %then conad = seg<<seg shift %else print string("CONNECT ".filename." FAILS ".errs(flag).snl)
+      %finish %else print string("CREATE ".filename." FAILS ".errs(flag).snl)
+   %end; ! OF ROUTINE CREATE AND CONNECT
+
+   ! THE FOLLOWING VALUES ARE PASSED BACK TO THE CALLING ROUTINE
+   queues = 0; ! THE NUMBER OF QUEUES IN THE CONFIGURATION
+   qconad = 0; ! THE CONNECT ADDRESS OF THE QUEUE TABLE
+   remotes = 0; ! THE NUMBER OF REMOTES IN THE CONFIGURATION
+   rconad = 0; ! THE CONNECT ADDRESS OF THE REMOTES TABLE
+   streams = 0; ! THE NUMBER OF STREAMS IN THE CONFIGURATION
+   sconad = 0; ! THE CONNECT ADDRESS OF THE STREAM TABLE
+   qnconad = 0; snconad = 0; rnconad = 0; ! the 'name' areas for queue/stream/remote tables
+   hdrs = 0; ! THE NUMBER OF STREAMS REQUIRING HEADERS
+   ->create ll %if infile="" %or infile owner=""
+
+   seg = 0; gap = 0; ! ANY SEGMENT ANY GAP
+   ! CONNECT INPUT FILE TO READ
+   %if target#2900 %then flag = dconnect(infile owner, infile, in fsys, r, seg, gap) %else %c
+    flag = dconnect(infile owner, infile, in fsys, r, 0, seg, gap)
+   %if flag#0 %start
+      print string("CONNECT ".infile owner.sep.infile." FAILS ".errs(flag).snl)
+      ->create ll
+   %finish
+   conad = seg<<seg shift; ! TURN SEGMENT INTO A VIRTUAL ADDRESS
+   file hdr == record(conad); ! MAP FILE HEADER
+   text pointer = conad+file hdr_start; ! ADDR OF FIRST BYTE (USED BY READ LINE)
+   text end = conad+file hdr_end; ! ADDR OF LAST BYTE + 1 (USED BY READ LINE)
+   config size = max queues*queue entry size+max remotes*remote entry size+max streams*stream entry size
+   config size = config size+file hdr size+(max streams+max queues+max remotes)*name entry size
+   create and connect(outfile owner, temp outfile, out fsys, config size, r!w, conad)
+   create and connect(outfile owner, outfile."PTRS", out fsys, 1024, r!w!shared, ptr conad)
+   ! This file contains the pointers to the main spooler database.
+
+   %if conad#0 %and ptr conad#0 %start; ! Successfully created file for config record arrays.
+
+      !*  QUEUE INPUT SECTION
+
+      conad = conad+file hdr size
+      ! now initialise the pointer file.
+      pointers == record(ptr conad+file hdr size)
+      file hdr == record(ptr conad)
+      file hdr_start = file hdr size
+      file hdr_size = x'1000'
+      read line(line); ! READ FIRST LINE IN FILE
+      %unless line->ns1.("QUEUES=").ns2 %and ns1="" %start; ! NUMBER OF QUEUES
+         print string("NUMBER OF QUEUES MUST BE FIRST IN CONFIG FILE, NOT ".line.snl)
+         ->endread
+      %finish
+      temps = ns2; temps = temp1 %if temps->temp1.("!").temp2; ! REMOVE ANY COMMENTS
+      queues = s to i(temps)
+      %unless 1<=queues<=max queues %start
+         print string("INVALID NUMBER OF QUEUES ".line.snl)
+         ->endread
+      %finish
+      ! VALID NUMBER OF QUEUES
+      qnconad = conad+queues*queue entry size
+      queue name entries == array(qnconad, qaf)
+      pointers_queues = queues
+      pointers_queue displ = file hdr size
+      pointers_queue name displ = pointers_queue displ+queues*queue entry size
+      pointers_queue entry size = queue entry size
+      %for i = 1, 1, queues %cycle; ! ROUND EACH QUEUE
+         queue entry == record(conad+(i-1)*queue entry size)
+         ! MAP QUEUE ENTRY
+         %for j = 1, 1, q descriptors %cycle; ! READ EACH QUEUE DESCRIPTOR
+            read line(line)
+            %exit %if line=""; ! A NULL LINE SIGNIFIES THE END OF FILE
+            ->failq %unless line->ns1.(qd(j)).ns2 %and ns1=""
+            ! CORRECT FORMAT
+            temps = ns2
+            temps = temp1 %if temps->temp1.("!").temp2
+            ! REMOVE COMMENTS
+            %continue %if temps="NA" %or temps="NOTAPPLICABLE"
+            %if qdt(j)=0 %start; ! NUMERIC PARAMETER
+               value = stoi(temps)
+               ->failq %if value=not assigned %or value<0
+            %finish %else %start; ! STRING PARAMETER
+               ->failq %unless 1<=length(temps)<=qdt(j)
+            %finish
+            ->qswt(j); ! INTERPRET TEMPS
+qswt(1):
+            ! NAME OF QUEUE
+            queue entry_name = temps
+            queue name entries(i)_name = temps
+            %continue
+qswt(2):
+            ! DEFAULT USERNAME
+            %if charno(temps, 1)='$' %then queue entry_service = 1 %and temps -> ("$").temps %else %c
+             queue entry_service = 0
+            queue entry_default user = temps
+            %continue
+qswt(3):
+            ! DEFAULT DELIVERY
+            queue entry_default delivery = temps
+            %continue
+qswt(4):
+            ! START BYTE IN FILE
+            queue entry_default start = value
+            %continue
+qswt(5):
+            ! DEFAULT PRIORITY
+            ok = no
+            %for k = 1, 1, 5 %cycle
+               %continue %unless temps=priorities(k)
+               queue entry_default priority = k
+               ok = yes; %exit
+            %repeat
+            %continue %if ok=yes
+            ->failq
+qswt(6):
+            ! DEFAULT CPU TIME
+            ->failq %unless value>0
+            queue entry_default time = value
+            %continue
+qswt(7):
+            ! DEFAULT OUTPUT LIMIT
+            ->failq %unless value>0
+            queue entry_default output limit = value
+            %continue
+qswt(8):
+            ! DEFAULT FORMS TYPE
+            ->failq %unless value<=255
+            queue entry_default forms = value
+            %continue
+qswt(9):
+            ! DEFAULT MODE
+            ok = no
+            %for k = 0, 1, 2 %cycle
+               %continue %unless temps=modes(k)
+               queue entry_default mode = k
+               ok = yes; %exit
+            %repeat
+            %continue %if ok=yes
+            ->failq
+qswt(10):
+            ! DEFAULT COPIES
+            ->failq %unless 0<value<=255
+            queue entry_default copies = value
+            %continue
+qswt(11):
+            ! DEFAULT RERUN
+            ->failq %unless temps="YES" %or temps="NO"
+            queue entry_default rerun = yes %if temps="YES"
+            %continue
+qswt(12):
+            ! MAXIMUM LENGTH OF QUEUE
+            queue entry_max length = value
+            %continue
+qswt(13):
+            ! MAX ACR WITH ACCESS TO THIS QUEUE
+            ->failq %unless 0<value<=15
+            queue entry_max acr = value
+            %continue
+qswt(14):
+            ! QUEUE BY ALGORITHM
+            queue entry_q by = 0
+            %continue
+qswt(15):
+            ! SET RESOURCE LIMIT FOR PRIORITY CALCULATION
+            ->failq %unless value>0
+            queue entry_resource limit = value
+            %continue
+failq:
+            print string("QUEUE ".i to s(i)." ".queue entry_name." ENTRY ".qd(j)." WRONG ".line.snl)
+         %repeat; ! EACH QUEUE DESCRIPTOR
+         %exit %if line=""; ! END OF FILE?
+      %repeat; ! EACH QUEUE
+
+      !* REMOTE INPUT SECTION
+
+      read line(line)
+      ! IS IT NUMBER OF REMOTES?
+      %unless line->ns1.("REMOTES=").ns2 %and ns1="" %start
+         print string("NUMBER OF REMOTES MUST BE NEXT IN CONFIG FILE, NOT ".line.snl)
+         ->endread
+      %finish
+      temps = ns2; temps = temp1 %if temps->temp1.("!").temp2
+      ! REMOVE COMMENTS
+      remotes = s to i(temps)
+      %unless 1<=remotes<=max remotes %start
+         print string("INVALID NUMBER OF REMOTES ".line.snl)
+         ->endread
+      %finish
+      ! VALID NUMBER OF REMOTES
+      rnconad = conad+queues*queue entry size+queues*name entry size+remotes*remote entry size
+      remote name entries == array(rnconad, raf)
+      pointers_remotes = remotes
+      pointers_remote displ = pointers_queue displ+queues*(queue entry size+name entry size)
+      pointers_remote name displ = pointers_remote displ+remotes*remote entry size
+      pointers_remote entry size = remote entry size
+      %for i = 1, 1, remotes %cycle; ! ROUND EACH REMOTE
+         remote entry == record(conad+queues*queue entry size+(i-1)*remote entry size+queues*name entry size)
+         ! MAP REMOTE ENTRY
+         %for j = 1, 1, r descriptors %cycle
+            read line(line)
+            %exit %if line=""; ! END OF FILE
+            ! CORRECT FORMAT?
+            ->failr %unless line->ns1.(rd(j)).ns2 %and ns1=""
+            temps = ns2; temp2 = ""
+            temps = temp1 %if temps->temp1.("!").temp2; ! IGNORE COMMENTS
+            %continue %if temps="NA" %or temps="NOTAPPLICABLE"
+            %if rdt(j)=0 %start; ! NUMERIC
+               value = stoi(temps)
+               ->failr %if value=not assigned %or value<0
+            %finish %else %start; ! STRING
+               ->failr %unless 1<=length(temps)<=rdt(j)
+            %finish
+            ->rswt(j)
+rswt(1):
+            ! NAME OF REMOTE
+            remote entry_name = temps
+            remote name entries(i)_name = temps
+            %if length(temp2)>0 %and charno(temp2, 1)='*' %start
+               temp2 -> ("*").temp2
+               %if length(temp2)>31 %then length(temp2) = 31
+               remote entry_description = temp2
+            %finish %else remote entry_description = ""
+            %if temps="LOCAL" %then remote entry_status = 3
+            ! IE IF IT IS THE 'LOCAL' REMOTE THE INITS STATE MUST BE LOGGED ON.
+            %continue
+rswt(2):
+            ! DEFAULT REMOTE STATUS
+            ok = no
+            %for k = 0, 1, 3 %cycle
+               %continue %unless temps=remote status(k)
+               %if k<2 %then remote entry_status = k %else %start
+                  remote entry_status = 1; ! IE OPEN
+                  %if k=2 %then remote entry_prelog = 1 %else remote entry_prelog = 2
+               %finish
+               ok = yes; %exit
+            %repeat
+            %continue %if ok=yes
+            ->failr
+rswt(3):
+            ! DEFAULT FEP
+            ->failr %unless value<=9
+            remote entry_prelog fep = value
+            %continue
+rswt(4):
+            ! DEFAULT NETWORK ADDRESS
+            %if temps->("_") %start; ! NSI.
+               k = 0
+               remote entry_network address type = 1 {NSI}
+               %while temps#"" %cycle
+                  temp1 = "" %unless temps->temps.("_").temp1
+                  ->failr %if k=32
+                  l = stoi(temps)
+                  ->failr %unless 0<=l<=255
+                  remote entry_addresses(1)_network add(k) = l
+                  k = k+1
+                  temps = temp1
+               %repeat
+              remote entry_addresses(1)_network address len = k
+            %finish %else %start; ! 'Text' logon address.
+               remote entry_network address type = 2 {TS}
+               address count = 0
+               %cycle
+                 %unless temps -> temp1.("&").temps %then temp1 = temps
+                 address count = address count + 1
+                 remote entry_addresses(address count)_TS address = temp1
+                 %exit %if temps = temp1
+               %repeat
+               remote entry_address count = address count
+            %finish
+            %continue
+rswt(5):
+            ! THE REMOTE PASSWORD.
+            remote entry_password = temps
+            %continue
+failr:
+            print string("REMOTE ".i to s(i)." ".remote entry_name." ENTRY ".rd(j)." WRONG ".line.snl)
+         %repeat; ! EACH REMOTE DESCRIPTOR
+         %exit %if line=""; ! END OF FILE
+      %repeat; ! EACH REMOTE
+
+      !* STREAM INPUT SECTION
+
+      read line(line); ! GET NUMBER OF STREAMS
+      %unless line->ns1.("STREAMS=").ns2 %and ns1="" %start
+         print string("NUMBER OF STREAMS MUST BE NEXT IN CONFIG FILE, NOT ".line.snl)
+         ->endread
+      %finish
+      ! NUMBER OF STREAMS
+      temps = ns2
+      temps = temp1 %if temps->temp1.("!").temp2; ! REMOVE COMMENTS
+      streams = s to i(temps)
+      %unless 1<=streams<=max streams %start
+         print string("INVALID NUMBER OF STREAMS ".line.snl)
+         ->endread
+      %finish
+      ! VALID NUMBER OF STREAMS
+      snconad = queues*queue entry size+queues*name entry size+remotes*remote entry size
+      snconad = snconad+remotes*name entry size+conad+streams*stream entry size
+      stream name entries == array(snconad, saf)
+      pointers_streams = streams
+      pointers_stream displ = pointers_remote displ+remotes*(remote entry size+name entry size)
+      pointers_stream name displ = pointers_stream displ+streams*stream entry size
+      pointers_stream entry size = stream entry size
+      %for i = 1, 1, streams %cycle; ! ROUND EACH STREAM
+         ! MAP STREAM ENTRY
+         stream entry == record(queues*queue entry size+remotes*remote entry size+(queues+remotes) %c
+          *name entry size+conad+(i-1)*stream entry size)
+         %for j = 1, 1, s descriptors %cycle; ! ROUND EACH STREAM DESCRIPTOR
+            read line(line)
+            %exit %if line=""; ! END OF FILE
+            ->fails %unless line->ns1.(sd(j)).ns2 %and ns1=""
+            ! CORRECT FORMAT
+            temps = ns2
+            temps = temp1 %if temps->temp1.("!").temp2; ! IGNORE COMMENTS
+            %continue %if temps="NA" %or temps="NOTAPPLICABLE"
+            %if sdt(j)=0 %start; ! NUMERIC
+               value = stoi(temps)
+               ->fails %if value=not assigned %or value<0
+            %finish %else %start; ! STRING
+               ->fails %unless 1<=length(temps)<=sdt(j)
+            %finish
+            ->sswt(j)
+sswt(1):
+            ! NAME OF STREAM
+            stream entry_name = temps
+            stream name entries(i)_name = temps
+            %continue
+sswt(2):
+            ! REMOTE FOR STREAM
+            ok = no
+            address pointer = 1
+            %if temps -> temps.("/").temp1 %then address pointer = stoi(temp1)
+            %for k = 1, 1, remotes %cycle
+               remote entry == record(conad+queues*queue entry size+(k-1)*remote entry size+queues*name entry size)
+               %continue %unless remote entry_name=temps
+               stream entry_remote = k
+               %if REMOTE entry_prelog > 0 %and address pointer > remote entry_address count %then %c
+                printstring("NO /".temp1." address for ".remote entry_name.snl) %and -> fails
+               stream entry_address selector = address pointer
+               remote entry_lowest stream = i %if remote entry_lowest stream=0
+               ->fails %unless remote entry_highest stream=0 %or remote entry_highest stream=i-1
+               remote entry_highest stream = i
+               ok = yes; %exit
+            %repeat
+            %continue %if ok=yes
+            ->fails
+sswt(3):
+            ! DEFAULT STREAM STATUS
+            ok = no
+            %for k = 0, 1, 2 %cycle
+               %continue %unless temps=stream status(k)
+               stream entry_status = k
+               ok = yes; %exit
+            %repeat
+            %continue %if ok=yes
+            ->fails
+sswt(4):
+            ! DEVICE TYPE
+            ok = no
+            %for k = 0, 1, 15 %cycle
+               %continue %unless device type(k)=temps
+               stream entry_device type = k
+               ->fails %if stream entry_remote=0
+               remote entry == record(conad+queues*queue entry size+(stream entry_remote-1) %c
+                *remote entry size+queues*name entry size)
+               %if remote entry_name="LOCAL" %start
+                  stream entry_ident = k<<24
+                  %if target#2900 %and k=4 %then printstring("LOCAL CR not (yet) handled".snl) %and ->fails
+               %finish %else stream entry_ident = 14<<24
+               ! FEP
+               ok = yes; %exit
+            %repeat
+            %continue %if ok=yes
+            ->fails
+sswt(5):
+            ! DEVICE NO
+            ->fails %unless value<=9
+            stream entry_device no = value
+            ->fails %if stream entry_remote=0
+            remote entry == record(conad+queues*queue entry size+(stream entry_remote-1) %c
+             *remote entry size+queues*name entry size)
+            %if remote entry_name="LOCAL" %then stream entry_ident = stream entry_ident!value<<16 %else %c
+             stream entry_ident = stream entry_ident!remote entry_fep<<16
+            %continue
+sswt(6):
+            ! DEFAULT LIMIT
+            stream entry_limit = value
+            %continue
+sswt(7):
+            ! DEFAULT FORMS
+            ->fails %unless value<=255
+            stream entry_forms = value
+            %continue
+sswt(8):
+            ! LOWEST PRIORITY
+            ok = no
+            %for k = 1, 1, 5 %cycle
+               %continue %unless temps=priorities(k)
+               stream entry_lowest priority = k
+               ok = yes; %exit
+            %repeat
+            %continue %if ok=yes
+            ->fails
+sswt(9):
+            ! STREAM TYPE
+            ok = no
+            %for k = 0, 1, 5 %cycle
+               %continue %unless temps=stream types(k)
+               stream entry_service = k
+               ok = yes; %exit
+            %repeat
+            %continue %if ok=yes
+            ->fails
+sswt(10):
+            ! QUEUES ATTACHED TO
+            remote entry == record(conad+queues*queue entry size+(stream entry_remote-1) %c
+             *remote entry size+queues*name entry size)
+            %while temps#"" %cycle
+               temp1 = "" %unless temps->temps.("&").temp1
+               ok = no
+               %for k = 1, 1, queues %cycle
+                  queue entry == record(conad+(k-1)*queue entry size)
+                  %continue %unless queue entry_name=temps
+                  %for l = 0, 1, 15 %cycle
+                     %continue %unless stream entry_queues(l)=0
+                     stream entry_queues(l) = k
+                     %if remote entry_name="LOCAL" %and stream entry_service=0 %then queue entry_general access = 1
+                     ! IE OFFER ALL LOCAL OUTPUT QUEUES.
+                     ok = yes; %exit
+                  %repeat
+                  ->fails %if ok=no
+                  %exit %if stream entry_service=2
+                  ! NOT INPUT STREAMS
+                  ok = no
+                  %for l = 0, 1, 15 %cycle
+                     %continue %unless queue entry_streams(l)=0
+                     queue entry_streams(l) = i
+                     ok = yes; %exit
+                  %repeat
+                  %exit
+               %repeat
+               ->fails %if ok=no
+               temps = temp1
+            %repeat
+            %continue
+sswt(11):
+            ! HEADER TYPE
+            ok = no
+            %for k = 1, 1, 4 %cycle
+               %continue %unless temps=hdr types(k)
+               stream entry_header type = k
+               hdrs = hdrs+1
+               stream entry_header number = hdrs
+               ok = yes; %exit
+            %repeat
+            %continue %if ok=yes
+            ->fails
+sswt(12):
+            ! UNIT SIZE
+            ->fails %unless value<=255
+            stream entry_unitsize = value
+            %continue
+sswt(13):
+            ! UNIT NAME
+            stream entry_unitname = temps
+            %continue
+fails:
+            print string("STREAM ".i to s(i)." ".stream entry_name." ENTRY ".sd(j)." WRONG ".line.snl)
+         %repeat; ! EACH STREAM DESCRIPTOR
+         %exit %if line=""; ! END OF FILE
+      %repeat; ! EACH STREAM
+
+endread:
+      !* AT THIS POINT A CONFIG FILE IS CREATED AND CONNECTED
+
+      flag = ddisconnect(outfile owner, temp outfile, out fsys, 0)
+      %if flag=0 %start; ! CONFIG FILE DISCONNECTED TO CHANGE ITS SIZE
+         conad = 0
+         %if queues>0 %and remotes>0 %and streams>0 %start
+            ! MAKE SURE THERE IS SOMETHING IN IT
+            config size = (queues*queue entry size+remotes*remote entry size+streams*stream entry size+ %c
+             (queues+streams+remotes)*name entry size+file hdr size+1023)>>10
+            flag = dchsize(outfile owner, temp outfile, out fsys, config size)
+            %if flag=0 %start; ! SUCCESSFULL TRIMMED
+               flag = drename(outfile owner, temp outfile, outfile, out fsys)
+               flag = dnewgen(outfile owner, outfile, temp outfile, out fsys) %if flag=already exists
+               %if flag=0 %start
+                  %if target#2900 %start
+                     flag = dpermission(outfile owner, "REMOTE", "", outfile, out fsys, 1, r!w)
+                     print string("SET UP ON ".outfile owner.sep.outfile." ON FSYS ".i to s(out fsys)." FAILS ". %c
+                      errs(flag).snl) %if flag#0
+                  %finish %else %start
+                     flag = dpermission(outfile owner, "", "", outfile, out fsys, 1, r)
+                     print string("SET EEP ON ".outfile owner.sep.outfile." ON FSYS ".i to s(out fsys)." FAILS ". %c
+                      errs(flag).snl) %if flag#0
+                  %finish
+                  seg = 0; gap = 0
+                  %if target#2900 %then flag = dconnect(out file owner, outfile, out fsys, r!w!shared, seg,
+                   gap) %else flag = dconnect(out file owner, outfile, out fsys, r!w!shared, 0, seg, gap)
+                  %if flag=0 %start
+                     conad = seg<<seg shift
+                     file hdr == record(conad)
+                     i = queues*queue entry size+remotes*remote entry size
+                     i = i+streams*stream entry size+file hdr size+(queues+streams+remotes)*name entry size
+                     file hdr_end = i
+                     file hdr_start = file hdr size
+                     file hdr_size = config size
+                     file hdr_type = 0
+                     file hdr_datetime = pack date and time(date, time)
+                     file hdr_queues = queues
+                     file hdr_remotes = remotes
+                     file hdr_streams = streams
+                     qconad = file hdr size+conad
+                     rconad = file hdr size+conad+queues*queue entry size+queues*name entry size
+                     sconad = file hdr size+conad+queues*queue entry size+remotes*remote entry size+ %c
+                      (queues+remotes)*name entry size
+                  %finish %else print string("CONNECT ".outfile owner.sep.outfile." FAILS ".errs(flag).snl)
+                  %if target#2900 %start
+                     flag = dpermission(outfile owner, "REMOTE", "", outfile."PTRS", out fsys, 1, r!w)
+                     %if flag#0 %then printstring("Permission on POINTER file fails ".errs(flag).snl)
+                  %finish %else %start
+                     flag = dpermission(outfile owner, "", "", outfile."PTRS", out fsys, 1, r)
+                     %if flag#0 %then printstring("Permission on POINTER file fails ".errs(flag).snl)
+                  %finish
+               %finish %else print string("RENAME/NEWGEN ".outfile owner.sep.outfile." FAILS ".errs(flag).snl)
+            %finish %else print string("CHSIZE ".outfile owner.sep.temp outfile." FAILS ".errs(flag).snl)
+         %finish %else print string("NO QUEUES, REMOTES OR STREAMS IN CONFIGURATION FILE".snl)
+         %if conad=0 %start
+            flag = ddestroy(outfile owner, temp outfile, "", out fsys, 0)
+            print string("DESTROY ".outfile owner.sep.temp outfile." FAILS ".errs(flag).snl) %if flag#0
+         %finish
+      %finish %else print string("DISCONNECT ".outfile owner.sep.temp outfile." FAILS ".errs(flag).snl)
+   %finish; ! Of config file processing.
+   flag = ddisconnect(infile owner, infile, in fsys, 0)
+   print string("DISCONNECT ".infile owner.sep.infile." FAILS ".errs(flag).snl) %if flag#0
+
+create ll:
+   ! Now create the LINK LIST file.
+   create and connect(outfile owner, link list name, out fsys, link list entries*link list entry size, r!w!shared,
+    link list conad)
+   %if link list conad=0 %then printstring("DISASTER Link list create fails".snl) %and %stop
+   %if target#2900 %start
+      flag = dpermission(outfile owner, "REMOTE", "", link list name, out fsys, 2, r!w)
+   %finish %else %start
+      flag = dpermission(outfile owner, "", "", link list name, out fsys, 1, r)
+   %finish
+   %if flag#0 %then printstring("Permission on link list file fails ".errs(flag).snl)
+
+   !* THIS NEXT SECTION IS ONLY ENTERED IF THE CONFIGURATION FILE WAS
+   !* NOT SUCCESSFULLY READ OR THE SPOOLER DATA BASE FILE NOT SUCCESSFULLY
+   !* CREATED.
+
+   %if qconad=0 %or rconad=0 %or sconad=0 %start
+      ! FAILED TO CREATE CONFIG FILE
+      print string("DEFAULT CONFIG IN USE".snl)
+      qconad = addr(tempqs(0)); ! ADDRESS OF DEFAULT QUEUES
+      queues = 2
+      rconad = addr(temp rmts(0))
+      remotes = 1
+      sconad = addr(tempstrms(0)); ! ADDRESS OF DEFAULT STREAMS
+      streams = 1
+
+      queue entry == record(qconad)
+      queue entry = 0
+      queue entry_name = "LP"; ! DEFAULT LINE PRINTER QUEUE
+      queue entry_streams(0) = 1; ! THE LP0 STREAM
+      queue entry_default user = "SPOOLR"
+      queue entry_default delivery = "Spooled Output"
+      queue entry_default start = 32
+      queue entry_default priority = 3; ! STD
+      queue entry_default copies = 1
+      queue entry_default rerun = yes
+      queue entry_max length = 100
+      queue entry_max acr = 15; ! ACCESS BY ANY ONE
+      queue entry_resource limit = 1000
+
+      queue entry == record(qconad+queue entry size)
+      queue entry = 0
+      queue entry_name = "JOURNAL"; ! DEFAULT JOURNAL QUEUE
+      queue entry_default start = 32
+      queue entry_default priority = 3; ! STD
+      queue entry_default copies = 1
+      queue entry_default rerun = yes
+      queue entry_max length = 100
+      queue entry_max acr = 9; ! PRIVILEGED ACCESS ONLY
+      queue entry_resource limit = 1000
+      qnconad = addr(temp qs name(0))
+      queue name entries == array(qnconad, qaf)
+      queue name entries(1)_name = "LP"
+      queue name entries(2)_name = "JOURNAL"
+
+      remote entry == record(rconad)
+      remote entry = 0
+      remote entry_name = "LOCAL"
+      remote entry_status = 3; ! LOGGED ON
+      remote entry_address count = 1
+      remote entry_lowest stream = 1
+      remote entry_highest stream = 1
+      rnconad = addr(temp rmts name(0))
+      remote name entries == array(rnconad, raf)
+      remote name entries(1)_name = "LOCAL"
+
+      stream entry == record(sconad)
+      stream entry = 0
+      stream entry_name = "LP0"
+      stream entry_remote = 1
+      stream entry_address selector = 1
+      stream entry_status = 2; ! ALLOCATED
+      stream entry_ident = x'06000000'; ! LP ADAPTOR DEVICE 0
+      stream entry_limit = 512
+      stream entry_queues(0) = 1; ! THE LP QUEUE
+      stream entry_device type = 6; ! LP
+      stream entry_device no = 0
+      stream entry_lowest priority = 1
+      stream entry_header type = 1; ! LINE PRINTER
+      stream entry_header number = 1
+      stream entry_service = 0; ! OUTPUT DEVICE
+      snconad = addr(temp strms name(0))
+      stream name entries == array(snconad, saf)
+      stream name entries(1)_name = "LP0"
+   %finish %else print string("CONFIG ".in file owner.sep.infile.snl)
+
+   ! printstring("CONFIG returns".snl. %c
+   ! "QCONAD ".itos(qconad).snl."SCONAD ".itos(sconad). %c
+   ! "RCONAD ".itos(rconad).snl."QS ".itos(queues).snl)
+   ! printstring("STRMS ".itos(streams).snl."RMTS ")
+   ! queue entry == record(qconad)
+   ! printstring(itos(remotes).snl.queue entry_name.snl)
+   ! queue entry == record(qconad+queue entry size)
+   ! printstring(queue entry_name.snl)
+   ! remote entry == record(rconad); stream entry == record(sconad)
+   ! printstring(remote entry_name.snl.stream entry_name.snl."END LIST".snl)
+%end; ! Of %external %routine read spool config.
+
+%end %of %file

@@ -1,0 +1,347 @@
+43
+D(NAME)
+D(ICONST)
+D(CONST)
+D(DUMMYSTART)
+D(N)
+D(S)
+D(TEXT)
+D(BIGHOLE)
+D(N255)
+D(HOLE)
+D(MARK)
+D(READLINE?)
+D(TEXTTEXT)
+D(DUMMYAPP)
+D(DOWN)
+D(UP)
+D(LISTON)
+D(LISTOFF)
+D(COLON)
+D(NOTECONST)
+D(TRACE)
+D(SETNEM)
+D(UCNOPS)
+D(UCUB)
+D(UCSB)
+D(OP)
+D(CHUI)
+D(+')
+D(NOTECYCLE)
+D(,')
+D(CHTYPE)
+D(COMP1)
+D(ASSOP)
+D(NOTESTART)
+D(NOTEFINISH)
+D(NOTEREPEAT)
+D(COMP2)
+D(INCLUDE)
+D(UCW)
+D(UCUBUB)
+D(UCUBW)
+D(UCJUMP)
+D(UCWRONG)
+D(OPERAND)
+D(COPERAND)
+D(APP)
+D(%IU)
+D(%WU)
+D(BTYPE)
+D(FULLTYPE)
+D(TYPE)
+D(NLIST')
+D(ALIAS')
+D(ADECLN)
+D(RESTOFARLIST)
+D(RESTOFFPLIST)
+D(RESTOFUI)
+D(%SPEC')
+D(VSPEC')
+D(RESTOFELIST)
+D(RESTOFSWLIST)
+D(RESTOFBPLIST)
+D(RESTOFEXPR)
+D(RESTOFCEXPR)
+D(RESTOFCOND)
+D(RESTOFANDC)
+D(RESTOFORC)
+D(RESTOFSC)
+D(RT)
+D(FM)
+D(DECLN)
+D(%FORMAT')
+D(AUI)
+D(RESTOFIU)
+D(OPEXPR)
+D(ENDLIST)
+D(%EVENT')
+D(%NAME')
+D(%QNAME')
+D(FPP)
+D(FPDEL)
+D(SC)
+D(RESTOFSS1)
+D(RESTOFREPEAT)
+D(ELSE')
+D(UCI)
+D(RESTOFUCI)
+D(AT')
+D(OPTINC)
+D(IREG)
+D(DXB)
+D(DB)
+D(RESTOFUCS)
+D(RESTOFDLB)
+D(RESTOFSI)
+D(RESTOFDXB)
+D(ENAME')
+D(BPAIR)
+D(CONST')
+D(%SEX)
+D(RESTOFRFDEC)
+D(ALTRFDEC)
+D(RFDEC)
+D(RFELMNT)
+D(RFSTMNT)
+D(RFREF)
+D(CYCPARM)
+D(CONSTLIST)
+D(ROCL)
+D(REPFACT)
+D(RESTOFAPP)
+D(EXPR)
+D(CEXPR)
+D(STAROREXPR)
+D(XOWN)
+D(OWNDEC)
+D(RESTOFOWNDEC)
+D(UI)
+D(SS)
+P(OPERAND)     =(NAME)(APP)(ENAME'),
+                (CONST),
+                '('(EXPR)')';
+P(COPERAND)    =(NAME)(DUMMYAPP),
+                (CONST),
+                '('(CEXPR)')';
+P(CEXPR)       =(HOLE)(+')(COPERAND)(MARK)(RESTOFCEXPR);
+P(STAROREXPR)  =(HOLE)(+')(COPERAND)(MARK)(RESTOFCEXPR),
+                '*';
+P(EXPR)        =(HOLE)(+')(OPERAND)(MARK)(RESTOFEXPR);
+P(RESTOFEXPR)  =(OP)(OPERAND)*,
+                0;
+P(RESTOFCEXPR) =(OP)(COPERAND)*,
+                0;
+P(APP)         ='('(EXPR)(RESTOFAPP)')',
+                0;
+P(RESTOFAPP)   =','(EXPR)*,
+                0;
+P(%IU)         ='%IF',
+                '%UNLESS';
+P(%WU)         ='%WHILE'(HOLE)(SC)(RESTOFCOND)(MARK),
+                '%UNTIL'(HOLE)(SC)(RESTOFCOND)(MARK),
+                '%FOR'(HOLE)(NAME)'='(EXPR)','(EXPR)','(EXPR)(MARK);
+P(ALIAS')      ='%ALIAS'(TEXTTEXT),
+                0;
+P(NLIST')      =','(NAME)*,
+                0;
+P(FULLTYPE)    ='%INTEGER',
+                0;
+P(BTYPE)       ='%INTEGER',
+                '%REAL',
+                '%LONG''%REAL';
+P(TYPE)       ='%INTEGER',
+                '%REAL',
+                '%LONG'(BTYPE),
+                '%BYTE'(FULLTYPE),
+                '%STRING'(REPFACT),
+                '%HALF'(FULLTYPE),
+                '%SHORT'(FULLTYPE),
+                '%RECORD''('(RFREF)')';
+P(RT)          ='%ROUTINE',
+                (CHTYPE)(TYPE)(FM);
+P(FM)          ='%FN',
+                '%MAP',
+                '%FUNCTION';
+P(FPDEL)       =(TYPE)(%QNAME')(NAME)(NLIST'),
+                (RT)(%NAME')(NAME)(NLIST')(FPP),
+                '%NAME'(NAME)(NLIST');
+P(%NAME')      ='%NAME',
+                0;
+P(%QNAME')     ='%ARRAYNAME',
+                '%NAME',
+                0;
+P(FPP)         ='('(HOLE)(FPDEL)(MARK)(RESTOFFPLIST)')',
+                0;
+P(RESTOFFPLIST)=(,')(HOLE)(FPDEL)(MARK)*,
+                0;
+P(ENDLIST)     ='%OFPROGRAM'(UP),
+                '%OFFILE',
+                '%OFLIST'(LISTOFF),
+                (UP);
+P(%FORMAT')    ='%FORMAT',
+                0;
+P(SC)          =(EXPR)(COMP1)(EXPR)(RESTOFSC),
+                '('(SC)(RESTOFCOND)')',
+                '%NOT'(SC);
+
+P(RESTOFSC)    =(COMP2)(EXPR),
+                0;
+P(RESTOFCOND)  ='%AND'(SC)(RESTOFANDC),
+                '%OR'(SC)(RESTOFORC),
+                0;
+P(RESTOFANDC)  ='%AND'(SC)*,
+                0;
+P(RESTOFORC)   ='%OR'(SC)*,
+                0;
+P(RESTOFUI)    =(ASSOP)(EXPR),
+                ':',
+                0;
+P(%SPEC')      ='%SPEC',
+                (DOWN);
+P(VSPEC')      ='%SPEC',
+                O;
+P(RESTOFBPLIST)=','(EXPR)':'(EXPR)(RESTOFBPLIST),
+                0;
+P(DECLN)       =(%QNAME')(NAME)(NLIST'),
+                '%ARRAY'(%FORMAT')(ADECLN);
+P(ADECLN)      =(NAME)(NLIST')(BPAIR)(RESTOFARLIST);
+P(RESTOFARLIST)=','(ADECLN),
+                0;
+
+P(OWNDEC)      =(%QNAME')(VSPEC')(HOLE)(NAME)(ALIAS')(CONST')
+                         (MARK)(RESTOFOWNDEC)(S),
+                '%ARRAY'(%FORMAT')(VSPEC')(NAME)(ALIAS')(BPAIR)(CONSTLIST) ;
+P(RESTOFOWNDEC)=','(HOLE)(NAME)(ALIAS')(CONST')(MARK)
+                  (RESTOFOWNDEC),
+                0;
+P(XOWN)        ='%OWN',
+                '%EXTERNAL',
+                '%EXTRINSIC',
+                '%CONSTANT',
+                '%CONST';
+P(CONSTLIST)   ='='(READLINE?)
+                  (+')(COPERAND)(RESTOFCEXPR)(REPFACT)(ROCL),
+                0;
+P(ROCL)        =','(READLINE?)(+')(COPERAND)(RESTOFCEXPR)(REPFACT)*,
+                0;
+P(REPFACT)     ='('(STAROREXPR)')',
+                0;
+
+P(RESTOFELIST) =','(CEXPR)*,
+                0;
+P(%EVENT')     ='%EVENT',
+                0;
+P(OPEXPR)      =','(EXPR),
+                0;
+P(RESTOFSWLIST)=','(NAME)(NLIST')'('(EXPR)':'(EXPR)')'*,
+                0;
+P(RESTOFREPEAT)='%UNTIL'(SC)(RESTOFCOND),
+                0;
+P(RESTOFSS1)   =(COLON),
+                (S),
+                (%IU)(SC)(RESTOFCOND)(S),
+                (%WU)(S);
+P(RESTOFIU)    ='%START'(NOTESTART),
+                '%THENSTART'(NOTESTART),
+                '%THEN'(HOLE)(UI)(MARK)(ELSE');
+P(AUI)         ='%AND'(UI),
+                0;
+P(ELSE')       ='%ELSESTART'(NOTESTART),
+                '%ELSE'(%IU)(HOLE)(SC)(RESTOFCOND)(MARK)(RESTOFIU),
+                '%ELSE'(UI),
+                0;
+P(ENAME')      ='_'(NAME)(APP)(ENAME'),
+                0;
+P(BPAIR)       ='('(EXPR)':'(EXPR)(RESTOFBPLIST)')';
+P(CONST')      ='='(+')(COPERAND)(RESTOFCEXPR),
+                0;
+P(%SEX)        ='%SYSTEM',
+                '%EXTERNAL',
+                '%DYNAMIC',
+                0;
+P(CYCPARM)     =(NAME)'='(EXPR)','(EXPR)','(EXPR),
+                0;
+P(RESTOFRFDEC) =','(RFDEC)*,
+                0;
+P(RFSTMNT)     ='%SPEC'(NAME),
+                (NAME)'('(RFDEC)(RESTOFRFDEC)(ALTRFDEC)')';
+P(RFREF)       =(NAME),
+                (RFDEC)(RESTOFRFDEC)(ALTRFDEC);
+P(RFDEC)       =(TYPE)(RFELMNT),
+                '('(RFDEC)(RESTOFRFDEC)(ALTRFDEC)')';
+P(RFELMNT)     =(%QNAME')(NAME)(NLIST'),
+                '%ARRAY'(ADECLN);
+P(ALTRFDEC)    ='%OR'(RFDEC)(RESTOFRFDEC)*,
+                0;
+P(UCI)         ='*'(AT')(NAME)(OPTINC)(S),
+                'PUT_'(ICONST)(S),
+                (SETNEM)(RESTOFUCI)(S),
+                'CNOP_'(N255)','(N255)(S),
+                (UCWRONG);
+P(OPTINC)      ='+'(N),
+                '-'(N),
+                0;
+P(AT')         ='@',
+                '=',
+                0;
+P(RESTOFUCI)   =(UCNOPS)(N255),
+                (UCUB)(N255)','(N255),
+                (UCSB)(N255)','(DXB),
+                (UCW)(N255)','(N255)','(DB),
+                (UCUBUB)(DB)(RESTOFSI),
+                (UCUBW)(DXB)','(DB),
+                (UCJUMP)(N255)(IREG)',''<'(NAME)'>';
+P(IREG)        =','(N255),
+                0;
+P(DXB)         =(NAME)(OPTINC)(RESTOFDLB),
+                (N)(RESTOFDXB);
+P(DB)          =(NAME)(OPTINC),
+                (N)(RESTOFUCS);
+P(RESTOFUCS)   ='('(N255)')',
+                0;
+P(RESTOFDLB)   ='('(N)')',
+                O;
+P(RESTOFSI)    =','(CEXPR),
+                0;
+P(RESTOFDXB)   ='('(N)','(N255) ')',
+                '('(N255)')',
+                0;
+P(UI)          =(HOLE)(NAME)(APP)(ENAME')(MARK)(RESTOFUI)(AUI),
+                '->'(NAME)(APP),
+                '%RETURN',
+                '%RESULT'(ASSOP)(EXPR),
+                '%MONITOR'(AUI),
+                '%STOP',
+                '%SIGNAL'(%EVENT')(CEXPR)(OPEXPR),
+                '%EXIT',
+                '%CONTINUE';
+P(SS)          =(CHUI)(HOLE)(UI)(MARK)(RESTOFSS1),
+                (TEXT),
+                (%IU)(HOLE)(SC)(RESTOFCOND)(MARK)(RESTOFIU)(S),
+                '%FINISH'(NOTEFINISH)(ELSE')(S),
+                '%CYCLE'(NOTECYCLE)(CYCPARM)(S),
+                '%REPEAT'(NOTEREPEAT)(RESTOFREPEAT)(S),
+                (%WU)'%CYCLE'(NOTECYCLE)(S),
+                (CHTYPE)(HOLE)(TYPE)(MARK)(DECLN)(S),
+                '%END'(ENDLIST)(S),
+                '%RECORD''%FORMAT'(RFSTMNT)(S),
+                (HOLE)(%SEX)(RT)(MARK)(%SPEC')(HOLE)(NAME)(ALIAS')(FPP)(S),
+                (XOWN)(TYPE)(OWNDEC),
+                '%INCLUDE'(CONST)(INCLUDE),
+
+                '%BEGIN'(DOWN)(HOLE)(S),
+                '%ON'(TRACE)(%EVENT')(CEXPR)(RESTOFELIST)'%START'
+                      (NOTESTART)(S),
+                '%SWITCH'(NAME)(NLIST')'('(EXPR)':'(EXPR)')'
+                      (RESTOFSWLIST)(S),
+                '%LIST'(S)(LISTON),
+                '%ELSE'(NOTEFINISH)(DUMMYSTART)(NOTESTART)(S),
+
+                '*'(UCI),
+                '%TRUSTEDPROGRAM'(S),
+                '%MAINEP'(NAME)(S),
+                '%CONTROL'(CONST)(S),
+                (NAME)'(*):',
+                (S);
+E

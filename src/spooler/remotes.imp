@@ -1,0 +1,2495 @@
+!***************************************************************
+!This version is compatable only with versions of SPOOLR >= 0488
+!***************************************************************
+!
+%external %routine %spec iprintstring(%string (255) s)
+%external %routine %spec inewline
+%external %routine %spec iprompt(%string (255) s)
+%external %routine %spec ilogoff(%integer i)
+%external %routine %spec iterminate
+%external %routine %spec iselect output(%integer console)
+%external %routine %spec iset logout delay(%integer seconds {-1 = never})
+%external %integer %fn %spec ioutpos {gives current column position}
+
+%record %format parmf(%integer dest,srce,p1,p2,p3,p4,p5,p6)
+%record %format rf(%integer conad,filetype,datastart,dataend)
+%record %format chdrform(%integer conad,filetype,datastart,dataend)
+%external %routine %spec connect %alias "S#OLDCONNECT"(%string (255) file, %integer mode,hole,prot,
+   %record (chdrform) %name r, %integer %name flag)
+%external %routine %spec disconnect %alias "S#DISCONNECT"(%string (255) file, %integer %name flag)
+%external %routine %spec mprintp(%record (parmf) p)
+%external %routine %spec give monitoring(%string %name tim, %integer %name secs,nbytes)
+%external %string %function %spec i to s %alias "S#ITOS"(%integer i)
+%external %integer %function %spec bin(%string (255) s)
+%external %routine %spec uc translate %alias "S#UCTRANSLATE"(%integer addr,len)
+
+
+%external %integer %function %spec dexecmess(%string %name user, %integer %name sact,len,adr)
+
+%routine uctran(%string %name s)
+   uctranslate(addr(s)+1,length(s))
+%end {uctran}
+%constant %byte %integer not used= 255
+%constant %integer oper display size= 22
+%constant %integer max consoles= 127
+
+%constbyteinteger sole = 1
+%constbyteinteger barred = 2
+
+%constant %byte %integer info= 0
+%constant %byte %integer activity permitted= 1
+%constant %byte %integer manager= 2
+
+%constant %byte %integer not logged on= 0
+%constant %byte %integer logged on ok= 1
+
+
+
+%constant %string (1) snl="
+"
+
+%constinteger true = 1
+%constinteger false = 0
+
+%constant %integer comseg=31, seg shift=20
+%constant %string %name date= comseg<<seg shift + x'3b'
+%constant %string %name time= comseg<<seg shift + x'47'
+
+%own %integer already connected= 0
+
+%own %integer current scan point = 0
+%own %integer looking at queue = false
+
+%own %string(63) s key 1 = ""
+%own %string(63) s key 2 = ""
+
+%own %integer qs= 256
+%own %integer strms= 256
+%own %integer rmts= 256
+
+
+%own %integer %array consoles(0:127)=255(128)
+
+%record %format connectionf(%string (15) name, %string (63) it connection, %integer display type,which display,
+   which page,source, %string (10) specific user, %byte %integer status,type,disabled)
+
+%own %record (connectionf) %array connections(0:max consoles)
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!We now have the declarations wholesale from spoolr.
+
+%constant %string (7) %array stream type(0:3)= %c
+ "Output",
+ "Input",
+ "Job",
+ "Process"
+%constant %string (17) %array stream status type(0:8)= %c
+ "Unallocated",
+ "Allocating",
+ "Allocated",
+ "Active",
+ "Connecting",
+ "Disconnecting",
+ "Aborting",
+ "Suspending",
+ "Deallocating"
+%constant %string (11) %array remote status type(0:5)= %c
+ "Closed",
+ "Open",
+ "Logging On",
+ "Logged On",
+ "Switching",
+ "Logging Off"
+%constant %integer n modes= 2
+%constant %string (3) %array modes(0:n modes)= %c
+ "ISO", "EBC", "BIN"
+%constant %string (15) %array doc state(0:6)= %c
+ "Deleted",
+ "Queued",
+ "Sending",
+ "Running",
+ "Receiving",
+ "Processing",
+ "Transferring"
+
+%constant %integer n priorities= 5
+%constant %string (5) %array priorities(1:n priorities)= %c
+ "VLOW",
+ "LOW",
+ "STD",
+ "HIGH",
+ "VHIGH"
+
+%constant %string (2) %array device type(0:15)= %c
+ "NA", "PP", "PR", "CP", "CR", "MT", "LP", "GP", "OP", "MP", "DO",
+ "NA", "CT", "SU", "FE", "NA"
+%constant %integer on= 1
+%constant %integer off= 0
+%constant %integer no= 0
+%constant %integer yes= 1
+%constant %integer locked= 2
+
+%constant %string (12) %array header type(1:3)= %c
+ "Line Printer", "Paper Tape", "Card Punch"
+%constant %integer %array prtys(1:n priorities)= %c
+1, 1000001, 2000001, 3000001, 4000001
+%constant %integer max fsys= 99
+%constant %integer no route= 0
+%constant %integer p station= 0
+%constant %integer max documents= 1000;  !MAX DOCUMENT DESCRIPTORS ON EACH FILE SYSTEM
+%constant %integer document entry size= 384;  !SIZE IN BYTES OF A DOCUMENT DESCRIPTOR
+%constant %integer info size= 384;  !SIZE IN BYTES OF INFO RETURNED TO USERS
+%constant %integer max priority= 10000;  !PRIORITY ADDED TO BASE PRIORITY IF RESOURCE = 0
+%constant %integer small weight= 4;  !THIS SHOULD BE INCREASED TO FAVOUR SMALL JOBS
+%constant %integer requested= 255
+%constant %integer ok= 0;  !GENERAL SUCCESSFUL REPLY FLAG
+%constant %integer rejected= 3
+%constant %integer unused= 0;  !DESCRIPTOR STATUS
+%constant %integer queued= 1;  !DITTO
+%constant %integer sending= 2;  !DITTO
+%constant %integer running= 3;  !DITTO
+%constant %integer receiving= 4;  !DITTO
+%constant %integer processing= 5;  !DITTO
+%constant %integer transferring= 6;  !FTP file transfer activity
+%constant %integer closed= 0;  !REMOTE STATUS
+%constant %integer open= 1;  !DITTO
+%constant %integer logging on= 2;  !DITTO
+%constant %integer logged on= 3;  !DITTO
+%constant %integer switching= 4;  !DITTO
+%constant %integer logging off= 5;  !DITTO
+%constant %integer unallocated= 0;  !STREAM STATUS
+%constant %integer allocating= 1
+%constant %integer allocated= 2;  !DITTO
+%constant %integer active= 3;  !DITTO
+%constant %integer connecting= 4;  !DITTO
+%constant %integer disconnecting= 5;  !DITTO
+%constant %integer aborting= 6;  !DITTO
+%constant %integer suspending= 7;  !DITTO
+%constant %integer deallocating= 8;  !DITTO
+%constant %integer all queues= 1;  !WHICH DISPLAY TYPE
+%constant %integer all streams= 2;  !DITTO
+%constant %integer individual queue= 3;  !DITTO
+%constant %integer individual stream= 4;  !DITTO
+%constant %integer non empty queues= 5;  !DITTO
+%constant %integer active streams= 6;  !DITTO
+%constant %integer individual document= 7;  !DITTO
+%constant %integer full individual queue= 8;  !DITTO
+%constant %integer all remotes= 9;  !DITTO
+%constant %integer logged on remotes= 10;  !DITTO
+%constant %integer individual remote= 11;  !DITTO
+%constant %integer file header size= 32;  !SS STANDARD FILE HEADER SIZE
+%constant %integer r= b'00000001';  !READ PERMITION
+%constant %integer w= b'00000010';  !WRITE PERMITION
+%constant %integer s= b'00001000'
+%constant %integer zerod= b'00000100';  !ZERO FILE ON CREATION
+%constant %integer tempfi= b'00000001';  !TEMP FILE ON CREATION
+%constant %integer list size= 1000;  !SIZE OF QUEUE CELLS LIST
+%constant %integer max fep= 7;  !MAXIMUM FEPS SUPPORTED
+%constant %integer last q per stream= 15;  !NUMBER OF QUEUES BEING SERVED BY ONE STREAM
+%constant %integer last stream per q= 15;  !NUMBER OF LAST STREAM SERVING EACH Q
+%constant %integer queue dest= 1
+%constant %integer file dest= 2
+%constant %integer newfile dest= 3
+%constant %integer null dest= 4
+
+%constant %integer output= 0;  !serviceINE STREAM TYPE
+%constant %integer input= 1;  !DITTO
+%constant %integer job= 2;  !DITTO
+%constant %integer process= 3;  !DITTO
+
+!Now the document property identifers.
+%constant %byte %integer dap batch flag= x'01'
+%constant %byte %integer media hold= x'01'
+%constant %byte %integer dap hold= x'02'
+%constant %byte %integer not media= x'fe'
+%constant %byte %integer not dap= x'fd'
+%constant %integer prelogon tied= 2;  !INDICATES TYPE OF PRELOGGED ON STATE OF A REMOTE.
+%constant %integer prelogon untied= 1
+%constant %integer unknown type= 0
+%constant %integer NSI type= 1
+%constant %integer X25 type= 2
+
+
+%record %format pe(%integer dest,srce,p1,p2,p3,p4,p5,p6)
+
+%record %format pointers f(%integer queues,queue entry size,queue displ,queue name displ,streams,stream entry size,
+   stream displ,stream name displ,remotes,remote entry size,remote displ,remote name displ,ftp stations,
+   station entry size,ftp station displ)
+
+%recordformat document descriptorf(%byteinteger state,
+   %string(6) user,
+   %string(15) dest,
+   (%integer date and time received, date and time started %or %c
+    %byteinteger FTRANS action, confirm, type, tfsys, %integer transfer ident),
+    {the FTRANS units are set by us when requesting SPOOLR to do something}
+   %shortinteger dap mins,dap c exec time,
+   %integer date and time deleted, start after date and time,
+            priority, data start, data length, time, output limit ,
+   %string(3) originating system,
+   %integer originating ident,
+   %integerarray spareintegers (1:3),
+   %byteinteger copies requested, priority requested, forms, mode, copies,
+                 rerun, decks, drives, fails, srce,
+                 outdev, output, delivery, name,
+   %byteintegerarray vol label(1:8),
+   %byteinteger unique, order, order set, batch log, batch job,
+   %byteintegerarray sparebytes (1:15),
+   %byteinteger properties,
+   (%byteinteger string ptr %or %string(255) string space), %BYTEINTEGER OHECK)
+
+%record %format queuef(%string (15) name,
+   (%short %integer %array streams(0:15) %or %short %integer %array lines(0:15)), %string (7) default user,
+   %string (31) default delivery, %integer default start,default priority,default time,default output limit,
+   default forms,default mode,default copies,default rerun,length,head,max length,maxacr, %short %integer q by,
+   general access, %integer resource limit,amount)
+
+
+%recordformat stream f(%string(15) name, %string(7) unit name,
+  %integer q no, %shortintegerarray queues(0 : 15),
+  %integer status, bytes sent, bytes to go, block, part blocks,
+           document, %string(6) specific user, (%byteinteger reallocate %or %byteinteger logical dap),
+           %integer bin offset,  %byteinteger service, user abort, unit size, fep,
+  %byteinteger remote, address selector, fep selector, bspare01,
+  %byteinteger abort retry count, connect fail expected,
+           TS call accept, allodeallo count, %integer  offset,
+           (%integer in comms stream %or %integer comms stream),
+           %integer out comms stream,
+           (%integer in stream ident %or %integer ident),
+           %integer out stream ident,
+ (%integer limit, account,
+  %byteinteger device type, device no, forms, lowest priority,
+               header type, header number,
+               (%byteinteger batch enable, invoc %or %byteinteger new allocation, sole or barred),
+  %string(6)%array user profile(1:8) %or %integer transfer status, tcc subtype,
+           in block addr, out block addr,
+  %byteinteger activity, station type, station ptr, suspend,
+               in stream status, out stream status,
+               timer, output buffer status, output transfer pending,
+               new ftp data record, sp2,sp3,
+  %integer aux document, pre abort status, bytes transferred,
+  %record(pe) output transfer record))
+
+
+!*
+!*
+%recordformat r addr f ((%byteinteger network address len, %byteintegerarray network %c
+  add (0:62) %or %string(63) TS address))
+!*
+%recordformat remotef(%string (15) name,
+  %integer status, lowest stream, highest stream, fep, old fep,
+  prelog fep, prelog, timeout, polling, command lock,
+  %byteinteger unused1, unused2, network address type, address count,
+  %record(raddrf)%array addresses(1:5),
+  %byteintegerarray fep route value(0:max fep),
+  %string(31) description, ( %string(7) password %or %integer pic file, page ))
+!*
+
+
+!Note that the stream tables (and FTP line tables) are in two sections.
+!The first gives basic information used on stream 'scans', ie in
+!response to a QUEUE user command for active documents. The first section
+!will fit in a single page. The second sections contains the meaty bits.
+!
+%record %format details f(%string (15) name, %string (7) user)
+
+
+
+%record %format lcf(%integer document,priority,size, %byte %integer order set,order,copies,gen flags,
+   %integer link, %string (6) user,(%byte %integer after %or %byte %integer forms))
+
+%record %format fhf(%integer end,start,size,type,free hole,datetime,spare1,spare2)
+
+%record %format message f(%string(15) remote name, %integer dt, %string (63) message)
+
+
+%string %function doc string(%record (document descriptor f) %name document, %byte %integer %name ptr)
+   %if ptr=0 %then %result = "" %else %result = string(addr(document_string space)+ptr)
+%end
+
+
+%integer %function s to i(%string (255) s)
+   %string (255) p,ns1,ns2
+   %integer total,sign,i,j,hex
+   %constant %integer %array rad(0:1)= 10,16
+   hex = 0; total = 0; sign = 1
+a:
+   %if s->ns1.(" ").ns2 %and ns1="" %then s = ns2 %and ->a;  !CHOP LEADING SPACES
+   %if sign=1 %and s->ns1.("-").ns2 %and ns1="" %then s = ns2 %and sign = -1
+   %if hex=0 %and s->ns1.("X").ns2 %and ns1="" %then s = ns2 %and hex = 1 %and ->a
+   %if hex=0 %and s->ns1.("x").ns2 %and ns1="" %then s = ns2 %and hex = 1 %and ->a
+   p = s %unless s->p.(" ").s
+   ->fault %if p="" %or (hex=1 %and length(p)>8)
+   %for i = 1,1,length(p) %cycle
+      j = charno(p,i)
+      ->fault %unless '0'<=j<='9' %or (hex=1 %and 'A'<=j&95<='F')
+      %if 'A'<=j&95<='F' %then j = 10+j&95-'A' %else j = j-'0'
+      total = rad(hex)*total+j
+   %repeat
+   %result = sign*total
+fault:
+   %result = -1000;  ! Unlikely value.
+%end;  !OF INTEGERFN S TO I
+
+
+
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!The main entry points now follow
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+
+%external %routine m initialise(%string (63) user,pass,it connection, %integer protocol,console)
+
+   %record (remote f) %array %format rarf(1:rmts)
+   %record (remote f) %array %name remotes
+
+   %record (connectionf) %name connection
+   %record (pointers f) %name pointers
+   %record (rf) re
+   %string (63) call
+   %integer i,entry,flag
+   entry = -1
+   %for i = 0,1,max consoles %cycle
+      %if consoles(i)=not used %then entry = i %and %exit
+   %repeat
+   %if entry=-1 %start
+      !All consoles in use.
+      iprintstring("Sorry, busy"); inewline
+      ilogoff(console)
+      %return
+   %finish
+   %cycle
+      %if pass#"" %and (charno(pass,length(pass))=13 %or charno(pass,length(pass))=nl) %then %c
+         length(pass) = length(pass)-1 %else %exit
+   %repeat
+
+   connect("SPOOLR:CFILEPTRS",r!W!s,0,0,re,flag)
+   %if flag#0 %and flag#34 %start
+      iprintstring("CFILEPTRS conn fail ".itos(flag).snl)
+      ilogoff(console)
+      %return
+   %finish
+   pointers == record(re_conad+file header size)
+   %if qs=256 %start
+      !this is the first time in.
+      qs = pointers_queues
+      strms = pointers_streams
+      rmts = pointers_remotes
+      iset logout delay(-1); ! Suppress log out of REMOTE.
+   %finish
+   connection == connections(entry)
+   consoles(entry) = console
+
+   connection = 0
+   connect("SPOOLR:CFILE",r!W!s,0,0,re,flag)
+   %if flag#0 %and flag#34 %start
+      iprintstring("CFILE conn fails ".itos(flag).snl)
+      ilogoff(console)
+      %return
+   %finish
+   remotes == array(re_conad+pointers_remote displ,rarf)
+   %if user->("REMOTE ").user %start
+      %cycle
+         %exit %unless user->(" ").user
+      %repeat
+      %if user="MANAGER" %then user = "LOCAL"
+      %for i = 1,1,rmts %cycle
+         %if remotes(i)_name=user %then connection_source = i %and %exit
+      %repeat
+      %if connection_source=0 %then iprintstring(user." not known".snl) %and ilogoff(console) %and %return
+      connection_type = activity permitted
+      %unless pass->("X25").pass %or pass->("TS").pass %then %c
+         iprintstring("Invalid pass".snl) %and ilogoff(console) %and %return
+      call = "OPER(".user.")CHECKPASS:".itos(connection_source)."/".itos(entry)."/".pass
+      flag = dexecmess("SPOOLR",1,length(call),addr(call)+1)
+      %if flag#0 %then iprintstring("SPOOLER unavailable".snl) %and ilogoff(console) %and %return
+      %if user="LOCAL" %then user = "MANAGER" %and connection_source = 0
+      connection_name = user
+      connection_disabled = locked
+   %finish %else iprintstring("User name: 'REMOTE <name>'".snl) %and ilogoff(console) %and %return
+
+   iprintstring("REMOTE News: Some new commands and changes (Feb '88)".snl. %c
+                "             type 'NEWS' for details".snl.snl)
+
+   IPROMPT("<> ")
+%end {m initialise}
+
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+%external %routine m input(%string (255) call, %integer console)
+
+   %string (255) aaa,bbb,tim,sx,sy
+   %integer i,n,secs,nbytes,j,unass,entry,found,flag, k,count,smod
+
+   ! R E C O R D A R R A Y F O R M A T S
+   ! - - - - - - - - - - - - - - - - - -
+   %record (lcf) %array %format list cells af(1:list size)
+   %record (details f) %array %format qnaf(1:qs)
+   %record (queuef) %array %format qarf(1:qs)
+   %record (details f) %array %format rnaf(1:rmts)
+   %record (remotef) %array %format rarf(1:rmts)
+   %record (details f) %array %format snaf(1:strms)
+   %record (streamf) %array %format sarf(1:strms)
+
+
+   ! R E C O R D A R R A Y N A M E S
+   ! - - - - - - - - - - - - - - - -
+   %record (lcf) %array %name list cells
+   %record (details f) %array %name queue names
+   %record (queuef) %array %name queues
+   %record (details f) %array %name remote names
+   %record (remotef) %array %name remotes
+   %record (details f) %array %name stream details
+   %record (streamf) %array %name streams
+
+   %record (message f) %array %format message af(1:5000)
+   %record (message f) %array %name messages
+
+
+   ! R E C O R D S
+
+   %record (connectionf) %name connection
+   %record (pointers f) %name pointers
+   %record (rf) re
+
+   %string %function %spec ident to s(%integer ident)
+   %string %function %spec i to ss(%integer i,l)
+   %string %function %spec unpack date(%integer datetime)
+   %string %function %spec unpack time(%integer datetime)
+   %integer %function %spec pack date and time(%string (8) date,time)
+   %string (15) %function %spec hms(%integer secs)
+   %routine %spec interpret command
+   uctran(call)
+   length(call) = length(call)-1 %if call#"" %and charno(call,length(call))=nl
+
+   %if call = "NEWS" %start
+     iprintstring("There are a number of changes in the Feb. '88 release:".snl.snl)
+     iprintstring("1) The information line now starts '(X)' rather than 'EMAS EMAS-X' as before".snl.snl)
+     iprintstring("2) The command 'SCAN' is introduced. With this you can look back over a large".snl. %c
+                  "   number of messages for your remote.  Each message is timed, and you can".snl)
+     iprintstring("   thumb through using the commands '+' and '-' (which now also replace 'NEXT'".snl. %c
+                  "   and 'LAST').".snl)
+     iprintstring("   You can also include one or two 'keys' with SCAN, e.g.:".snl)
+     iprintstring("      SCAN GP15".snl)
+     iprintstring("   or SCAN EGPH24 LP23".snl)
+     iprintstring("   [notice however key scan is on upper case words only]".snl.snl)
+     iprintstring("3) Action of a specific user is now extended to include".snl. %c
+                  "   SOLE as well as BAR.  Whereas 'BAR LP25 ENGT32' prevented any".snl)
+     iprintstring("   documents by that user being actioned, SOLE results in only that user".snl. %c
+                  "   being selected.  Like BAR a command 'SOLE LP15' removes the sole setting".snl)
+     iprintstring("   as does any other use of SOLE or BAR.".snl.snl)
+     iterminate
+   %finish %else  %if (call="?" %or call="HELP") %start
+      iterminate
+   %finish %else %if call="CONSOLES" %start
+      iprintstring("Logged-on consoles: ".SNL)
+      n = 0
+      %for i = 0,1,127 %cycle
+         %if consoles(i)#255 %then n = n+1 %and %c
+            iprintstring("Console ".itos(consoles(i))." : ".CONNECTIONS(I)_NAME.snl)
+      %repeat
+   %finish %else %if call->aaa.("PRINT").bbb %start
+      n = bin(bbb)
+      %if 0<n<=x'b00' %start
+         i = 0
+         %cycle
+            aaa = itos(i)
+            aaa = "0".aaa %while length(aaa)<4
+            aaa = " ".aaa
+            %if ioutpos>60 %then aaa = aaa.snl
+            iprintstring(aaa)
+            i = i+length(aaa)
+            %exit %if i>n
+         %repeat
+      %finish
+   %finish %else %if call="GETMON" %start
+      give monitoring(tim,secs,nbytes)
+      iprintstring(itos(nbytes)." bytes at ".tim." term after ".itos(secs))
+   %finish %else %if call->aaa.("SETLOGOUTDELAY").bbb %start
+      i = bin(bbb)
+      %if 0<=i<=60*60 {1hr} %then iset logout delay(i) %else iprintstring("Invalid value")
+   %finish %else %if call="UNASS" %start
+      j = unass
+   %finish %else %if length(call)>2 %and call->aaa.(":").bbb %and length(aaa)>0 %start
+      ! Try for inter-console communication: aaa should be a console number
+      i = bin(aaa)
+      %if 0<i<=127 %start
+         found = 0
+         %for j = 0,1,127 %cycle
+            %if consoles(j)=i %then connection == connections(j) %and found = 1
+         %repeat
+         %if found=0 %then iprintstring("Console ".itos(i)." not connected") %else %start
+            iselect output(i)
+            iprintstring(snl."From ".itos(console)." (".CONNECTION_NAME.") ".": ".bbb.SNL)
+         %finish
+      %finish %else iprintstring("Invalid console number")
+   %finish %else %start
+
+      !******************** This is the REMOTE user service entry point.
+
+      %for i = 0,1,maxconsoles %cycle
+         %if consoles(i)=console %then connection == connections(i) %and entry = i %and %exit
+         %if i=max consoles %start
+            iprintstring("Console match fail..disaster".snl)
+            %return
+         %finish
+      %repeat
+
+      %if already connected=no %start
+         connect("SPOOLR:CFILEPTRS",r!W!s,0,0,re,flag)
+         %if flag#0 %and flag#34 %start
+            iprintstring("CFILEPTRS conn fail ".itos(flag).snl)
+            %return
+         %finish
+         pointers == record(re_conad+file header size)
+         connect("SPOOLR:CFILE",r!W!s,0,0,re,flag)
+         %if flag#0 %and flag#34 %start
+            iprintstring("CFILE conn fail ".itos(flag).snl)
+            %return
+         %finish
+         streams == array(re_conad+pointers_stream displ,sarf)
+         already connected = yes
+         connect("SPOOLR:RJEMESS",r!W!s,0,0,re,flag)
+         %if flag#0 %and flag#34 %start
+            iprintstring("SPOOL MESSAGE FILE con fail ".itos(flag).snl)
+         %finish %else %start
+           messages == array(RE_conad+file header size,message af)
+           i = integer(re_conad+16)
+           k = i
+           j = 0
+           %cycle
+             %if messages(k)_remote name=connection_name %then j = j + 1
+             %if k=1 %then k = 5000 %else k = k-1
+             %exit %if k=i
+           %repeat
+           disconnect("SPOOLR.RJEMESS",flag)
+           iprintstring("***There are ".itos(j)." messages in recall memory  ". %c
+            "available for SCANing.".snl) %if j > 0
+        %finish
+
+      %finish
+      interpret command
+      iprompt("<> ")
+
+      %return
+
+   %finish
+
+
+
+   %routine interpret command
+      !***********************************************************************
+      !*                                                                     *
+      !*                                                                     *
+      !***********************************************************************
+      %constant %integer command limit= 72
+      %switch swt(1:command limit)
+      %integer i,j,k,strm,rmt,flag,q no,id
+      %integer new q no,command length,link,forms
+      %integer flags,source
+
+      %record (rf) re
+      %record (streamf) %name stream
+      %record (queuef) %name queue
+      %record (document descriptorf) %name document
+      %string (15) q,name,ident,recieving queue,user
+      %string (15) original queue
+      %string (10) specific user
+      %string (63) param1,param2
+      %string (63) reply,param,ns1
+      %string (63) %array words(1:15)
+      %string (255) command
+      %integer %function %spec find remote(%string (255) r)
+      %integer %function %spec find queue(%string (255) q)
+      %integer %function %spec find stream(%string (255) strm)
+
+      %routine %spec display queues(%integer page,full)
+      %routine %spec display remotes(%integer page,full)
+      %routine %spec display streams(%integer page,full)
+      %routine %spec display queue(%integer q no,page,full, %string (10) specific user)
+      %routine %spec display document(%integer line,ident)
+      %routine %spec display stream(%integer strm)
+      %routine %spec display remote(%integer r)
+      %routine %spec update oper(%integer display type,which display,which page, %string (10) specific user)
+      %constant %string (15) %array comm(1:command limit)= %c
+                    "FE", "LAST", "NEXT", "LOGON", "LOGOFF", "WINDUP",
+                     "OPEN", "CLOSE", "TIE", "SWITCH", "POLL", "BROADCAST",
+                     "EOF", "START", "STOP", "ATTACH", "DETACH", "ABORT",
+                     "BATCHSTREAMS", "RUN", "SELECT", "TIDY", "PRINT", "MON",
+                     "PROMPT", "CONFIG", "CHOP", "FEPUP", "FEPDOWN", "STREAM",
+                     "S", "STREAMS", "SS", "QUEUE", "Q", "QUEUES",
+                     "QS", "DISPLAY", "BATCH", "REMOTES", "RS", "REMOTE",
+                     "R", "PRIORITY", "LIMIT", "FORMS", "RUSH", "HOLD",
+                     "RELEASE", "DELETE", "MOVE", "COPY", "OFFER", "WITHDRAW",
+                     "MSG", "ENABLE", "DISABLE", "CONNECTFE", "A:", "",
+                     "","","","","","AUTODAP",
+                     "BAR","QFORMS","SCAN","SOLE","+","-"
+
+      !The following array of words are param checking flags used as follows:
+      ! x00nnnnnn  no checking to be done
+      ! x01nnnnnn  do checks
+      ! xnn00nnnn  Main oper command only
+      ! xnn01nnnn  Main oper and RJE command
+      ! xnn10nnnn  RJE command only
+      ! xnn11nnnn  Informative command, not checked for RJE access permissions.
+      ! xnnnnllnn  minimum number of params
+      ! xnnnnnnll  maximum number of params (FF implies any number)
+
+
+      %constant %integer %array comm flags(1:command limit)= %c
+ x'01000000', x'01000000', x'01000000', x'01000003', x'01010001', x'01010001',
+ x'01000101', x'01000101', x'01000101', x'01000303', x'01000000', x'01000101',
+ x'01000101', x'01000101', x'01000001', x'01000303', x'01000303', x'01010101',
+ x'01000102', x'01000202', x'01000101', x'01000101', x'01000001', x'01000101',
+ x'01000101', x'01000002', x'01000101', x'01000101', x'01000101', x'01110101',
+ x'01110101', x'01110001', x'01110001', x'01110103', x'01110103', x'01110001',
+ x'01110001', x'01110101', x'01110000', x'01110001', x'01110001', x'01110101',
+ x'01110101', x'01010202', x'01010202', x'01010202', x'01010101', x'01010101',
+ x'01010101', x'01010102', x'01010304', x'01010303', x'01010101', x'01010101',
+ x'010101FF', x'01100101', x'01100000', x'01000101', x'011100FF', x'01000102',
+ x'01000001', x'01000001', x'01110002', x'01000102', x'01000102', x'01000102',
+ x'01010102', x'01000202', x'01010002', x'01010102', x'01010000', x'01010000'
+
+
+      %integer %function find document(%string (15) srce,q,name,id, %string (6) user, %integer %name q no,ident)
+         !***********************************************************************
+         !*                                                                     *
+         !*  ATTEMPTS TO FIND THE SPECIFIED DOCUMENT. ANY OR MANY OF THE PARAMS *
+         !*  MAY NOT BE SPECIFIED.                                              *
+         !*                                                                     *
+         !***********************************************************************
+         %integer next
+         %for q no = 1,1,qs %cycle
+            %if q="" %or q=queue names(q no)_name %start
+               !THIS Q?
+               next = queues(q no)_head;  !FIND FIRST DOCUMENT IN Q
+               %while next#0 %cycle;  !SCAN DOWN QUEUE
+                  ident = list cells(next)_document
+                  !PICK UP DOCUMENT IDENTIFIER
+                  %result = 0 %if id="" %or id=ident to s(ident)
+                  !THIS IDENT?
+                  next = list cells(next)_link
+               %repeat
+            %finish
+         %repeat
+         %result = 1
+      %end;  !OF INTEGERFN FIND DOCUMENT
+
+      %integer %function check params(%string (255) param, %string %name q,name,user,ident)
+         !***********************************************************************
+         !*                                                                     *
+         !*                                                                     *
+         !***********************************************************************
+         %integer i,id,afsys
+         q = ""; name = ""; user = ""; ident = ""
+         %if param->q.(" ").param %start;  !Q THE
+            %if 1<=length(q)<=15 %start;  !RIGHT LT
+               %if param->user.(" ").name %start
+                  %result = 0 %if length(user)=6 %and 1<=length(name)<=15
+               %finish
+            %finish %else %result = 1
+         %finish
+         %if length(param)=6 %start
+            afsys = 0
+            %for i = 1,1,2 %cycle
+               %result = 1 %unless '0'<=charno(param,i)<='9'
+               afsys = afsys*10+charno(param,i)-'0'
+            %repeat
+            %result = 1 %unless 0<=afsys<=max fsys
+            id = 0
+            %for i = 3,1,6 %cycle
+               %result = 1 %unless '0'<=charno(param,i)<='9'
+               id = id*10+charno(param,i)-'0'
+            %repeat
+            %result = 1 %unless 1<=id<=max documents
+            ident = param
+            %result = 0
+         %finish
+         %result = 1
+      %end;  !OF ROUTINE CHECK PARAM
+
+      %integer %function get document(%string (31) param)
+         !***********************************************************************
+         !*                                                                     *
+         !*                                                                     *
+         !***********************************************************************
+         %integer i
+         %record (fhf) %name file header
+         %result = 1 %if check params(param,q,name,user,ident)#0
+         %result = 2 %if find document(connection_name,q,name,ident,user,q no,id)#0
+         i = (id&x'ff000000')>>24
+         connect("SPOOLR:SPOOLLIST".itos(i),r!W!s,0,x'00000080'!(i<<8),re,flag)
+         %if flag#0 %and flag#34 %start
+            iprintstring("SPOOLLIST".itos(i)." conn fails ".itos(flag).snl)
+            %result = 3
+         %finish
+         file header == record(re_conad)
+         i = re_conad+file header_start+(id&x'ffffff'-1)*document entry size
+         document == record(i)
+         %result = 0
+      %end;  !OF INTEGERFN GET DOCUMENT
+
+
+      %integer %function map document(%integer param)
+         !***********************************************************************
+         !*                                                                     *
+         !*                                                                     *
+         !***********************************************************************
+         %integer i
+         %record (fhf) %name file header
+         i = (param&x'ff000000')>>24
+         connect("SPOOLR:SPOOLLIST".itos(i),r!W!s,0,x'00000080'!(i<<8),re,flag)
+         %if flag#0 %and flag#34 %start
+            iprintstring("SPOOLLIST".itos(i)." conn fails ".itos(flag).snl)
+            %result = 3
+         %finish
+         file header == record(re_conad)
+         i = re_conad+file header_start+(param&x'ffffff'-1)*document entry size
+         document == record(i)
+         %result = 0
+      %end;  !OF INTEGERFN map DOCUMENT
+
+
+      !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+      !GENERAL ROUTINES FOR THE COMMAND SET INTERPRETATION.
+
+      %integer %function permission(%integer type)
+         !THIS CHECKS PERMISSION OF THE FOLLOWING TYPES:
+         !  1:  PERMISSION ON AN INDIVIDUAL DOCUMENT
+         !  2:  PERMISSION ON A STREAM
+         !  3:  PERMISSION ON A QUEUE
+         %integer i,j
+         !
+         {do the info/activity/managr checks here}
+         %result = 0 %if connection_name="MANAGER"
+         %if type=1 %start
+            !DOCUMENT CHECK
+            %if doc string(document,document_srce)#"" %start
+               ! It was generated by a remote.
+               %for i = remotes(source&255)_lowest stream,1,remotes(source&255)_highest stream %cycle
+                  %if stream details(i&255)_name=doc string(document,document_srce) %then %result = 0
+               %repeat
+            %finish
+            !OK, SO CHECK WETHER DOCUMENT IS IN A QUEUE SERVED(OWNED) BY
+            !THE CALLING REMOTE.
+            %for i = remotes(source)_lowest stream,1,remotes(source)_highest stream %cycle
+               stream == streams(i&255)
+               %for j = 0,1,last q per stream %cycle
+                  %exit %unless 0<stream_queues(j)<=qs
+                  %if queues(stream_queues(j)&255)_name=document_dest %then %result = 0
+               %repeat
+            %repeat
+            !WELL WE TRIED DIDN'T WE !!
+            %result = 1
+         %finish
+         %if type=2 %start
+            !STREAM PERMISSION CHECK
+            %result = 0 %if remotes(source&255)_lowest stream<=strm<=remotes(source&255)_highest stream
+            %result = 1
+         %finish
+         %if type=3 %start
+            !A QUEUE PERMISSION CHECK.
+            %for i = remotes(source&255)_lowest stream,1,remotes(source&255)_highest stream %cycle
+               stream == streams(i)
+               %for j = 0,1,last q per stream %cycle
+                  %exit %if stream_queues(j)=0
+                  %result = 0 %if q no=stream_queues(j)
+               %repeat
+            %repeat
+            %result = 1
+         %finish
+         !
+      %end
+
+      %integer %function resolve command
+         %integer elements
+         %string (127) word
+
+         elements = 0
+         command = call
+         length(command) = length(command)-1 %while command#"" %and charno(command,length(command))=' '
+         %while elements<15 %and command#"" %cycle
+            command -> (" ").command %while length(command)>0 %and charno(command,1)=' '
+            word = command %and command = "" %unless command->word.(" ").command
+            elements = elements+1
+            words(elements) <- word
+         %repeat
+         %result = elements
+      %end
+
+      !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+      !DO THE INITIAL CHECKS AGAINST THE ATRIBUTES WORD
+
+      source = connection_source
+      forms = -1
+      reply = ""
+      command length = resolve command
+      %return %if command length=0
+      link = 0
+      %for i = 1,1,command limit %cycle
+         %if words(1)=comm(i) %then link = i %and %exit
+      %repeat
+      %if link=0 %start
+         %if call="QUIT" %start
+            connection_source = 0
+            connection_name = ""
+            %return
+         %finish
+         reply = "INVALID COMMAND ".words(1)
+         ->error
+      %finish
+      flags = comm flags(link)
+      ->skip %if flags>>24=0
+      !IE DO NOT DO INITIAL CHECKS.
+      %unless (flags>>8)&x'FF'<=command length-1<=flags&x'FF' %start
+         reply = "NUMBER OF PARAMS ?"
+         ->error
+      %finish
+
+skip:
+      !now connect the spoolr files we will require.
+      connect("SPOOLR:CFILEPTRS",r!W!s,0,0,re,flag)
+      %if flag#0 %and flag#34 %then reply = "CFILEPTRS conn fail ".itos(flag) %and ->error
+      pointers == record(re_conad+file header size)
+      connect("SPOOLR:CFILE",r!W!s,0,0,re,flag)
+      %if flag#0 %and flag#34 %then reply = "CFILE conn fail ".itos(flag) %and ->error
+      queue names == array(re_conad+pointers_queue name displ,qnaf)
+      queues == array(re_conad+pointers_queue displ,qarf)
+      stream details == array(re_conad+pointers_stream name displ,snaf)
+      streams == array(re_conad+pointers_stream displ,sarf)
+      remote names == array(re_conad+pointers_remote name displ,rnaf)
+      remotes == array(re_conad+pointers_remote displ,rarf)
+      qs = pointers_queues
+      strms = pointers_streams
+      rmts = pointers_remotes
+      disconnect("SPOOLR:CFILEPTRS",flag)
+      connect("SPOOLR:SPOOLLINK",r!W!s,0,0,re,flag)
+      %if flag#0 %and flag#34 %then reply = "SPOOLLINK conn fail ".itos(flag) %and ->error
+      list cells == array(re_conad,list cells af)
+      %if connection_disabled=yes %and link#56 %then iprintstring("Your terminal is locked out.".snl) %and %return
+
+      %unless 71<= link <= 72 %start
+        current scan point = 0
+        s key 1 = ""
+        s key 2 = ""
+        looking at queue = false
+      %finish
+
+      ->swt(link)
+      !
+      !
+swt(7):
+swt(8):
+swt(11):
+swt(21):
+swt(23):
+swt(24):
+swt(27):
+swt(28):
+swt(29):
+swt(58):
+swt(61):
+swt(62):
+swt(64):
+swt(65):
+swt(66):
+
+      ->call spooler
+swt(*):
+      iprintstring("No".snl)
+      %return
+
+
+
+      !**********************************************************
+      !
+      !Scan the recall memory.
+      !
+
+swt(69):
+swt(71):
+swt(72):
+
+      connect("SPOOLR:RJEMESS",r!W!s,0,0,re,flag)
+      %if flag#0 %and flag#34 %start
+         iprintstring("****Recall memory failure: ".itos(flag).snl)
+         %return
+      %finish
+      messages == array(RE_conad+file header size,message af)
+
+go:
+      %if 71<= link <= 72 %start
+
+        %if looking at queue = true %start
+          !this is a replacement for NEXT and LAST
+          %if link = 71 %then link = 3 %else link = 2
+          -> swt(link)
+        %finish
+
+        %if current scan point = 0 %start
+          iprintstring("You must either set up a QUEUE or Q display, or set up  a SCAN by one of:".snl)
+          iprintstring("  1)   SCAN             with no parameters starts a straight scan".snl. %c
+           "  2)   SCAN key         starts a scan on a keyword,".snl. %c
+           "  3)   SCAN key key     starts a scan on two keys, e.g.  SCAN LP15  EGNR44".snl)
+          %return
+        %finish
+        count = 0
+        %if link = 71 %then smod = 1 %else smod = -1
+        k = current scan point
+
+        %cycle
+
+          %if messages(k)_remote name = connection_name %start
+            %if s key 1 = "" %and s key 2 = "" %then -> printit
+            %if s key 2 = "" %and messages(k)_message -> sx.(s key 1).sy %then  -> printit
+            %if messages(k)_message -> sx.(s key 1).sy %and messages(k)_message %c
+             -> sx.(s key 2).sy %then -> printit
+          %finish
+          -> update
+
+printit:  count = count + 1
+          sx = unpack date(messages(k)_dt)
+          length(sx) = length(sx)-3
+          sx = sx." ".unpack time(messages(k)_dt)
+          length(sx) = length(sx) - 3
+          sx <- sx." ".messages(k)_message
+          i printstring(sx)
+          %unless messages(k)_message -> sx.(snl).sy %and sy = "" %then  inewline
+
+update:   %if smod = 1 %and k = 5000 %then k = 1 %else %c
+          %if smod = -1 %and k = 1 %then k = 5000 %else k = k + smod
+          %if k = integer(re_conad+16) %start
+           iprintstring(snl."************** TOP/BOTTOM wrap around ************".snl.snl) %unless k = current scan point
+          %finish
+          %if count = 18 %then current scan point = k %and %exit
+          %if k = current scan point %start
+            iprintstring("*** NO MORE ***".snl)
+            %exit
+          %finish
+        %repeat
+        %return
+      %finish
+
+      s key 1 = ""; s key 2 = ""
+      current scan point = integer(re_conad + 16)
+      link = 72
+
+      %if command length = 1 %then -> go
+
+      %if command length > 1 %start
+        s key 1 = words(2)
+        %if command length > 2 %then s key 2 = words(3)
+        -> go
+      %finish
+
+
+
+      disconnect("SPOOLR.RJEMESS",flag)
+      %return
+
+
+      !***************************************************
+
+      !DISPLAY A SPECIFIED (DEFAULT 0) PAGE OF THE QUEUES.
+
+swt(36):
+swt(37):
+
+      %if command length=2 %start
+         j = stoi(words(2))
+         param = "PAGE NO." %and ->parameter %if j<0 %or j>255
+      %finish %else j = 0
+      %if link=36 %then i = all queues %else i = non empty queues
+      connection_display type = i
+      connection_which display = 0
+      connection_which page = j
+      connection_specific user = ""
+      ->up oper
+
+      !*****************************
+      !DISPLAY A SPECIFIED DOCUMENT.
+
+swt(38):
+
+      param = "DOCUMENT"
+      %if length(words(2))=6 %start
+         %for i = 1,1,6 %cycle
+            ->parameter %unless '0'<=charno(words(2),i)<='9'
+         %repeat
+         i = (charno(words(2),1)-'0')*10+charno(words(2),2)-'0'
+         j = (charno(words(2),3)-'0')*1000+(charno(words(2),4)-'0')*100+(charno(words(2),
+            5)-'0')*10+charno(words(2),6)-'0'
+         ->parameter %unless 1<=j<=max documents
+         connection_display type = individual document
+         connection_which page = 0
+         connection_which display = i<<24!j
+         connection_specific user = ""
+         ->up oper
+      %finish %else ->parameter
+
+      !**********************************************************
+      !RUSH:   PUT A JOB AT MAX PRIORITY WITHIN ITS OWN PRIORITY
+
+swt(47):
+
+      param = "DOCUMENT"
+      flag = get document(words(2))
+      reply = "DOCUMENT access fails ".i to s(flag) %and ->error %if flag#0
+      ->violation %if permission(1)#0
+      ->call spooler
+
+
+      !*************************************
+      !RELEASE A HELD DOCUMENT
+
+swt(49):
+
+      param = "DOCUMENT"
+      flag = get document(words(2))
+      reply = "DOCUMENT access fails ".i to s(flag) %and ->error %if flag#0
+      ->violation %if permission(1)#0
+      ->call spooler
+
+      !****************
+      !HOLD A DOCUMENT.
+
+swt(48):
+
+      param = "DOCUMENT"
+      flag = get document(words(2))
+      reply = "DOCUMENT access fails ".itos(flag) %and ->error %if flag#0
+      ->violation %if permission(1)#0
+      ->call spooler
+
+      !*************************************************
+      !DELETE A DOCUMENT OR THE DOCUMENTS INDICATED BY
+      !SUBSEQUENT PARAMETERS.
+
+swt(50):
+
+      specific user = ""; q no = 0
+      %if words(2)->words(2).(".ALL") %start
+         %if command length=3 %start
+            !IE DELETE ALL A USER'S DOCS IN A PARTICULAR QUEUE.
+            q no = find queue(words(3))
+            param = "QUEUE" %and ->parameter %if q no=0
+            specific user = words(2)
+            param = "USER" %and ->parameter %if length(specific user)#6
+         %finish %else %start
+            q no = find queue(words(2))
+            param = "QUEUE" %and ->parameter %if q no=0
+         %finish
+      %finish %else %start
+         !DELETE A SINGLE DOCUMENT.
+         flag = get document(words(2))
+         reply = "DOCUMENT access fails ".itos(flag) %and ->error %if flag#0
+         ->violation %if permission(1)#0
+         ->call spooler
+      %finish
+      !COMPLETE THE MULTIPLE DELETE.
+      ->violation %if permission(3)#0
+      !IE NO ACCESS TO THAT QUEUE.
+      ->call spooler
+
+      !*************************************************
+      !MOVE A DOCUMENT OR THE DOCUMENTS INDICATED BY
+      !SUBSEQUENT PARAMETERS.
+
+swt(51):
+
+      specific user = ""; q no = 0; recieving queue = ""
+      original queue = ""; new q no = 0
+      %if command length=5 %start
+         !A USER'S DOCS IN A QUEUE TO BE MOVED.
+         param = "WORDING" %and ->parameter %unless words(4)="TO" %and words(2)->specific user.(".ALL")
+         param = "USER" %and ->parameter %unless length(specific user)=6
+         q no = find queue(words(5))
+         param = "RECIEVING QUEUE" %and ->parameter %if q no=0
+         ->violation %unless permission(3)=0 %or queues(q no)_general access=open
+         recieving queue = words(5)
+         new q no = q no
+         q no = find queue(words(3))
+         original queue = words(3)
+         param = "ORIGINAL QUEUE" %and ->parameter %if q no=0
+         ->violation %if permission(3)#0
+      %finish %else %start
+         !USER NOT SPECIFIED, MUST BE EITHER SINGLE DOC OR A WHOLE QUEUE.
+         q no = find queue(words(4))
+         param = "RECIEVING QUEUE" %and ->parameter %if q no=0
+         ->violation %unless permission(3)=0 %or queues(q no)_general access=open
+         recieving queue = words(4)
+         new q no = q no
+         %unless words(2)->words(2).(".ALL") %start
+            !IT IS A SINGLE DOC MOVE.
+            flag = get document(words(2))
+            param = "DOCUMENT access fails ".itos(flag) %and ->parameter %if flag#0
+            original queue = document_dest
+            ->violation %if permission(1)#0
+            ->call spooler
+         %finish
+         !FULL QUEUE MOVE.
+         q no = find queue(words(2))
+         original queue = words(2)
+         param = "ORIGINAL QUEUE " %and ->parameter %if q no=0
+         ->violation %if permission(3)#0
+      %finish
+      !DO THE MOVES.
+      queue == queues(q no)
+      reply = "NOT TO SAME QUEUE !" %and ->error %if recieving queue=original queue
+      ->call spooler
+
+      !*************************************************
+      !CHANGE THE PRIORITY OF A STREAMS OR OF A DOCUMENT
+
+swt(44):
+
+      i = 0
+      %for j = 1,1,n priorities %cycle
+         %if words(3)=priorities(j) %start
+            i = j
+            %exit
+         %finish
+      %repeat
+      param = "PRIORITY" %and ->parameter %if i=0
+      strm = find stream(words(2))
+      %if strm=0 %start
+         !MUST THEREFORE BE A DOCUMENT
+         %if get document(words(2))#0 %then param = "STREAM/DOCUMENT" %and ->parameter
+         ->violation %if permission(1)#0
+         ->call spooler
+      %finish
+      !A STREAM PRIORITY CHANGE.
+      ->violation %unless permission(2)=0
+      ->call spooler
+
+      !***************************************************
+      !COPY A DOCUMENT TO ANOTHER QUEUE.
+
+swt(52):
+
+      q no = find queue(words(4))
+      param = "QUEUE" %and ->parameter %if q no=0
+      ->violation %unless permission(3)=0 %or queues(q no)_general access=open
+      new q no = q no
+      flag = get document(words(2))
+      param = "DOCUMENT access fails ".itos(flag) %and ->parameter %if flag#0
+      ->violation %unless permission(1)=0
+      ->call spooler
+      !******************************************************
+      !WINDUP ACTIVITY ON STREAMS FOR SPECIFIED REMOTE. (ALL)
+
+swt(6):
+
+      %if command length>1 %and words(2)=".ALL" %start
+         ->violation %if source#0
+         ->call spooler
+      %finish %else %start
+         %if command length=1 %then words(2) = connection_name
+         rmt = find remote(words(2))
+         param = "REMOTE" %and ->parameter %if rmt=0
+         ->call spooler
+      %finish
+      %return
+
+
+      !******************************************************
+      !ABORT ONE OR ALL STREAMS.
+
+swt(18):
+
+      %if words(2)=".ALL" %start
+         ->violation %unless source=0
+         ->call spooler
+      %finish %else %start
+         strm = find stream(words(2))
+         param = "STREAM" %and ->parameter %if strm=0
+         ->violation %unless permission(2)=0
+         reply = "NOT REQUIRED" %and ->error %if streams(strm)_status<allocated
+         ->call spooler
+      %finish
+      %return
+
+      !*********************************************************
+      !START A STREAM (IE REMOVE STOP AND KICK) , OR ALL STREAMS.
+
+swt(14):
+
+      %if words(2)=".ALL" %start;  !START ALL STREAMS
+         ->call spooler
+      %finish %else %start
+         strm = find stream(words(2))
+         param = "STREAM" %and ->parameter %if strm=0
+         ->call spooler
+      %finish
+      %return
+
+      !*********************************************************
+      !DISPLAY PAGE OF ALL STREAMS       OR     ACTIVE STREAMS
+
+swt(32):
+swt(33):
+
+      %if command length>1 %start
+         j = s to i(words(2))
+         param = "PAGE" %and ->parameter %if j<0 %or j>255
+      %finish %else j = 0
+      %if i=32 %then i = all streams %else i = active streams
+      connection_display type = i
+      connection_which display = 0
+      connection_which page = j
+      connection_specific user = ""
+      ->up oper
+
+      !************************************************************
+      !DISPALY FORMS specific queue
+
+swt(68):
+
+      q no = find queue(words(2))
+      param = "QUEUE" %and ->parameter %if q no=0
+      %if words(3)="#0" %then forms = 256 %else %start
+         forms = s to i(words(3))
+         param = "FORMS (0-255 or #0)" %and ->parameter %unless 0<=forms<=255
+      %finish
+      connection_display type = individual queue
+      connection_which display = q no
+      connection_which page = forms
+      connection_specific user = "FORMS"
+      ->up oper
+
+      !********************************************************
+      !DISPLAY DETAILED PAGE OF QUEUE  OR  SIMPLE PAGE OF QUEUE
+
+swt(34):
+swt(35):
+
+      j = 0; connection_specific user = ""
+      %if command length=2 %start
+         q no = find queue(words(2))
+         param = "QUEUE" %and ->parameter %if q no=0
+      %finish %else %start
+         %if words(2)->words(2).(".ALL") %start
+            param = "USER" %and ->parameter %unless %c
+               length(words(2))=6 %or (words(2)->reply.("DAP") %and (length(reply)=0 %or length(reply)=7))
+            connection_specific user = words(2)
+            q no = find queue(words(3))
+            param = "QUEUE" %and ->parameter %if q no=0
+            %if command length=4 %start
+               j = s to i(words(4))
+               param = "PAGE" %and ->parameter %unless 0<=j<=255
+            %finish
+         %finish %else %start
+            q no = find queue(words(2))
+            j = s to i(words(3))
+            %if q no=0 %start
+               %if 0<=j<=255 %start
+                  param = "QUEUE"
+                  ->parameter
+               %finish %else %start
+                  reply = "<USER>.ALL ?"
+                  ->error
+               %finish
+            %finish
+            param = "PAGE" %and ->parameter %unless 0<=j<=255
+         %finish
+      %finish
+      %if link=34 %then i = full individual queue %else i = individual queue
+      looking at queue = true
+      connection_display type = i
+      connection_which display = q no
+      connection_which page = j
+      connection_specific user = ""
+      ->up oper
+
+      !***********************************************
+      !REPORT ON STREAM STATUS FULLY   OR   PARTIALLY
+
+swt(30):
+swt(31):
+
+      strm = find stream(words(2))
+      param = "STREAM" %and ->parameter %if strm=0
+      connection_display type = individual stream
+      connection_which display = strm
+      connection_which page = 0
+      connection_specific user = ""
+      ->up oper
+
+      !*****************************************************
+      !SET A STREAM ATTRIBUTE.  FORMS OR LIMIT
+
+swt(46):
+swt(45):
+
+      strm = find stream(words(2))
+      param = "STREAM" %and ->parameter %if strm=0
+      ->violation %unless permission(2)=0
+      i = s to i(words(3))
+      %if link=45 %then j = 10000 %else j = 255
+      param = "VALUE" %and ->parameter %unless 0<=i<=j
+      ->call spooler
+
+      !********************************************************************
+      !Bar (or release) a stream from outputing(and only output streams)
+      !for a particular user.
+
+swt(67):
+
+      strm = find stream(words(2))
+      param = "STREAM" %and ->parameter %if strm=0
+      ->violation %unless permission(2)=0
+      %if streams(strm)_specific user # "" %start
+        %if streams(strm)_sole or barred = barred %then iprintstring( %c
+         "BAR on ".streams(strm)_specific user." removed".snl) %else %c
+         iprintstring("SOLE use by ".streams(strm)_specific user." ends.".snl)
+      %finish
+      ->call spooler
+
+      !********************************************************************
+      !Set (or release) a stream to outputing(and only output streams)
+      !for a particular user.
+
+swt(70):
+
+      strm = find stream(words(2))
+      param = "STREAM" %and ->parameter %if strm=0
+      ->violation %unless permission(2)=0
+      %if streams(strm)_specific user # "" %start
+        %if streams(strm)_sole or barred = barred %then iprintstring( %c
+         "BAR on ".streams(strm)_specific user." removed".snl) %else %c
+         iprintstring("SOLE use by ".streams(strm)_specific user." ends.".snl)
+      %finish
+      ->call spooler
+
+
+      !**************************************************
+      !ATTACH A STREAM TO A PARTICULAR QUEUE
+
+swt(16):
+
+      reply = "<STRM> TO <Q> ?" %and ->error %unless words(3)="TO"
+      strm = find stream(words(2))
+      param = "STREAM" %and ->parameter %if strm=0
+      q no = find queue(words(4))
+      param = "QUEUE" %and ->parameter %if q no=0
+      stream == streams(strm)
+      queue == queues(q no)
+      %if stream_service#input %start;  !NOT INPUT STREAMS
+         %for i = 0,1,last q per stream %cycle
+            %unless stream_queues(i)=q no %start
+               %if stream_queues(i)=0 %start
+                  %for j = 0,1,last stream per q %cycle
+                     %unless queue_streams(j)=strm %start
+                        %if queue_streams(j)=0 %start
+                           ->call spooler
+                        %finish
+                     %finish %else %start
+                        reply = words(2)." ALREADY ATTACHED"
+                        ->error
+                     %finish
+                  %repeat
+                  reply = words(4)." HAS TOO MANY STREAMS"
+                  ->error
+               %finish
+            %finish %else %start
+               reply = words(2)." ALREADY ATTACHED"
+               ->error
+            %finish
+         %repeat
+         reply = words(2)." ATTACHED TO TOO MANY QUEUES"
+         ->error
+      %finish %else %start;  !INPUT STREAMS
+         %if stream_queues(0)#0 %start
+            reply = words(2)." ALREADY ATTACHED TO ".queue names(stream_queues(0))_name
+            ->error
+         %finish
+         ->call spooler
+      %finish
+
+      !************************************************
+      !DETACH A STREAM FROM A QUEUE.
+
+swt(17):
+
+      reply = "<STRM> FROM <Q> ?" %and ->error %unless words(3)="FROM"
+      strm = find stream(words(2))
+      param = "STREAM" %and ->parameter %if strm=0
+      q no = find queue(words(4))
+      param = "QUEUE" %and ->parameter %if q no=0
+      stream == streams(strm)
+      queue == queues(q no)
+      %if q no=stream_queues(stream_q no) %and stream_document#0 %start
+         !THE STREAM IS CURRENTLY SERVING THE QUEUE IN QUESTION.
+         reply = "DETACH FAILS, ".words(2)." SERVING ".words(4)
+         ->error
+      %finish
+      %if stream_service#input %start;  !NOT INPUT STREAMS
+         %for i = 0,1,last q per stream %cycle
+            %exit %if stream_queues(i)=0
+            %if stream_queues(i)=q no %start
+               %for j = 0,1,last stream per q %cycle
+                  %exit %if queue_streams(j)=0
+                  %if queue_streams(j)=strm %then ->call spooler
+               %repeat
+               reply = words(2)." ATTACHED TO ".words(4)." WRONGLY"
+               ->error
+            %finish
+         %repeat
+         reply = words(2)." NOT ATTACHED TO ".words(4)
+         ->error
+      %finish %else %start
+         %if stream_queues(0)#q no %start
+            reply = words(2)." NOT ATTACHED TO ".words(4)
+            ->error
+         %finish %else ->call spooler
+         %return
+      %finish
+
+      !********************************************************
+      !DISPLAY A PAGE OF INFORMATION ABOUT REMOTES.
+
+swt(40):
+swt(41):
+
+      %if command length=2 %start
+         j = stoi(words(2))
+         param = "PAGE" %and ->parameter %if j<0 %or j>255
+      %finish %else j = 0
+      %if link=40 %then i = all remotes %else i = logged on remotes
+      connection_display type = i
+      connection_which display = 0
+      connection_which page = j
+      connection_specific user = ""
+      ->up oper
+
+      !*********************************************
+      !DISPLAY REMOTE STATUS INFORMATION.
+
+swt(42):
+swt(43):
+
+      rmt = find remote(words(2))
+      param = "REMOTE" %and ->parameter %if rmt=0
+      connection_display type = individual remote
+      connection_which display = rmt
+      connection_which page = 0
+      connection_specific user = ""
+      ->up oper
+
+      !******************************************
+      !LOGOFF REMOTE(S) AS SPECIFIED
+
+swt(5):
+
+      words(2) = connection_name %and call = call." ".connection_name %if command length=1
+      %if words(2)=".ALL" %or find remote(words(2))#0 %then ->call spooler %else param = "REMOTE" %and ->parameter
+      %return
+
+      !*******************************************
+      !DISPLAY LAST PAGE OF CURRENT DISPLAY
+
+swt(2):
+
+      reply = "FIRST PAGE!" %and ->error %if connection_which page=0
+      connection_which page = connection_which page-1
+      ->up oper
+
+      !************************************************
+      !DISPLAY THE NEXT PAGE OF THE CURRENT DISPLAY.
+
+swt(3):
+
+      reply = "LAST PAGE!" %and ->error %if connection_which page=255
+      connection_which page = connection_which page+1
+      ->up oper
+
+      !************************************************************
+      !SET THE NUMBER OF BATCH STREAMS (AND LIMIT IF REQUIRED)
+
+swt(19):
+
+      i = s to i(words(2))
+      reply = "0-16 STREAMS ONLY !" %and ->error %unless 0<=i<=16
+      ->call spooler
+
+      !***********************************************
+      !FORCE A SPECIFIC BATCH JOB TO START.
+
+swt(20):
+
+      strm = find stream(words(2))
+      param = "STREAM" %and ->parameter %if strm=0
+      printstring("Stream already ACTIVE!".snl) %and %return %if streams(strm)_status>allocated
+      flag = get document(words(3))
+      param = "DOCUMENT access fails ".itos(flag) %and ->parameter %if flag#0
+      reply = "Not a batch job" %and ->error %if streams(strm)_service#job
+      %if document_dap c exec time#0 %then reply = "Use SELECT on DAP jobs" %and ->error
+      ->call spooler
+
+      !*************************************************
+      !OFFER OR WITHDRAW A GENERAL QUEUE PARAMETER
+
+swt(53):
+swt(54):
+
+      q no = find queue(words(2))
+      param = "QUEUE" %and ->parameter %if q no=0
+      ->violation %unless permission(3)=0
+      ->call spooler
+
+      !**********************************************
+      !ENABLE OR DISABLE A REMOTE'S COMMAND INPUT
+
+swt(56):
+swt(57):
+
+      %if connection_name="MANAGER" %then name = "LOCAL" %else name = connection_name
+      rmt = find remote(name)
+      %if link=56 %start
+         !ENABLE(REQUIRES A PASSWORD)
+         %unless words(2)->("X25").words(2) %or words(2)->("TS").words(2) %then param = "PASS" %and ->parameter
+         call = "OPER(".connection_name.")CHECKPASS:".itos(connection_source)."/".itos(entry)."/".words(2)
+         flag = dexecmess("SPOOLR",1,length(call),addr(call)+1)
+         %if flag#0 %then iprintstring("SPOOLER unavailable".snl) %and ilogoff(console)
+         %return
+      %finish
+      %if link=57 %then connection_disabled = yes
+      %return
+
+      !******************************************************
+      !LOGON THE SPECIFIED REMOTE THRU THE SPECIFIED FEP AT
+      !THE SPECIFIED ADDRESS
+
+swt(4):
+
+      %if connection_name="MANAGER" %then reply = "NO" %and ->error
+    %if command length > 1 %start
+      %if words(2)->param1.(".").param2 %start
+         %if length(param1)=8 %then words(2) = "0000".words(2)
+      %finish %else %if length(words(2))=8 %then words(2) = "0000".words(2)
+    %finish
+
+      reply = "ALREADY LOGGED ON" %and ->error %if remotes(connection_source)_status>open
+      !in the next section the FEP no 0 could,from config stage, be
+      !either because it was set to 0 really or NA. Therefore we
+      !ignore FE0 as a logon primitive and use FE? (ie choose)
+      !when we call spoolr.  If 0 was wanted and is X25 it will be
+      !chosen anyway by spooler.
+      !NOTE that if the FE is specified by the ops. then this is used.
+
+  %if remotes(connection_source)_prelog > 0 %start
+    %if command length = 1 %start
+      call = "LOGON ".connection_name." FE? PRELOG"
+    %finish
+    %if command length > 1 %start
+      %unless words(2) -> ("FE").words(2) %then reply = "LOGON FEn  for PRELOGGED ON REMOTES" %and -> error
+      i = stoi(words(2))
+      %unless 0 <= i <= max fep %then reply = "invalid FE no." %and -> error
+      call = "LOGON ".connection_name." FE".words(2)." PRELOG"
+    %finish
+    %if command length = 3 %then call = call." TIED"
+    printstring(call.snl)
+    -> call spooler
+  %finish
+      call = "LOGON ".connection_name." FE"
+      %if command length>=3 %start
+         %unless words(3)->("FE").words(3) %then reply = "LOGON <addr> FEn  ?" %and ->error
+         i = stoi(words(3))
+         %unless 0<=i<=max fep %then reply = "Invalid FEP no." %and ->error
+         call = call.words(3)." ".words(2)
+         %if command length=4 %then call = call." TIED"
+      %finish %else call = call."? ".words(2)
+      printstring(call.snl)
+      ->call spooler
+
+      !****************************************
+      !TIE DOWN A REMOTE TO ITS CURRENT FEP
+
+swt(9):
+
+      rmt = find remote(words(2))
+      param = "REMOTE" %and ->parameter %if rmt=0 %or remotes(rmt)_name="LOCAL"
+      %if remotes(rmt)_status=logged on %or remotes(rmt)_status=switching %start
+         !OK TO TIE DOWN
+         ->call spooler
+      %finish %else printstring(remotes(rmt)_name." NOT LOGGED ON.".snl)
+      %return
+
+      !*************************************************
+      !SWITCH A REMOTE FROM ONE FEP TO ANOTHER.
+
+swt(10):
+
+      %if words(3)="TO" %start
+         reply = "<RMT> TO FEn" %and ->error %unless %c
+            words(4)->ns1.("FE").words(4) %and ns1="" %and length(words(4))=1
+         rmt = find remote(words(2))
+         param = "REMOTE" %and ->parameter %if rmt=0
+         i = charno(words(4),1)-'0'
+         param = "FEP" %and ->parameter %unless 0<=i<=max fep
+         %if no route<remotes(rmt)_fep route value(i)<requested %and remotes(rmt)_status=logged on %and %c
+            remotes(rmt)_prelog<prelogon tied %start
+            !OK TO GO AHEAD WITH THE SWITCH.
+            ->call spooler
+         %finish %else printstring("SWITCH NOT POSSIBLE!!".snl)
+         %return
+      %finish
+      %if words(3)="FROM" %and words(2)=".ALL" %and length(words(4))=3 %and substring(words(4),1,2)="FE" %start
+         words(4) -> ("FE").words(4)
+         i = charno(words(4),1)-'0'
+         param = "FEP" %and ->parameter %unless 0<=i<=max fep
+         ->call spooler
+      %finish
+      printstring("<RMT> TO FEn".snl.".ALL FROM FEn".snl)
+      %return
+
+
+up oper:
+
+      update oper(connection_display type,connection_which display,connection_which page,connection_specific user)
+      %return
+violation:
+      param = "ACCESS"
+parameter:
+
+      reply = "INVALID ".param
+error:
+
+      iprintstring(reply.snl)
+      %return
+
+call spooler:
+      call = "OPER(".connection_name.")".call
+      flag = dexecmess("SPOOLR",1,length(call),addr(call)+1)
+      %if flag#0 %then iprintstring("SPOOLR call fails ".itos(flag).snl) %else iprintstring("SPOOLR called".snl)
+
+      %return
+
+
+
+
+
+      %integer %function find queue(%string (255) q)
+         !***********************************************************************
+         !*                                                                     *
+         !*  RETURNS THE INDEX INTO THE QUEUE ARRAY OF THE SPECIFIED QUEUE      *
+         !*  RETURNS ZERO IF THE QUEUE IS NOT FOUND                             *
+         !*                                                                     *
+         !***********************************************************************
+         %integer i
+         %for i = 1,1,qs %cycle
+            %result = i %if queue names(i)_name=q
+         %repeat
+         reply = "NO SUCH QUEUE ".q
+         %result = 0
+      %end;  !OF INTEGERFN FIND QUEUE
+
+
+
+      %integer %function find remote(%string (255) r)
+         !***********************************************************************
+         !*                                                                     *
+         !*  RETURNS THE INDEX INTO THE REMOTE ARRAY OF THE SPECIFIED REMOTE    *
+         !*  RETURNS ZERO IF THE REMOTE IS NOT FOUND                            *
+         !*                                                                     *
+         !***********************************************************************
+         %integer i
+         %for i = 1,1,rmts %cycle
+            %result = i %if remote names(i)_name=r
+         %repeat
+         reply = "NO SUCH REMOTE ".r
+         %result = 0
+      %end;  !OF INTEGERFN FIND REMOTE
+
+
+
+      %integer %function find stream(%string (255) strm)
+         !***********************************************************************
+         !*                                                                     *
+         !*  RETURNS THE INDEX INTO THE STREAM ARRAY OF THE SPECIFIED STREAM    *
+         !*  RETURNS ZERO IF THE STREAM IN NOT FOUND                            *
+         !*                                                                     *
+         !***********************************************************************
+         %string (255) rmt
+         %integer i
+         rmt = "" %unless strm->rmt.(".").strm
+         %for i = 1,1,strms %cycle
+            %result = i %if stream details(i)_name=strm %and (rmt="" %or rmt=remote names(streams(i)_remote)_name)
+         %repeat
+         strm = rmt.".".strm %if rmt#""
+         reply = "NO SUCH STREAM ".strm
+         %result = 0
+      %end;  !OF INTEGERFN FIND STREAM
+
+
+
+
+
+      %routine display queues(%integer page,full)
+         !***********************************************************************
+         !*                                                                     *
+         !*  DISPLAY A SUMMARY OF ALL THE QUEUES STARTING AT THE GIVEN PAGE     *
+         !*                                                                     *
+         !***********************************************************************
+         %record (queuef) %name queue
+         %integer q no,line,count,limit
+         %string (255) s,t
+         s = "Page ".i to s(page)
+         s = s." " %while length(s)<12
+         %if full=yes %then s = s."All Queues" %else s = s."Queues"
+         iprintstring(s.snl);  !TITLE
+         line = 1
+         count = 0
+         limit = (oper display size-line)*page
+         %for q no = 1,1,qs %cycle
+            queue == queues(q no)
+            %if full=yes %or queue_length#0 %start
+               %if count=limit %start
+                  s = queue_name
+                  s = s." " %while length(s)<16
+                  %if queue_length#0 %start
+                     t = i to ss(queue_length,4)
+                     %if queue_length#queue_max length %start
+                        %if queue_length=1 %then t = t." Entry  " %else t = t." Entries"
+                     %finish %else t = t." Full   "
+                     s = s.t
+                     %if queue_default time<=0 %then t = i to s((queue_amount+1023)>>10)."K" %else %c
+                        t = hms(queue_amount)
+                     t = " ".t %while length(t)<12
+                     s = s.t
+                  %finish %else s = s."     Empty"
+                  iprintstring(s.snl)
+                  line = line+1
+                  %exit %if line=oper display size
+               %finish %else count = count+1
+            %finish
+         %repeat
+      %end;  !OF ROUTINE DISPLAY QUEUES
+
+
+
+      %routine display remotes(%integer page,full)
+         !***********************************************************************
+         !*                                                                     *
+         !*  DISPLAY A SUMMARY OF ALL THE REMOTES STARTING AT THE GIVEN PAGE    *
+         !*                                                                     *
+         !***********************************************************************
+         %record (remotef) %name remote
+         %integer r,line,count,limit
+         %string (255) s
+         s = "Page ".i to s(page)
+         s = s." " %while length(s)<12
+         %if full=yes %then s = s."All Remotes" %else s = s."Remotes"
+         iprintstring(s.snl);  !TITLE
+         line = 1
+         %if full=yes %then count = 2 %else count = 1
+         limit = ((oper display size-line)//count)*page
+         count = 0
+         %for r = 1,1,rmts %cycle
+            remote == remotes(r)
+            %if full=yes %or logging on<=remote_status<=logging off %start
+               %if count=limit %start
+                  s = remote_name
+                  s = s." " %while length(s)<16
+                  s = s.remote status type(remote_status)
+                  s = s." FE".i to s(remote_fep) %if remote_addresses(1)_network address len>0
+                  iprintstring(s.snl)
+                  line = line+1
+                  %if full=yes %then iprintstring("  ".remote_description.snl) %and line = line+1
+                  %exit %if line>oper display size-1
+               %finish %else count = count+1
+            %finish
+         %repeat
+      %end;  !OF ROUTINE DISPLAY REMOTES
+
+
+
+      %routine display streams(%integer page,full)
+         !***********************************************************************
+         !*                                                                     *
+         !*  DISPLAY A SUMMARY OF ALL THE STREAMS STARTING AT THE GIVEN PAGE    *
+         !*                                                                     *
+         !***********************************************************************
+         %record (streamf) %name stream
+         %integer strm,line,count,limit
+         %string (255) s
+         s = "Page ".i to s(page)
+         s = s." " %while length(s)<12
+         %if full=yes %then s = s."All Streams" %else s = s."Streams"
+         iprintstring(s.snl);  !TITLE
+         line = 1
+         count = 0
+         limit = (oper display size-line)*page
+         %for strm = 1,1,strms %cycle
+            stream == streams(strm)
+            %if (connection_name="MANAGER" %or connection_name=remotes(stream_remote)_name) %and (full=yes %or %c
+               stream_status>allocated) %start
+               %if count=limit %start
+                  s = stream_name
+                  s = s." " %while length(s)<16
+                  s = s.stream status type(stream_status)
+                  %if stream_document#0 %start
+                     flag = map document(stream_document)
+                     %if flag#0 %then iprintstring("DOCUMENT access fails ".itos(flag).snl) %and %return
+                     s = s." For ".document_user
+                     s = s." ".ident to s(stream_document) %if stream_status=active
+                  %finish
+                  iprintstring(s.snl)
+                  line = line+1
+                  %exit %if line=oper display size
+               %finish %else count = count+1
+            %finish
+         %repeat
+      %end;  !OF ROUTINE DISPLAY STREAMS
+
+
+
+      %routine display queue(%integer q no,page,full, %string (10) specific user)
+         !***********************************************************************
+         !*                                                                     *
+         !*  MAKE UP TO DATE THE DISPLAY WHICH HOLDS THE SPECIFIED QUEUE.       *
+         !*                                                                     *
+         !***********************************************************************
+         %record (queuef) %name queue
+         %integer line,next,i,j,limit,user limit,forms,dap special,flag
+         %string (3) p
+         %string (255) s,t
+         %if specific user="FORMS" %start
+            forms = page
+            page = 0
+            specific user = ""
+         %finish %else forms = -1
+         dap special = no
+         %if specific user#"" %start
+            %if specific user->specific user.(".DAP") %or specific user->specific user.("DAP") %then %c
+               dap special = yes
+         %finish
+         s = "Page ".i to s(page)
+         s = s." " %while length(s)<10
+         queue == queues(q no);  !MAP THE APPROPRIATE QUEUE
+         s = s."Queue ".queue_name
+         s = s." Full" %if queue_length=queue_max length
+         s = s." Empty" %if queue_length=0
+         iprintstring(s.snl);  !TITLE
+         %if queue_length=0 %then t = " No" %else t = i to ss(queue_length,3)
+         s = t." Entries"
+         t = i to ss(queue_max length,4)
+         s = s.t." Max"
+         t = i to ss(queue_maxacr,3)
+         s = s.t." MaxACR"
+         %if queue_length>0 %and dap special=no %start
+            %if queue_default time>0 %then t = hms(queue_amount) %else t = i to s((queue_amount+1023)>>10)."K"
+            t = " ".t %while length(t)<11
+            s = s.t
+         %finish
+         %if dap special=yes %then s = s." DAP"
+         iprintstring(s.snl)
+         %if full=yes %start
+            line = 2
+            iprintstring("Defaults:".snl)
+            line = line+1
+            iprintstring("USER:     ".queue_default user.snl) %if queue_default user#""
+            line = line+1
+            iprintstring("DELIVERY: ".queue_default delivery) %if queue_default delivery#""
+            line = line+1
+            s = "PRIORITY: ".priorities(queue_default priority)
+            s = s." " %while length(s)<20
+            %if queue_default time>0 %then s = s."TIME:     ".i to s(queue_default time)."S" %else %start
+               s = s."START:    ".i to s(queue_default start) %if queue_default start#0
+            %finish
+            iprintstring(s.snl)
+            line = line+1
+            s = "FORMS:    ".i to s(queue_default forms)
+            s = s." " %while length(s)<20
+            iprintstring(s."MODE:     ".modes(queue_default mode).snl)
+            line = line+1
+            s = "COPIES:   ".i to s(queue_default copies)
+            s = s." " %while length(s)<20
+            %if queue_default rerun=no %then s = s."RERUN:    No" %else s = s."RERUN:    Yes"
+            iprintstring(s.snl)
+            line = line+1 %and iprintstring("LINES:    ".i to s(queue_default output limit).snl) %if %c
+               queue_default output limit>0
+            line = line+1
+            iprintstring("Streams:".snl)
+            s = ""
+            %for i = 0,1,last stream per q %cycle
+               %if queue_streams(i)=0 %start
+                  line = line+1 %and iprintstring(s.snl) %if s#""
+                  %exit
+               %finish
+               %if i&1=0 %start
+                  line = line+1 %and iprintstring(s.snl) %if s#""
+                  s = ""
+               %finish %else %start
+                  s = s." " %while length(s)<20
+               %finish
+               %if streams(queue_streams(i))_batch enable=open %then s = s."* " %else s = s."  "
+               s = s.stream details(queue_streams(i))_name." ".stream status type(streams(queue_streams(i))_status)
+               line = line+1 %and iprintstring(s.snl) %if i=last stream per q
+            %repeat
+         %finish %else line = 1
+         %if queue_head#0 %start
+            s = "POS  IDENT  USER  NAME         PRTY  "
+            %if QUEUE_DEFAULT TIME<=0 %then s = s."SIZE" %else s = s."TIME"
+            line = line+1
+            i = 1
+            iprintstring(s.snl)
+            next = queue_head
+            line = line+1
+            limit = (oper display size-line)*page
+            %if specific user#"" %start
+               user limit = limit
+               limit = 0
+            %finish %else user limit = 0
+            %while next#0 %and line<oper display size %cycle
+               %if i>limit %start
+                  %if (dap special=no %and (specific user="" %or list cells(next)_user=specific user)) %or %c
+                     (dap special=yes %and list cells(next)_gen flags&dap batch flag#0 %and (specific user="" %or %c
+                     list cells(next)_user=specific user)) %start
+                     flag = map document(list cells(next)_document)
+                     %if flag#0 %then iprintstring("DOCUMENT access fails ".itos(flag).snl) %and %return
+                     %unless full=no %and ((document_start after date and time#0 %and %c
+                        document_start after date and time>pack date and time(date,time)) %or %c
+                        (document_dap c exec time#0 %and dap special=no)) %start
+                        %if user limit=0 %start
+                           s = i to ss(i,3);  !CALCULATE QUEUE POSITION
+                           s = s." ".ident to s(list cells(next)_document)
+                           s = s." ".document_user." ".doc string(document,document_name)
+                           length(s) = 29 %if length(s)>29
+                           s = s." " %while length(s)<30
+                           %if document_priority<0 %then s = s."HLD" %else %start
+                              p = ""
+                              %for j = n priorities,-1,1 %cycle
+                                   %if document_priority>=prtys(j) %start
+                                        p <- priorities(j)
+                                        %exit
+                                   %finish
+                              %repeat
+                              s = s.p
+                           %finish
+
+                           %if forms#-1 %start
+                              %if forms=256 %and document_forms=0 %then ->skipped
+                              %if forms#256 %and document_forms#forms %then ->skipped
+                           %finish
+                           %if forms#-1 %start
+                              s = s."F="
+                              s = s.itos(document_forms)
+                           %finish %else %start
+                              %if document_forms#queue_default forms %then s = s."F" %else %start
+                                   %if document_start after date and time#0 %and %c
+                                      document_start after date and time>pack date and time(date,time) %then %c
+                                      s = s."A" %else %start
+                                        %if document_order#0 %then s = s."O" %else s = s." "
+                                   %finish
+                              %finish
+                           %finish
+                           %if document_priority<0 %and document_properties&(media hold!dap hold)#0 %start
+                              t = ""
+                              %if document_drives#0 %then t = i to s(document_drives)." EDU"
+                              %if document_decks#0 %start
+                                   %if t="" %then t = i to s(document_decks)." MTU" %else t = "DSPLY"
+                              %finish
+                              %if document_dap c exec time#0 %start
+                                   %if dap special=yes %then t = itos(document_dap mins)."m" %else %if t="" %then %c
+                                      t = "  DAP" %else t = "DSPLY"
+                              %finish
+                           %finish %else %start
+                              %if document_time>0 %then t = i to s(document_time)."S" %else %c
+                                 t = i to s((document_data length+1023)>>10)."K"
+                           %finish
+                           t = " ".t %while length(t)<6
+                           s = s.t
+                           iprintstring(s.snl)
+                           line = line+1
+                        %finish %else user limit = user limit-1
+                     %finish
+                  %finish
+               %finish
+skipped:
+               i = i+1
+               next = list cells(next)_link
+            %repeat
+         %finish
+      %end;  !OF ROUTINE DISPLAY QUEUE
+
+
+
+      %routine display document(%integer line,ident)
+         !***********************************************************************
+         !*                                                                     *
+         !*  DISPLAY STARTING AT THE GIVEN LINE THE SPECIFIED DOCUMENT          *
+         !*                                                                     *
+         !***********************************************************************
+         %integer i
+         %string (255) s
+         iprintstring("IDENT:    ".ident to s(ident).snl)
+         flag = map document(ident)
+         %if flag#0 %then iprintstring("DOCUMENT access fails ".itos(flag).snl) %and %return
+         line = line+1
+         iprintstring("STATE:    ".doc state(document_state).snl)
+         line = line+1
+         s = "ORIGIN:   "
+         %if doc string(document,document_srce)="" %then s = s."USER" %else %c
+            s = s.doc string(document,document_srce)
+         iprintstring(s.snl)
+         line = line+1
+         iprintstring("USER:     ".document_user.snl)
+         line = line+1
+         iprintstring("NAME:     ".doc string(document,document_name).snl)
+         line = line+1
+         iprintstring("QUEUE:    ".document_dest.snl)
+         line = line+1
+         %if document_outdev>0 %start
+            s = "OUT:      "
+            %if document_outdev=queue dest %then s = s.doc string(document,document_output) %else %c
+               s = s."FILE ".doc string(document,document_output)
+            iprintstring(s.snl)
+            line = line+1
+         %finish
+         iprintstring("DELIVERY: ".doc string(document,document_delivery).snl)
+         line = line+1
+         iprintstring("RECEIVED: ".unpack date(document_date and time received)." ".unpack time %c
+            (document_date and time received).snl)
+         line = line+1 %and iprintstring("AFTER:    ".unpack date(document_start after date and time)." ". %c
+            unpack time(document_start after date and time).snl) %if document_start after date and time#0
+         line = line+1 %and iprintstring("STARTED:  ".unpack date(document_date and time started)." ".unpack time %c
+            (document_date and time started).snl) %if document_date and time started#0
+         line = line+1 %and iprintstring("DELETED:  ".unpack date(document_date and time deleted)." ".unpack time %c
+            (document_date and time deleted).snl) %if document_date and time deleted#0
+         line = line+1
+         %if document_time<=0 %and document_dap c exec time=0 %start
+            s = "SIZE:     ".i to s(document_data length)
+            s = s." " %while length(s)<20
+            s = s."START:    ".i to s(document_data start) %if document_data start#0
+            iprintstring(s.snl)
+         %finish %else %start
+            %if document_dap c exec time#0 %then %c
+               iprintstring("DAP time : ".itos(document_dap mins)." mins".snl) %else %c
+               iprintstring("TIME:     ".itos(document_time)."S".snl)
+         %finish
+         line = line+1
+         %if document_priority<0 %then s = "PRIORITY: Held" %else %start
+            %for i = n priorities,-1,1 %cycle
+               %if document_priority>=prtys(i) %start
+                  s = "PRIORITY: ".priorities(i)
+                  %exit
+               %finish
+            %repeat
+         %finish
+         %if document_forms#0 %start
+            s = s." " %while length(s)<20
+            s = s."FORMS:    ".i to s(document_forms)
+         %finish
+         iprintstring(s.snl)
+         line = line+1
+         s = "MODE:     ".modes(document_mode)
+         %if document_copies>1 %start
+            s = s." " %while length(s)<20
+            s = s."COPIES:   ".i to s(document_copies)
+         %finish
+         iprintstring(s.snl)
+         line = line+1
+         %if document_rerun=no %then s = "RERUN:    No" %else s = "RERUN:    Yes"
+         %if document_fails#0 %start
+            s = s." " %while length(s)<14
+            s = s."FAIL ".i to s(document_fails)
+         %finish
+         %if document_order#0 %start
+            s = s." " %while length(s)<20
+            s = s."ORDER:    ".i to s(document_order)
+         %finish
+         iprintstring(s.snl)
+         line = line+1
+         %if document_decks=0 %then s = "" %else %start
+            s = "DECKS:    ".i to s(document_decks)
+            s = s." " %while length(s)<20
+         %finish
+         s = s."DRIVES:    ".i to s(document_drives) %if document_drives#0
+         s = s."DAP control exec: ".itos(document_dap c exec time)."s" %if document_dap c exec time#0
+         %if s#"" %then iprintstring(s.snl) %else %return
+         line = line+1
+         %if document_decks>0 %start
+            s = "TSNS: "
+            %for i = 1,1,(8-document_drives) %cycle
+               %if i=4 %or i=7 %start
+                  iprintstring(s.snl)
+                  line = line+1
+                  s = "      "
+               %finish
+               %exit %if document_vol label(i)=0
+               s = s.doc string(document,document_vol label(i))." "
+            %repeat
+            iprintstring(s.snl) %and line = line+1 %if length(s)>6
+         %finish
+         %if document_drives>0 %start
+            s = "DSNS: "
+            %for i = 1,1,document_drives %cycle
+               %if i=4 %or i=7 %start
+                  iprintstring(s.snl)
+                  line = line+1
+                  s = "      "
+               %finish
+               s = s.doc string(document,document_vol label(9-i))." "
+            %repeat
+            iprintstring(s.snl) %and line = line+1 %if length(s)>6
+         %finish
+      %end;  !OF ROUTINE DISPLAY DOCUMENT
+
+
+
+      %routine display stream(%integer strm)
+         !***********************************************************************
+         !*                                                                     *
+         !*  MAKE UP TO DATE THE DISPLAY WHICH HOLDS THE SPECIFIED STREAM.      *
+         !*                                                                     *
+         !***********************************************************************
+         %record (streamf) %name stream
+         %string (255) s
+         %integer line,i
+         stream == streams(strm)
+         s = "      ".stream type(stream_service&3)." Stream ".stream_name
+         iprintstring(s.snl)
+         line = 1
+         iprintstring("Queues:".snl)
+         s = ""
+         %for i = 0,1,last q per stream %cycle
+            %if stream_queues(i)=0 %start
+               line = line+1 %and iprintstring(s.snl) %if s#""
+               %exit
+            %finish
+            %if i&1=0 %start
+               line = line+1 %and iprintstring(s.snl) %if s#""
+               s = ""
+            %finish %else %start
+               s = s." " %while length(s)<20
+            %finish
+            s = s.queue names(stream_queues(i)&255)_name
+            s = s." *" %if stream_q no=i %and stream_service#input
+            line = line+1 %and iprintstring(s.snl) %if i=last q per stream
+         %repeat
+         line = line+1
+         ->end %if line>=10
+         s = "STATUS: ".stream status type(stream_status) %if 0<=stream_status<=8
+         %if stream_specific user # "" %start
+           %if stream_sole or barred = barred %then s = s. %c
+            "   [ ".stream_specific user." barred]" %else s = s. %c
+            "   [ ".stream_specific user." sole]"
+         %finish
+         iprintstring(s.snl)
+         line = line+1
+         ->end %if line>=10
+         s = "REMOTE: ".remotes(stream_remote&255)_name." (addr: ".itos(stream_address selector).")"
+         i = remotes(stream_remote&255)_status
+         s = s.remote status type(i) %if 0<=i<=5
+         iprintstring(s.snl)
+         %if 0<stream_device type<16 %start
+            line = line+1
+            ->end %if line>=10
+            s = "TYPE:   ".device type(stream_device type&15).i to s(stream_device no)
+            %if stream_ident&x'FFFF'#0 %start
+               s = s." " %while length(s)<20
+               s = s."ADAPTR: ".device type((stream_ident>>24)&15).i to s((stream_ident>>16)&255)." ".i to s %c
+                  (stream_ident&x'FFFF')
+            %finish
+            iprintstring(s.snl)
+         %finish
+         line = line+1
+         ->end %if line>=10
+         s = "LIMIT :  ".i to s(stream_limit)
+         s = s." " %while length(s)<20
+         s = s."FORMS:  ".i to s(stream_forms)
+         iprintstring(s.snl)
+         line = line+1
+         ->end %if line>=10
+         %if stream_service#input %and 1<=stream_lowest priority<=5 %then %c
+            s = "PRTY:   ".priorities(stream_lowest priority) %else s = ""
+         %if stream_comms stream#0 %start
+            s = s." " %while length(s)<20
+            s = s."COMMST: ".i to s(stream_comms stream)
+         %finish
+         iprintstring(s.snl)
+         line = line+1
+         ->end %if line>=10
+         %if stream_block#0 %start
+            s = "TO GO:  ".i to s(stream_bytes to go)." BYTES" %if stream_service=output
+            s = "RCVD:   ".i to s(stream_bytes to go)." BYTES" %if stream_service=input
+            s = s." " %while length(s)<20
+         %finish %else s = ""
+         s = s."HEADER: ".header type(stream_header type) %if 0<stream_header type<4
+         %if s#"" %start
+            iprintstring(s.snl)
+            line = line+1
+            ->end %if line>=10
+         %finish
+         s = "UNITSIZE: ".itos(stream_unitsize)
+         %if stream_unit name#"" %start
+            s = s." " %while length(s)<20
+            s = s."UNIT NAME: ".stream_unit name
+         %finish
+         iprintstring(s.snl)
+end:
+
+         display document(10,stream_document) %if stream_document#0
+      %end;  !OF ROUTINE DISPLAY STREAM
+
+
+
+      %routine display remote(%integer r)
+         !***********************************************************************
+         !*                                                                     *
+         !*  MAKE UP TO DATE THE DISPLAY WHICH HOLDS THE SPECIFIED REMOTE.      *
+         !*                                                                     *
+         !***********************************************************************
+         %record (remotef) %name remote
+         %integer i,j,line
+         %string (255) s
+         remote == remotes(r)
+         iprintstring("Remote  ".remote_name.snl)
+         line = 1
+         iprintstring("        ".remote_description.snl)
+         line = 3
+         iprintstring("STATUS:   ".remote status type(remote_status).snl)
+         %if remote_addresses(1)_network address len>0 %start
+            line = line+1
+            %if remote_status<=open %then s = "PRELOGON FEP:      FE".i to s(remote_prelog fep) %else %c
+               s = "FEP:      FE".i to s(remote_fep)
+            %if remote_prelog>prelogon untied %start
+               s = s." (TIED"
+               %if remote_fep=remote_prelog fep %then s = s.")" %else s = s." TO FE".itos(remote_prelog fep).")"
+            %finish
+            iprintstring(s.snl)
+            line = line + 1
+            s = "Network Address(es):".snl; iprintstring(s)
+            %cycle j = 1,1,remote_address count
+              s = "(".itos(j).") "
+              %if remote_addresses(j)_network address len>2 %then s = s.remote_addresses(j)_TS address %else %start
+               %for i = 0,1,remote_addresses(j)_network address len-1 %cycle
+                    s = s.i to s(remote_addresses(j)_network add(i))." "
+                 %repeat
+              %finish
+              line = line+1
+              iprintstring(s.snl)
+           %repeat
+         %finish
+         line = line+1
+         iprintstring("Streams:".snl)
+         %for i = remote_lowest stream,1,remote_highest stream %cycle
+            s = stream details(i)_name." (addr: ".itos(streams(i)_address selector).") ".stream status type(streams(i)_status)
+            line = line+1 %and iprintstring(s.snl)
+         %repeat
+      %end;  !OF ROUTINE DISPLAY STREAM
+
+
+
+      %routine update oper(%integer display type,which display,which page, %string (10) specific user)
+         !***********************************************************************
+         !*                                                                     *
+         !*  REFRESH THE SELECTED DISPLAY ON THE OPER SPECIFIED EITHER CALLED   *
+         !*  INTERNALLY OR CALLED ON A CLOCK TICK.                              *
+         !*                                                                     *
+         !***********************************************************************
+         %switch type(1:12)
+         ->type(display type)
+type(all queues):
+         display queues(which page,yes)
+         ->return
+type(non empty queues):
+         display queues(which page,no)
+         ->return
+type(all streams):
+         display streams(which page,yes)
+         ->return
+type(active streams):
+         display streams(which page,no)
+         ->return
+type(individual queue):
+         display queue(which display,which page,no,specific user)
+         ->return
+type(full individual queue):
+         display queue(which display,which page,yes,specific user)
+         ->return
+type(individual stream):
+         display stream(which display)
+         ->return
+type(individual document):
+         display document(1,which display)
+         ->return
+type(all remotes):
+         display remotes(which page,yes)
+         ->return
+type(logged on remotes):
+         display remotes(which page,no)
+         ->return
+type(individual remote):
+         display remote(which display)
+         ->return
+return:
+      %end;  !OF ROUTINE UPDATE OPER
+
+   %end {of routine interpret command}
+
+   %string %function ident to s(%integer ident)
+      !***********************************************************************
+      !*                                                                     *
+      !*  TURNS A DOCUMENT IDENTIFIER INTO A STRING OF FIXED FORMAT          *
+      !*                                                                     *
+      !***********************************************************************
+      %string (2) fsys
+      %string (4) rest
+      fsys = i to s(ident>>24)
+      fsys = "0".fsys %if length(fsys)=1
+      rest = i to s(ident&x'FFFFFF')
+      rest = "0".rest %while length(rest)<4
+      %result = fsys.rest
+   %end;  !OF STRINGFN IDENT TO S
+
+   %string %function i to s s(%integer i,l)
+      !***********************************************************************
+      !*                                                                     *
+      !*  TURNS AN INTEGER INTO A STRING OF THE SPECIFIED LENGTH PADDING     *
+      !*  WITH LEADING SPACES IF NECESSARY.                                  *
+      !*                                                                     *
+      !***********************************************************************
+      %string (255) s
+      s = i to s(i)
+      s = " ".s %while length(s)<l
+      %result = s
+   %end;  !OF STRINGFN I TO SS
+
+   !***********************************************************************
+   !*                                                                     *
+   !* THESE FUNCTIONS ALL USE A PACKED FORMAT OF DATE AND TIME OF THE     *
+   !* FOLLOWING FORM. BITS ARE NUMBERED FROM 31 (MOST SIGNIFICANT) TO     *
+   !* 0 (LEAST SIGNIFICANT)                                               *
+   !* BITS    USE                                                         *
+   !* 31-26  YEAR-70  (VALID FOR 1970-2033)                               *
+   !* 25-22  MONTH                                                        *
+   !* 21-17  DAY                                                          *
+   !* 16-12  HOUR                                                         *
+   !* 11- 6  MINUTE                                                       *
+   !*  5- 0  SECOND                                                       *
+   !*                                                                     *
+   !***********************************************************************
+
+%stringfn s2(%integer n)
+!THIS FUNCTION RETURNS A TWO DIGIT DECIMAL VALUE FOR N
+%integer tens, units
+   tens = n//10
+   units = n-10*tens
+   %result = tostring(tens+'0').tostring(units+'0')
+%end;                                   !OF S2
+%stringfn unpack date(%integer p)
+   %result = s2(p>>17&x'1F')."/".s2(p>>22&x'F')."/".s2((p>>26& %c
+      x'3F')+70)
+%end;                                   !OF UNPACK DATE
+%stringfn unpack time(%integer p)
+   %result = s2(p>>12&x'1F').".".s2(p>>6&x'3F').".".s2(p&x'3F')
+%end;                                   !OF UNPACK TIME
+
+
+
+   %integer %function i2(%integer ad)
+      !AD POINTS TO THE FIRST OF A PAIR OF DECIMAL CHARACTERS. THE RESULT
+      !IS THE NUMERIC VALUE OF THE CHAS
+      %result = 10*(byteinteger(ad)&x'F')+(byteinteger(ad+1)&x'F')
+   %end;  !OF I2
+
+
+
+   %integer %function pack date(%string (8) date)
+      %integer ad
+      ad = addr(date)
+      %result = ((i2(ad+7)-70)<<26)!(i2(ad+4)<<22)!(i2(ad+1)<<17)
+   %end;  !OF PACK DATE
+
+
+
+   %integer %function pack date and time(%string (8) date,time)
+      %integer at
+      at = addr(time)
+      %result = pack date(date)!(i2(at+1)<<12)!(i2(at+4)<<6)!(i2(at+7))
+   %end;  !OF PACK DATE AND TIME
+
+   %string (15) %function hms(%integer secs)
+      !***********************************************************************
+      !*                                                                     *
+      !*  RETURNS THE GIVEN NUMBER OF SECONDS IN THE FORMAT HH.MM.SS         *
+      !*                                                                     *
+      !***********************************************************************
+      %integer hrs,mins
+      %string (255) s
+      hrs = secs//3600
+      secs = secs-hrs*3600
+      mins = secs//60
+      secs = secs-mins*60
+      %if hrs>0 %then s = i to s(hrs)."h " %else s = ""
+      %if s#"" %or mins>0 %then s = s.i to s(mins)."m "
+      %result = s.i to s(secs)."s"
+   %end;  !OF STRINGFN HMS
+
+%end {m input}
+
+%external %routine m poff message(%record (parmf) %name p)
+
+   %record (message f) %array %format message af(1:5000)
+   %record (message f) %array %name messages
+   %record (rf) re
+   %switch activity(20:40)
+   %integer remote number,flag,i
+   %string (15) for
+   %string (63) message
+
+   iselect output(0)
+   ->activity(p_dest&x'0000ffff')
+
+activity(*):
+   %return
+
+activity(30):
+
+   connect("SPOOLR:RJEMESS",r!W!s,0,0,re,flag)
+   %if flag#0 %and flag#34 %then %monitor
+   messages == array(re_conad+file header size,message af)
+   for = messages(p_p2)_remote name
+   message = messages(p_p2)_message
+   remote number = p_p1
+   %for i = 0,1,max consoles %cycle
+      %if connections(i)_name="MANAGER" %or connections(i)_name=for %start
+         iselect output(consoles(i))
+         %if connections(i)_name="MANAGER" %then iprintstring("Message for ".for." (".itos(remote number).") ".snl)
+         iprintstring(message.snl)
+         iprompt("<> ")
+         iterminate
+      %finish
+   %repeat
+   %return
+
+activity(31):
+   !The reply from the password check by SPOOLR
+   iselect output(consoles(P_p2))
+   %if p_p1#0 %start
+      iprintstring("Invalid pass".snl)
+      %if connections(P_p2)_disabled=locked %then ilogoff(consoles(P_p2))
+      %return
+   %finish
+   connections(P_p2)_disabled = no
+   iprompt("<> ")
+   iterminate
+   %return
+%end {m poff message}
+
+%external %routine m finalise(%integer console)
+   %integer i
+   %for i = 0,1,127 %cycle
+      %if consoles(i)=console %then consoles(i) = 255
+   %repeat
+%end {m finalise}
+
+%external %routine MLISTENDS(%integer I)
+%end
+
+
+%end %of %file
+

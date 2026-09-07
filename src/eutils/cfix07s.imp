@@ -1,0 +1,496 @@
+!
+!updated 04-09-86..RDE..XA rewrite to do secondary IPL, ERCC PAM code
+!updated 26-02-86..RDE..XA fixes for problems with VM/XA IPL simulator
+!updated 16-12-85..RDE..XA fixes to PSW, CHOPSUPE now starts in EC mode
+!updated 25-09-85..SH..subsys specs
+%conststring(20) vsn="cfix07 - 04 Sep 1986"
+!*
+!***********************************************************************
+!*
+!*                    Map of store during IPL phase
+!*                    =============================
+!*
+!*                         Page 0 (IPL record)
+!*                         -------------------
+!*        X0            IPL record (24 bytes max)
+!*
+!*                       Page 1 (disk IPL block)
+!*                       -----------------------
+!*        X1000         Disk read CCWs (set up by CHOPFIX)
+!*        X1280         Disk secondary IPL (DIPL) code [XA only]
+!*        X13B0         Disk setup CCWs [XA only]
+!*        X1400         Disk/seek search data for disk read CCWs
+!*        X1800         CHOPSUPE entry code
+!*
+!*               Page 2 (tape IPL block, tape IPLs only)
+!*               ---------------------------------------
+!*        X2000         Tape read CCWs
+!*        X2280         Tape secondary IPL (TIPL) code [XA only]
+!*
+!***********************************************************************
+!
+%constinteger no = 0, yes = 1
+!
+%conststring(8) default obj="ICHOPZ"
+%conststring(5) entry name="ENTER"
+%conststring(8) tops="I#STKTOP"
+%constinteger load address=x'8000'
+%constinteger iput=0,lput=1
+!
+%externalroutine chopfix %alias "C#CHOPFIX"
+%externalroutinespec emas3string(%stringname vector,value)
+%externalroutinespec emas3integer(%stringname vector,%integername value)
+%externalintegerfnspec rdfilead(%string(255)file)
+%externalintegerfnspec nwfilead(%string(255)file,%integer pages)
+%externalroutinespec move %alias "S#MOVE" (%integer l,f,t)
+%externalroutinespec phex %alias "S#PHEX" (%integer i)
+%recordformat centf(%integer link, (%integer loc, %string (31) iden %or %c
+   %integer code offset,gla offset,ep offset,pword,%string(31)iden2))
+%routinespec analyse(%record(centf)%name cent,%integername lput type, %c
+      %stringname iden,%integer link)
+%routinespec findcodeep(%string(31) entry,%integername co,gl,ep,flag)
+%routinespec finddataep(%string(31) entry,%integername ad, flag)
+%recordformat rf(%integer arealoc, baseloc)
+%recordformat relf(%integer link, n, %record(rf)%array r(1:1000))
+%recordformat ofmf(%integer start, l, prop)
+%recordformat dentf(%integer link, disp, l, a,  %c
+         %string (31) iden)
+%recordformat creff(%integer link, refloc, %string (31) iden)
+%recordformat dreff(%integer link, refarray, l,  %c
+         %string (31) iden)
+%record(centf)%name cent
+%record(dentf)%name dent
+%constantinteger areas = 10
+%record(ofmf)%arrayformat ofmaf(1:areas)
+%record(ofmf)%arrayname ofm
+%record(creff)%name cref
+%record(dreff)%name dref
+%record(relf)%name rel
+%integerarray base,lbase(1:areas);           !area start addresses when loaded
+%integerarrayformat ldataaf(0:14)
+%integerarrayformat reflocaf(1:1000)
+%integerarrayname ldata, refloc
+%constinteger std irsize = 6
+%ownintegerarray std ipl rec(1:std irsize) = %c
+{x0000}  x'000c0000',x'00001800',          { PSW, EC mode, allow machine      }
+                                           { check, start CHOPSUPE            }
+{x0008}  x'06001000',x'40001000',          { read next 4K to x1000            }
+{x0010}  x'08001000',x'00000000'           { transfer-in-channel to x1000     }
+%constinteger std ecsize = 32
+%ownintegerarray std entry code(1:std ecsize) = %c
+{x1800}  x'070005e0',         { nopr                * padding                 }
+                              { balr  14,0          * set up base register    }
+{x1804}  x'41100001',         { la    1,1           * generate x8000          }
+{x1808}  x'8910000f',         { sll   1,15          * address of CHOPSUPE     }
+{x180c}  x'58201000',         { l     2,0(1)        * get size                }
+{x1810}  x'1e218820',         { alr   2,1           * form address of end     }
+{x1814}  x'00111222',         { srl   2,17          * isolate values > x20000 }
+                              { ltr   2,2           * test value              }
+{x1818}  x'4780e034',         { bz    x1838         * no code above x20000    }
+{x181c}  x'41200001',         { la    2,1           * generate x20000         }
+{x1820}  x'89200011',         { sll   2,17          * destination address     }
+{x1824}  x'58301000',         { l     3,0(1)        * size                    }
+{x1828}  x'1e311f32',         { alr   3,1           * add base                }
+                              { slr   3,2           * derive length for move  }
+{x182c}  x'41400021',         { la    4,x'21'       * generate x21000         }
+{x1830}  x'8940000c',         { sll   4,12          * destination address     }
+{x1834}  x'18540e24',         { lr    5,4           * copy for move           }
+                              { mvcl  2,4           * move block down         }
+{x1838}  x'58b01000',         { l     11,0(1)       * offset of end of code   }
+{x183c}  x'1eb15820',         { alr   11,1          * use as stack base       }
+{x1840}  x'101c1e21',         { l     2,28(1)       * get OFM offset          }
+                              { alr   2,1           * add in base             }
+{x1844}  x'58c02004',         { l     12,4(2)       * code offset             }
+{x1848}  x'1ec158d0',         { alr   12,1          * form code base          }
+{x184c}  x'20101ed1',         { l     13,16(2)      * get GLA offset          }
+                              { alr   13,1          * form GLA base           }
+{x1850}  x'58e01010',         { l     14,16(1)      * get entry address       }
+{x1854}  x'05fe0000',         { balr  15,14         * enter CHOPSUPE          }
+{x1858}  0(*)
+%constinteger xa irsize = 4
+%ownintegerarray xa ipl rec(1:xa irsize) = %c
+{x0000}  x'000c0000',x'00001280',          { PSW, EC mode, allow machine      }
+                                           { check, start DIPL code           }
+{x0008}  x'06001000',x'00001000'           { CCW/DIPL block to x1000          }
+%constinteger xa ecsize = 10
+%ownintegerarray xa entry code(1:xa ecsize) = %c
+{x1800}  x'41100001',         { la    1,1           * form address x8000      }
+{x1804}  x'8910000f',         { sll   1,15          * address of CHOPSUPE     }
+{x1808}  x'58b01000',         { l     11,0(1)       * offset of end of code   }
+{x180c}  x'1eb15820',         { alr   11,1          * use as stack base       }
+{x1810}  x'101c1e21',         { l     2,28(1)       * get OFM offset          }
+                              { alr   2,1           * add in base             }
+{x1814}  x'58c02004',         { l     12,4(2)       * code offset             }
+{x1818}  x'1ec158d0',         { alr   12,1          * form code base          }
+{x181c}  x'20101ed1',         { l     13,16(2)      * get GLA offset          }
+                              { alr   13,1          * form GLA base           }
+{x1820}  x'58e01010',         { l     14,16(1)      * get entry address       }
+{x1824}  x'05fe0000'          { balr  15,14         * enter CHOPSUPE          }
+%ownintegerarray xa dipl block(1:1024) = %c
+{x1000}  0(160),              {                     * space for CCWs          }
+{x1280}  x'41c00128',         { la    12,x'128'     * set up base address     }
+{x1284}  x'89c00004',         { sll   12,4          * generates x1280         }
+{x1288}  x'581000b8',         { l     1,184(0)      * get IPL subsystem ID    }
+{x128c}  x'41200008',         { la    2,8           * make EC mode PSW        }
+{x1290}  x'89200010',         { sll   2,16          * generates x80000        }
+{x1294}  x'4130c044',         { la    3,68(12)      * make address x12c4      }
+{x1298}  x'90230078',         { stm   2,3,120(0)    * set I/O interrupt addr  }
+{x129c}  x'4120c0f0',         { la    2,schib       * get SCHIB address       }
+{x12a0}  x'b2342000',         { stsch 0(2)          * get subchannel info     }
+{x12a4}  x'58320004',         { l     3,4(2)        * get enable bit          }
+{x12a8}  x'5630c0ec',         { o     3,=x'00800000'* set enable bit          }
+{x12ac}  x'50320004',         { st    3,4(2)        * put back in SCHIB       }
+{x12b0}  x'b2322000',         { msch  0(2)          * enable subchannel       }
+{x12b4}  x'b766c124',         { lctl  6,6,cr6       * allow interrupts        }
+{x12b8}  x'4120c0e0',         { la    2,orb         * get ORB address         }
+{x12bc}  x'b2332000',         { ssch  0(2)          * start subchannel        }
+{x12c0}  x'8200c128',         { lpsw  wpsw          * wait for interrupt      }
+{x12c4}  x'4120c050',         { la    2,irb         * get IRB address         }
+{x12c8}  x'b2352000',         { tsch  0(2)          * clear status-pending    }
+{x12cc}  x'47f0c580',         { b     x1800         * enter CHOPSUPE          }
+{x12d0}  0(16),               { IRB for test subchannel                       }
+{x1310}  0(20),               { *** padding and patch area ***                }
+{x1360}  x'00000000',         { ORB interruption parameter - not used         }
+{x1364}  x'0000ff00',         { ORB flags - all LPM bits set                  }
+{x1368}  x'000013b8',         { ORB CCW address - chain to read CHOPSUPE      }
+{x136c}  x'00800000',         { literal - enable bit for SCHIB                }
+{x1370}  0(13),               { SCHIB                                         }
+{x13a4}  x'ff000000',         { CR6 - allow interrupts                        }
+{x13a8}  x'020a0000',         { WPSW word 0 - EC mode, allow I/O ints, wait   }
+{x13ac}  x'00000000',         { WPSW word 1 - not relevant when waiting       }
+{x13b0}  0(2),                { *** padding and patch area ***                }
+{x13b8}  x'1f0013ff',x'60000001',         { set file mask to x'40'            }
+{x13c0}  x'13000000',x'60000001',         { recalibrate                       }
+{x13c8}  x'230013f8',x'60000001',         { set sector to index               }
+{x13d0}  x'310013f9',x'60000005',         { search ID equal, C0 H0 R3         }
+{x13d8}  x'080013d0',x'00000000',         { transfer-in-channel to *-8        }
+{x13e0}  x'08001000',x'00000000',         { transfer-in-channel to main chain }
+{x13e8}  0(4),                            { *** padding and patch area ***    }
+{x13f8}  x'00000000',x'00030040',         { various operands                  }
+{x1400}  0(256),                          { space for seek/search data        }
+{x1800}  0(512)                           { space for entry code              }
+%ownbyteintegerarray seek data(0:6) = %c
+      0,0,        { always 0 }
+      0,0,        { cyl      }
+      0,0,        { track    }
+      1           { sector   }
+%integer codestart,glastart,ep,codelen,glalen
+%integer areacode, areadisp, basecode, basedisp, n, co, gl, entp
+%integer unsatcode, unsatdata, rlink
+%integer conad, flag, inbase, loc, link, ad, refarray,lput type
+%integer map,BCmode,xa,irsize,ecsize,i,j,k,datad,track
+%integerarrayname ipl rec,entry code
+%constinteger seek=x'07000000'
+%constinteger ss=x'23000000'
+%constinteger tic=x'08000000'
+%constinteger sie=x'31000000'
+%constinteger rd=x'06000000'
+%constinteger cc=x'40000000'
+%constinteger xtra=3;                   ! 4K hdr + 2 IPL blocks
+%constinteger pptrkmo=9;                ! 3380 pages/track-1
+%string (31) iden
+%string(255) infile
+      !
+      printstring(vsn); newline
+      emas3string("File to be fixed;file,uc;".default obj,infile)
+      emas3integer("Map (yes or no);word,no,yes;no",map)
+      emas3integer("BC mode (yes or no);word,no,yes;no",BCmode)
+      emas3integer("XA machine (yes or no);word,no,yes;no",xa)
+      %if BCmode = yes %and xa = yes %then %start
+         printstring("Cannot have BC mode on XA machine!"); newline
+         %stop
+      %finish
+      %if xa = no %then %start
+         irsize = std irsize
+         ecsize = std ecsize
+         ipl rec == std ipl rec
+         entry code == std entry code
+      %else
+         irsize = xa irsize
+         ecsize = xa ecsize
+         ipl rec == xa ipl rec
+         entry code == xa entry code
+      %finish
+      i=rdfilead(infile)
+      %stop %if i=0
+      j=(integer(i)+4095)>>12;          ! chopsupe pages
+      conad=nwfilead("ichopt",j+xtra)
+      %stop %if conad=0
+      inbase=conad+xtra*4096
+      integer(conad)=integer(conad+8);  ! next free byte
+      integer(conad+4)=4096;            ! header length
+      move(integer(i),i,inbase);  ! chopsupe
+      integer(inbase)=j<<12;            ! stack base
+      move(irsize*4,addr(ipl rec(1)),conad+4096); ! IPL record
+      %if BCmode = yes %then integer(conad+4096) = 0
+                                        ! PSW0 to all zeros
+      i=j+2;                            ! total pages
+      j=conad+8192;                     ! read CCWs/DIPL code
+      %if xa=yes %then %start
+         move(4096,addr(xa dipl block(1)),j);     ! fill in DIPL code, etc
+      %finish
+      k=j+1024;                         ! seek/search data
+      datad=load address
+      n=2
+      track=0
+      %cycle
+         %for n=n,1,pptrkmo %cycle
+            integer(j)=rd!datad
+            integer(j+4)=cc!4096
+            datad=datad+4096
+            %if xa = no %then %start
+               %if datad=x'20000' %then datad=x'21000'
+                                       ! leave hole for VM IPL simulator
+            %finish
+            j=j+8
+         %repeat
+         i=i-pptrkmo-1
+         %exit %if i<=0
+         track=track+1
+         move(7,addr(seek data(0)),k)
+         byteinteger(k+5)=track
+         integer(j)=seek!(k-(conad+4096))
+         integer(j+4)=cc!6
+         j=j+8
+         integer(j)=ss;                 ! RA 0
+         integer(j+4)=cc!1
+         j=j+8
+         integer(j)=sie!(k+2-(conad+4096))
+         integer(j+4)=cc!5
+         j=j+8
+         integer(j)=tic!(j-8-(conad+4096))
+         j=j+8
+         k=k+8
+         n=0
+      %repeat
+      integer(j-4)=4096;                ! unchain
+      move(ecsize*4,addr(entry code(1)),conad+x'2800'); ! entry code
+      !
+      unsatcode=0
+      unsatdata=0
+      codestart=load address
+      ldata==array(inbase+integer(inbase+24),ldataaf)
+                                        !load data
+      ofm==array(inbase+integer(inbase+28)+4,ofmaf)
+                                        !object file map
+      %cycle i=1,1,integer(inbase+integer(inbase+28))
+         base(i)=inbase+ofm(i)_start
+      %repeat
+!
+! Note:     CODELEN is set to include the SST, since they are 
+!           adjacent.
+!
+      codelen=ofm(1)_l + ofm(4)_l
+      glalen=ofm(2)_l
+      glastart=inbase+ofm(2)_start
+!
+      lbase(1) =ofm(1)_start+codestart; !start of loaded code
+      lbase(2) =ofm(2)_start+codestart; !start of loaded gla
+      lbase(4) =ofm(4)_start+codestart; !start of loaded sst
+      lbase(5) =ofm(2)_l+lbase(2);      !start of loaded ust
+      lbase(6) =ofm(6)_start+codestart; !start of diag tables
+      lbase(10)=ofm(10)_start+codestart;!start of constant area
+!
+! now go through code refs filling in info
+!
+      link=ldata(7);                    !static code refs
+      %while link#0 %cycle
+         cref==record(link+inbase)
+         findcodeep(cref_iden,co,gl,entp,flag)
+         loc=base(cref_refloc>>24)+cref_refloc&x'ffffff'
+         integer(loc)=co
+         integer(loc+4)=gl
+         integer(loc+8)=entp
+         integer(loc+12)=gl
+         link=cref_link
+      %repeat
+!
+! now deal with data refs
+!
+      link=ldata(9)
+      %while link#0 %cycle
+         dref==record(link+inbase)
+         refarray=(dref_refarray&x'7fffffff')+inbase
+                                        !and off common bit
+         n=integer(refarray)
+         refloc==array(refarray+4,reflocaf)
+         finddataep(dref_iden,ad,flag)
+         %cycle n=1,1,n
+            loc=base(refloc(n)>>24)+refloc(n)&x'ffffff'
+            integer(loc)=integer(loc)+ad
+         %repeat
+         link=dref_link
+      %repeat
+!
+! now deal with relocation requests
+!
+      link=ldata(14)
+      %while link#0 %cycle
+         rel==record(link+inbase)
+         %cycle n=1,1,rel_n;            !no of relocation entries in this block
+            areacode=rel_r(n)_arealoc>>24
+            areadisp=rel_r(n)_arealoc&x'ffffff'
+            basecode=rel_r(n)_baseloc>>24
+            basedisp=rel_r(n)_baseloc&x'ffffff'
+            loc=base(areacode)+areadisp
+            integer(loc)=integer(loc)+lbase(basecode)+basedisp
+         %repeat
+         link=rel_link
+      %repeat
+!
+! now print map of entry points
+!
+      %if map = yes %then %start
+      printstring("name                          entry point")
+      newline
+      link=ldata(1);                    !head of code ep list
+      %while link#0 %cycle
+         cent==record(inbase+link)
+         analyse(cent,lput type,iden,link)
+         printstring(iden)
+         spaces(32-length(iden))
+         %if lput type=iput %then loc=lbase(1)+cent_ep offset %else %c
+            loc=lbase((cent_loc>>24)&x'f')+cent_loc&x'ffffff'
+         phex(loc)
+         newline
+         link=cent_link
+      %repeat
+!
+! now print map of data entries if any
+!
+      link=ldata(4);                    !head of data ep list
+      %if link#0 %start
+         newlines(2)
+         printstring( %c
+            "name                        length              address")
+         newline
+         %while link#0 %cycle
+            dent==record(inbase+link)
+            printstring(dent_iden)
+            spaces(32-length(dent_iden))
+            write(dent_l,10)
+            spaces(5)
+            phex(lbase(dent_a)+dent_disp)
+            newline
+            link=dent_link
+         %repeat
+         newlines(2)
+      %finish
+      %finish
+      selectoutput(0)
+!
+! now check for un-used entries
+!
+      link=ldata(1);                    !list head of code entries
+      %while link#0 %cycle
+         cent==record(inbase+link)
+         analyse(cent,lput type,iden,link)
+         rlink=ldata(7);                !head of code ref list
+         %while rlink#0 %cycle
+            cref==record(inbase+rlink)
+            %exit %if iden=cref_iden;   !entry is used
+            rlink=cref_link
+         %repeat
+         %if rlink=0 %and iden#entry name %start;    !entry is not referenced
+            printstring("**warning - procedure ".iden. %c
+               " not used")
+            newline
+         %finish
+         link=cent_link
+      %repeat
+      %if unsatcode=0=unsatdata %start
+         printstring("all refs filled")
+         newline
+      %finish %else %start
+         %if unsatcode>0 %start
+            write(unsatcode,1)
+            printstring("  unsatisfied code references")
+            newline
+         %finish
+         %if unsatdata>0 %then %start
+            write(unsatdata,1)
+            printstring("  unsatisfied data references")
+            newline
+         %finish
+      %finish
+      newline
+      findcodeep(entry name,i,gl,ep,flag)
+      %if flag#0 %then printstring("Entry point ".entry name." not found")
+      newline
+      integer(inbase+16)=ep;            ! entry point to header
+      integer(inbase+8)=x'100000';      ! stack top
+      newlines(2)
+      printstring("ICHOPT written ok")
+      %return
+%routine analyse(%record(centf)%name cent,%integername lput type, %c
+      %stringname iden,%integer link)
+%if 0<length(cent_iden)<32 %start
+      lput type=lput
+      iden=cent_iden
+%finish %else %if 0<length(cent_iden2)<32 %start
+      lput type=iput
+      iden=cent_iden2
+%finish %else %start
+      select output(0)
+      printstring("Invalid load data entry at offset ")
+      phex(link)
+      newline
+      %stop
+%finish
+%end
+%routine findcodeep(%string (31) entry, %integername co,gl,ep, flag)
+%integer link,lput type
+%record(centf)%name cent
+%string(31)iden
+      link=ldata(1)
+      %while link#0 %cycle
+         cent==record(inbase+link)
+         analyse(cent,lput type,iden,link)
+         %if entry=iden %start
+            co=lbase(1)
+            gl=lbase(2)
+            %if lput type=iput %start
+               ep=lbase(1)+cent_ep offset
+               co=co+cent_code offset
+               gl=gl+cent_gla offset
+            %finish %else ep=lbase(1) + cent_loc&x'ffffff'
+            flag=0
+            %return
+         %finish
+         link=cent_link
+      %repeat
+      co=0
+      gl=0
+      ep=0
+      printstring("unsat ref ".entry)
+      newline
+      flag=1
+      unsatcode=unsatcode+1
+      %end; ! findcodeep
+%routine finddataep(%string (31) entry, %integername ad, flag)
+%integer link
+%record(dentf)%name dent
+      link=ldata(4)
+      %while link#0 %cycle
+         dent==record(inbase+link)
+         %if entry=dent_iden %start
+            ad=lbase(dent_a)+dent_disp
+            flag=0
+            %return
+         %finish
+         link=dent_link
+      %repeat
+      %if entry=tops %start
+         ad=load address+8
+         flag=0
+         %return
+      %finish
+      printstring("unsat data ref ".entry)
+      newline
+      ad=0;                             !null value
+      flag=1
+      unsatdata=unsatdata+1
+%end;                                   !of finddataep
+%end;                                   !of fix
+%endoffile
+

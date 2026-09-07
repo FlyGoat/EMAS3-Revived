@@ -1,0 +1,105 @@
+%EXTERNALROUTINE ICL9CEZIBMIMP
+%CONSTINTEGER RELEASE=4
+%INCLUDE "ERCC07.TRIMP_HOSTCODES"
+%CONSTINTEGER HOST=EMAS
+%CONSTINTEGER TARGET=IBMXA
+%CONSTINTEGER STANDARDPT=X'51'
+%CONSTINTEGER MINAPT=X'51';             ! MINIMUM PTYPE FOR WHICH ARITHMETIC
+                                        ! OPERATORS ARE AVAILABLE
+%CONSTINTEGER MINAPREC=MINAPT>>4
+%CONSTHALFINTEGERARRAY TYPEFLAG(0:12)=0,
+                                        X'51'{%INTEGER},
+                                        X'52'{%REAL},
+                                        X'8009'{%LONG SOMETHING},
+                                        X'4031'{%BYTE},
+                                        X'35'{%STRING},
+                                        X'6051'{%HALF->%INTEGER+WARNING},
+                                        X'4041'{%SHORT->%SHORTINTEGER},
+                                        X'33'{%RECORD},
+                                        0,
+                                        X'61'{%LONG INTEGER},
+                                        X'62'{%LONG REAL},
+                                        X'72'{%LONGLONGREAL};
+!
+! 2****15 SET FOR RELAY TO LOWER PART OF TYPEFLAGS
+! 2****14 SET TO SKIP NEXT AR ENTRY FOR BYTE(INTEGER?) ETC
+! 2****13 SET IF A DIFFERENT PRECISION USED GIVES WARNING
+! 2****12 SET FOR COMBINATION WE CANT SUPPORT GIVES FAULT99
+!
+%CONSTBYTEINTEGERARRAY PTRSIZE(0:127)= %C
+                                        8,0(15)                 {PREC=0},   
+                                        0(16)                   {PREC=1},
+                                        0(16)                   {PREC=2},
+                                        8,4,0,4,0,8,0,4,0(8)    {PREC=3},
+                                        8,4,0(14)               {PREC=4},
+                                        8,4,4,0(13)             {PREC=5},
+                                        8,4,4,0(13)             {PREC=6},
+                                        8,0,4,0(13)             {PREC=7};
+%CONSTBYTEINTEGERARRAY PTRROUNDING(0:3*128-1)=%C
+                  3(128)                {ALL PTRS IN RECORDS},
+                  3(128)                {ALL PTRS IN STACK FRAMES},
+                  3(128)                {ALL PTRS IN PARAMETERS};
+%CONSTINTEGER SFRAMEMISALIGN=0;         ! NEEDED ONLY FOR 2900 WHERE PRECALL
+                                        ! MISALIGNS STACK FRAMES !
+%CONSTINTEGER AHEADPT=X'71';            ! PTYPE OF ARRAYHEAD WHEN USED AS SCALR
+%CONSTINTEGER AHEADSIZE=16;             ! SIZE OF ARRAY HEAD(BYTES)
+%CONSTINTEGER MINPARAMSIZE=4;           ! MINIMUM STACKABLE PARAMETER(BYTES)
+%CONSTINTEGER RTPARAMPT=X'51';          ! PTYPE OF RTPARAM WHEN USED AS SCALAR
+%CONSTINTEGER RTPARAMSIZE=4;            ! SIZE OF RT PARAMETER (BYTES)
+%CONSTINTEGER RECORDROUNDING=7;         ! RECORDS TO 8 BYTE BNDRY
+%CONSTINTEGER STRINGROUNDING=0;         ! STRING TO 1 BYTE BNDRY
+%CONSTINTEGER ARRAYROUNDING=7;          ! ALL ARRAYS TO 8 BYTE BNDR
+%CONSTINTEGER ARRAYINRECROUNDING=0;     ! ARRAYS IN RECORDS ALIGNED AS ELEMENTS
+%CONSTINTEGER STRVALINWA=NO;            ! STRING VALUE STACKED- NOT PASSED AS 
+                                        ! PTR TO A WORK AREA
+%CONSTINTEGER STRRESINWA=NO;           ! STR FN RESULTS RETURNED ON STACK
+!
+%CONSTBYTEINTEGERARRAY RNDING(0:3*128-1)= %C
+                  {VALUES FOR SCALARS PTYPES 0->X'7F' IN SITUATIONS}
+                  {FIRST SITUATION IS IN RECORDS}
+                  {SECOND SITUATION IS IN STACK FRAMES}
+                  {THIRD SITUATION IS AS PARAMETERS}
+
+         0(16)                          {PREC=0},
+         0(16)                          {PREC=1},
+         0(16)                          {PREC=2},
+         0(3),3,0,0,0(10)               {PREC=3},
+         0,1,0(14)                      {PREC=4},
+         0,3,3,0(13)                    {PREC=5},
+         0,3,3,0(13)                    {PREC=6},
+         0,3,3,0(13)                    {PREC=7},
+
+
+         0(16)                          {PREC=0},
+         0(16)                          {PREC=1},
+         0(16)                          {PREC=2},
+         0(3),3,0,0,0(10)               {PREC=3},
+         0,1,0(14)                      {PREC=4},
+         0,3,3,0(13)                    {PREC=5},
+         0,7,7,0(13)                    {PREC=6},
+         0,0,7,0(13)                    {PREC=7},
+
+
+         0(16)                          {PREC=0},
+         0(16)                          {PREC=1},
+         0(16)                          {PREC=2},
+         0,3,0,3,0,3,0(10)              {PREC=3},
+         0,3,0(14)                      {PREC=4},
+         0,3,3,0(13)                    {PREC=5},
+         0,3,3,0(13)                    {PREC=6},
+         0,0,3,0(13)                    {PREC=7};
+
+%CONSTBYTEINTEGERARRAY BYTES(0:7)=0(3),1,2,4,8,16;
+%CONSTBYTEINTEGERARRAY WORDS(0:7)=0(3),1,1,1,2,4;
+%CONSTINTEGER DAREA=4;                  ! DIAGS IN SPECIAL AREA FOR IBMEMAS
+                                        ! BUT MUST USE SST ON 2900
+%CONSTINTEGER DVAREA=1;                 ! CONST DOPE VECTORS IN CODE FOR EMAS
+%CONSTINTEGER LHSADDRFIRST=NO;          ! EVALUATE LHS AFTER RHS FOR ASSGNMNT
+%CONSTINTEGER JRNDBODIES=YES;           ! NEED TO JUMP ROUND RT BODIES
+%CONSTINTEGER PARAMSBWARDS=NO;          ! PARAMETERS L_>R
+%CONSTINTEGER DISPLAY NEEDED=NO;        ! DISPLAY NOT NEEDED IN LOCAL SPACE
+%CONSTINTEGER RTPARAM1OFFSET=64;        ! OFFSET FROM LNB TO PARAM1
+%CONSTINTEGER ALPHA=0;             ! zero post parmeter linkage
+!
+! ENDED OF CONCATENATED DEFINITIONS
+!

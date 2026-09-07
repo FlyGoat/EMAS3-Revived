@@ -1,0 +1,4674 @@
+! S02 - Service routines
+%end %oflist
+%include "SUBARC:SSOWNF3"
+%list
+!***********************************************************************
+!*                                                                     *
+!*                           Record formats                            *
+!*                                                                     *
+!***********************************************************************
+!
+!
+%record %format prmsf(%string (6) user, %byte %integer uprm)
+!
+!
+%record %format dpermf(%integer bytesreturned, ownp, eep, spare, %record (prmsf) %array prms(0:15))
+%record %format pdindexf(%integer start, %string (11) name, %integer hole, s5, s6, s7)
+%record %format pdheaderf(%integer dataend, datastart, size, filetype, sum, datetime, adir, count)
+%record %format pf(%integer dest, srce, (%integer p1, p2, p3, p4, p5, p6 %or %string (23) s))
+!
+!***********************************************************************
+!*                                                                     *
+!*                              Constants                              *
+!*                                                                     *
+!***********************************************************************
+!
+!
+!
+%const %string (1) shortstem= "$"
+%const %integer shortstemchar= '$'
+%constant %real timefactor= 1000.0;      ! SECONDS = DCPUTIME/TIMEFACTOR.
+%constant %integer kshift= 10;           !SHIFT BYTES TO KBYTES
+%constant %integer segsize= 1 << seg shift
+%constant %integer tempmarker= X'40000000'
+%constant %integer valid mode bits=X'000003FF'; ! Mode bits recognised by Director:
+! N.B.  must be updated if Director facilities are enhanced
+! For the significance of the bits, see comment in CONNECT.
+%constant %integer vtempmarker= X'20000000'
+!
+!***********************************************************************
+!*                                                                     *
+!*             DIRECTOR and SUPERVISOR Routine/fn/map spec             *
+!*                                                                     *
+!***********************************************************************
+!
+%external %integer %fn %spec dclearprivviol(%string %name xfile index, xfile, %integer %name xfsys)
+%external %integer %fn %spec dchaccess(%string %name file index, file, %integer %name fsys, newmode)
+%external %integer %fn %spec dchsize(%string %name file index, file, %integer %name fsys, newsize kb)
+%external %integer %fn %spec dcputime
+%external %integer %fn %spec dconnect(%string %name fileindex, file, %integer %name fsys, mode, seg, gap)
+%external %integer %fn %spec dcreate(%string %name fileindex, file, %integer %name fsys, nkb, type, da)
+%external %integer %fn %spec ddaynumber
+%external %integer %fn %spec ddestroy(%string %name fileindex, file, date, %integer %name fsys, type)
+%external %integer %fn %spec ddisconnect(%string %name fileindex, file, %integer %name fsys, destroymode)
+%external %integer %fn %spec dfinfo(%string %name fileindex, file, %integer %name fsys, %string %name s,
+   %integer %array %name i)
+%external %integer %fn %spec dfstatus(%string %name fileindex, file, %integer %name fsys, act, value)
+%external %integer %fn %spec dfsys(%string %name index, %integer %name fsys)
+%external %integer %fn %spec dnewgen(%string %name fileindex, file, nfile, %integer %name fsys)
+%external %integer %fn %spec drename(%string %name fileindex, old, new, %integer %name fsys)
+%external %integer %fn %spec drestore(%string %name index, file, date, %integer %name fsys, type)
+%external %integer %fn %spec dexec(%string %name exec, %record (pf) %name p, %integer %name len, adr)
+%external %integer %fn %spec dsfi(%string %name fileindex, %integer %name fsys, type, set, %string %name s,
+   %integer %array %name i)
+!
+!
+!***********************************************************************
+!*                                                                     *
+!*                     %system Routine/fn/map spec                     *
+!*                                                                     *
+!***********************************************************************
+!
+!***********************************************************************
+!*                                                                     *
+!*               External/internal routine/fn/map specs                *
+!*                                                                     *
+!***********************************************************************
+!
+%external %routine %spec getstring %alias "s#getstring"(%string (255) vec, %string %name val)
+%external %integer %fn %spec scarce %alias "s#scarce"
+%external %string %fn %spec failuremessage %alias "S#FAILUREMESSAGE"(%integer n)
+%external %routine %spec tojournal %alias "s#tojournal"(%integer adr, len)
+%external %routine %spec emas3(%string %name com, param, %integer %name flag)
+%external %routine %spec note %alias "s#note"(%string (255) s)
+%external %integer %fn %spec iocp %alias "s#iocp"(%integer ep, parm)
+%external %routine %spec ssenter %alias "s#ssenter"(%string %name s, %integer %name i, %string %name t)
+%external %routine %spec ssexit %alias "s#ssexit"(%string %name s, %integer %name i, %string %name t)
+%external %string %fn %spec version %alias "s#ssversion"
+%external %routine %spec inner obey %alias "s#innerobey"(%string (255) in, out, %integer echo, type,
+   %integer %name flag)
+%external %integer %fn %spec compare %alias "s#compare"(%string (255) a, b)
+%external %routine %spec printline %alias "s#printline"(%string (255) s)
+%external %routine %spec etoi %alias "S#ETOI"(%integer nad, nl)
+%external %routine %spec itoe %alias "S#ITOE"(%integer nad, nl)
+%external %routine %spec fill %alias "s#FILL"(%integer len, from, filler)
+%external %routine %spec move %alias "s#MOVE"(%integer len, from, to)
+%external %integer %fn %spec checkname %alias "s#checkname"(%string %name name, %integer %name type, qualifier)
+%external %integer %fn %spec current packed dt %alias "S#CURRENTPACKEDDT"
+%external %integer %fn %spec dirtoss %alias "S#DIRTOSS"(%integer flag)
+%external %routine %spec disposeheap %alias "s#disposeheap"(%integer adr)
+%external %integer %fn %spec getheap %alias "s#getheap"(%integer bytes)
+%external %routine %spec allow interrupts %alias "S#ALLOWINTERRUPTS"
+%external %routine %spec chopldr %alias "S#CHOPLDR"(%string %name a, %integer i)
+%external %string %fn %spec nexttemp %alias "S#NEXTTEMP"
+%external %routine %spec changeaccess %alias "s#changeaccess"(%string (255) file, %integer mode, %integer %name flag)
+%routine %spec connect(%string (255) file, %integer mode, hole, prot, %integer %name adr, type, start, end, flag)
+%routine %spec clearfn(%record (conff) %name cur)
+%integer %fn %spec findfn(%string %name file, %integer fsys)
+%external %routine %spec phex %alias "S#PHEX"(%integer i)
+%external %string %fn %spec htos %alias "s#htos"(%integer h, places)
+%external %routine %spec setreturncode %alias "S#setreturncode"(%integer flag)
+%external %routine %spec setssinhibit %alias "S#SETSSINHIBIT"
+
+%external %string %fn %spec itos %alias "s#itos"(%integer i)
+%external %routine %spec modpdfile %alias "s#modpdfile"(%integer ep, %string (255) pd, %string (11) member,
+   %string (255) infile, %integer %name flag)
+%external %routine %spec monparams %alias "s#monparams"(%string (255) temp)
+%external %routine %spec sstrace %alias "s#sstrace"
+%external %integer %fn %spec stoi %alias "s#stoi"(%string (255) s, %integer %name i)
+%external %routine %spec shout %alias "s#shout"(%string (255) s)
+%external %integer %fn %spec existtype %alias "s#existtype"(%string (255) fname)
+%external %routine %spec scopy1 %alias "s#copy1"(%string (255) file1, file2, name1, name2, %integer %name flag)
+%external %routine %spec permit %alias "s#permit"(%string (255) filename, %string (6) user, %integer perm,
+   %integer %name flag)
+%external %routine %spec destroy %alias "s#destroy"(%string (255) file, %integer %name flag)
+%external %string %fn %spec uinfs %alias "s#uinfs"(%integer n)
+!
+%string %fn %spec substring(%string %name s, %integer i, j)
+%routine %spec disconnectlevelzerofiles(%integer severity)
+%routine %spec relink(%record (conff) %name cur, %integer newlevel)
+!
+
+!-----------------------------------------------------------------------
+
+%external %string %fn translateshortname %alias "s#translateshortname"(%string %name short, %integer mode)
+
+! mode = 0 return actual filename
+! mode = 1 return {shortname} as well
+
+   %integer pos
+   %string (255) m, w
+   %record (conff) %name cur
+
+   ->out %unless short#"" %and charno(short, 1)=shortstemchar
+   short -> (shortstem).w
+   m = "" %unless w->w.("_").m
+   ->out %unless stoi(w, pos)=0
+   ->out %unless 0<=pos<=maxconf
+   cur == record(ssown_conf(pos))
+   %if mode=0 %then w = "" %else w = "{".shortstem.w."}"
+   w = w.cur_file
+   w = w."_".m %unless m=""
+   %result = w
+out:
+   %result = short {no can do}
+%end;                                    ! translateshortname
+
+!-----------------------------------------------------------------------
+
+%external %string %fn suffixed %alias "s#suffixed"(%string %name file)
+
+   %if length(file)>1 %and charno(file, 1)='T' %and charno(file, 2)='#' %and charno(file, length(file))#gsepch %then %c
+      %result = file.ssown_sssuffix %else %result = file
+%end;                                    ! suffixed
+
+!-----------------------------------------------------------------------
+
+%external %routine lctranslate %alias "s#lctranslate"(%integer adr, len)
+   %byte %integer %name c
+   %while len>0 %cycle
+      len = len-1
+      c == byteinteger(adr+len)
+      c = c+32 %if 'A'<=c<='Z'
+   %repeat
+%end;                                    ! lctranslate
+!
+!-----------------------------------------------------------------------
+!
+%external %string %fn lcstring %alias "s#lcstring"(%string (255) s)
+   lctranslate(addr(s)+1, length(s)) %unless s=""
+   %result = s
+%end;                                    ! lcstring
+
+!-----------------------------------------------------------------------
+
+%external %routine uctranslate %alias "S#UCTRANSLATE"(%integer adr, len)
+   %const %byte %integer %array upptab(0:255)= %c
+ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
+ 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
+ 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59,
+ 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78,
+ 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 65,
+ 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84,
+ 85, 86, 87, 88, 89, 90, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133,
+ 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149,
+ 150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165,
+ 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181,
+ 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196, 197,
+ 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213,
+ 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229,
+ 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245,
+ 246, 247, 248, 249, 250, 251, 252, 253, 254, 255
+   %const %byte %integer %array upptab2(0:255)=0(97), 1(26), 0(133)
+
+   *l_5, adr
+   *l_6, len
+   *l_3, upptab;                         !address of UPPTAB(0)
+   *l_4, upptab2;                        !address of UPPTAB2(0)
+   *la_0, 256
+   *basr_15, 0;                          !base register
+   *using_15
+loop:
+   *sr_6, 0;                             !r6=r6-256
+   *bc_4, <endbit>
+   *trt_0(256, 5), 0(4);                 !first see if there IS any lower-caseletter present
+   *bc_8, <dont translate>;              !to save the page-fault, possibly
+   *tr_0(256, 5), 0(3)
+dont translate:
+   *la_5, 256(5);                        !r5=r5+256
+   *bc_15, <loop>
+endbit:
+   *ar_6, 0;                             !r6=r6+256
+   *bctr_6, 0;                           !r6=r6-1
+   *ltr_6, 6
+   *bc_4, <ret>;                         !return if r6<0
+   *ex_6, <trt>;                         !again, see first if there IS a lower-case letter present
+   *bc_8, <ret>;                         !return if not
+   *ex_6, <tr>
+   *drop_15
+ret: %return
+
+tr: *tr_0(0, 5), 0(3)
+trt: *trt_0(0, 5), 0(4)
+
+!%byte %integer %name ch
+!   %while len>0 %cycle
+!      len = len-1
+!      ch == byte integer(adr+len)
+!      ch = ch-'a'+'A' %if 'a'<=ch<='z'
+!   %repeat
+%end;                                    ! of UCTRANSLATE
+!
+!-----------------------------------------------------------------------
+!
+%external %string %fn ucstring %alias "s#ucstring"(%string (255) s)
+   uctranslate(addr(s)+1, length(s)) %unless s=""
+   %result = s
+%end;                                    ! ucstring
+!
+!-----------------------------------------------------------------------
+!
+%external %integer %fn oktooverwrite %alias "s#oktooverwrite"(%integer t1, t2)
+
+   {result is either no or yes}
+
+   {1 object}
+   {2 old dir}
+   {3 char  }
+   {4 data  }
+   {5 corr ob}
+   {6 pdfile}
+   {7 dir   }
+
+   %result = yes %if t1=t2
+   %result = yes %if t2<1 %or t2=5 %or t2>7
+   %result = no
+
+   {used by NEWGEN and old COPY command}
+
+%end;                                    ! ok to overwrite
+
+!-------------------------------------------------------------------------------
+
+%routine resetheader(%integer conad)
+! Sets filetype field in file header to a valid number PROVIDED THAT THE REST OF
+! THE HEADER LOOKS STANDARD.  [We want to leave truly non-standard files alone, but
+! we want character files to have header type 3 rather than 0].
+   %integer pt, ch, notiso, to
+   %record (fhf) %name h
+   h == record(conad)
+   %if h_type=0 %and h_start<=h_end<=h_size %start
+      ! Check first 256 bytes to see if it looks like a character file. 90% soultion.
+      notiso = 0
+      to = h_start+256; %if h_end<to %then to = h_end
+      %for pt = h_start, 1, to %cycle
+         ch = byteinteger(conad+pt)
+         %unless 32<=ch<=126 %or ch=10 %or ch=13 %or ch=12 %then notiso = 1
+      %repeat
+      %if notiso=0 %then h_type = 3
+   %finish
+%end;                                    ! resetheader
+
+!-------------------------------------------------------------------------------
+
+%external %routine finfo %alias "s#finfo"(%string (255) file, %integer mode, %record (frf) %name fr,
+   %integer %name flag)
+
+!    mode & 1 = 0    do not connect (if file)
+!    mode & 1 = 1    connect (if file)
+
+!    mode & 2 = 0    file only
+!    mode & 2 = 1    file or group ok
+
+   %string (6) tran
+   %string (19) index
+   %record (conff) %name cur
+   %integer %array i(0:12)
+
+   %if ssown_ssnote&8#0 %then monparams(">trjrjriw")
+   fr = 0
+   flag = checkname(file, 2, 0)
+   %if flag#0 %and %not (flag=345 {group for a file} %and mode&2=2) %then ->fout
+
+   cur == record(ssown_conf(ssown_confpos))
+   file = cur_file %if charno(file, 1)=shortstemchar
+   file -> index.(usep).file
+
+   flag = dfinfo(index, suffixed(file), ssown_curfsys, tran, i)
+   flag = 2 %if flag=0 %and mode&2=0 %and i(0)=0 {name used for a group}
+   %if flag=0 %start
+      ssown_curfsys = i(6)
+      fr_size = i(0)<<kshift;            !PHYSICAL SIZE IN BYTES
+      fr_rup = i(1);                     !REQUESTING USERS PERMISSION
+      fr_eep = i(2);                     !EVERYONE ELSE'S PERMISSION
+      fr_fsys = i(6)
+      fr_cct = i(8)
+      fr_dayno = i(10)
+      fr_codes2 = i(11)
+      fr_conad = i(7)<<segshift;         !CONNECT ADDRESS
+      fr_users = i(4)
+      fr_arch = (i(5)&X'80')!((i(9)&X'10')>>4)!(i(9)&X'0C')!((i(11)&2)<<5)
+      ! X'80': archive
+      ! X'08': very temporary
+      ! X'04': temporary
+      ! X'01': cherished
+      fr_ssbyte = i(12)
+      fr_tran = tran;                    !ON OFFER TO
+
+      clearfn(cur) %if fr_size>0 %and cur_conlevel=notexistlist
+
+      ! We also connect the file if connection is requested in MODE
+      ! The connection is done only for FILES, not GROUPS (obviously)
+
+      %if mode&1#0 %and fr_size#0 %then %c
+         connect(ssown_shortname, 0, 0, 2 {level0}, fr_conad, fr_filetype, fr_datastart, fr_dataend, flag)
+
+   %finish %else %start
+      flag = dirtoss(flag)
+   %finish
+
+fout:
+   %if monitoring possible=yes %and ssown_ssnote&8#0 %then monparams("<trjrjriw")
+%end;                                    ! of FINFO
+
+!-----------------------------------------------------------------------
+
+%external %routine fstatus %alias "s#fstatus"(%string (255) file, %integer act, value, %integer %name flag)
+   %string (19) index
+   %record (conff) %name cur
+
+   %if monitoring possible=yes %and ssown_ssnote&4#0 %then mon params(">trjrjriw")
+   flag = checkname(file, 2 {file}, 0);  !ANY OWN FILE
+   ->err %if flag#0
+   cur == record(ssown_conf(ssown_confpos))
+   cur_file -> index.(usep).file
+   flag = dfstatus(index, suffixed(file), cur_fsys, act, value)
+   flag = dirtoss(flag) %unless flag=0
+err:
+   %if monitoring possible=yes %and ssown_ssnote&4#0 %then mon params("<trjrjriw")
+%end;                                    ! of FSTATUS
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn roundup %alias "S#ROUNDUP"(%integer n, round)
+! RESULT IS N ROUNDED UP TO MULTIPLE OF ROUND >=N
+! N.B.: This will not work unless ROUND is a power of 2.
+   round = round-1
+   %result = (n+round)&(\round);         ! AND WITH NOT ROUND
+%end;                                    ! of ROUNDUP
+
+!-----------------------------------------------------------------------
+
+%integer %fn hashfn(%string (255) name)
+! RETURNS VALUE IN THE RANGE 0-MAXCONF FOR FINDING ENTRY IN THE CONNECTED FILE TABLE.
+! MAXCONF should be ONE LESS than some prime number.
+   %integer a, j, w, l, a1, a2
+   a = addr(name)+7
+   l = length(name)-7
+   %if l>8 %start
+      ! Close up last 4 to first 4
+      a1 = a+5
+      a2 = a+l-3
+      byteinteger(a1+j) = byteinteger(a2+j) %for j = 3, -1, 0
+   %finish %else name = name."<>#@!+&"
+   w = byteinteger(a+1)*71+byteinteger(a+2)*47+byteinteger(a+3)*97+byteinteger(a+4)*79+byteinteger(a+5) %c
+      *29+byteinteger(a+6)*37+byteinteger(a+7)*53+byteinteger(a+8)*59
+   %result = w-(w//(maxconf+1))*(maxconf+1)
+%end;                                    ! of HASHFN
+
+!-----------------------------------------------------------------------
+
+%const %integer linkcheckreqd=no
+
+
+!---------------------------------------------------------------------------------
+
+ ! %if linkcheckreqd=yes %start
+
+%external %routine checklinks %alias "EMAS#CHECKLINKS"
+   %integer next, lev, link, ncf, error, loopcount
+   %record (conff) %name cur
+
+   %return %if ssown_sscomreg(25)=4
+   error = 0
+   ncf = 0
+   lev = notexistlist
+   %cycle
+      printline("Lev ".itos(lev)) %if ssown_sscomreg(25)=128
+      link = ssown_levelhead(lev)
+      loopcount = 0
+      %while link#0 %cycle
+         cur == record(link)
+         next = cur_flnk
+
+         printline("File:".cur_file) %if ssown_sscomreg(25)=128
+
+         %if lev=doesexistlist %and cur_size=0 %start
+            printline("Zero size for existing ".cur_file)
+            error = 1
+            %exit
+         %finish
+
+         %if cur_conlevel#lev %start
+            printline("List ".itos(lev)." error")
+            error = 1
+            %exit
+         %finish
+
+         %if 0<=lev<=toploadlevel %then ncf = ncf+1
+
+         link = next
+         loopcount = loopcount+1
+         %if loopcount>500 %start
+            printline("Conf Loop")
+            error = 1
+            %exit
+         %finish
+      %repeat
+      lev = lev-1
+   %repeat %until lev<0
+
+   %unless ncf=ssown_connfiles %then printline("ncf,_connfiles".itos(ncf)." ".itos(ssown_connfiles))
+   %if error>0 %then ssown_sscomreg(25) = 4 %and printline(tostring(7))
+%end;                                    ! of checklinks
+
+ ! %finish; ! Link check reqd
+
+!------------------------------------- CLEARLLISTS -------------------------------
+
+%external %routine clearllists %alias "S#CLEARLLISTS"
+   %integer lev, link, loopcount, pos
+   %record (conff) %name cur
+
+!   monparams(">") %if ssown_ssnote & 8 > 0
+   pos = ssown_confpos
+   %for lev = notexistlist, -1, doesexistlist %cycle
+      link = ssown_levelhead(lev)
+      loopcount = 0
+      %while link#0 %cycle
+         cur == record(link)
+         link = cur_flnk
+!printline(cur_file) %if ssown_ssnote & 8 > 0
+         loopcount = loopcount+1
+         %if loopcount>500 %start
+            shout("Conf Loop")
+            %exit
+         %finish
+         %continue %unless cur_defines=0
+
+         %if cur_conlevel#lev %start
+            shout("List ".itos(lev)." error")
+            %exit
+         %finish
+
+         clearfn(cur)
+
+      %repeat
+   %repeat
+   ssown_confpos = pos
+!   monparams("<") %if ssown_ssnote & 8 > 0
+%end;                                    ! of clearllists
+
+!------------------------------------- UNLINK ----------------------------------
+
+%routine unlink(%record (conff) %name cur)
+   %record (conff) %name w
+
+   %if linkcheckreqd=yes %then checklinks
+
+   set ss inhibit
+   %if cur_blnk#0 %start
+      w == record(cur_blnk)
+      w_flnk = cur_flnk
+      %if cur_conlevel<=toploadlevel %then ssown_connfiles = ssown_connfiles-1
+   %finish
+
+   %if cur_flnk#0 %start
+      w == record(cur_flnk)
+      w_blnk = cur_blnk
+   %finish
+
+   cur_flnk = 0
+   cur_blnk = 0
+   allowinterrupts
+   %if linkcheckreqd=yes %then checklinks
+%end;                                    ! of UNLINK
+
+!-------------------------------- TOLEVELLIST -----------------------------------------
+
+%external %routine tolevellist %alias "S#TOLEVELLIST"(%record (conff) %name cur)
+   %integer save, level
+   %record (conff) %name currentfirst
+
+   %if linkcheckreqd=yes %then checklinks
+   set ss inhibit
+   level = cur_conlevel
+   save = ssown_levelhead(level)
+   ssown_levelhead(level) = addr(cur)
+   cur_flnk = save
+   cur_blnk = addr(ssown_levelhead(level))
+
+   %if save#0 %start
+      currentfirst == record(save)
+      currentfirst_blnk = addr(cur)
+   %finish
+   allow interrupts
+
+   ssown_connfiles = ssown_connfiles+1 %if level<=toploadlevel
+   %if linkcheckreqd=yes %then checklinks
+%end;                                    ! of TOLEVELLIST
+
+!----------------------------------- RELINK -------------------------------------------
+
+%external %routine relink %alias "s#relink"(%record (conff) %name cur, %integer newlevel)
+! CUR_LEVEL used to be set with new level, but we require to know previous
+! level to decrement _CONNFILES in UNLINK
+   monparams("=*id=".cur_file.",from ".itos(cur_conlevel)." to ".itos(newlevel)) %if ssown_ssnote&16>0
+   unlink(cur)
+   cur_conlevel = newlevel
+   tolevellist(cur)
+%end;                                    ! of RELINK
+
+!-----------------------------------------------------------------------
+
+%integer %fn confstamp
+   %if ssown_confstamp=255 %then ssown_confstamp = 0 %else ssown_confstamp = ssown_confstamp+1
+   %result = ssown_confstamp
+%end;                                    ! confstamp
+
+!-----------------------------------------------------------------------
+
+%integer %fn confaged(%integer curstamp)
+   %integer diff
+
+   diff = ssown_confstamp-curstamp
+   diff = diff+256 %if diff<0
+   %if diff<32 %then %result = 0 %else %result = 1
+%end;                                    ! confaged
+
+!-----------------------------------------------------------------------
+
+%routine finfo data to conf(%integer %array %name dfindata, %record (conff) %name cur)
+   %integer mode
+
+   cur_size = dfindata(0)<<kshift
+   cur_rup = dfindata(1)
+   cur_fsys = dfindata(6)
+   cur_eep = dfindata(2)
+   cur_use = dfindata(4)
+   cur_codes = dfindata(9)
+   cur_codes2 = dfindata(11)!(dfindata(5)&X'80') {the 'to-be-archived' bit}
+   cur_type = dfindata(12)
+   cur_conad = dfindata(7)<<segshift
+   %if cur_conad=0 %start
+      cur_conlevel = doesexistlist
+   %finish %else %start
+      mode = 1
+      mode = 3 %if cur_codes2&1>0
+      cur_mode = mode!(cur_codes2&8)
+      cur_conlevel = 1
+   %finish
+%end;                                    ! finfo data to conf
+
+!------------------------------- FINDFN -----------------------------------------------
+
+%external %integer %fn findfn %alias "s#findfn"(%string %name curfile, %integer fsys)
+
+! LOOK FOR FILE IN CONF. SET ssown_confpos TO POSITION OR TO POSITION OF HOLE IF NOT FOUND.
+
+! RESULT=0 IF FOUND (May or may not be connected: CUR_CONAD shows)
+! RESULT=1 IF NOT FOUND.  IF SSOWN_CONF(i) IS -1 THEN POSITION CAN BE RE-USED.
+!                         IT HAS BE LEFT LIKE THIS TO PREVENT A SEARCH CHAIN BEING BROKEN.
+!          FILENAME HAS BEEN ADDED TO CONF TABLE.
+! RESULT=2 IF NOT FOUND AND NOT ADDED BECAUSE IT'S A GROUP
+! RESULT=233 IF NOT FOUND AND GONE RIGHT ROUND THE TABLE (TABLE FULL)
+!            (This flag should not occur since we are keeping the Subsystem's table
+!             bigger than Director's.  Files known about but not connected are discarded
+!             when the table is found to be full, and we then have another go at finding
+!             an empty slot.)
+
+   %integer empty, startpos, loopcnt, rlt, pos, finfo flag
+   %record (conff) %name cur
+   %record (shortconff) %name shortcur
+   %string (6) trans
+   %string (19) index
+   %string (255) file
+   %integer %array dfindata(0:12)
+
+   %if monitoring possible=yes %and ssown_ssnote&8#0 %then monparams(">sr")
+   empty = -1;                           !IMPOSSIBLE VALUE
+   pos = hashfn(curfile)
+   startpos = pos
+   rlt = 1 {not found - not connected}
+   loopcnt = 0
+
+   %cycle
+      %exit %if ssown_conf(pos)=0 {zero entry, not found, use this or a previous free}
+      %if ssown_conf(pos)>0 %start {this entry in use}
+         cur == record(ssown_conf(pos))
+         rlt = 0 %and %exit %if cur_file=curfile {found it !!}
+         %if empty<0 {havent encountered a free one yet} %and doesexistlist<=cur_conlevel<=notexistlist %and %c
+            cur_defines=0 {or used for defines} %and confaged(cur_stamp)=1 %then empty = pos {suitable for reuse}
+      %finish %else %start
+         empty = pos %if empty<0
+      %finish
+
+      %if pos=maxconf %then pos = 0 %else pos = pos+1; !WRAP ROUND AT TOP OF SSOWN_CONF
+      %if pos=startpos %start;           !GONE RIGHT ROUND
+         %exit %if empty>=0
+         rlt = 233 %and %exit %if loopcnt=2
+         disconnectlevelzerofiles(loopcnt)
+         loopcnt = loopcnt+1
+      %finish
+   %repeat
+
+   %if rlt=1 %start {not found}
+
+      curfile -> index.(usep).file
+      %unless index="S#DISC" %start
+         finfo flag = dfinfo(index, suffixed(file), fsys, trans, dfindata)
+
+         %if (finfo flag=0 %and dfindata(0) {size}=0) %or (finfo flag#0 %and finfo flag#32 %and finfo flag#24) %then %c
+            rlt = 2 %and ->out
+      %finish
+
+      ! Here we have (a zero flag and not a group) or (flag 32 - not exist)
+      ! or (flag=24 - intermmediate group does not exist)
+
+      pos = empty %unless empty<0
+
+      %if ssown_conf(pos)>0 %start {reuse this entry}
+         cur == record(ssown_conf(pos))
+         unlink(cur)
+         %if length(curfile)>length(cur_file) %start
+            disposeheap(ssown_conf(pos))
+            ssown_conf(pos) = 0
+         %finish
+      %finish
+
+      %if ssown_conf(pos)<=0 %start {need some heap}
+         ssown_conf(pos) = getheap(cbaselen+length(curfile))
+         cur == record(ssown_conf(pos))
+      %finish
+
+      shortcur == record(ssown_conf(pos))
+      shortcur = 0
+      cur_file = curfile
+      cur_pos = pos
+
+      %if finfo flag=0 %start
+         ! Filename and DOES EXIST
+         finfo data to conf(dfindata, cur)
+
+      %finish %else %start
+         ! File does not exist
+         cur_conlevel = notexistlist
+         cur_fsys <- fsys
+         ! For "intermediate group does not exist, set CUR_FINFO FLAG to 24
+         ! CHECKNAME will do further analysis and error reporting
+         %if finfo flag=24 %then cur_finfo flag = 24 %and rlt = 1
+      %finish
+      tolevellist(cur)
+   %finish
+
+out:
+   %unless rlt=233 %start
+      ssown_confpos = pos
+      ssown_shortname = shortstem.itos(pos)
+   %finish
+
+   %if monitoring possible=yes %and ssown_ssnote&8#0 %then %c
+      monparams("<sr*start=".itos(startpos).",pos=".itos(pos).",res=".itos(rlt))
+   %result = rlt
+%end;                                    ! of FINDFN
+
+!------------------------------------------- CLEARFN ---------------------------------------
+
+%routine clearfn(%record (conff) %name cur)
+!CLEARS OUT ENTRY IN ARRAY SSOWN_CONF. ALSO CLEARS ANY PRECEDING
+! "EMPTY" SLOTS IF THE NEXT ONE IS EMPTY. USED BY DISCONNECT AND DESTROY
+   %integer nextx, pos
+   %string (255) w
+
+!   %if ssown_ssnote&8#0 %then monparams(">")
+   pos = cur_pos
+   w = cur_file
+
+   %if doesexistlist<=cur_conlevel<=notexistlist %start
+      %if cur_defines=0 %start
+!         %if confaged(cur_stamp) = 1 %start
+         unlink(cur)
+         disposeheap(ssown_conf(pos))
+         %if pos=maxconf %then nextx = 0 %else nextx = pos+1
+         %if ssown_conf(nextx)=0 %start
+            ssown_conf(pos) = 0
+            ! Clear any adjacent (previous) "EMPTY" cells
+            %cycle
+               %if pos=0 %then pos = maxconf %else pos = pos-1; !NEXT LOWER - WITH WRAP ROUND
+               cur == record(ssown_conf(pos))
+               %exit %if ssown_conf(pos)>=0
+               ! Then SAFE TO CLEAR IT OUT
+               ssown_conf(pos) = 0
+            %repeat
+         %finish %else ssown_conf(pos) = -1; ! "EMPTY"
+!         %finish %else w = w . " not aged"
+      %finish %else w = w." defined"
+   %finish %else w = w." left at conlevel ".itos(cur_conlevel)
+
+!   %if ssown_ssnote & 8 > 0 %then monparams("<*".w)
+%end;                                    ! of CLEARFN
+
+!------------------------------- SDISCONNECT ------------------------------------------
+
+%external %routine sdisconnect %alias "S#DISCONNECT"(%string (255) file, %integer %name flag)
+   %record (conff) %name cur
+   %integer type, lev
+   %string (19) index, text
+   %string (6) owner
+
+   %if monitoring possible=yes %and ssown_ssnote&4#0 %then mon params(">triw")
+   text = ""
+   flag = checkname(file, 2 {file}, 0)
+   %if flag=0 %start
+      cur == record(ssown_conf(ssown_confpos))
+      text = "*type=".itos(cur_type)
+      %if cur_conad=0 %then flag = 256 %else %start
+         cur_file -> index.(usep).file
+         owner <- index
+         %if cur_conlevel=0 %or cur_conlevel>=ssown_loadlevel %start
+            type = integer(cur_conad+12)
+            %if cur_mode&2#0 %start
+               %if %not (0<type<=sstopfiletype) %then resetheader(cur_conad) %and type = integer(cur_conad+12)
+               %if type#cur_type %and 0<type<=sstopfiletype %and owner=ssown_ssowner %then %c
+                  fstatus(ssown_shortname, 18, type, flag) %and cur_type = type
+            %finish
+            %if type=ssdirfiletype %then ssown_dirdiscon = 1; ! TO WARN LOADER THAT A DIRECTORY HAS BEEN DISCONNECTED
+            %if cur_file->("T#WRK") %then ssown_sscomreg(14) = 0
+            set ssinhibit;               !HOLD OFF INTERRUPTS
+            flag = ddisconnect(index, suffixed(file), cur_fsys, 0)
+            %if flag=0 %start
+               cur_conad = 0
+               lev = doesexistlist
+               %if cur_codes&8 {vtemp}>0 %then lev = notexistlist %and cur_size = 0
+               ! Will not exist if VTEMP
+               relink(cur, lev)
+            %finish %else flag = dirtoss(flag)
+            allow interrupts
+         %finish %else flag = 234;       !in use at lower ll
+      %finish
+   %finish
+   %if monitoring possible=yes %and ssown_ssnote&4#0 %then mon params("<triw".text)
+%end;                                    ! of SDISCONNECT
+
+!-----------------------------------------------------------------------
+
+%external %routine sdisco %alias "s#sdisconnect"(%string (255) file, %integer fsys, %integer %name flag)
+!***********************************************************************
+!*                                                                     *
+!* SDISCONNECT provided for JOBBER and JOURNAL allows for              *
+!* disconnection of a particular file on a particular FSYS. It is      *
+!* used in conjunction with a facility in CONNECT which allows the     *
+!* user to specify the FSYS of the file he wishes to connect.          *
+!*                                                                     *
+!***********************************************************************
+   %if monitoring possible=yes %and ssown_ssnote&4#0 %then mon params(">trjriw")
+   flag = checkname(file, 2 {file}, 0)
+   %if flag=0 %start
+      ssown_curfsys = fsys;              !user supplies fsys
+      sdisconnect(ssown_shortname, flag); !last stops checkname, curfsys left alone
+   %finish
+   %if monitoring possible=yes %and ssown_ssnote&4#0 %then mon params("<trjriw")
+%end;                                    ! of SDISCO
+
+!-----------------------------------------------------------------------
+
+%external %routine set conlevel %alias "s#setconlevel"(%string (255) file, %integer conlevel, %integer %name flag)
+! If conlevel=1 change the conlevel of a file from 0 to 1
+! If conlevel=0 change the conlevel of a file from 1 to 0
+   %record (conff) %name cur
+   %record (fhf) %name h
+   %string (255) ssfname
+   %string (31) text, index
+   %string (6) owner
+
+   %if monitoring possible=yes %and ssown_ssnote&4#0 %then mon params(">trjriw")
+
+   text = ""
+   ssfname = ssown_ssfname
+   flag = checkname(file, 2 {file}, 0)
+   %if flag=0 %start
+      cur == record(ssown_conf(ssown_confpos))
+      %unless cur_conad=0 %start
+         cur_file -> index.(usep)
+         owner <- index
+         %if conlevel=0 %or conlevel=1 %start
+            h == record(cur_conad)
+!            cur_type = h_type&x'ff'
+
+            %if h_type#cur_type %and 0<h_type<=sstopfiletype %and owner=ssown_ssowner %start
+               fstatus(file, 18, h_type, 0)
+               cur_type = h_type
+            %finish
+
+            text = "*connected, type=".itos(cur_type)
+            %if cur_conlevel+conlevel#1 %start
+               %if conlevel=0 %then flag = 236 {not perm} %else flag = 266 {inconsistent}
+            %finish %else relink(cur, conlevel)
+         %finish %else flag = 266
+      %finish %else flag = 256;          !not connected
+   %finish
+   ssown_ssfname = ssfname
+   %if monitoring possible=yes %and ssown_ssnote&4#0 %then mon params("<trjriw".text)
+%end;                                    !of setconlevel
+
+!----------------------------- DISCONNECTLEVELZEROFILES -------------------------------
+
+%routine disconnectlevelzerofiles(%integer severity)
+   %integer confpos, curfsys, flag, link
+   %record (conff) %name cur
+   %string (255) ssfname
+
+!   %if ssown_ssnote&4#0 %then monparams(">")
+
+   confpos = ssown_confpos
+   ssfname = ssown_ssfname
+   curfsys = ssown_curfsys
+
+   link = ssown_levelhead(0)
+   %while link#0 %cycle
+      cur == record(link)
+      link = cur_flnk
+      !Must disconnect ALL eligible files if severity=1.
+      !doconnect failure (flag=35)  SH 09-apr-87.
+      %continue %if severity=0 %and confaged(cur_stamp)=0
+      sdisconnect(shortstem.itos(cur_pos), flag)
+      clearfn(cur) %if flag=0
+   %repeat
+
+
+   ssown_ssfname = ssfname
+   ssown_curfsys = curfsys
+   ssown_confpos = confpos
+
+!   %if ssown_ssnote&4#0 %then monparams("<")
+
+%end;                                    ! of DISCONNECTLEVELZEROFILES
+
+!------------------------------ DOCONNECT ---------------------------------------------
+
+%routine doconnect(%record (conff) %name cur, %integer %name hole, mode, prot, conseg, flag)
+   %integer level, tst
+   %string (19) index
+   %string (255) file
+
+   %if monitoring possible=yes %and ssown_ssnote&8>0 %then monparams(">jribibibibib")
+   hole = hole>>segshift;                !HOLE IN SEGMENTS
+   %if prot&8#0 %then mode = mode!X'0100'; ! Tell Director "never disconnect".
+   %if prot&x'10'#0 %then mode = mode!x'200'; ! Set advisory sequential
+   ! Ignore (remove) Sequential bit for short files in read mode
+   %if mode&2=0 %and cur_size<x'4000' %then mode = mode&(\(x'200'))
+
+   cur_file -> index.(usep).file
+   file = suffixed(file)
+   tst = 0
+   %cycle
+      flag = dconnect(index, file, cur_fsys, mode, conseg, hole)
+      %if flag=0 %or (flag#28 {no CBT ..Should not occur} %and flag#29 {No free conlist entry} %and %c
+         %not (flag=35 %and conseg=0) {segment in use}) %or tst=2 %then %exit
+      disconnectlevelzerofiles(tst)
+      tst = tst+1
+   %repeat
+
+   level = ssown_loadlevel
+   %if flag#0 %start
+      ! Failures should leave file not connected.  We do not expect flag 34
+      ! (already connected) here.
+      relink(cur, doesexistlist)
+      ! Flag 35 with CONSEG zero means there is not enough room in the VM for this file.
+      ! Flag 35 with CONSEG non-zero means that the requested segment is already in use.
+      %if flag=35 %and conseg=0 %then flag = 309 {VM full from Director} %else flag = dirtoss(flag)
+      ssown_ssfname = cur_file
+   %else
+      cur_conad = conseg<<segshift;      !connect address
+      cur_hole = hole<<segshift
+      cur_mode = mode!1;                 ! Because Director will grant READ mode if you ask for WRITE or EXECUTE.
+
+      %if prot&15#0 %start
+         %if prot&12#0 %then level = 1 {perm connected} %else %start
+            %if prot&2#0 %then level = 0; !may be disconnected at any loadlevel
+         %finish
+      %finish
+
+      ! Link onto relevant LEVEL list
+      relink(cur, level)
+   %finish
+   %if monitoring possible=yes %and ssown_ssnote&8>0 %then monparams("<jribibibibib*lev=".itos(level))
+%end;                                    ! of DOCONNECT
+
+!------------------------------- ENTERALLOWCONN -------------------------------
+
+%routine enterallowconn(%string %name ssowner, fileowner, filename, %integer %name mode, flag, %integer epad)
+   ! Move parameters onto stack for ALLOWCONNECT
+   *mvc_64(32, 11), 64(10)
+   *l_1, epad
+   *stm_4, 14, 16(11)
+   *lm_12, 14, 0(1)
+   *basr_15, 14
+%end;                                    ! of ENTERALLOWCONN
+
+!--------------------------------- CONNECT ------------------------------------
+
+%external %routine connect %alias "S#CONNECT"(%string (255) file, %integer mode, hole, prot, %integer %name conad,
+   filetype, datastart, dataend, flag)
+
+   %record (pdheaderf) %name pdh
+   %record (pdindexf) %name pd
+   %integer dskad, i, p, type, checkdiscon, restrict, qual, conlevel
+   %integer conseg, reqmode, saveconad, lmode, reconnect
+   %string (11) piece
+   %record (fhf) %name h;                !FILE HEADER
+   %record (conff) %name cur
+   %string (6) ssowner, fileowner, on offer to
+   %integer %array dfi(0:12)
+   %string (19) curindex
+   %string (255) member, filename
+
+! Mode bits are:
+! X'00000001'      Read      If the bottom three bits of MODE are all zero on the call of CONNECT, this
+! X'00000002'      Write     is taken to mean that any mode is acceptable.  The result is to take the
+! X'00000004'      Execute   current mode if the file is connected, else R-mode.  At November 86
+!                            a further alteration was made so that the current mode will not be reduced
+!                            if the file is already connected (i.e. a request for R-mode when the
+!                            file is currently W-mode will not lead to a change access
+!                            to R-mode.  This is really NECESSARY since
+!                            otherwise a higher level program could withdraw W-mode access from a
+!                            lower level program.
+!                            Dec 87: have decided that W-mode should not be
+!                            available to a higher-level program when current mode is READ.
+!                            This MUST be logical, to get the protection we  require
+!                            See statement labelled {14 DEC 87} below.
+! X'00000008'      Accept shared write
+! X'00000010'      Newcopy
+! X'00000020'      Comms mode, now spare.
+! X'00000040'      Disc only
+! X'00000080'      Formerly new stack segment, now spare
+! X'00000100'      Disallow DISCONNECT, CHANGE ACCESS, CHANGE SIZE
+! X'00000200'      Sequential.  This bit is ignored (in DOCONNECT) for an R-mode connection of
+!                  a file shorter than four pages.
+! X'00000400'      This bit means "if W-mode is requested but is not available for this file, then R-mode is
+!                  nevertheless acceptable".  This bit is provided primarily for FORTRAN OPENDA, where the
+!                  default mode is W, but R-mode can still clearly be useful for read-only access to
+!                  the file.  The intention later is to make sure that the FORTRAN i/o rejects
+!                  write-requests when only R-mode has been given.  Initially an address error will
+!                  result.  That's why a specific warning is output when only R-mode is granted.
+!
+! Common valid combinations are (in decimal):
+!   1   read
+!   2   write                                  {*}
+!   3   read/write
+!   4   execute                                {*}
+!   5   read/execute
+!   9   read (accept shared write)
+!  10   write (accept shared write)            {*}
+!  11   read/write (accept shared write)
+!  18   write newcopy                          {*}
+!  19   read/write newcopy
+! 513   read sequential
+! 514   write sequential                       {*}
+! 515   read/write sequential
+! 521   read sequential (accept shared write)
+! 522   write sequential (accept shared write) {*}
+! 523   read/write sequential (accept shared write)
+! 530   write newcopy sequential               {*}
+! 531   read/write newcopy sequential
+!     where {*} means that Director grants read access in addition
+!                          to the requested modes.
+! PROT bits are:
+!
+!      x'80'  fsys nominated
+!      x'40'  conad nominated
+!      x'10'  advisory sequential.  This bit has exactly the same effect (when set)
+!             as the x'200' bit in MODE.  Either means of specifying Adv Seq is acceptable.
+!             [Provision here makes this PROT bit valid in both CONNECT and OUTFILE]
+!      x'08'  dont disconnect (director)   [conlevel=1]
+!      x'04'  dont disconnect (subsys) [conlevel=1]
+!      x'02'  may disconnect at any loadlevel  [conlevel=0]
+
+
+   checkdiscon = 0
+   type = 0
+   %if monitoring possible=yes %and ssown_ssnote&4#0 %then mon params(">trjrjrjribiwiwiwiw")
+   saveconad = conad %if prot&x'40'>0
+   conad = 0
+   reqmode = mode;                       ! Save requested mode
+   mode = mode&valid mode bits;          ! Ignore mode bits not recognised by Director.
+
+   %if mode&X'12'=X'10' %start
+      ! Reject NEWCOPY without WRITE.
+      ! Should we also reject NEWCOPY on another user's file?
+      flag = 260;                        ! Invalid connect mode.
+      ->err1
+   %finish
+
+   qual = 0 {4=must exist}
+   %if prot&x'80'#0 %start
+      ssown_curfsys = (prot>>8)&255
+      qual = x'2000';                    {2004}! CHECKNAME to accept SSOWN_CURFSYS as FSYS
+   %finish
+
+   %if file->("_") %then qual = qual!x'8000' {dont CONNECT to verify member exists}
+   flag = checkname(file, 1 {file or mem}, qual)
+   ->err1 %if flag#0
+
+   cur == record(ssown_conf(ssown_confpos))
+   member = "" %unless ssown_shortname->("_").member
+   %if member#"" %and mode&2#0 %then flag = 271 {can't write to a member} %and ->err1
+   cur_file -> curindex.(usep).filename
+   fileowner = curindex %unless curindex->fileowner.("{")
+
+   ! Do we need to call the ALLOWCONNECT routine?  Take care not to reference UINF unless required
+   ! [On 370/XA, UINF_WO BASE points within *Director's* UNIF segment number, which is
+   ! different from the Subsystem's segment and inaccessible to it.]
+   %if procbits&1#0 %then restrict = integer(addr(uinf)+uinf_wo base&x'FFFFF'+4) %else restrict = 0
+   %if restrict#0 %start
+      %if curindex#ssown_ssowner %start; !can always access own files
+         %if restrict<0 %then flag = 218 %and ->err1
+         ssowner = ssown_ssowner
+         lmode = mode
+         restrict = addr(uinf)+restrict&x'FFFFF'
+         enterallowconn(ssowner, curindex, filename, lmode, flag, restrict)
+         %if flag#0 %and "SPOOLR"#curindex#"MAILER" %and "FTRANS"#curindex#"SUBSYS" %and %c
+            "BBOARD"#curindex#"HELPER" %then flag = 218 %and ->err1
+         flag = 0
+      %finish
+   %finish
+
+   hole = (hole+segsize-1)&(\(segsize-1))
+
+   ! Has the user specified a connect address?
+   %if prot&X'40'=0 %then conseg = 0 %else conseg = saveconad>>segshift
+
+   setssinhibit;                         !HOLD OFF INTERRUPTS
+
+   %if cur_conad=0 %start {file not currently connected}
+      %if cur_size=0 %start
+         flag = dfinfo(curindex, suffixed(filename), ssown_curfsys, on offer to, dfi)
+
+
+         %if flag=32 %and fileowner="PLUDAT" %and ssown_gcstarted#0 %start
+            flag = drestore(curindex, filename, "", ssown_curfsys, 0)
+            %if flag=0 %or flag=102 {duplicate request} %start {request accepted}
+               %if ssown_ssreason=batchreason %start
+                  emas3("AWAITRESTORES", "", flag)
+                  flag = dfinfo(curindex, suffixed(filename), ssown_curfsys, on offer to, dfi)
+                  flag = dirtoss(flag) %unless flag=0
+                  {and proceed as if nothing had happened}
+               %finish %else %start
+                  ssown_ssfname = "A file you require is being restored from archive.
+Please try again in about 15 minutes"
+                  flag = 100
+               %finish
+            %finish
+         %finish
+         flag = dirtoss(flag) %unless flag=0 %or flag=100
+         %if flag=346 %then flag = checkname(file, 1 {file or mem}, qual!4 {must exist})
+         !for error msg
+
+
+         ->err %unless flag=0
+         finfo data to conf(dfi, cur)
+      %finish
+      %if hole#0 %and hole<cur_size %then hole = 0
+      mode = mode!1;                     ! Including for case of MODE 0
+      %if cur_rup&2=0 %and reqmode&x'402'=x'402' %start
+         printline("**Warning - Write-mode request not granted for ".cur_file)
+         mode = mode&(\2)
+         reqmode = reqmode&(\2)
+      %finish
+      doconnect(cur, hole, mode, prot, conseg, flag)
+      %if flag#0 %then ->err
+
+   %else;                                ! File is connected.
+
+      mode = mode!(cur_mode&(\16));      ! Take current mode (without newcopy)
+
+      reconnect = yes {assume the worst}
+      %if hole#0 %and hole<cur_size %then hole = 0; !Is HOLE relevant?
+
+      %if cur_rup&2=0 %and reqmode&x'400'#0 %then mode = mode&(\2) %and reqmode = reqmode&(\2)
+
+      %if mode&2#0 %and cur_mode&2=0 %and 0<cur_conlevel<ssown_loadlevel %start
+         shout("mode=".itos(mode).", cur_mode=".itos(cur_mode).", cur_conlevel=".itos(cur_conlevel))
+         flag = 234
+         ->err {14 Dec 87}
+      %finish
+
+      %if hole<=cur_hole %and (conseg=0 %or saveconad=cur_conad) %start
+         %if mode=(cur_mode&(\16)) %start
+            ! If the current MODE and the HOLE size are already correct,
+            ! then there is nothing to do.  MODE=0 means that the
+            ! caller does not care what mode he gets.
+            ! We take the NEWCOPY bit out of the current mode (a) so that we
+            ! enforce a NEWCOPY changeaccess if the request is for newcopy and
+            ! (b) to allow through WRITE (or indeed READ) requests if the file is currently
+            ! connected for NEWCOPY.
+            reconnect = no {everything OK}
+
+         %else {mode fishy}
+
+            %if (\cur_rup)&mode&7#0 %then flag = 303 {req perm not allowed} %and ->err
+            %if prot&8#0 %then mode = mode!x'0100' {never disconnect}
+            %if prot&x'10'#0 %then mode = mode!x'200' {seq}
+            flag = dchaccess(curindex, suffixed(filename), cur_fsys, mode!1)
+            flag = dirtoss(flag) %and ->err %if flag#0
+            cur_mode = mode!1
+            reconnect = no {change access worked OK}
+         %finish
+
+         %if reconnect=no %start;        !connected ok
+            conlevel = cur_conlevel
+            %if prot&12#0 %start
+               conlevel = 1
+            %else
+               %if (cur_conlevel=0 %or cur_conlevel>=ssown_loadlevel) %and prot&2=0 %then conlevel = ssown_loadlevel
+               ! else previous value takes priority
+            %finish
+            relink(cur, conlevel) %if conlevel#cur_conlevel
+         %finish
+
+      %finish
+
+      %if reconnect=yes %start;          !hole or conad need to be changed
+         %if 0<cur_conlevel<ssown_loadlevel %start
+            shout("cur_conlevel=".itos(cur_conlevel))
+            flag = 234 {in use at lower level}
+            ->err
+         %finish
+
+         relink(cur, doesexistlist);     !not now connected
+         checkdiscon = 1
+         flag = ddisconnect(curindex, suffixed(filename), cur_fsys, 0)
+         flag = dirtoss(flag) %and ->err %unless flag=0
+
+         ! If the file were VTEMP it would have disappeared now.
+         %if cur_codes&8 {VTEMPF}#0 %start
+            flag = dcreate(curindex, suffixed(filename), cur_fsys, cur_size>>kshift, 8, dskad)
+            flag = dirtoss(flag) %and ->err %unless flag=0
+            cur_codes = cur_codes!64 {Priv viol}
+         %finish
+
+         ! Do not drag conlevel down to zero (PROT&2#0) for an  already-connnected file
+         prot = prot&(\2)
+         doconnect(cur, hole, mode, prot, conseg, flag)
+         ->err %if flag#0
+      %finish
+
+   %finish {file was connected}
+
+   conad = cur_conad;                    !CONNECT ADDRESS
+   type = integer(conad+12)
+   %unless 0<type<=sstopfiletype %then type = nonstandardtype
+   %if cur_type#type %and fileowner=ssown_ssowner %start
+      flag = dfstatus(curindex, suffixed(filename), cur_fsys, 18, type)
+   %finish
+   cur_type = type
+
+   %unless member="" %start {locate member}
+      member = member."_"
+      file = cur_file
+      %cycle
+         h == record(conad)
+         %exit %if member=""
+         %if h_type#sspdfiletype %start
+            ssown_ssfname = file
+            flag = 286 {not a PD file}
+            ->err
+         %finish
+         member -> piece.("_").member
+         pdh == record(conad)
+         p = pdh_adir+conad
+         i = 0
+         %while i<pdh_count %cycle
+            pd == record(p+32*i)
+            %if pd_name=piece %start
+               conad = conad+pd_start
+               file = file."_".piece
+               i = -1
+               %exit
+            %finish
+            i = i+1
+         %repeat
+         %if i>=0 %start
+            ssown_ssfname = piece
+            flag = 288
+            ->err
+         %finish {else found}
+      %repeat
+   %finish
+
+   h == record(conad);                   ! Map H onto header of file OR MEMBER
+   filetype = h_type
+   filetype = nonstandardtype %unless 0<filetype<=sstopfiletype
+   datastart = h_start
+   dataend = h_end
+   %if reqmode&2#0 %and filetype#nonstandardtype %and h_start>=32 %start
+      !EXPLICIT CONNECT IN WRITE MODE
+      !AND HEADER AT LEAST 32 BYTES
+      ! LONG
+      h_datetime = currentpackeddt
+   %finish
+err:
+   allow interrupts
+err1:
+   %if (type=ssdirfiletype) %and checkdiscon#0 %then ssown_dirdiscon = 1
+   ! tell loader
+   %if monitoring possible=yes %and ssown_ssnote&4#0 %then mon params("<trjrjrjribiwiwiwiw")
+%end;                                    ! of CONNECT
+
+!-------------------------------------- OLDCONNECT ------------------------------------
+
+%record %format oldconf(%integer conad, filetype, datastart, dataend)
+
+%external %routine oldconnect %alias "s#oldconnect"(%string (255) file, %integer mode, hole, prot,
+   %record (oldconf) %name r, %integer %name flag)
+
+   connect(file, mode, hole, prot, r_conad, r_filetype, r_datastart, r_dataend, flag)
+%end;                                    !of oldconnect
+
+!--------------------------------------- OUTFILE -------------------------------------
+
+%external %routine outfile %alias "S#OUTFILE"(%string (255) file, %integer filesize, hole, prot,
+   %integer %name conad, flag)
+
+! HOLE<0 means "don't connect".  CONAD is set to zero.
+!     (This will not be relevant if the file is already connected: the request
+!      "not to connect" will be ignored)
+!
+!
+! FILESIZE<0 means that a file of size equal to or greater than -FILESIZE is acceptable
+!            This is a highly-desirable option in general, as an existing file
+!            will be re-used with minimum overhead provided it is big enough.
+!            The only situation with contra-indications for calling OUTFILE with
+!            negative FILESIZE is where a permanent file is to be created and
+!            the calling program does not intend to trim.
+!
+!
+! Note on PROT:
+! bit  1 (X'40000000') non-zero means that a TEMP file is required -
+!        this can also be specified by nominating a file name whose
+!        first two characters are "T#"
+! bit  2 (X'20000000') non-zero means that a VTEMP file is required -
+!        if both TEMP and VTEMP are specified, then the file will be VTEMP
+! bit 24 (X'00000080') non-zero means that (PROT>>8)&X'FF' gives FSYS:
+! bit 25 (X'00000040') non-zero means that user nominates CONAD:
+! bit 27 (X'00000010') non-zero means advisory sequential
+!        (x'00000008') dont disconnect (director) [conlevel=1]
+!        (x'00000004') dont disconnect (subsys)   [conlevel=1]
+!        (x'00000002') means connect at conlevel=0, i.e. file can be disconnected
+!                      at any loadlevel.
+!        (x'nnnnnnn0') means connect with conlevel set to current loadlevel -
+!        cannot disconnect at a higher loadlevel
+
+! August 1986: an explicit restriction to OWN FILES.  Previously there was a
+! half-hearted attempt to pretend that OUTFILE might be applied to other users'
+! files (assuming of course that W-access was allowed).  If we restrict to own
+! files, then we need to consider permissions status only if they are  non-default.
+
+   %record (fhf) %name h
+   %record (conff) %name cur
+   %integer mode, conseg, psize, type, saveconad
+   %integer dskad, inhibited, level, qual, fail level, typefield
+   %integer mustdestroy, mustcreate, connected, newgenreqd, mustdisconnect
+   %integer precisesizereqd, donewcopychaccess, cherished, access conflicted
+   %string (11) newname
+   %string (19) index
+   %string (6) user
+   %string (255) filename
+
+!%routine zzz(%string(255)txt)
+!%string(255)w
+!w="ZZZ ".txt." "
+!w=w."mustcreate"
+!%if mustcreate=0 %then w=w."=no" %else w=w."=yes"
+!w=w.", mustdestroy"
+!%if mustdestroy=0 %then w=w."=no" %else w=w."=yes"
+!w=w.", connected"
+!%if connected=0 %then w=w."=no" %else w=w."=yes"
+!w=w.", donewcopychaccess"
+!%if donewcopychaccess=0 %then w=w."=no" %else w=w."=yes"
+!w=w.", newgenreqd"
+!%if newgenreqd=0 %then w=w."=no" %else w=w."=yes"
+!w=w.", cherished"
+!%if cherished=0 %then w=w."=no" %else w=w."=yes"
+!shout(w)
+!%end
+
+
+   %if monitoring possible=yes %and ssown_ssnote&4#0 %then mon params(">trjrjrjribiw")
+   inhibited = 0
+   saveconad = conad %if prot&x'40'>0
+   conad = 0
+   %if filesize<0 %start
+      filesize = -filesize
+      precisesizereqd = no
+   %finish %else precisesizereqd = yes
+
+   qual = 2 {"to be written"}
+   %if prot&x'80'#0 %start
+      ssown_curfsys = (prot>>8)&255
+      qual = qual!x'2000' %if prot&x'2000'#0; ! Checkname to use _CURFSYS
+   %finish
+
+   flag = checkname(file, 2 {file}, qual)
+   ->err %if flag#0
+
+   cur == record(ssown_conf(ssown_confpos))
+   cur_file -> index.(usep).filename
+   user = index %unless index->user.("{")
+   %unless user=ssown_ssowner %then flag = 258 {ill.use of another user's file} %and ->err
+
+   psize = (filesize+4095)&(\4095)
+   %if hole>0 %start
+      %if hole<filesize %then hole = filesize; ! physical size
+      hole = (hole+(1<<segshift-1))&(\(1<<segshift-1)); ! roundup(hole, segsize)
+   %finish
+
+   ! TYPE 1 is TEMP file,   TYPE 2 is VTEMP file
+   %if prot&tempmarker#0 %or (length(filename)>=2 %and charno(filename, 1)='T' %and charno(filename, 2)='#') %then %c
+      type = 1 %else type = 0
+
+   %if prot&vtempmarker#0 %then type = 2
+
+   mode = x'13';                         !Newcopy/read/write
+   %if prot&X'40'#0 %then conseg = saveconad>>segshift %else conseg = 0
+
+   %if prot&8#0 %then mode = mode!X'0100'; ! Tell Director "never disconnect".
+   %if prot&x'10'#0 %then mode = mode!x'200'; ! Set advisory sequential
+
+   typefield = sscharfiletype;           ! Default
+
+   !---------------------------- DECIDE HOW TO DO IT ----------------------------------------
+
+   access conflicted = no
+   ! This variable above is set to "yes" when (if) DCHACCESS fails 33, conflicting mode.
+   ! and also if DOCONNECT fails 279 (Subsys flag for director 33).
+   ! Then we can come round again and do a NEWGEN-operation.
+
+retry:
+   mustdisconnect = no
+   mustcreate = no
+   mustdestroy = no
+   connected = no
+   donewcopychaccess = no
+   newgen reqd = no
+   cherished = 0
+
+   %if cur_size>0 %start {file exists}
+
+      %if cur_codes&16#0 %then cherished = 8 {for the DCREATE, if reqd}
+
+      %if cur_conad#0 %then connected = yes
+
+      ! Is the file's access permission OK?
+      %if cur_rup&8#0 %then flag = 283 {no DESTROY permission} %and ->err
+      %if cur_rup&2=0 %then flag = 303 %and ->err
+      %if cur_codes2&x'80'#0 %then flag = 423 %and ->err
+
+      %if connected=yes %start
+         ! Preserve current filetype if possible, from CONAD+12 if connected
+         ! else from CUR_TYPE if available.
+         typefield = integer(cur_conad+12)
+         !%if cur_use>1 %then flag = 279 %and ->err;  ! could be omitted since we are prepared to NEWGEN
+         %if 0<cur_conlevel<ssown_loadlevel %then flag = 234 %and ->err
+      %finish %else typefield = cur_type
+
+      typefield = sscharfiletype %unless 0<typefield<=sstopfiletype
+
+      %if (cur_size=psize %or (precisesizereqd=no %and cur_size>psize)) %and access conflicted=no %and %c
+         (connected=yes %and hole<=cur_hole) %then donewcopychaccess = yes
+
+      %if connected=yes %and (hole>cur_hole %or 0#conseg#cur_conad>>segshift) %then %c
+         mustdisconnect = yes %and donewcopychaccess = no
+
+      %if precisesizereqd=no %and cur_size>psize %then psize = cur_size
+
+      %if (precisesizereqd=yes %and cur_size#psize) %or cur_size<psize %or access conflicted=yes %start
+         mustdisconnect = no
+         mustdestroy = yes
+         mustcreate = yes
+         donewcopychaccess = no
+
+         ! What are the current permissions?  Are they default
+         ! values?  If not we will create a new filename and NEWGEN it to
+         ! preserve the permissions.  Otherwise we will destroy and re-create.
+         ! [We could always NEWGEN, but it does transiently require extra file
+         !  section descriptors, and it possibly makes any monitoring more opaque]
+
+         %if cur_eep#0 %or cur_rup#7 %or cur_codes2&2#0 {individual access prms exist} %or %c
+            access conflicted=yes %then newgenreqd = yes
+      %finish
+
+   %finish %else mustcreate = yes {as it does not exist}
+
+   !------------------------------------- DO THE WORK --------------------------------------
+
+   setssinhibit
+   inhibited = 1
+
+   %if newgenreqd=yes %start
+      fail level = doesexistlist
+      newname = "T#OUTF".nexttemp
+      flag = dcreate(index, suffixed(newname), cur_fsys, psize>>kshift, 0, dskad)
+      ->trans %unless flag=0
+
+      flag = dnewgen(index, suffixed(filename), suffixed(newname), cur_fsys)
+      %if flag#0 %then ->trans
+
+      %if connected=yes %start
+         %if cur_codes&8 {VTEMPF}=0 %then fail level = doesexistlist %else fail level = notexistlist
+         flag = ddisconnect(index, suffixed(filename), cur_fsys, 0)
+         %if flag#0 %then ->trans and clear
+      %finish
+
+      ! Now the file is not connected (whether or not it was previously connected)
+
+   %else
+
+      %if cur_codes&8 {VTEMPF}=0 %then fail level = doesexistlist %else fail level = notexistlist
+
+      %if mustdisconnect=yes %start
+         flag = ddisconnect(index, suffixed(filename), cur_fsys, 0)
+         %if flag#0 %then ->trans and clear
+         %if cur_codes&8 {VTEMPF}#0 %then mustcreate = yes
+      %finish
+
+      %if mustdestroy=yes %start
+         %if connected=yes %start
+
+            flag = ddisconnect(index, suffixed(filename), cur_fsys, 1) {and destroy}
+         %else
+            fail level = notexistlist
+            flag = ddestroy(index, suffixed(filename), "", cur_fsys, 0)
+         %finish
+         %if flag#0 %then ->trans and clear
+      %finish
+
+      %if mustcreate=yes %start
+         fail level = notexistlist
+         flag = dcreate(index, suffixed(filename), cur_fsys, psize>>kshift, type!cherished, dskad)
+         ->trans and clear %unless flag=0
+
+         ! Set up relevant default values in CUR
+         cur_rup = 3
+         cur_codes = 4 {TEMPFI} %if type=1 {TEMP}
+         cur_codes = 8 {VTEMPF} %if type=2 {VTEMP}
+         cur_codes = cur_codes!64 {PROV VIOL}
+      %finish
+
+      %if donewcopychaccess=yes %start
+         flag = dchaccess(index, suffixed(filename), cur_fsys, mode)
+         %if flag#0 %start
+            %if flag=33 {conflicting use in another VM..director flag} %start
+               access conflicted = yes
+               ->retry
+            %finish
+            fail level = doesexistlist
+            ->trans and clear
+         %finish
+
+         ! Update the CONF record as appropriate
+         cur_mode = mode
+         level = ssown_loadlevel
+         %if prot&15#0 %start
+            %if prot&12#0 %then level = 1 {perm connected} %else %start
+               %if prot&2#0 %then level = 0; !may be disconnected at any loadlevel
+            %finish
+         %finish
+         relink(cur, level)
+
+      %finish
+      ! And here too the file is not now connected unless DONEWCOPYCHACCESS=YES
+
+   %finish
+
+   cur_size = psize
+   %unless hole<0 {don't connect} %and connected=no %start
+
+      %if donewcopychaccess=no %start
+         ! We need to connect or re-connect
+
+         doconnect(cur, hole, mode, prot, conseg, flag)
+         %if flag#0 %start
+            %if flag=279 {conflicting use in another VM..subsys flag} %start
+               access conflicted = yes
+               ->retry
+            %finish
+            ->err
+         %finish
+         cur_conad = conseg<<segshift
+      %finish
+
+      conad = cur_conad
+      h == record(conad)
+      h = 0
+      h_end = 32
+      h_start = 32
+      h_size = psize
+      h_type = typefield
+      h_datetime = current packed dt
+   %finish
+   ->err
+
+trans and clear:
+   %if connected=yes %then cur_conad = 0 %and relink(cur, fail level)
+trans:
+   flag = dirtoss(flag)
+
+err:
+   %if inhibited#0 %then allowinterrupts
+   %if monitoring possible=yes %and ssown_ssnote&4#0 %then mon params("<trjrjrjribiw")
+
+%end;                                    ! of OUTFILE
+
+!-------------------------------- SEGSINUSE -------------------------------------------
+
+%external %string %fn segsinuse %alias "s#segsinuse"(%integer %name firstseg, lastseg, %integer segstart)
+! This function returns the name of the file which owns the segment
+! SEGSTART and its first and last claimed segments or a null string.
+! File structure does not matter as in CONFILE, we just want to know the name in CONF.
+! CMcC 23/03/83
+   %string (255) filename
+   %record (conff) %name cur
+   %integer i, ad
+
+   %if monitoring possible=yes %and ssown_ssnote&8>0 %then sstrace
+   filename = ""
+   ad = segstart<<segshift
+   %for i = maxconf, -1, 0 %cycle
+      %if ssown_conf(i)>0 %start
+         cur == record(ssown_conf(i))
+         %if cur_conad<=ad<cur_conad+cur_hole %start
+            %exit %if cur_file="EMPTY"
+            filename = cur_file
+            firstseg = cur_conad>>segshift
+            lastseg = (cur_conad+cur_hole-1)>>segshift
+            %exit
+         %finish
+      %finish
+   %repeat
+   %result = filename
+%end;                                    ! of SEGSINUSE
+
+!----------------------------------- SDESTROY -----------------------------------------
+
+%external %routine sdestroy %alias "S#DESTROY"(%string (255) file, %integer %name flag)
+   %integer conlevel, j
+   %string (11) member
+   %string (19) index
+   %record (conff) %name cur
+
+   %if monitoring possible=yes %and ssown_ssnote&4#0 %then mon params(">triw")
+
+   flag = checkname(file, 1 {file or mem}, 0)
+   %if flag=0 %start
+
+      setssinhibit
+
+      %if file->("_") %start {a PD member}
+         j = length(file)
+         %cycle
+            j = j-1
+            %exit %if charno(file, j)='_'
+         %repeat
+         member = substring(file, j+1, length(file))
+         length(file) = j-1
+         mod pd file(2, file, member, "", flag)
+      %finish %else %start
+         cur == record(ssown_conf(ssown_confpos))
+         cur_file -> index.(usep).file
+         %if cur_conad=0 %start {file is not connected}
+            flag = ddestroy(index, suffixed(file), "", cur_fsys, 0)
+         %else
+            %if 0<cur_conlevel<ssown_loadlevel %then flag = -1 {234} %else %start
+               %if integer(cur_conad+12)=ssdirfiletype %then ssown_dirdiscon = 1
+               ! DISCONNECT+DESTROY
+               flag = ddisconnect(index, suffixed(file), cur_fsys, 1)
+
+               ! 283 is 'no DESTROY permission', but the file will still
+               ! be disconnected.  Similarly 278 is 'file connected in
+               ! another VM.
+            %finish
+         %finish
+
+         %if flag=0 %or flag=32 %start
+            cur_size = 0
+            cur_conad = 0
+            relink(cur, notexistlist)
+         %finish %else %if flag#-1 %start
+            conlevel = doesexistlist
+            relink(cur, conlevel)
+         %finish
+         flag = dirtoss(flag) %unless-1<=flag<=0
+         flag = 234 %if flag=-1
+      %finish
+      allow interrupts
+   %finish
+
+   %if monitoring possible=yes %and ssown_ssnote&4#0 %then mon params("<triw")
+%end;                                    ! of SDESTROY
+
+!---------------------------------- RENAME --------------------------------------------
+
+%external %routine rename %alias "S#RENAME"(%string (255) file, newname, %integer %name flag)
+   %integer newname pos
+   %record (conff) %name cur, newcur
+   %record (shortconff) %name shortcur
+   %record (shortconff) savecur
+   %string (19) index, newindex
+   %string (1) gdot
+   %string (255) ssfname
+
+   %if monitoring possible=yes %and ssown_ssnote&4#0 %then mon params(">trtriw")
+
+   flag = checkname(newname, 2, 10);     !check newname first, file+notexist+write(for numeric check)
+   flag = 393 {group already exists} %if flag=345 {group for a file}
+   ->err %unless flag=0
+   ssfname = ssown_ssfname;              ! Save for errors from DRENAE
+
+   newcur == record(ssown_conf(ssown_confpos)) {even if its a group}
+   newcur_file -> newindex.(usep).newname {its just to get 'newindex'}
+   newname pos = ssown_confpos
+
+   flag = checkname(file, 2 {file}, 4);  !now check old name, file+exists
+   %if flag=345 {group for a file} %then gdot = gsep %and flag = 0 %else gdot = ""
+   ->err %unless flag=0
+
+   %if gdot="" %start {we are dealing with a file}
+      sdisconnect(ssown_shortname, flag)
+      ->err %if flag=234 {file in use at a lower level}
+      cur == record(ssown_conf(ssown_confpos))
+      cur_file -> index.(usep).file
+   %else
+      file -> index.(usep).file
+   %finish
+   flag = 347 {258} %and ->err %unless index=newindex; ! Illegal use of another user's file
+
+   set ss inhibit
+
+   ! Re-instate SSFNAME from the first filename.  We reckon errors from DRENAME
+   ! should relate to that file, rather than the new name, which has been
+   ! checked out more adequately
+   ssown_ssfname = ssfname
+
+   flag = drename(index, suffixed(file.gdot), suffixed(newname.gdot), ssown_curfsys)
+   %if flag=0 %start
+      %if gdot="" %start
+         shortcur == record(ssown_conf(ssown_confpos))
+         savecur = shortcur;             ! Data to be moved to newname
+         shortcur_size = 0
+         shortcur_conad = 0
+         relink(shortcur, notexistlist)
+         clearfn(cur)
+
+         ! Place all relevant data (NOT flnk,blnk,level) into the new CONF record
+         ! from the old CONF record
+
+         ssown_confpos = newname pos
+         shortcur == record(ssown_conf(newname pos))
+         shortcur_size = savecur_size
+         shortcur_hole = savecur_hole
+         shortcur_fsys = savecur_fsys
+         shortcur_type = savecur_type
+         shortcur_rup = savecur_rup
+         shortcur_eep = savecur_eep
+         shortcur_codes = savecur_codes
+         shortcur_codes2 = savecur_codes2
+         shortcur_defines = savecur_defines
+
+         %if length(newname)>2 %and substring(newname, 1, 2)="T#" %start
+            flag = dfstatus(index, suffixed(newname.gdot), savecur_fsys, 5 {TEMPFI}, 0)
+            shortcur_codes = shortcur_codes!4 {TEMPFI}
+         %finish
+         relink(shortcur, doesexistlist)
+      %finish
+   %finish %else flag = dirtoss(flag)
+   allow interrupts
+
+err:
+   %if monitoring possible=yes %and ssown_ssnote&4#0 %then mon params("<trtriw")
+%end;                                    ! of RENAME
+
+!----------------------------------- NEWGEN -------------------------------------------
+
+%external %routine newgen %alias "S#NEWGEN"(%string (255) file, oldfile, %integer %name flag)
+   %integer cflag1, cflag2, type1, type2, conad, fstart, fend
+   %integer old pos, cost
+   %string (19) index, oldindex
+   %record (conff) %name cur, oldcur
+   %string (255) work
+
+   %if monitoring possible=yes %and ssown_ssnote&4#0 %then mon params(">trtriw")
+
+   flag = checkname(oldfile, 2 {file}, 2 {to be "written})
+   %if flag#0 %then ->err
+   old pos = ssown_confpos
+   connect(ssown_shortname, 0, 0, 2, conad, type2, fstart, fend, cflag2); ! Obtain type for checking
+   sdisconnect(ssown_shortname, flag);   !TRY TO DISCONNECT
+   %if flag#0 %start
+      work = "**Warning DISCONNECT (in NEWGEN) ".oldfile."  failed  ".itos(flag).snl
+      %if flag#256 %start
+         cost = ssown_sscomreg(23);      ! Current output stream
+         %if cost#0 %then select output(0)
+         ! Code to try to unravel, or make explicit, some curiosities when the  NEWGEN fails to take ...
+         ! Next statement could flop, for v.long filenames
+         printstring(work)
+         printline(failuremessage(flag)) %if flag#256 {only because ECCE calls it  even on non-existant files}
+         select output(cost) %if cost#0
+      %finish %else tojournal(addr(work)+1, length(work))
+   %finish
+   oldcur == record(ssown_conf(oldpos))
+   oldcur_file -> oldindex.(usep).oldfile
+
+   connect(file, 0, 0, 2, conad, type1, fstart, fend, cflag1)
+   sdisconnect(ssown_shortname, flag);   !MUST DISCONNECT IF CONNECTED
+   ->err %unless flag=0 %or flag=256;    !OK OR NOT CONNECTED
+   cur == record(ssown_conf(ssown_confpos))
+   flag = 218 %and ->err %if cur_size=0
+   cur_file -> index.(usep).file
+
+   flag = 347 {258} %and ->err %unless index=oldindex
+
+   %if cflag1=cflag2=0 %and ok to overwrite(type1, type2)=no %start
+      ssown_ssfname = "NEWGEN to"
+      flag = 392
+      ->err
+   %finish
+
+   %if file=oldfile %then flag = 229 {must be different} %and ->err
+   flag = dnewgen(index, suffixed(oldfile), suffixed(file), cur_fsys)
+   %if flag=0 %start
+      ! Alter size to NEW SIZE - even if file is connected in this VM and the
+      ! new size is not yet relevant to this VM.  The correct size will become accurate at next
+      ! disconnect, and likely won't be needed before then.
+      oldcur_size = cur_size
+      cur_size = 0
+      cur_conad = 0
+      relink(cur, notexistlist)
+   %finish %else flag = dirtoss(flag)
+err:
+   %if monitoring possible=yes %and ssown_ssnote&4#0 %then mon params("<trtriw")
+%end;                                    ! of NEWGEN
+
+!-------------------------------- REGEN -----------------------------------------------
+
+%external %routine sregen %alias "s#regen"(%string (255) file1, file2, %integer %name flag)
+   %integer type2
+   %string (255) str
+   %string (19) index1, index2
+   %integer %array arr(0:12);            !for dfinfo
+   %string (6) tran;                     !for dfinfo
+
+   %if monitoring possible=yes %and ssown_ssnote&4#0 %then mon params(">trtriw")
+
+   flag = checkname(file1, 2 {filename}, x'4004' {exist, verify my file})
+   %if flag#0 %then ->out
+   flag = checkname(file2, 2 {filename}, x'4000' {verify my file})
+   %if flag#0 %then ->out
+   type2 = existtype(file2)
+   file1 -> index1.(usep).str;           !filename checked..so will work
+   file2 -> index2.(usep).str
+   %if index1=index2 %start
+      ! same index..hence just rename or newgen
+      %if type2=0 {file does not exist} %start
+         rename(file1, file2, flag)
+      %finish %else %start
+         newgen(file1, file2, flag);     !note..params not reversed
+      %finish
+      ->out
+   %finish
+   ! different indexes..need to copy and destroy
+   %if type2=0 %start
+      str = file2;                       !no existing file..just copy in
+   %finish %else %start
+      %if {type2#0 %and}existtype(file1)#type2 %start
+         ssown_ssfname = file2
+         flag = 396;                     !existing file has different filetype
+         ->out
+      %finish
+      str = index2.usep."T#REGNF";       !existing file..copy and newgen
+   %finish
+   scopy1(file1, str, file1, str, flag)
+   %if flag&x'7fffffff'#0 %then ->out;   !x80000000 on success
+   %if type2=0 %start
+      ! copied to correct file..but need to set permissions etc.
+      file1 -> index1.(usep).str
+      flag = dfinfo(index1, suffixed(str), -1 {fsys}, tran, arr)
+      %if flag#0 %start
+         ->direrror
+      %finish
+      %if 0#0 %start
+         !monitoring
+         printstring("RUP:")
+         write(arr(1), 1)
+         printstring(" eep:")
+         write(arr(2), 1)
+         !arr(6) is fsys
+         %if arr(5)&x'80'#0 %then printstring(" archive")
+         %if arr(9)&x'10'#0 %then printstring(" cherish")
+         newline
+      %finish
+      %if arr(1) {rup}#7 {default} %start
+         permit(file2, "=" {rup}, arr(1) {rup}, flag)
+         %if flag#0 %then ->out
+      %finish
+      %if arr(2) {eep}#0 %start
+         permit(file2, "??????" {eep}, arr(2) {eep}, flag)
+         %if flag#0 %then ->out
+      %finish
+      %if arr(5)&x'80'#0 %start
+         !file archive requested
+         fstatus(file2, 3 {archive}, 1, flag)
+         %if flag#0 %then ->out
+      %finish
+      %if arr(9)&x'10'#0 %start
+         !cherish
+         fstatus(file2, 1 {cherish}, 1, flag)
+         %if flag#0 %then ->out
+      %finish
+   %finish %else %start
+      newgen(str, file2, flag);          !note..params NOT reversed
+      %if flag#0 %then ->out
+   %finish
+   destroy(file1, flag)
+   ->out
+!
+direrror:
+   flag = dirtoss(flag)
+out:
+   %if monitoring possible=yes %and ssown_ssnote&4#0 %then mon params("<trtriw")
+%end;                                    ! of REGEN
+
+!---------------------------------- CHANGEACCESS ---------------------------------------
+
+%external %routine changeaccess %alias "S#CHANGEACCESS"(%string (255) file, %integer mode, %integer %name flag)
+! Bits in MODE have the following meanings (as in the MODE parameter to procedure DCONNECT):
+!         2**0 set - read access to be allowed
+!         2**1 set - write access to be allowed
+!         2**2 set - execute access to be allowed
+!         2**3 set - write-shared access to be allowed
+!         2**4 set - newcopy access
+!         2**8 set - disallow (further) change-access or disconnect
+!         2**9 set - advisory sequential(not set, then clear)
+! The bottom 3 bits of MODE must have one of the values 1, 3
+! or 5.  The file must be permitted to the caller in the appropriate
+! mode.
+
+   %integer j, conlevel, type
+   %string (19) index
+   %record (fhf) %name h
+   %record (conff) %name cur
+
+   %if monitoring possible=yes %and ssown_ssnote&4#0 %then mon params(">trjriw")
+
+   mode = mode&valid mode bits
+   flag = checkname(file, 2 {file}, 0);  !ANY FILE
+   %return %if flag#0
+   cur == record(ssown_conf(ssown_confpos))
+   %if cur_conad=0 %then flag = 256 {not connected} %and ->err
+   %if cur_mode&(\16)=mode %then ->err;  !CURRENT MODE OK (BUT MUST DCHACC FOR NEWCOPY)
+   cur_file -> index.(usep).file
+   %if (\cur_rup)&mode&7#0 %then flag = 303 {REQUESTED PERMISSION NOT ALLOWED} %and ->err
+
+   ! Check that MODE will be acceptable to Director for DCHACCESS:
+   mode = mode!1
+   j = mode&2_10111 {omit WS-allow bit}
+   %unless (j=1 %or j=3 %or j=5 %or j=19) %and %not (j&2_11000=2_11000 {disallow newcopy with WS-allow}) %and %c
+      mode&X'FFFFFCE0'=0 %then flag = 260 %and ->err
+
+   ! For change FROM write mode, set header file-type if appropriate
+   %if cur_mode&2#0 %and mode&2=0 %start
+      type = integer(cur_conad+12)
+      %if %not (0<type<=sstopfiletype) %then resetheader(cur_conad) %and type = integer(cur_conad+12)
+      %if type#cur_type %and 0<type<=sstopfiletype %and index=ssown_ssowner %then %c
+         fstatus(file, 18, type, flag) %and cur_type = type
+   %finish
+
+   setssinhibit
+   flag = dchaccess(index, suffixed(file), cur_fsys, mode)
+   %if flag=32 %or flag=33 %or flag=84 %start
+      cur_conad = 0
+      cur_size = 0 %if flag=32
+      %if flag=32 %then conlevel = notexistlist %else conlevel = doesexistlist
+      relink(cur, conlevel)
+   %finish
+   allowinterrupts
+   flag = dirtoss(flag) %and ->err %if flag#0
+   %if mode&2#0 %and cur_mode&2=0 %start; !CHANGE TO WRITE MODE - UPDATE "LAST ALTERED"
+      h == record(cur_conad)
+      %if h_start>=32 %then h_datetime = currentpackeddt
+   %finish
+
+   cur_mode = mode
+err:
+   %if monitoring possible=yes %and ssown_ssnote&4#0 %then mon params("<trjriw")
+%end;                                    ! of CHANGEACCESS
+
+!-------------------------------- CHANGEFILESIZE --------------------------------------
+
+%external %routine changefilesize %alias "S#CHANGEFILESIZE"(%string (255) file, %integer newsize, %integer %name flag)
+! N.B. This does NOT update the FILE SIZE field in the file header.
+   %integer newksize
+   %string (19) index
+   %record (conff) %name cur
+
+   %if monitoring possible=yes %and ssown_ssnote&4#0 %then mon params(">trjriw")
+
+   newsize = roundup(newsize, filesizealloc)
+   newksize = newsize>>kshift;           !NUMBER OF KBYTES TO ALTER
+   flag = checkname(file, 2 {file}, 0);  !ANY OWN FILE
+   ->err %if flag#0
+   cur == record(ssown_conf(ssown_confpos))
+   ->err %if newsize=cur_size
+   cur_file -> index.(usep).file
+   %if cur_conad#0 %start;               ! File is connected.
+      %if newsize>cur_hole %start
+         flag = 261 {VM hole too small} %and ->err
+         ->err
+      %finish
+   %finish
+
+   setssinhibit
+   flag = dchsize(index, suffixed(file), cur_fsys, newksize)
+
+   %if flag=0 %then cur_size = newsize %else %c
+      note("Change size of ".cur_file." to ".itos(newksize)."K gives dflag of  ".itos(flag)) %and flag = dirtoss(flag)
+   allow interrupts
+err:
+   %if monitoring possible=yes %and ssown_ssnote&4#0 %then mon params("<trjriw")
+%end;                                    ! of CHANGEFILESIZE
+
+!---------------------------------- CLEAR PRIV VIOL ----------------------------------
+
+%external %routine clear priv viol %alias "S#CLEARPRIVVIOL"(%string (255) file, %integer %name flag)
+! This routine is designed to be used in preference to a DISCONNECT when
+! current actions on a file are complete, typically after a TRIM, when
+! "privacy-violation" pages are dropped from the end of a  file.  A clal of this
+! routine can never do any harm, since Director will clear the PRIV VIOL bit in
+! the file descriptor only if the file has no privacy-violating pages.
+! Opportunity is taken to update the type field in the Subsystem's connected file
+! table if relevant.
+   %integer newksize
+   %string (19) index
+   %record (conff) %name cur
+   %record (fhf) %name h
+
+   %if monitoring possible=yes %and ssown_ssnote&4#0 %then mon params(">triw")
+
+   flag = checkname(file, 2 {file}, 0);  !ANY OWN FILE
+   %if flag=0 %start
+      cur == record(ssown_conf(ssown_confpos))
+      %if cur_conad#0 %start
+
+         cur_file -> index.(usep).file
+         flag = dclear priv viol(index, suffixed(file), cur_fsys)
+
+         %if flag#0 %then flag = dirtoss(flag)
+         h == record(cur_conad)
+         %if 0<h_type<=sstopfiletype %and h_size&x'FFF'=0 %then cur_type = h_type
+      %finish %else flag = 256 {file not connected}
+   %finish
+err:
+   %if monitoring possible=yes %and ssown_ssnote&4#0 %then mon params("<triw")
+%end;                                    ! Clear priv viol
+
+!------------------------------------- TRIM -------------------------------------------
+
+%external %routine trim %alias "S#TRIM"(%string (255) file, %integer %name flag)
+   %integer size
+   %record (reportf) rr
+   %record (conff) %name cur
+
+   %if monitoring possible=yes %and ssown_ssnote&4#0 %then mon params(">triw")
+   connect(file, 3, 0, 2 {avail for discon}, rr_conad, rr_filetype, rr_datastart, rr_dataend, flag)
+   %if flag=0 %start
+      size = roundup(rr_dataend, filesizealloc)
+      changefilesize(ssown_shortname, size, flag)
+      %if flag=0 %and integer(rr_conad+12)<sstopfiletype %then integer(rr_conad+8) = size
+      cur == record(ssown_conf(ssown_confpos))
+      %if cur_codes&64#0 {Status PRIV VIOL} %then clear priv viol(ssown_shortname, flag)
+   %finish
+
+   %if monitoring possible=yes %and ssown_ssnote&4#0 %then mon params("<triw")
+%end;                                    ! of TRIM
+
+!-------------------------------- EMAS3SETWORK ----------------------------------------
+
+%external %routine setwork %alias "s#setwork"(%integer %name ad, flag)
+
+! On entry ad contains length required
+! Changed to create a new vtemp file every time - on drop of load level
+! this file is disconnected=destroyed
+
+   %integer conad
+   %string (5) workname
+   workname = "T#WRK"
+   %if ad<ssown_ssinitworksize %then ad = ssown_ssinitworksize; !MINIMUM SIZE
+   %if ad>ssown_ssmaxfsize %then ad = ssown_ssmaxfsize; !MAX SIZE
+   outfile(workname, ad, 0, vtempmarker, conad, flag)
+   %if flag=0 %start
+      ssown_sscomreg(14) = conad
+      ad = conad
+   %finish %else ssown_sscomreg(14) = 0
+%end;                                    ! of SETWORK
+
+!-----------------------------------------------------------------------
+
+%external %routine emas3 setwork(%integer %name xad, xflag)
+   %integer ad, flag
+   ssenter("", ad, "ibiw")
+   setwork(ad, flag)
+   ssexit("", ad, "ibiw")
+%end;                                    ! emas3 setwork
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn kins %alias "S#KINS"
+!  %result = INT (DCPUTIME * COM_INSPERSEC / TIMEFACTOR)
+   %result = dcputime;                   ! For the sake of returning something - until
+   ! I know what to do about INSPERSEC.
+%end;                                    ! of KINS
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn pageturns %alias "s#pageturns"
+   %result = integer(ssown_apageturns)
+%end;                                    ! of PAGETURNS
+
+!-----------------------------------------------------------------------
+
+%external %string %fn nexttemp %alias "S#NEXTTEMP"
+   ssown_seq = ssown_seq+1
+   %result = htos(ssown_seq, 3)
+%end;                                    ! of NEXTTEMP
+
+!-----------------------------------------------------------------------
+
+%external %routine workspace %alias "s#workspace"(%integer bytes, %integer %name startaddr, flag)
+
+   %integer conad
+   %string (11) name
+
+   start addr = -1
+   name = "T#SPCE".next temp
+   outfile(name, bytes+32, 0, X'20000000', conad, flag)
+   start addr = conad+32 %if flag=0
+
+%end;                                    ! workspace
+
+!----------------------------- DEVCODE -----------------------------------------
+
+%external %integer %fn devcode %alias "S#DEVCODE"(%string (16) device)
+!RETURNS -1 FOR INVALID DEVICE OTHERWISE DEVICE CODE
+   %record (reportf) rr
+   %string (16) rest
+   %integer i, flag, special
+   %string (15) %array %format devarrayaf(1:256)
+   %string (15) %array %name devarray
+   %string (255) ssfname
+
+   %if monitoring possible=yes %and ssown_ssnote&8>0 %then sstrace
+   special = 0;                          !NOT A SPECIAL DEVICE - DEFAULT
+   %if device="" %or charno(device, 1)#'.' %then %result = -1
+   chopldr(device, 1)
+   uctranslate(addr(device)+1, length(device))
+   %if device="LP" %then %result = 2;    !SPECIAL CASE - VERY COMMON
+   %if device="TEMP" %or device="NULL" %then %result = 0
+   %if (device->rest.("BPP") {%or device->rest.("SGP")}) %and rest="" %start
+      ! Malcolm 11/1/89
+      chopldr(device, 1)
+      special = 1
+   %finish
+   %if ssown_devarraybase=0 %start;      !TRY TO CONNECT SPOOLR CONTROL FILE
+      ssfname = ssown_ssfname
+      connect("spoolr:queuelist", 0, 0, 4, rr_conad, rr_filetype, rr_datastart, rr_dataend, flag)
+      ! connect in any mode, prevent disconnect
+      %if flag#0 %then setreturncode(-flag) %and %result = -flag
+      ssown_ssfname = ssfname
+      ssown_maxdevarray = (rr_dataend-rr_datastart+1)//16; !no of queues
+      ssown_devarraybase = rr_conad+rr_datastart
+   %finish
+   devarray == array(ssown_devarraybase, devarrayaf)
+   %for i = ssown_maxdevarray, -1, 1 %cycle
+      %result = (i<<1)!special %if devarray(i)=device
+   %repeat
+   %result = -1;                         !INVALID DEVICE
+%end;                                    ! of DEVCODE
+
+!----------------------------------------------------------------------------
+
+%external %routine sendfile2 %alias "s#sendfile2"(%string (255) file, %string (16) device, %string (31) name,
+   %integer copies, forms, %integer %name flag)
+
+   %record %format df(%integer dataend, datastart,size,type,sum,datetime,recfm,nrecs)
+   %record (df) %name oldfile, newfile
+   %record (conff) %name cur
+   %record (pf) p
+   %integer %array priv(0:0)
+   %string (16) hold device, cforms
+   %string (11) startstr, lenstr, msgstr, pseudoname
+   %record (reportf) rr
+   %integer len, datalength, datastart {keep last two together}
+   %string (255) message, shortname
+   %string (14) rest, pass
+   %integer conad, inpt, outpt, i, newsize, note, nrecs
+   %string (19) index
+   %const %integer mptype= (132<<16)!1 {132 byte fixed format}
+   %const %integer remote devices= 20
+   %const %string (7) %array remote device(1:remote devices) = %c
+"VM23", "HP15A3", "SP15A3", "SP15A4", "PS0", "PS1", "PS25", "CPS0", "CPS1", %c
+"CPS25", "SP25A3", "SP25A4", "LP25", "LP70", "LP15", "LP23", "CVM23", "GP20", %c
+"GP20A3", "GP20A4"
+
+   %const %string (2) %array devicemap(5:10) = %c
+"23", "1", "25", "23", "1", "25"
+   %switch sw(1:remote devices)
+
+   %routine %spec cvp;                   ! CONVERT PAPER TAPE
+   %integer %fn %spec send to castle(%string (16) device, cforms, %string (255) file)
+   %integer %fn %spec get user priv
+
+
+   %if monitoring possible=yes %and ssown_ssnote&8>0 %then sstrace
+!   fad = addr(file)+1
+!   flen = length(file)
+!   txiso(fad, flen)
+!   fad = addr(name)+1
+!   flen = length(name)
+!   txiso(fad, flen)
+!   fad = addr(device)+1
+!   flen = length(device)
+!   txiso(fad, flen)
+   holddevice = device
+   %if length(device)>=1 %and charno(device, 1)='.' %start
+      chopldr(device, 1)
+   %finish
+   %if device->rest.("PP") %start
+      %if rest="" %start
+         cvp;                            ! CONVERT PAPER TAPE
+         ->err %if flag#0
+      %finish %else %if rest="B" %then chopldr(device, 1)
+   %finish
+
+   flag = checkname(file, 2 {file}, 0);  !ANY OWN FILE
+   ->err %if flag#0
+   connect(ssown_shortname, 0, 0, 0, rr_conad, rr_filetype, rr_datastart, rr_dataend, flag)
+   ->err %if flag#0
+
+   shortname = ssown_shortname
+   datalength = rr_dataend-rr_datastart
+   datastart = rr_conad+rr_datastart
+
+   %if device="OUT" %and datalength>0 %start
+      flag = iocp(19, addr(datalength))
+      datalength = 0
+   %finish
+
+   %if datalength<=0 %start;             ! EMPTY FILE.
+      sdestroy(shortname, flag)
+      ->err
+   %finish
+   %if device="MP15" %or device="MP23" %start; !directly attached matrix plotters
+      %if rr_filetype#4 {data} %or integer(rr_conad+24)&mptype#mptype %then flag = 397 {wrong filetype} %and ->err
+      %if device="MP15" %start;          !convert and transfer to ercvax
+         oldfile == record(rr_conad)
+         nrecs = (rr_dataend-rr_datastart)//132
+         newsize = nrecs*134+32
+         file = "T#PLOT".nexttemp
+         outfile(file, newsize, 0, 0, conad, flag)
+         %if flag#0 %then ->err
+         newfile == record(conad)
+         inpt = rr_conad+rr_datastart
+         outpt = conad+newfile_datastart
+         %for i = 1, 1, nrecs %cycle
+            byteinteger(outpt) = x'11'
+            byteinteger(outpt+1) = 0
+            move(132, inpt, outpt+2)
+            inpt = inpt+132
+            outpt = outpt+134
+         %repeat
+         newfile_dataend = outpt-conad
+         newfile_type = 4
+         newfile_recfm = (134<<16)!1 {F134}
+         newfile_nrecs = nrecs
+         sdisconnect(file, flag)
+         %if flag#0 %then ->err
+         sdestroy(shortname, flag)
+         %if flag#0 %then ->err
+         pass = "WX@0258P"
+         charno(pass, i) = charno(pass, i)+1 %for i = 1, 1, length(pass)
+         note = ssown_ssnote
+         ssown_ssnote = 0
+         emas3("transfer", file.",ercvax(spooler,".pass.")lpmp15,output,binary,failmail", flag)
+         ssown_ssnote = note
+         pass = "         "
+         %if flag#0 %then ->err
+         sdestroy(file, flag)
+         ->err
+      %finish
+   %finish
+   cforms = ""
+   %for i = 1, 1, remote devices %cycle; ! reached via file transfer
+      %if device=remote device(i) %then ->sw(i) %else %continue
+
+sw(1): {vm23}
+      flag = get user priv
+      %if flag#0 %then ->err
+sw(17): {cvm23}
+      %if forms=21 %then cforms = "h" %else %if forms#0 %start
+         flag = 124 {form not suitable}
+         ->err
+      %finish
+      %if i=17 {c} %start
+         %if forms=21 {h} %then cforms="ch" %else cforms="ca0"
+         device = "vm23"
+      %finish
+      ->send
+
+sw(2):  {hp15a3}
+sw(3): {sp15a3}
+sw(4): {sp15a4}
+sw(11): {sp25a3}
+sw(12): {sp25a4}
+      cforms = substring(device, 5, 6)
+      device = "hp".substring(device, 3, 4)
+      %if forms=21 %then cforms = "H" %else %if forms=22 %then cforms = cforms."U" %else %if 54<=forms<=57 %then %c
+         cforms = "TR" %else %if forms#0 %then flag = 124 {form not suitable} %and ->err
+      cforms = lcstring(cforms)
+      ->send
+sw(5): {ps0}
+sw(6): {ps1}
+sw(7): {ps25}
+sw(8): {cps0}
+sw(9): {cps1}
+sw(10): {cps25}
+      device -> startstr.("PS").rest
+      %if startstr="C" %then cforms = "ca4" %else %start
+         cforms = ""
+         flag = dsfi(ssown_ssowner, ssown_ssownfsys, 38 {get priv}, 0, "", priv)
+         %if flag#0 %then flag = dirtoss(flag) %and ->err
+         %if priv(0)=0 %then flag = 335 {no priv} %and ssown_ssfname = holddevice %and ->err
+      %finish
+      %if rest="1" %and forms#0 %start
+         %if forms#90 %then flag = 124 %and ->err
+         %if startstr = "C" %then cforms = "ca3" %else cforms = "a3"
+      %finish
+      device = "ps".devicemap(i)
+      ->send
+
+sw(13): {lp25}
+sw(16): {lp23}
+      %if forms#0 %start
+         %if forms=5 %then cforms = "l1" %else %if (forms=20 %or forms=30) %then cforms = "a4" %else %if forms=26 %then %c
+            cforms = "l4" %else %start
+            %if (forms=9 %or forms=21) %then cforms = "h" %else %if forms=100 %then cforms = "s" %else %c
+               flag = 124 %and ->err
+         %finish
+      %finish
+      ->send
+
+sw(14): {lp70}
+sw(15): {lp15}
+      %if forms#0 %then flag = 124 {forms not suitable} %and ->err
+      ->send {no special action}
+
+sw(20): cforms = "a4" {gp20a4}
+      -> sw(18)
+sw(19): cforms = "a3" {gp20a3}
+sw(18): device = "gpchem"
+      -> send
+
+send: device = lcstring(device)
+      flag = send to castle(device, cforms, file)
+      ->err
+   %repeat
+   %if device->rest.("SGP") %and rest="" %start
+      chopldr(device, 1)
+      forms = 1
+   %finish
+
+   cur == record(ssown_conf(ssown_confpos))
+   cur_file -> index.(usep).file
+   %if length(index)>6 %start {SPOOLR cant handle, so make a copy}
+      file = "T#SEND".nexttemp
+      outfile(file, rr_dataend, 0, 0, conad, flag)
+      ->err %unless flag=0
+      move(rr_dataend, rr_conad, conad)
+      sdisconnect(file, flag)
+      ->err %unless flag=0
+      cur == record(ssown_conf(ssown_confpos))
+      sdestroy(shortname, flag)
+   %finish %else %start
+      sdisconnect(shortname, flag)
+      ->err %if flag#0
+
+      %if length(file)>15 %start {until SPOOLR can accept general names}
+         pseudoname = "T#".nexttemp
+         rename(":".file, pseudoname, flag)
+         ->err %unless flag=0
+         file = pseudoname
+         cur == record(ssown_conf(ssown_confpos))
+      %finish
+   %finish
+
+   startstr = itos(rr_datastart)
+   lenstr = itos(datalength)
+   message = "DOCUMENT SRCE=".suffixed(file).",DEST=".device.",START=".startstr.",LENGTH=".lenstr
+   %if name#"" %then message = message.",NAME=".name
+   %if forms#0 %start
+      msgstr = itos(forms)
+      message = message.",FORMS=".msgstr
+   %finish
+   %if copies#0 %start
+      msgstr = itos(copies)
+      message = message.",COPIES=".msgstr
+   %finish
+   %if ssown_tempdelivery#0 %then message = message.",DELIV=".string(ssown_tempdelivery)
+   len = length(message)
+   %if ssown_inhibitspooler=0 %start
+      flag = devcode(".".device)
+      %if flag<0 %then flag = 264 %and ssown_ssfname = holddevice {no such device} %and ->err
+      flag = dexec("SPOOLR", p, len, addr(message)+1)
+      %if 100>flag#0 %start;             ! if Director couldn't pass the
+         ! request on to Spooler:
+         flag = dirtoss(flag)
+      %finish %else %if p_p1#0 %start
+         %if 203<=p_p1<=204 %then flag = 331 {QUEUE FULL} %else %if p_p1=210 %start
+            flag = 335
+            ssown_ssfname = holddevice
+         %finish %else %if p_p1=202 %start
+            flag = 264
+            ssown_ssfname = holddevice
+         %finish %else flag = 1000+p_p1; ! VERY UNLIKELY FAILURE!
+      %finish
+      %if flag=0 %start
+         cur_size = 0
+         relink(cur, notexistlist)
+         message = name." queued for ".device.", document number ".itos(p_p2&1023).snl
+         tojournal(addr(message)+1, length(message))
+      %finish
+   %else
+      printstring(message)
+      flag = 1001
+   %finish
+
+err:
+
+
+   %routine cvp;                         ! CONVERT PAPER TAPE
+!CONVERTS CHARACTER FILE TO PAPER TAPE FILE WITH EVEN PARITY
+!AND WITH CR INSERTED WHERE NEC.
+      %constant %byte %integer %array parity(0:127)= %c
+0,129,130,3,132,5,6,135,136,9,10,139,12,141,142,15,
+ 144,17,18,147,20,149,150,23,24,153,154,27,156,29,30,159,
+ 160,33,34,163,36,165,166,39,40,169,170,43,172,45,46,175,
+ 48,177,178,51,180,53,54,183,184,57,58,187,60,189,190,63,
+ 192,65,66,195,68,197,198,71,72,201,202,75,204,77,78,207,
+ 80,209,210,83,212,85,86,215,216,89,90,219,92,221,222,95,
+ 96,225,226,99,228,101,102,231,232,105,106,235,108,237,238,111,
+ 240,113,114,243,116,245,246,119,120,249,250,123,252,125,126,255
+      %record (reportf) rr
+      %string (11) tempfile
+      %integer inp, in, outp, x, outconad, lastch
+      x = 0
+      connect(file, x, x, x, rr_conad, rr_filetype, rr_datastart, rr_dataend, flag)
+      ->err %if flag#0
+      x = -1
+      len = rr_dataend-rr_datastart
+      %if len=0 %then ->err;             !EMPTY FILE WILL BE DESTROYED LATER
+      tempfile = nexttemp
+      tempfile = "T#PP".tempfile
+      x = len*2
+      outfile(tempfile, x, flag, flag, outconad, flag)
+      ->err %if flag#0
+      outp = outconad+32
+      integer(outconad+4) = 32
+      lastch = 0
+      %for inp = rr_conad+rr_datastart, 1, rr_conad+rr_dataend-1 %cycle
+         in = byteinteger(inp)&127;      !ONLY THE BOTTOM 7 BITS USED
+         ! Before a NL character (10), we will put out a CR (13).
+         %if in=nl %then x = 13 %else x = in
+         ! In the cycle below, we plant characters in the output
+         ! area until we have planted a copy of the input character.
+         %cycle
+            ! Avoid planting redundant CR characters:
+            %if x#13 %or nl#lastch#13 %start
+               byte integer(outp) = parity(x)
+               outp = outp+1
+            %finish
+            lastch = x
+            x = nl
+         %repeat %until lastch=in
+      %repeat
+      integer(outconad) = outp-outconad
+      flag = -1
+      sdestroy(file, flag)
+      file = tempfile
+err:
+   %end;                                 ! of CVP {CONVERT PAPER TAPE}
+
+   %integer %fn get user priv
+      %integer flag
+      flag = dsfi(ssown_ssowner, ssown_ssownfsys, 38 {get priv}, 0, "", priv)
+      %if flag#0 %then %result = dirtoss(flag)
+      %if priv(0)=0 %then ssown_ssfname = holddevice %and %result = 335 {no priv}
+      %result = 0
+   %end;                                 !of get user priv
+
+   %integer %fn send to castle(%string (16) device, cforms, %string (255) file)
+      %integer flag
+      %string (255) s, t
+
+      %routine add(%string (2) type, %string (255) value)
+         %integer i, j
+         %string (255) s1, s2
+         %if length(value)=0 %then %return
+         %for i = 1, 1, length(value) %cycle
+            j = charno(value, i)
+            %if j<32 %or j>127 %or j=',' %or j='''' %then charno(value, i) = ' '
+         %repeat
+         value = s1." ".s2 %while value->s1.("  ").s2
+         %if value=" " %then %return
+         %if length(s)+length(value)+2>254 %then %return
+         t = t.type."=".value.","
+      %end;                              !of add
+
+      s = "oqhms@v@"
+      charno(s, i) = charno(s, i)+1 %for i = 1, 1, length(s)
+      s = file.",castle(emasserv,".s.")".device.",output,failmail//INFO='"
+      t = ""
+      add("E", uinfs(1));                !ercreg (= userid)
+      %if cforms#"" %then add("F", cforms); !special forms
+!      add("N", uinfs(1)."@ed.emas-a");   !name (mail address)
+      add("SF", name);                   !local filename
+      add("D", uinfs(7)." - ".uinfs(2)); !personal name + delivery
+      length(t) = 64 %if length(t)>64
+      charno(t, length(t)) = ''''
+      note = ssown_ssnote
+      ssown_ssnote = 0
+      %if ssown_inhibitspooler=0 %then emas3("transferinfo", s.t, flag) %else %start
+         printstring(s.t)
+         newline
+         flag = 1001
+      %finish
+      ssown_ssnote = note
+      s = "                                                                        "
+      %if flag=0 %then sdestroy(file, flag)
+      %result = flag
+   %end;                                 !of send to castle
+%end;                                    ! of SENDFILE2
+
+!-----------------------------------------------------------------------
+
+%external %routine sendfile %alias "s#sendfile"(%string (255) file, %string (16) device, %string (24) name,
+   %integer copies, forms, %integer %name flag)
+
+   sendfile2(file, device, name, copies, forms, flag)
+%end;                                    ! sendfile
+
+!-------------------------------------- EXISTTYPE --------------------------------
+
+%external %integer %fn existtype %alias "S#EXISTTYPE"(%string (255) file)
+!  Returns   0  if file does not exist
+!           >0  the Subsystem filetype (Type = Non-standard or not recognised)
+   %record (reportf) rr
+   %record (frf) fr
+   %integer flag, ad, type
+
+   %if monitoring possible=yes %and ssown_ssnote&8>0 %then sstrace
+   %if file->("_") %or procbits&1#0 %start
+      ! Must connect if Pdfile, to check that member exists.  Connect also if
+      ! Customised Subsystem, to invoke ALLOWCONNECT checks.
+      connect(file, 0, 0, 2 {connect at level 0}, rr_conad, rr_filetype, rr_datastart, rr_dataend, flag)
+      ad = -1
+      type = rr_filetype
+   %finish %else %start
+      finfo(file, 0, fr, flag)
+      %result = 0 %unless flag=0
+      type = fr_ssbyte
+      ! Next line for when SSBYTE is zero
+      %if type=0 %then finfo(ssown_shortname, 1 {connect}, fr, flag) %and type = fr_filetype
+   %finish
+   %if flag=0 %start
+      %unless 0<type<=sstopfiletype %then type = nonstandardtype
+   %finish %else type = 0 {not exist}
+   %result = type
+%end;                                    ! of EXISTTYPE
+
+!---------------------------------------- EXIST ----------------------------------
+
+%external %integer %fn exist %alias "S#EXIST"(%string (255) file)
+!  Returns   0  if file does not exist
+!            1  if the file exists
+   %integer j
+   j = existtype(file)
+   j = 1 %if j>1
+   %result = j
+%end;                                    ! of EXIST
+
+!-----------------------------------------------------------------------
+
+%external %routine closejournal %alias "S#CLOSEJOURNAL"
+
+   %if monitoring possible=yes %and ssown_ssnote&8>0 %then sstrace
+   %return %if ssown_ssreason=testreason
+   %return %if ssown_it_jnbase<=0
+   integer(ssown_it_jnbase) = ssown_it_jncur-ssown_it_jnbase; !OFFSET OF END
+%end;                                    ! of CLOSEJOURNAL
+
+!-----------------------------------------------------------------------
+
+
+%external %integer %fn valid header %alias "s#validheader"(%integer conad)
+
+! To be called after a successful connect.
+! This function prints a message if the header does not conform to standards, in
+! the first three words.  It returns the physical file size in SIZE.  It gives
+! result ZERO provided START and END can be used (i.e. they are within the
+! file and START , END).  It gives flag "corrupt file" otherwise.
+
+   %integer j
+   %record (fhf) %name h
+   %record (conff) %name cur
+
+   %const %integer size wrong=1, start wrong=2, end wrong=3
+
+   %const %string (31) %array text(1:3)= %c
+   " - header SIZE field incorrect",
+   " - header START field incorrect",
+   " - header END field incorrect"
+
+   j = 0
+   cur == record(ssown_conf(ssown_confpos))
+   h == record(conad)
+   %unless ssown_shortname->("_") %start
+      j = size wrong %unless cur_size=h_size
+      j = end wrong %unless h_end<=h_size
+   %finish
+
+   j = start wrong %unless 32<=h_start<=h_end
+
+   printline("**Warning: file ".ssown_ssfname.text(j)) %unless j=0
+   %unless 32<=h_start<=h_end %and h_end<=cur_size %then j = 311; ! Fatal - corrupt
+
+   ! These algorithms still allow a pdfile header to be "fatally wrong" and to get through as non-fatal
+   ! Still, it's better than it was
+
+   %if j<4 %then j = 0;                  ! Non-fatal
+   %result = j
+%end;                                    ! valid header
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn starts %alias "s#starts"(%string %name line, first)
+   %integer l
+   %string (255) w
+   l = length(first)
+   %result = 0 %if l>length(line)
+   w = line
+   length(w) = l
+   %result = compare(w, first)
+%end;                                    ! starts
+
+!-----------------------------------------------------------------------
+
+%external %routine top n tail %alias "s#topntail"(%string %name s)
+
+   length(s) = length(s)-1 %while length(s)>0 %and charno(s, length(s))=' '
+   s -> ("
+").s %while length(s)>0 %and charno(s, 1)=nl
+   s -> (" ").s %while length(s)>0 %and charno(s, 1)=' '
+%end
+
+!-----------------------------------------------------------------------
+
+%external %integer %fn s11ok %alias "s#s11ok"(%string %name s11)
+   %integer j, ch, l
+!
+! RESULT = 0 GOOD
+!
+   l = length(s11)
+   %result = 370 %if l=0
+   %result = 378 %if l>11
+   %cycle j = 1, 1, l
+      ch = charno(s11, j)
+      %result = 379 %unless ch='#' %or 'A'<=ch<='Z' %or 'a'<=ch<='z' %or '0'<=ch<='9'
+   %repeat
+   %result = 0
+%end;                                    ! S11OK
+!
+!-----------------------------------------------------------------------
+!
+%integer %fn memok(%string %name m)
+   %integer j
+   %string (255) w, s11
+
+   w = m."_"
+   %cycle
+      w -> s11.("_").w
+      j = s11ok(s11)
+      %exit %unless j=0
+      %exit %if w=""
+   %repeat
+   %result = j
+%end
+
+!-----------------------------------------------------------------------
+
+%integer %fn inok(%string %name index)
+   %integer ch, j, l, alpha
+   l = length(index)
+   %result = 30 %unless 0<l<12 {invalid index name}
+   alpha = 30
+   %cycle j = 1, 1, l
+      ch = charno(index, j)
+      %if ch='#' %or 'a'<=ch<='z' %or 'A'<=ch<='Z' %then alpha = 0 %else %start
+         %result = 30 %unless '0'<=ch<='9'
+      %finish
+   %repeat
+   %result = alpha {purely numeric names are rejected}
+%end;                                    ! INOK
+!
+!-----------------------------------------------------------------------
+!
+%external %integer %fn unok %alias "s#unok"(%string %name user)
+   %integer j, ch
+   %result = 374 %unless length(user)=6
+   %cycle j = 1, 1, 6
+      ch = charno(user, j)
+      %result = 375 %unless 'A'<=ch<='Z' %or 'a'<=ch<='z' %or '0'<=ch<='9'
+   %repeat
+   %result = 0
+%end;                                    ! UNOK
+!
+!-----------------------------------------------------------------------
+!
+%external %integer %fn uiok %alias "s#uiok"(%string %name s)
+   %integer j
+   %string (255) u, i, w
+   %if s="" %start
+      s = ssown_ssowner
+      %result = 0
+   %finish
+
+   %if s->u.(isepl).i.(isepr).w %start
+      %result = 376 %if i=""
+      %result = 377 %if w#""
+      %if u="" %then u = ssown_ssowner %else %start
+         j = unok(u)
+         %result = j %unless j=0
+      %finish
+      j = inok(i)
+      %result = j %unless j=0
+      s = u.isepl.i.isepr
+   %finish %else j = unok(s)
+   %result = j
+%end;                                    ! UI
+
+!-----------------------------------------------------------------------
+
+%integer %fn random
+   %integer a, b, c
+   *la_2, b
+   *srl_2, 3
+   *sll_2, 3
+   *stck_0(2)
+   *lm_0, 1, 0(2)
+   *srdl_0, 24
+   *st_1, a
+   %result = a
+%end;                                    ! random
+
+!------------------------------------------------------------------
+
+%external %integer %fn massage name %alias "s#massagename"(%string %name name)
+   %integer j
+   %string (255) s
+   %unless name->(usep) %start
+      %if starts(name, "T#")=yes %then s = ssown_ssowner.usep %else %start
+         s = ssown_path to be used
+         %while starts(name, "-")=yes %cycle
+            name -> ("-").name
+            %for j = length(s)-1, -1, 1 %cycle
+               %if charno(s, j)=gsepch %or charno(s, j)=usepch %then length(s) = j %and %exit
+            %repeat
+            %result = 220 %if j=1;       !too many "-"
+         %repeat
+      %finish
+      %result = 224 %if length(s)+length(name)>225; ! too long
+      name = s.name
+   %finish
+   %result = 0
+%end;                                    ! massage name
+
+!------------------------------- CHECKNAME -----------------------------------------------
+
+%external %integer %fn checkname %alias "s#checkname"(%string %name name, %integer %name type, qualifier)
+!
+! - no action if name is 'last'
+! - incorporate 'path to be used'
+! - turn into upper case
+! - resolve name into
+!        ssown_curuser   6 characters
+!        ssown_curindex 19 characters
+!        ssown_curfile 255 characters, the whole thing
+!        ssown_curfname 255 the dfilename bit
+!
+! type:  select ONLY one of
+!     1 a file or pd member name
+!     2   file
+!     4   group
+!     8   fileindex
+!    16   username
+!    32   path
+!    64   file or device
+!
+! qualifier is bit significant (note that these bits match 'string tag' setting)
+!     1 can be read
+!     2        written
+!     4 already exists
+!     8 does not exist
+!   x10 formerly: "don't append invoc or alter", now: UNUSED
+!   x20 object file         (type 1)
+!   x40 non-standard        (type 2)
+!   x80 character file      (type 3 + old type 0)
+!  x100 data filetype       (type 4)
+!  x200 corrupt object      (type 5)
+!  x400 pdfile              (type 6)
+!  x800 directory           (type 7)
+! x2000 Accept ssown_curfsys as FSYS. (For Batch-job connect of SPOOLR document file).
+!       Also, omit check that user exists (with call of dfsys)
+! x4000 Verify that file owner is this user
+! x8000 Call from CONNECT, so dont verify existence of pd member by a recursive call
+!
+
+   %integer j, flag, co, fi, da, de, finfo flag, prot, findfn flag, fsys
+   %integer %array dfindata(0:12)
+   %string (255) i, s, w, mem, s11
+   %string (6) trans
+   %string (4) mod
+   %record (conff) %name cur
+
+   monparams(">sbibib") %if ssown_ssnote&8>0
+   finfo flag = -1 {finfo not called}
+
+   flag = 0
+
+   mod = ""
+   %if type=64 %start;                   !file or device
+      name = ucstring(name)
+      %if name->name.("-MOD") %then mod = "-MOD"
+      %if length(name)>0 %and charno(name, 1)='.' %start; !device
+         %if name#".NULL" %and name#".TEMP" %start; !always valid
+            %if name=".IN" %start
+               %if qualifier&2#0 %then flag = 481 {contradictory}
+            %finish %else %if name=".OUT" %start
+               %if qualifier&1#0 %then flag = 481 {contradictory}
+            %else
+               %if length(name)>16 %then j = 0 %else j = devcode(name)
+               %if j<=0 %then flag = 264 {invalid device code}
+            %finish
+            %if flag#0 %then ssown_ssfname = name
+         %finish
+         ->out
+      %finish
+      type = 1 {file or pd mem}
+   %finish
+   %if type&3>0 %and length(name)>1 %and charno(name, 1)=shortstemchar %start
+      name -> (shortstem).w
+      %if w->w.("_").mem %start
+         flag = 220 %and ->out %unless type=1
+      %finish %else mem = ""
+      flag = stoi(w, ssown_confpos)
+      ->out %unless flag=0
+      flag = 220 %and ->out %if ssown_confpos>maxconf
+      cur == record(ssown_conf(ssown_confpos))
+      cur_stamp = confstamp
+      ssown_curfsys = cur_fsys
+      ssown_ssfname = cur_file
+      %if mem="" %then ssown_shortname = shortstem.w %else ssown_shortname = shortstem.w."_".mem
+      ->out
+   %finish
+
+   %unless 0<type<=32 %and type&(type-1)=0 %start
+      ssown_ssfname = "type=".itos(type)
+      flag = 202 {invalid parameter ...}
+      ->out
+   %finish
+
+   ssown_ssfname = name
+   ssown_curfsys = -1 %if qualifier&X'2000'=0
+   name = ucstring(name)
+
+   %if type=16 %start {user}
+      flag = unok(name)
+      %if flag=0 %and name=ssown_ssowner %then ssown_curfsys = ssown_ssownfsys
+      ->out
+   %finish
+
+   %if type=8 %and name#"" %start {fileindex}
+      flag = uiok(name)
+      %if flag=0 %and name=ssown_ssowner %then ssown_curfsys = ssown_ssownfsys
+      %if flag=30 %then flag = 202
+      ->out
+   %finish
+
+   flag = massage name(name)
+   ->out %unless flag=0
+
+   name -> i.(usep).s
+   flag = uiok(i)
+   %if flag#0 %start
+      %if flag=30 %then flag = 220 {invalid} %else ssown_ssfname = i
+      ->out
+   %finish
+
+   w = i %unless i->w.(isepl)
+
+   !----------------------------------------- OBTAIN FSYS IF REQUIRED ------------------
+
+   %if qualifier&x'2000'=0 %start
+      %if i=ssown_ssowner %then ssown_curfsys = ssown_ssownfsys %else %start
+         fsys = -1
+         %cycle j = 0, 1, hot top
+            fsys = ssown_hotfsys(j) %and %exit %if i=ssown_hotindex(j)
+         %repeat
+
+         %if fsys=-1 %start {not found}
+            flag = dfsys(i, fsys)
+            %if flag=0 %start
+               j = random&hot top
+               ssown_hotfsys(j) = fsys
+               ssown_hotindex(j) = i
+            %finish %else flag = dirtoss(flag) %and ->out
+         %finish
+         ssown_curfsys = fsys
+      %finish
+   %finish {else accept SSOWN_CURFSYS as is}
+
+   %if qualifier&x'4000'#0 %and w#ssown_ssowner %then flag = 258 {illegal use of other's file} %and ->out
+
+   !---------------------------------------------------------------------------------------------
+
+   %if s->s.("_").mem %start
+      flag = 476 %and ->out %unless type=1 {mem name not acceptable}
+      flag = 220 %and ->out %if s="" {no filename}
+      flag = 220 %and ->out %if charno(s, length(s))=gsepch
+      flag = 270 %and ->out %unless memok(mem)=0
+   %finish %else mem = ""
+
+   %if s="" %start
+      flag = 220
+      %if type=32 {PATH} %start
+         name = i.usep
+         %if qualifier&8#0 %then flag = 394 {already exists} %else flag = 0
+      %finish
+      ->out
+   %finish
+
+   w = s
+   w = w.gsep %unless charno(s, length(s))=gsepch
+   s = ""
+
+   %cycle
+      w -> s11.(gsep).w
+      flag = s11ok(s11)
+      %if flag#0 %start
+         %if flag#370 {empty} %then ssown_ssfname = s11
+         %if w#"" %start;                !its an intermediate group
+            %if flag=370 %then flag = 480 {inter missing} %else flag = 380 {inter invalid}
+         %else;                          ! 'end' name
+            %if flag#370 %and type=4 {group} %start
+               %if flag=378 {toolong} %then flag = 478 {group toolong} %else flag = 479 {group invalid}
+            %finish
+         %finish
+         ->out
+      %finish
+      %if starts(s11, "T#")=1 %start
+         %if type=4 {group} %then flag = 480 {invalid groupname} %and ->out
+         %if s#"" %or w#"" %then flag = 220 %and ->out {intermediate t#}
+         flag = 477 %and ->out %if length(s11)>9 {leaving two digits for suffix}
+      %finish
+
+      %if s="" %then s = s11 %else s = s.gsep.s11 {rebuild name}
+
+      %if w="" %start {finished}
+         %if '0'<=charno(s11, 1)<='9' %start; !numeric filenames only allowed in read mode
+            %if qualifier&2#0 %start
+               %if type=4 %then flag = 480 {invalid group} %else flag = 398 {non-st filename}
+               ->out
+            %finish
+         %finish
+         %if type&36>0 %start {looking for group or path}
+            s = s.gsep
+            name = i.usep.s
+         %else
+            name = i.usep.s
+            name = name."_".mem %unless mem=""
+         %finish
+         %exit
+      %finish
+   %repeat
+   flag = 0 {all OK so far}
+
+   !------------------------------------------------------------------------------------------
+
+   ! This paragraph emulates the effect of the DFINFO below when FINDFN produces
+   ! relevant data in the CONF table.  Thus if FINDFN FLAG is 0 or 1 we need not
+   ! call DFINFO in CHECKNAME.
+
+   ! At this point we have a syntactically-correct full filename for Director
+   ! The combination of I.S is is exactly what is put, or perhaps has already been
+   ! put, into the CONF table.  Is it there already?
+
+   findfn flag = 2;                      ! means that CONF table is unchanged
+   %if type&3>0 %start
+
+      findfn flag = findfn(i.usep.s, ssown_curfsys)
+      %if findfn flag<2 %start
+         cur == record(ssown_conf(ssown_confpos))
+         cur_stamp = confstamp
+
+         ! Pick up data which the DFINFO below would have provided
+         dfindata(0) = cur_size>>kshift
+         dfindata(1) = cur_rup
+         dfindata(12) = cur_type
+
+         %if cur_conlevel=notexistlist %start
+            %if cur_finfo flag=24 %then finfo flag = 24 %else finfo flag = 32
+         %finish %else finfo flag = 0
+
+      %else
+         %if findfn flag=309 {vm full} %then flag = 309 %and ->out
+      %finish
+
+      ssown_shortname = ssown_shortname."_".mem %if mem#""
+   %finish
+
+   !----------------------------------------------------------------------------------------
+
+   %if type&x'27'#0 %start;              !other checks possible?
+      !     x'27' means: Username, Fileindex, File or Fileormem
+      %if findfn flag=2 %then finfo flag = dfinfo(i, suffixed(s), ssown_curfsys, trans, dfindata)
+      ! (We ought to be able to find a way of avoiding this DFINFO call altogether)
+
+      %if qualifier&x'fef'=0 %start;     !no qualifiers to check, just check type possible
+         %if finfo flag=0 %start;        !object exists, is it the wrong type?
+            %if type&3#0 %start;         !file (or) mem
+               %if dfindata(0)=0 %then flag = 345; !group for a file
+            %else
+               %if type=4 %and dfindata(0)#0 %then flag = 344; !file for a group
+            %finish
+         %finish %else flag = 0;         !doesnt exist, so ok
+      %else;                             !check on qualifiers
+         %if finfo flag=0 %start
+            %if mem#"" %start;           !member specified
+               %if qualifier&x'fed'#0 %and qualifier&x'8000'=0 %start; !omit connect if 'write' is only qual
+                  prot = 2;              ! May disconnect at any level
+                  %if qualifier&x'2000'#0 {Use SSOWN_CURFSYS} %then prot = (ssown_curfsys<<8)!x'82'
+                  connect(name, 0, 0, prot, co, fi, da, de, flag)
+                  %if flag=0 %start;     !member exists
+                     %if qualifier&8#0 %then flag = 287; !member already exists
+                     %if qualifier&x'fe0'#0 %and fi#sscorruptobjfiletype %and fi#0 %and %c
+                        1<<(fi&15)&(qualifier>>4&x'fe')=0 %start
+                        %if qualifier&2#0 %then flag = 396 {different} %else flag = 397 {wrong}
+                     %finish
+                  %else
+                     flag = 0 %if flag=288 {does not exist} %and qualifier&5=0 {doesn't have to 'already exist'}
+                  %finish
+               %finish
+               %if flag=0 %and qualifier&2>dfindata(1)&2 %then flag = 162; !no write perm
+            %else;                       !not a pd member
+               %if type&36#0 {group} %start
+                  %if dfindata(0)#0 %then flag = 344; !file for a group
+               %else;                    !its a file
+                  %if dfindata(0)=0 %then flag = 345 %else %start; !group for a file
+                     %if qualifier&x'fe0'#0 %and dfindata(12)#sscorruptobjfiletype %and dfindata(12)#0 %and %c
+                        1<<(dfindata(12)&15)&(qualifier>>4&x'fe')=0 %start
+                        %if qualifier&2#0 %then flag = 396 {different} %else flag = 397 {wrong}
+                        !bad filetype
+                     %finish
+                  %finish
+               %finish
+               %if flag=0 %start
+                  %if (qualifier&3)&(dfindata(1)&3)#qualifier&3 %start
+                     %if qualifier&2#0 %then flag = 162 {no write} %else flag = 173 {no access}
+                  %finish
+               %finish
+               %if flag=0 %and qualifier&8#0 %start; !must not exist
+                  %if type&36#0 %then flag = 393 {group} %else flag = 219 {file}
+                  !already exists
+               %finish
+            %finish
+         %else
+            %if finfo flag=32 {file} %start; !doesnt exist
+               %if qualifier&5#0 {must exist, or readable} %or (qualifier&2#0 {writeable} %and mem#"") %start
+                  %if type&36#0 %then flag = 346 %else flag = 218; !group missing or file not exist
+                  %if ssown_ssfname->ssown_ssfname.("_") %start; %finish; !better error msg
+               %finish %else flag = 0
+            %else
+               %if finfo flag=24 %start; !intermediate group missing
+                  %if qualifier&7#0 %start; !r or w or exist
+                     flag = 346;         !group does not exist
+                     %if ssown_ssfname->(gsep) %start; !need to pare it down?
+                        s = ssown_ssfname; !save it
+                        w = s
+                        %cycle
+                           j = charno(w, length(w))
+                           length(w) = length(w)-1
+                           %if j=gsepch %then %exit
+                        %repeat
+                        {to find (the least) intermediate group missing, calls checkname}
+                        {recursively till the name is ok or there are no more bits}
+                        j = checkname(w, 4, 4!16); !group + exist
+                        %if j=0 %then ssown_ssfname = s %else %start; !back to previous flag
+                           %if j#346 %then flag = j; !different error
+                        %finish
+                     %finish
+                  %finish %else flag = 0; !not exist permissible
+               %finish %else flag = dirtoss(finfo flag)
+            %finish
+         %finish
+      %finish
+   %finish
+
+out:
+   name = name.mod
+   monparams("<sbibib*pos=".itos(ssown_confpos).",res=".itos(flag)) %if ssown_ssnote&8>0
+   %result = flag
+%end;                                    ! of checkname
+
+
+!
+!-----------------------------------------------------------------------
+!
+!
+!
+!***********************************************************************
+!*                                                                     *
+!*                     %system Routine/fn/map spec                     *
+!*                                                                     *
+!***********************************************************************
+!
+%external %integer %fn %spec charge %alias "S#CHARGE"(%long %real %name cpu, %integer %name pturns, conmins)
+%external %long %real %fn %spec cputime %alias "S#CPUTIME"
+!***********************************************************************
+!*                                                                     *
+!*                         End of declarations                         *
+!*                                                                     *
+!***********************************************************************
+!
+
+! %const %string (8) VERSION = "SS 4.02X"
+%const %integer days70=25567;            ! DAYS FROM JAN1 1900 TO JAN1 1970
+%const %integer secsin24hrs=86400;       ! SECS IN DAY
+!
+!
+!
+%external %routine setpar %alias "S#SETPAR"(%string (255) s)
+   !STORE PARAM LIST FOR
+   ! SUBSEQUENT EXTRACTION OF
+   ! INDIVIDUAL PARAMS
+   !USING SPAR
+   %integer i, point, lens
+   ! code version.
+   !  SSOWN_LOCATE PRMS = 0
+   string(addr(ssown_parstring(0))) = s
+   ssown_pcount = 0
+   ssown_pmap = 0;                       !MAP OF BITS INDICATING
+   ! PARAMS SET
+   ssown_curpar = 1;                     !FIRST PARAM OF LIST
+   lens = length(s)
+   %if lens>0 %start;                    !IF ANY PARAMS AT ALL
+      point = 0
+      %for i = 1, 1, lens+1 %cycle
+         %if i=lens+1 %or ssown_parstring(i)=',' %start
+            ssown_pcount = ssown_pcount+1
+            ssown_pindex(ssown_pcount) = point; !START OF THIS PARAM
+            ssown_parstring(point) = i-point-1
+            !LENGTH OF THIS PARAM
+            %if ssown_parstring(point)>0 %then ssown_pmap = ssown_pmap!1<<(ssown_pcount-1)
+            point = i
+         %finish
+      %repeat
+   %finish
+%end;                                    ! of SETPAR
+!
+!-----------------------------------------------------------------------
+!
+!
+%external %integer %fn parmap %alias "S#PARMAP"
+   !RETURNS AN INTEGER SHOWING
+   ! WHICH PARAMETERS ARE
+   ! NON-NULL. BIT 2**0=
+   !PARAM 1 ETC.
+   %result = ssown_pmap
+%end;                                    ! of PARMAP
+!
+!-----------------------------------------------------------------------
+!
+
+%external %string %fn spar %alias "S#SPAR"(%integer n)
+   !N SHOULD BE NUMBER OF
+   ! REQUIRED PARAM, OR 0
+   ! MEANING NEXT PARAM
+   !ON EXIT RESULT WILL CONTAIN
+   ! PARAM OR NULL IF NONE
+   ! AVAILABLE.
+   %string (255) s
+   %integer save, uctp1, uctp2
+   save = n
+next:
+   %if n=0 %start
+      n = ssown_curpar
+      ssown_curpar = ssown_curpar+1
+   %finish
+   %if n>ssown_pcount %then %result = ""; !NO PARAM AVAILABLE
+   s = string(addr(ssown_parstring(0))+ssown_pindex(n))
+   uctp1 = addr(s)+1
+   uctp2 = length(s)
+   uctranslate(uctp1, uctp2)
+   %if s="" %and save=0 %start;          ! IGNORE NULL STRING IN SIMPLE LIST
+      n = 0
+      ->next
+   %finish
+   %result = s
+%end;                                    ! of SPAR
+!
+!-----------------------------------------------------------------------
+!
+%record %format sctf(%integer horiz vector bound, sct relst, idens array relst, dt stamp,
+   %string (15) fixup date, %integer endf)
+!
+!-----------------------------------------------------------------------
+!
+%external %integer %fn matchaddr %alias "s#matchaddr"(%integer pat adr, pat len, range adr, range len)
+
+! Looks for pattern in range, result 0 if not found or silly params.
+! result is range adr if pat len is zero, otherwise result is adr of
+! first byte in range to match pattern.
+
+   %integer j, last, len
+
+   %result = range adr %if pat len=0
+   %result = 0 %if pat len<=0 %or range len<=0 %or range len<pat len
+
+   last = range adr+range len-pat len {last poss 'first' byte}
+   %cycle j = range adr, 1, last
+      %continue %unless byteinteger(j)=byte integer(pat adr)
+      len = pat len
+      %cycle
+         len = len-1
+         %result = j %if len=0
+         %exit %unless byte integer(j+len)=byte integer(pat adr+len)
+      %repeat
+   %repeat
+   %result = 0 {not found}
+%end;                                    ! matchaddr
+
+!-----------------------------------------------------------------------
+
+%external %routine move %alias "S#MOVE"(%integer length, from, to)
+   %const %integer part=x'00F00000'
+   %integer j
+   from = from&X'7FFFFFFF'
+   to = to&X'7FFFFFFF'
+   %return %if length<=0 %or from=to
+   %while length&x'ff000000'#0 %cycle
+      !MVCL will not move more than x'ffffff'
+      !take care of order, in case overlapping
+      %if to>from %start
+         move(part, from+length-part, to+length-part)
+      %finish %else %start
+         move(part, from, to)
+         from = from+part
+         to = to+part
+      %finish
+      length = length-part
+   %repeat
+
+   *l_0, to
+   *l_2, from
+   *l_1, length
+   *lr_3, 1
+   *mvcl_0, 2
+   *basr_15, 0
+   *using_15
+   *bc_8, <out>
+   *drop_15
+
+   length = length-1 {overlapping so do it the hard way}
+   %if to>from %start
+      %cycle j = length, -1, 0
+         byteinteger(to+j) = byteinteger(from+j)
+      %repeat
+   %finish %else %start
+      %cycle j = 0, 1, length
+         byteinteger(to+j) = byteinteger(from+j)
+      %repeat
+   %finish
+out:
+%end;                                    ! of move
+!
+!-----------------------------------------------------------------------
+!
+%external %routine fill %alias "S#FILL"(%integer length, from, filler)
+   %const %integer part=x'00f00000'
+   %return %if length<=0
+
+!   %while length > 0 %cycle
+!      length = length - 1
+!      byteinteger(from + length) = filler
+!   %repeat
+   %while length&x'ff000000'#0 %cycle
+      !MVCL will not do more than x'00ffffff' bytes
+      fill(part, from, filler)
+      from = from+part
+      length = length-part
+   %repeat
+
+   *l_0, from
+   *lr_2, 0
+   *l_1, length
+   *l_3, filler
+   *sll_3, 24
+   *mvcl_0, 2
+%end;                                    ! of FILL
+!
+!-----------------------------------------------------------------------
+!
+%external %string %fn substring %alias "S#SUBSTRING"(%string %name s, %integer i, j)
+   %string (255) w
+   %if i<1 %or i>j+1 %or j>length(s) %then %signal %event 5, 7
+   j = j-i+1
+   length(w) = j
+   move(j, addr(s)+i, addr(w)+1)
+   %result = w
+%end;                                    ! of SUBSTRING
+!
+!-----------------------------------------------------------------------
+!
+%external %routine itoe %alias "S#ITOE"(%integer nad, nl)
+   %integer p
+!* %integer q
+   p = ssown_sscomreg(12);               ! ADDR OF ITOE TABLE IN PUBLIC SEGMENT
+!*    %if nl>0 %then %start
+!*       %for q = nl-1, -1, 0 %cycle
+!*          byte integer(nad+q) = byte integer(p+byte integer(nad+q))
+!*       %repeat
+!*    %finish
+   *l_1, nad
+   *l_2, nl
+   *l_3, p
+   *la_0, 256
+   *basr_15, 0;                          !base register
+   *using_15
+loop:
+   *sr_2, 0;                             !r2=r2-256
+   *bc_4, <endbit>
+   *tr_0(256, 1), 0(3)
+   *la_1, 256(1);                        !r1=r1+256
+   *bc_15, <loop>
+endbit:
+   *ar_2, 0;                             !r2=r2+256
+   *bctr_2, 0;                           !r2=r2-1
+   *ltr_2, 2
+   *bc_4, <ret>;                         !returnif r2<0
+   *ex_2, <tr>
+   *drop_15
+ret: %return
+!
+tr: *tr_0(0, 1), 0(3)
+%end;                                    ! of ITOE
+!
+!-----------------------------------------------------------------------
+!
+%external %routine etoi %alias "S#ETOI"(%integer nad, nl)
+   %integer p
+!* %integer q
+   p = ssown_sscomreg(11);               ! ADDR OF ETOI TABLE IN PUBLIC SEGMENT
+!* IMP version follows:
+!*    %if nl>0 %then %start
+!*       %for q = nl-1, -1, 0 %cycle
+!*          byte integer(nad+q) = byte integer(p+byte integer(nad+q))
+!*       %repeat
+!*    %finish
+   *l_1, nad
+   *l_2, nl
+   *l_3, p
+   *la_0, 256
+   *basr_15, 0;                          !base register
+   *using_15
+loop:
+   *sr_2, 0;                             !r2=r2-256
+   *bc_4, <endbit>
+   *tr_0(256, 1), 0(3)
+   *la_1, 256(1);                        !r1=r1+256
+   *bc_15, <loop>
+endbit:
+   *ar_2, 0;                             !r2=r2+256
+   *bctr_2, 0;                           !r2=r2-1
+   *ltr_2, 2
+   *bc_4, <ret>;                         !returnif r2<0
+   *ex_2, <tr>
+   *drop_15
+ret: %return
+!
+tr: *tr_0(0, 1), 0(3)
+%end;                                    ! of ETOI
+!
+!-----------------------------------------------------------------------
+!
+!%external %routine TXISO(%integer %name AD, LEN)
+! This routine attempts to ensure that the LEN characters of text at address AD
+! are in ISO code.  It scans the binary codes which represent the characters,
+! and if none of them exceeds X'7F' (127 decimal), it assumes that the text is
+! already ISO-coded, and it leaves the text unchanged.  But if any byte is
+! greater than 127, it assumes that the whole text is in EBCDIC, and it calls
+! ETOI to translate the text to ISO, overwriting the original text with the
+! ISO equivalent.  This is NOT always going to work, but it is reliable for
+! text which is known to contain letters and digits.
+!%integer I
+!   %if LEN>0 %then %start
+!      I = 0
+!      %while I<LEN %and BYTE INTEGER(AD+I)<128 %cycle
+!         I = I + 1
+!      %repeat
+!      %if I#LEN %then ETOI (AD,LEN); ! This is a crude test to detect EBCDIC.
+!   %finish
+!%end; ! of TXISO
+!
+!-----------------------------------------------------------------------
+!
+!
+%external %routine chopldr %alias "S#CHOPLDR"(%string %name a, %integer i)
+! This routine discards I bytes from the start of the string A, so that
+! the length of A is reduced by I. I must be <= LENGTH(A) on entry.
+   %integer j, ad
+   j = length(a)-i
+   j = 0 %if j<0
+   ad = addr(a)+1
+   move(j, ad+i, ad) %if j>0
+   length(a) = j
+%end;                                    ! of CHOPLDR
+!
+!-----------------------------------------------------------------------
+!
+%external %integer %fn size of %alias "S#SIZEOF"(%name x)
+   %integer i
+!
+! **** **** **** ****
+! This has still to be implemented properly: for the time being
+! we are using:
+! **** **** **** ****
+!
+   *l_0, x; *st_0, i
+   %result = i>>16
+!
+%end;                                    ! of SIZE OF
+!
+!-----------------------------------------------------------------------
+!
+!
+%external %string %fn itos %alias "S#ITOS"(%integer n)
+   %string (16) s
+   %integer sign, w, d
+
+   %result = "0" %if n=0
+   %result = "-2147483648" %if n=X'80000000'
+
+   sign = 1
+   sign = -1 %and n = -n %if n<0
+
+   s = ""
+   %while n>0 %cycle
+      w = n//10
+      d = n-w*10
+      s = tostring('0'+d).s
+      n = w
+   %repeat
+   s = "-".s %if sign<0
+   %result = s
+%end;                                    ! of itos
+!
+!-----------------------------------------------------------------------
+!
+%external %integer %fn pstoi %alias "S#PSTOI"(%string (255) s)
+   !CONVERT STRING CONTAINING
+   ! POSITIVE INTEGER TO INTEGER
+   ! RESULT
+   !RESULT = -1 IF INVALID
+   ! STRING IN ANY RESPECT
+   %integer value, j, k, l
+   %result = -1 %if s=""
+   l = length(s)
+   j = addr(s)+1
+   value = 0
+   %for k = 1, 1, l %cycle
+      j = charno(s, k)
+      %result = -1 %unless '0'<=j<='9'
+      value = 10*value+j&15
+   %repeat
+   %result = value
+%end;                                    ! of PSTOI
+!
+!-----------------------------------------------------------------------
+!
+!
+! %string %fn S2(%integer N)
+! THIS FUNCTION RETURNS A TWO DIGIT DECIMAL VALUE FOR N
+! %integer TENS, UNITS
+!    TENS = N//10
+!    UNITS = N-10*TENS
+!    %result = TOSTRING(TENS+'0').TOSTRING(UNITS+'0')
+! %end of S2
+!
+!-----------------------------------------------------------------------
+!
+!
+%integer %fn i2(%integer ad)
+!AD POINTS TO THE FIRST OF A PAIR OF DECIMAL CHARACTERS. THE RESULT
+!IS THE NUMERIC VALUE OF THE CHAS
+   %result = 10*(byteinteger(ad)&X'F')+(byteinteger(ad+1)&X'F')
+!  I have tried
+!  %result = 10*BYTEINTEGER(AD) + BYTEINTEGER(AD+1) - 11*'0'
+!  but, for reasons I don't understand, it takes the SAME space
+!  and MORE OCP time! (at IMP 9)
+%end;                                    ! of I2
+!
+!-----------------------------------------------------------------------
+!
+!
+%routine decwrite2(%integer value, ad)
+!***********************************************************************
+!*    WRITES VALUE AS TWO DECIMAL ISO DIGITS INTO AD AND AD+1          *
+!***********************************************************************
+   %integer p
+   p = value//10
+   byte integer(ad) = '0'+p-10*(value//100)
+   byte integer(ad+1) = '0'+value-10*p
+%end;                                    ! of DECWRITE2
+!
+!-----------------------------------------------------------------------
+!
+!
+%external %string %fn htos %alias "S#HTOS"(%integer value, places)
+   %string (8) s
+   %const %byte %integer %array h(0:15)= %c
+'0', '1', '2', '3', '4', '5', '6', '7',
+ '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'
+   places = 1 %if places<1
+   places = 8 %if places>8
+   s = ""
+   %cycle
+      s = tostring(h(value&15)).s
+      places = places-1
+      %result = s %if places=0
+      value = value>>4
+   %repeat
+%end;                                    ! of htos
+!
+!-----------------------------------------------------------------------
+!
+%external %routine phex %alias "S#PHEX"(%integer i)
+   printstring(htos(i, 8))
+%end;                                    ! of PHEX
+!
+!-----------------------------------------------------------------------
+!
+!
+!***********************************************************************
+!*                                                                     *
+!* THESE FUNCTIONS ALL USE A PACKED FORMAT OF DATE AND TIME OF ONE OF  *
+!* THE FOLLOWING FORMS.BITS ARE NUMBERED FROM 31 (MOST SIGNIFICANT) TO *
+!* 0 (LEAST SIGNIFICANT)                                               *
+!* OLD FORMAT                                                          *
+!* BITS    USE                                                         *
+!* 31      ZERO FOR OLD FORMAT                                         *
+!* 30-26  YEAR-70  (VALID FOR 1970-2033)                               *
+!* 25-22  MONTH                                                        *
+!* 21-17  DAY                                                          *
+!* 16-12  HOUR                                                         *
+!* 11- 6  MINUTE                                                       *
+!*  5- 0  SECOND                                                       *
+!*                                                                     *
+!*  NEW FORMAT                                                         *
+!*  BIT31 1 FOR NEW FORMAT                                             *
+!*    ALL OTHER BITS HOLD DT AS SECS SINCE 0000HRS ON 1/1/70           *
+!*    CALCULATED AS PER CACM COLLECTER ALGORITHMS NO 199Z              *
+!*    NB TO KEEP LEAP YEARS CORRECT ONE MUST USE THIS ALGORITH FROM    *
+!*    1ST JAN 1900 AND THEN CORRECT. THIS INVOLVES 64BIT ARITHMETIC    *
+!***********************************************************************
+!
+%external %integer %fn dtword %alias "S#DTWORD"(%integer s)
+   %integer y, m
+! Given a binary date and time in either the old or the new format,
+! returns the equivalent new-format date-and-time word.
+   %if s<0 %then %result = s
+   y = (s>>26)+70
+   m = (s>>22)&15
+! D = (S>>17) & 31
+! HRS = (S>>12) & 31
+! MINS = (S>>6) & 63
+! SECS = S&63
+   %if m>2 %then m = m-3 %else %start
+      m = m+9
+      y = y-1
+   %finish
+! %result = (((((1461*Y)//4 + (153*M+2)//5 + D + 58 - DAYS70) * 24 !             + HRS) * 60 + MINS) * 60 + SECS) ! X'80000000'
+   %result = (((((y*1461)//4+(m*153+2)//5+((s>>17)&31)-25509)*24+((s>>12)&31))*60+((s>>6)&63))*60+(s&63))!X'80000000'
+%end;                                    ! of DTWORD
+!
+!-----------------------------------------------------------------------
+!
+!
+! **** **** The following three routines replaced the    **** ****
+! **** **** old versions of PACKDATE and PACKDATEANDTIME **** ****
+! **** **** when the new format was put into service.    **** ****
+!
+%external %integer %fn kday %alias "s#kday"(%integer d, m, y)
+!***********************************************************************
+!*    RETURNS DAYS SINCE 1900 GIVEN DAY MONTH &YEAR(<=99)              *
+!***********************************************************************
+   %if m>2 %then m = m-3 %else %start
+      m = m+9
+      y = y-1
+   %finish
+   %result = 1461*y//4+(153*m+2)//5+d+58
+%end;                                    ! of KDAY
+!
+!-----------------------------------------------------------------------
+!
+!
+%integer %fn packdate(%string (8) date)
+   %integer ad, i
+   ad = addr(date)
+   i = kday(i2(ad+1), i2(ad+4), i2(ad+7))-days70
+   %result = i*secsin 24 hrs!X'80000000'
+%end;                                    ! of PACKDATE
+!
+!-----------------------------------------------------------------------
+!
+!
+%external %integer %fn packdateandtime %alias "S#PACKDATEANDTIME"(%string (8) date, time)
+   %integer at
+   at = addr(time)
+   %result = packdate(date)+3600*i2(at+1)+60*i2(at+4)+i2(at+7)
+%end;                                    ! of PACKDATEANDTIME
+!
+!-----------------------------------------------------------------------
+!
+!
+%external %integer %fn current packed dt %alias "S#CURRENTPACKEDDT"
+!***********************************************************************
+!*    GIVES CURRENT DT IN NEW PACKED FORM                              *
+!***********************************************************************
+   %string (8) date, time
+
+   %cycle
+      date = string(addr(com_date0)+3)
+      time = string(addr(com_time0)+3)
+      %exit %if date=string(addr(com_date0)+3)
+   %repeat
+   %result = packdateandtime(date, time)
+%end;                                    ! of CURRENT PACKED DT
+!
+!-----------------------------------------------------------------------
+!
+!
+! **** **** End of code for new format of date and time. **** ****
+!
+%external %routine kdate %alias "s#kdate"(%integer %name d, m, y, %integer k)
+!***********************************************************************
+!*    K IS DAYS SINCE 1ST JAN 1900                                     *
+!*    RETURNS D, M, Y   2 DIGIT Y ONLY                                 *
+!***********************************************************************
+   %integer w
+   k = k+693902;                         ! DAYS SINCE CAESARS BDAY
+   w = 4*k-1
+   y = w//146097
+   k = w-146097*y
+   d = k//4
+   k = (4*d+3)//1461
+   d = 4*d+3-1461*k
+   d = (d+4)//4
+   m = (5*d-3)//153
+   d = 5*d-3-153*m
+   d = (d+5)//5
+   y = k
+   %if m<10 %then m = m+3 %else %start
+      m = m-9
+      %if y=99 %then y = 0 %else y = y+1
+   %finish
+%end;                                    ! of KDATE
+!
+!-----------------------------------------------------------------------
+!
+%external %routine emas3daynumber(%integer %name xdayno)
+   %integer dayno
+
+   ssenter("", dayno, "iw")
+   dayno = ddaynumber
+   ssexit("", dayno, "iw")
+%end;                                    ! emas3daynumber
+
+!-----------------------------------------------------------------------
+
+%external %routine emas3datefields(%integer %name xdayno, %string %name xmonday, xnth, xjuly, xy1987)
+
+   %const %string (6) %array day(0:6)= "Mon","Tues", "Wednes", "Thurs",
+   "Fri", "Satur", "Sun"
+
+   %const %string (9) %array mon(1:12)= "January", "February", "March", "April",
+   "May", "June", "July", "August", "September", "October", "November", "December"
+
+   %const %string (2) %array ord(1:3)= "st", "nd", "rd"
+
+   %integer dayno, d, m, y, q, r
+   %string (255) monday, nth, july, y1987
+
+   ssenter(monday, dayno, "irswswswsw")
+   kdate(d, m, y, dayno)
+   dayno = dayno-7*(dayno//7)
+   monday = day(dayno)."day"
+
+   q = d//10
+   r = d-10*q
+   nth = "th"
+   nth = ord(r) %if q#1 %and 1<=r<=3
+   nth = itos(d).nth
+
+   july = mon(m)
+
+   y1987 = "19".itos(y)
+
+   ssexit(monday, dayno, "irswswswsw")
+%end;                                    ! emas3datefields
+
+!-----------------------------------------------------------------------
+
+%external %string %fn unpack date %alias "S#UNPACKDATE"(%integer np)
+   %integer d, m, y, ad, p
+   %string (8) s
+   p = np
+   ad = addr(s)
+   s = "00/00/00"
+   %if p>0 %start;                       ! OLD FORMAT
+      y = p>>26+70
+      %if y>99 %then y = y-100
+      m = p>>22&15
+      d = p>>17&31
+   %finish %else %start
+      p = (p&X'7FFFFFFF')//secs in 24 hrs
+      kdate(d, m, y, p+days70)
+   %finish
+   decwrite2(d, ad+1)
+   decwrite2(m, ad+4)
+   decwrite2(y, ad+7)
+   %result = s
+%end;                                    ! of UNPACK DATE
+!
+!-----------------------------------------------------------------------
+!
+!
+%external %string %fn unpack time %alias "S#UNPACKTIME"(%integer np)
+   %integer h, m, secs, at, p
+   %string (8) s
+   p = np
+   at = addr(s)
+   s = "00.00.00"
+   %if p>0 %start
+      h = p>>12&31
+      m = p>>6&63
+      secs = p&63
+   %finish %else %start
+      secs = p&X'7FFFFFFF'
+      m = secs//60
+      secs = secs-60*m
+      h = m//60
+      m = m-60*h
+      p = h//24
+      h = h-24*p
+   %finish
+   decwrite2(h, at+1)
+   decwrite2(m, at+4)
+   decwrite2(secs, at+7)
+   %result = s
+%end;                                    ! of UNPACK TIME
+!
+!-----------------------------------------------------------------------
+!
+!
+%external %integer %fn uinfi %alias "s#uinfi"(%integer entry)
+   %const %integer maxentry= 47
+   %integer ct, res, pages, maxtot, ad
+   %long %real cpu
+   %long %integer clock, diff
+   %switch sw(1:maxentry)
+   %integer %array sfi(0:15)
+   %record (pamf) %name pam
+
+   %unless 1<=entry<=maxentry %then %result = 0
+   ->sw(entry)
+
+sw(1):                                   !OWN FSYS
+   %result = ssown_ssownfsys
+
+sw(2):                                   !MODE  1=FOREGROUND
+   !2=BATCH
+   !3=FOREGROUND OBEYFILE
+   res = uinf_reason
+   res = 1 %if res=0 {I} %or res=4 {D/NEWSTART}
+   %if res=1 %and ssown_obeylevel>0 %then res = 3
+   ! IN OBEY FILE OR OBEYJOB
+   %result = res
+
+sw(3):                                   !NUMBER OF USERS
+   %result = com_users-uinf_top exec
+
+sw(4):                                   !CURRENT ACR LEVEL
+   %result = 0;                          ! Not implemented - not relevant for IBM architecture.
+
+sw(5):                                   !CURRENT CPULIMIT - SECONDS
+   %result = int(ssown_currms/timefactor)
+
+sw(6):                                   !MAX FILE SIZE IN KBYTES - FOR DEFINE
+   %result = (ssown_ssmaxfsize>>kshift)-1
+
+sw(7):                                   !SYNC1DEST
+   %result = uinf_sync1dest
+
+sw(8):                                   !SYNC2DEST
+   %result = uinf_sync2dest
+
+sw(9):                                   !ASYNCDEST
+   %result = uinf_asyncdest
+
+sw(10):                                  !AUINF
+   %result = uinf seg<<seg shift
+
+sw(11):                                  !PROCNO
+   %result = uinf_procno
+
+sw(12):                                  !SSOWN_OBEYLEVEL
+   %result = ssown_obeylevel
+
+sw(13):                                  !INCARNATION - AS AN INTEGER
+   %result = ssown_ssinvocation
+
+sw(14):                                  ! used to return AUXSTACKSIZE
+   %result = 0
+
+sw(15):                                  !ITWIDTH
+   %result = ssown_ssitwidth
+
+sw(16):                                  !BRACKETS - always returns 0 since there is no BRACKETS option.
+   %result = 0;                          ! NOBRACKETS is the rule in EMAS-3.
+
+sw(17):                                  !MAXPROMPTSIZE
+   %result = maxpromptsize
+
+sw(18):                                  !#0 FOR JOB CONTROL MODE
+   %result = 0 {used to be = SSOWN_CONTROLMODE}
+   ! There is no distinct "job control language" in EMAS-3.
+
+sw(19):                                  !#0 RESOURCES=SCARCE
+   %if funds on#0 %start
+      !**FUNDSSTART
+      %result = scarce
+      !**FUNDSEND
+   %finish
+   %result = 0
+
+sw(20):                                  !FUNDS LEFT - IN PENCE
+   %result = uinf_funds//100;            !RES IN PENCE/100
+
+sw(21):                                  !CHARGE FOR THIS SESSION IN PENCE
+   %if ssown_ssreason=batchreason %then ct = 0 %else %start
+      ct = (com_secsfrmn-ssown_startsecs)//60; !CONNECT TIME IN MINS
+      %if ct<0 %then ct = ct+24*60;      !GONE PAST MIDNIGHT
+   %finish
+   cpu = cputime
+   pages = pageturns
+   %result = charge(cpu, pages, ct)
+
+sw(22):                                  ! Returns non-zero iff messages are inhibited.
+
+   ! Three bit-values are defined in this word:
+   !     bit value   1   set if OPERATOR messages are inhibited
+   !                 2   set if INT:T messages are inhibited
+   !                 4   set if Subsystem (returncode) messages are inhibited
+
+   %result = ssown_inhibitmessages
+
+sw(23):                                  !TERMINAL TYPE
+   %result = ssown_ssterminaltype
+
+sw(24):                                  ! Give 0 for RECALL off, 1 for RECALL  on.
+   %if addr(ssown_it)>0 %and ssown_it_jnbase>0 %then %result = 1 %else %result = 0
+
+sw(25):                                  ! Stream identification -
+   %result = uinf_stream id
+
+sw(26):                                  ! Loader version.
+   %result = 1
+
+sw(27):                                  ! Ustacksize option setting
+   %result = ssown_ustacksize {>> kshift}
+
+sw(28):                                  ! Init worksize option setting
+   res = ssown_ssmaxfsize
+   res = ssown_ssinitworksize %if ssown_ssmaxfsize>ssown_ssinitworksize
+   %result = res{>> kshift}
+
+sw(29):
+   %result = ssown_itinlength{>> kshift}
+
+sw(30):
+   %result = ssown_itoutlength{>> kshift}
+
+sw(31):                                  ! index kb remaining
+   res = dsfi(ssown_ssowner, ssown_ssownfsys, 11, 0, "", sfi)
+   %result = 0 %unless res=0
+   maxtot = sfi(0)
+   res = dsfi(ssown_ssowner, ssown_ssownfsys, 30, 0, "", sfi)
+   %result = 0 %unless res=0
+   %result = maxtot-(sfi(1)-sfi(5))
+
+sw(32):                                  ! free fds
+sw(33):                                  ! free sds
+sw(34):                                  ! free pds
+sw(38):                                  ! index size in Kbytes
+   res = dsfi(ssown_ssowner, ssown_ssownfsys, 4, 0, "", sfi)
+   %result = 0 %unless res=0
+   %result = sfi(2) %if entry=32
+   %result = sfi(5) %if entry=33
+   %result = sfi(7) %if entry=34
+   %result = sfi(3) %if entry=38;        !index size
+
+sw(35):                                  ! control char ints   1 - activated   2 - passed through
+   %result = ssown_fepmode
+
+sw(36):                                  ! default define size
+   res = ssown_ssmaxfsize
+   res = ssown_defaultdefinesize %if ssown_ssmaxfsize>ssown_defaultdefinesize
+   %result = res{>> kshift}
+
+sw(37):                                  ! parity mask
+   %result = ssown_parity mask
+
+!sw(38):   {see sw(32):}                               ! index size in Kb
+
+sw(39):                                  ! current setting of #NOTE
+   %result = ssown_ssnote
+
+sw(40):                                  ! outstanding messages
+   %result = ssown_it_omwaiting
+
+sw(41):                                  ! last IPL
+   diff = lengtheni(25567)*86400
+   ad = integer(x'1f000b4')
+   clock = longinteger(ad+64)
+   clock = clock>>12//1000000
+   clock = clock-diff
+   %result = integer(addr(clock)+4)!x'80000000'
+
+sw(42):                                  ! Last interactive logon date/time
+   %result = uinf_last logon
+
+sw(43):                                  ! Last non-interactive start date/time
+   %result = uinf_last nonint start
+
+sw(44):                                  ! BASEDIR search order (before/after user directory-list)
+   %result = ssown_basedirsearch;        ! 0=FIRST,  1=LAST
+
+sw(45):                                  ! Scarcity at
+   %result = com_ration>>scarcity shift
+sw(46):                                  ! Premption at
+   %result = (com_ration>>pre empt shift)&ration mask
+sw(47):
+   pam == record(ssown_current pamad)
+   %result = pam_control
+%end;                                    ! of UINFI
+!
+!-----------------------------------------------------------------------
+!
+%external %string %fn uinfs %alias "s#uinfs"(%integer entry)
+   %record (pamf) %name pam
+   %record (sctf) %name sct
+   %const %integer top= 21
+   %switch sw(1:top)
+   %string (255) res
+   %integer %array dsfipa(0:0)
+   %integer i, j, flag
+
+   res = ""
+   ->out %unless 1<=entry<=top
+
+   %if uinf_sct block ad=0 %then sct == record(X'00200000') %else sct == record(uinf_sct block ad)
+   ->sw(entry)
+
+sw(1):                                   !OWNER
+   res = ssown_ssowner
+   ->out
+
+sw(2):                                   !DELIVERY INFO
+   flag = dsfi(ssown_ssowner, ssown_ssownfsys, 1, 0, res, dsfipa)
+   ->out
+
+sw(3):                                   !STARTTIME
+   res = ssown_ssstarttime
+   ->out
+
+sw(4):                                   !CURRENT PROMPT
+   res = ssown_prompttext
+   ->out
+
+sw(5):                                   !CURRENT ACTIVE DIR
+   res = ssown_avd
+   ->out
+
+sw(6):                                   !SUBSYSTEM VERSION
+   res = version
+   ->out
+
+sw(7):                                   !SURNAME
+   flag = dsfi(ssown_ssowner, ssown_ssownfsys, 18, 0, res, dsfipa)
+   ->out
+
+sw(8):                                   !OPTION CFAULTS=
+   ->out
+
+sw(9):                                   !FUNDS HELD BY
+   flag = dsfi(ssown_ssowner, ssown_ssownfsys, 37, 0, res, dsfipa)
+   ->out
+
+sw(10):                                  !OCPTYPE
+   i = com_ocptype&x'ffff';              ! model
+   %if i>>12=0 %then j = 3 %else j = 4;  ! digits
+   res = htos(i, j)
+   i = com_ocptype>>24;                  ! version
+   %if i=7 %then res = res." V/7" %else %if i=8 %then res = res." V/8"
+   ! other models as info. available
+   ! on IBM systems x'ff' means system is running under VM
+   ->out
+
+sw(11):                                  ! Batch job name.
+   res = uinf_jobname %if uinf_reason=2 {directors batchreason}
+   ->out
+
+sw(12):                                  ! Supervisor version.
+   res = string(addr(com_supvsn))
+   ->out
+
+sw(13):                                  ! Director version.
+   res = sct_fixupdate
+   ->out
+
+sw(14):                                  ! Terminal address.
+   res = uinf_itaddr;                    ! What if SSOWN_SSREASON=2?
+   ->out
+
+sw(15):                                  !
+   res = "UK.AC"
+   ->out
+
+sw(16):                                  !
+   res = "A"
+!   %if com_cpuid=x'00070094' %then res = "A"
+!   %if com_cpuid=x'00070353' %then res = "B"
+!   %if com_cpuid=x'00070563' %then res = "C"
+!   %if com_cpuid=x'00110061' %then res = "C"
+   res = "EDINBURGH.EMAS-".res
+   ->out
+
+sw(17):                                  ! Currently selected group
+   res = ssown_path to be used
+   ->out
+
+sw(18):                                  ! current command - actual
+sw(19):                                  ! current command - as typed
+   pam == record(ssown_currentpamad)
+   %if entry=18 %then res = pam_command %else res = pam_clicomm
+   ->out
+
+sw(20):                                  ! Full "username" response to the"User:" prompt at logon
+   res = uinf_full user
+   ->out
+sw(21):
+   res = ssown_commandprompt
+   ->out
+out:
+   %result = res
+%end;                                    ! of UINFS
+!
+!-----------------------------------------------------------------------
+!
+%record %format profile f(%string (11) key, %integer version, offset, length)
+%record %format ssprofile f(%integer end, start, size, filetype, checksum, datetime, format, sp0,
+   marker, max profiles, no profiles, sp1, %record (profile f) %array profile(1:500))
+!
+! 500 will never be approached.
+
+! Structure of profile file: It starts with the format of ssprofile f
+! above.  The first 8 words are standard Subsystem header. Thereafter:
+
+!   marker:       to check against overwriting or other corruption.
+!   max profiles: the maximum number of profiles which this file can currently
+!                 hold.
+!   no profiles:  the actual number of profiles held.
+!   profile:      a record array (1:max profiles), each element containing the
+!                 following:
+!                 key:       the keyword (the only access to profile data)
+!                 version:   the version number of the profile format.
+!                 offset:    the offset of the start of the profile data.
+!                 length:    the length of the profile data, as seen by the
+!                            user.  The profile scheme adds a marker word
+!                            and rounds up to word align the data.
+
+! All the above is treated as file header, and the second word of the header
+! is set accordingly.  The 'data' part of the file is thus the profile data,
+! pointed at from the profile array (described above).  The format of the
+! profile data is determined by the using program.  The scheme merely adds
+! a marker word to check against corruption.
+
+%constant %integer marker= x'84848484'
+%constant %integer data file= 4, unstructured = 3
+%const %string (11) profile file=":SS#PROFILE"
+
+%record %format rf(%integer conad, filetype, data start, data end)
+
+%routine cherish(%string (255) file, %integer %name flag)
+   %external %routine %spec fstatus %alias "S#FSTATUS"(%string (255) file, %integer act, value, %integer %name flag)
+   fstatus(file, 1, 0, flag);            !Cherish file
+%end;                                    ! Of %routine cherish.
+
+%external %routine read profile %alias "S#READPROFILE"(%string (11) key, %name udata, %integer %name version, flag)
+   %integer conad, profad, i, length, ulength, address
+   %record (ssprofile f) %name ssprofile
+   %record (rf) r
+   %record (profile f) %name p
+
+   ulength = size of(udata)
+   address = addr(udata)
+   fill(ulength, address, 0) {for safety}
+
+   version = 0; length = 0; flag = 0
+
+   flag = 239
+   ->out %if key=""
+
+   oldconnect(profile file, 0, 0, 2, r, flag)
+   flag = 237 %if flag=218 {does not exist}
+   ->out %unless flag=0
+
+   ! Now try to find key.
+   conad = r_conad
+   ssprofile == record(conad)
+   flag = 241
+   ->out %unless ssprofile_marker=marker; ! File corrupt.
+
+   i = 0
+   i = i+1 %until i>ssprofile_noprofiles %or key=ssprofile_profile(i)_key
+   flag = 240 {not found}
+   ->out %if i>ssprofile_no profiles %or ssprofile_profile(i)_version<0
+
+   p == ssprofile_profile(i)
+
+   flag = 241
+   ->out %if integer(conad+p_offset)#marker; ! File corrupt.
+
+   flag = 0
+   version = p_version
+   length = p_length
+   profad = conad+p_offset+4;            ! 4 to step over marker word.
+   flag = 238 %and length = ulength %if length>ulength; ! File data > info parameter.
+   move(length, profad, address) %if length>0
+   flag = 239 %if 0<length<ulength;      ! Info parameter > file data.
+out:
+%end;                                    ! of read profile.
+!
+!-----------------------------------------------------------------------
+!
+%external %routine write profile %alias "S#WRITEPROFILE"(%string (11) key, %name udata, %integer %name version, flag)
+   %integer conad, tconad, i, k, l, length, address, new, size, newsize, max profiles, no profiles
+   %record (rf) r
+   %record (ssprofile f) %name ssprofile, tprofile
+   %record (profile f) %name p
+   %const %string (10) nprofile file="T#PROFILE"
+   %string (4) pro, npro
+
+   %routine create profile file(%string (31) file, %integer size, max profiles, %integer %name conad, flag)
+      %record (ssprofile f) %name ssprofile
+      %record (profile f) dummy
+
+      outfile(file, size, 0, 0, conad, flag)
+      %return %if flag#0;                ! Failure.
+      ssprofile == record(conad);        ! ssprofile mapped onto file.
+      ssprofile_filetype = data file
+      ssprofile_format = unstructured
+      ssprofile_marker = marker
+      ssprofile_max profiles = max profiles
+      ssprofile_no profiles = 0
+      ssprofile_start = addr(ssprofile_profile(1))+maxprofiles*sizeof(dummy)-conad
+      ssprofile_end = ssprofile_start
+      ! Thus the whole of record ssprofile is taken as the file header, and
+      ! _start and _end refer to the profile data only.
+   %end;                                 ! of %routine create profile file.
+
+   %routine move profile(%record (profile f) %array %name profile1, profile2, %integer index1, index2, conad1, conad2)
+      ! This routine moves profile1(index1) to profile2(index2).
+      ! conad1 and conad2 give connect addresses, and also "end of data" word.
+      ! The routine does not update the "no profiles" word in the profile2 file.
+      %integer l, from, to
+
+      l = (profile1(index1)_length+3)&x'FFFFFFFC'+4
+      ! Word aligned, 4 bytes for initial marker.
+      profile2(index2) = profile1(index1)
+      profile2(index2)_offset = integer(conad2)
+      integer(conad2) = integer(conad2)+l; ! Update end of data pointer.
+      from = conad1+profile1(index1)_offset
+      to = conad2+profile2(index2)_offset
+      move(l, from, to)
+      ! Move profile data.
+   %end;                                 ! of %routine move profile.
+
+   ! Start of write profile code proper.
+   %if version<0 %start;                 ! Means keyword is to be deleted.
+      length = 0
+   %finish %else %start
+      length = size of(udata)
+   %finish
+   address = addr(udata)
+
+   flag = 239
+   ->out %if key=""
+
+   flag = 243
+   ->out %if length>4060
+
+   oldconnect(profile file, 0, 0, 2, r, flag)
+   ->out %if 0#flag#218
+   %if flag=218 %start;                  ! File does not exist.
+      new = yes
+      size = 0; max profiles = 0; no profiles = 0
+   %finish %else %start
+      pro = ssown_shortname
+      new = no
+      conad = r_conad
+      ssprofile == record(conad)
+      size = ssprofile_size
+      max profiles = ssprofile_max profiles
+      no profiles = ssprofile_no profiles
+   %finish
+
+   k = 0 {how big does new profile want to be ?}
+   newsize = 48 {for the header}
+   %for i = 1, 1, no profiles %cycle
+      %continue %if ssprofile_profile(i)_key=key
+      k = k+1
+      newsize = newsize+(ssprofile_profile(i)_length+24+7)&(-4)
+   %repeat
+
+   %if length>0 %start {we are adding one}
+      k = k+1
+      newsize = newsize+(length+24+7)&(-4)
+   %finish
+
+   create profile file(nprofile file, newsize, k, tconad, flag)
+   ->out %if flag#0
+   npro = ssown_shortname
+   tprofile == record(tconad)
+   k = 0
+   %for i = 1, 1, no profiles %cycle
+      %continue %if ssprofile_profile(i)_version<0 %or ssprofile_profile(i)_key=key
+      k = k+1
+      move profile(ssprofile_profile, tprofile_profile, i, k, conad, tconad)
+   %repeat
+   %if length>0 %start
+      k = k+1
+      p == tprofile_profile(k)
+      p_key = key
+      p_version = version
+      p_offset = integer(tconad)
+      p_length = length
+      integer(tconad+integer(tconad)) = marker
+      l = tconad+integer(tconad)+4
+      move(length, address, l)
+      l = (length+3)&x'FFFFFFFC'+4
+      integer(tconad) = integer(tconad)+l; ! Update end pointer.
+   %finish
+   tprofile_no profiles = k
+
+!   sdisconnect(npro, flag)
+   %if new=no %start
+!      sdisconnect(pro, flag)
+      newgen(npro, pro, flag)
+   %else
+      rename(npro, profile file, flag)
+      cherish(profile file, flag)
+   %finish
+out:
+%end;                                    ! of write profile.
+!
+!-----------------------------------------------------------------------
+!
+%const %integer heapcheckingrequired=no
+
+
+
+%const %integer listpercent= 20
+%const %integer cellsize= 12
+%const %integer round= 4  {power of 2}
+%const %integer waste= 8  {controls fit in hole}
+%const %integer filler= 0
+
+%record %format heaprf(%integer link, ad, len)
+
+
+%routine moveto(%integer %name point, listhead)
+!point is a pointer to a record which has to be moved from its
+!present position to the top of the specified list
+   %integer link
+   %record (heaprf) %name r
+   %if point=listhead %then %return;     !no need to move and it goes wrong if we try
+   r == record(point)
+   %if r_link=listhead %then %return;    ! ditto
+   link = r_link
+   r_link = listhead
+   listhead = point
+   point = link
+%end;                                    ! of MOVETO
+
+!-------------------------------------------------------------------------------
+
+
+
+
+%if heapcheckingrequired=yes %start
+   %const %short %integer prefix=x'6a6a', postfix=x'5a5a'
+   %routine areacheck
+      %integer link, c
+      %record (heaprf) %name r
+
+      link = ssown_heaparea
+      c = 0
+      %while link#0 %cycle
+         c = c+1
+         r == record(link)
+         %if heapcheckingrequired=yes %start
+            %unless shortinteger(r_ad)=prefix %and shortinteger(r_ad+r_len-2)=postfix %then %c
+               shout("  **HEAP FAILURE**") %and %return
+         %finish
+         link = r_link
+      %repeat
+!      %if ssown_sscomreg(25)#0 %then printline("Heap checks OK")
+   %end;                                 ! of AREACHECK
+%finish;                                 ! heapcheckingrequired
+
+!-------------------------------------------------------------------------------
+
+%external %routine dumph %alias "EMAS#DUMPH"
+   %integer link, c, i, ad, j, ch
+   %string %name tvl
+   %string (63) tx
+   %record (heaprf) %name r
+   print string("Heap manager dump: list heads AREA ")
+   phex(ssown_heaparea); print string(",  HOLE "); phex(ssown_heaphole)
+   print string(",  FREE "); phex(ssown_heapfree); newline
+   print line("Free list:")
+   link = ssown_heapfree
+   c = 0
+   %if link#0 %then tx = "Link: "
+   %while link#0 %cycle
+      c = c+1
+      r == record(link)
+      %if c<31 %start
+         print string(tx); phex(r_link)
+         %if 6*(c//6)#c %then tx = ",  " %else tx = "
+      "
+      %finish %else %if c=31 %then print string("
+      and so on ....")
+      link = r_link
+   %repeat
+   newline
+   write(c, 1); print string(" entries in free list.")
+   newline
+   print line("Hole list:")
+   link = ssown_heaphole
+   c = 0
+   %while link#0 %cycle
+      c = c+1
+      r == record(link)
+      print string("Link: ")
+      phex(r_link)
+      print string("    Address: ")
+      phex(r_ad)
+      print string("    Length: ")
+      write(r_len, 1)
+      newline
+      link = r_link
+   %repeat
+   newline
+   write(c, 1); print string(" entries in hole list.")
+   newline
+   print line("Area list:")
+   link = ssown_heaparea
+   c = 0
+   %while link#0 %cycle
+      c = c+1
+      r == record(link)
+      print string("Link: ")
+      phex(r_link)
+      print string("    Address: ")
+      phex(r_ad)
+      print string("    Length: ")
+      write(r_len, 1)
+      ad = r_ad
+      %if heapcheckingrequired=yes %then ad = ad+2
+!      tvl == string(ad)
+!      %if tvl#"" %and length(tvl)<r_len %then %start
+!         %for i = length(tvl), -1, 1 %cycle
+!            %exit %unless 32<=charno(tvl, i)<=126
+!            %if i=1 %then print string("    contains string """.tvl."""")
+!         %repeat
+!      %finish
+      spaces(3)
+      j = 0
+      %cycle
+         ch = byteinteger(ad); ad = ad+1; j = j+1
+         ch = ' ' %unless 32<ch<127
+         printsymbol(ch)
+         %exit %if j=r_len %or j>70
+      %repeat
+      %if heapcheckingrequired=yes %start
+         %unless shortinteger(r_ad)=prefix %and shortinteger(r_ad+r_len-2)=postfix %then printstring("  **FAILURE**")
+      %finish
+      newline
+      link = r_link
+   %repeat
+   newline
+   write(c, 1); print string(" entries in area list.")
+   newline
+%end;                                    ! of DUMPH
+
+!-----------------------------------------------------------------------
+
+%external %routine initialise heap %alias "s#initialiseheap"(%integer start, size)
+   %integer i, maxcells
+   %record (heaprf) %array %name r
+   %record (heaprf) %array %format rfa(1:100000)
+   ssown_heaparea = 0
+   ssown_heaphole = 0
+   r == array(start, rfa)
+   maxcells = int(size*listpercent/(100*cellsize))
+   %cycle i = 1, 1, maxcells-1
+      r(i) = 0
+      r(i)_link = addr(r(i+1)_link)
+   %repeat
+   r(maxcells) = 0;                      ! includes r(maxcells)_link = 0
+   ssown_heapfree = addr(r(1)_link)
+   r(1)_ad = start+maxcells*cellsize
+   r(1)_len = size-(maxcells*cellsize)
+   moveto(ssown_heapfree, ssown_heaphole)
+%end;                                    ! of INITIALISE HEAP
+
+!-----------------------------------------------------------------------
+
+
+%external %integer %function getheap %alias "s#getheap"(%integer len)
+   %integer %name link, hlink
+   %record (heaprf) %name r, ra, rh
+   %integer ad
+
+   monparams(">jr") %if ssown_ssnote&32>0
+   %if len<=0 %then len = 1
+   %if heapcheckingrequired=yes %then len = len+4
+   len = (len+round-1)&(-round)
+   link == ssown_heaphole
+   %while link#0 %cycle
+      r == record(link)
+      %if len<=r_len %start
+         ad = r_ad
+         %if r_len-len<=waste %or ssown_heapfree=0 %start; !(almost) exact fit - use whole block
+            moveto(link, ssown_heaparea)
+         %finish %else %start;           !use first part and put rest on hole list
+            %if ssown_heapfree=0 %start
+               selectoutput(0)
+               printline("No HEAP free list cells")
+               dumph
+               %result = 0
+            %finish
+            ra == record(ssown_heapfree)
+            ra_ad = r_ad
+            ra_len = len
+            moveto(ssown_heapfree, ssown_heaparea); !move to top of area list
+            r_ad = r_ad+len
+            r_len = r_len-len
+            hlink == ssown_heaphole;     !now shuffle hole list to put holes in len order
+            %while hlink#0 %cycle
+               rh == record(hlink)
+               %if rh_len>=r_len %and rh_ad#r_ad %start
+                  moveto(link, hlink)
+                  %exit
+               %finish
+
+               hlink == rh_link
+            %repeat
+         %finish
+         fill(len, ad, filler)
+         %if heapcheckingrequired=yes %start
+            shortinteger(ad) = prefix; shortinteger(ad+len-2) = postfix
+            ad = ad+2; len = len-4
+         %finish
+         %if ssown_ssnote&x'10000'#0 %then shout("GETHEAP ad ".htos(ad, 8)." len ".htos(len, 4))
+         %if heapcheckingrequired=yes %then areacheck
+         len = ad
+         monparams("<jw") %if ssown_ssnote&32>0
+         %result = ad
+      %finish
+      link == r_link
+   %repeat
+   selectoutput(0)
+   printline("No HEAP hole big enough")
+   dumph
+   %result = 0
+%end;                                    ! of GETHEAP
+
+!-------------------------------------------------------------------------------
+
+
+%external %routine disposeheap %alias "s#disposeheap"(%integer ad)
+   %integer %name link, hlink
+   %record (heaprf) %name r, rh
+   %if ssown_ssnote&x'10000'#0 %then shout("Dispose ".htos(ad, 8))
+   %if heapcheckingrequired=yes %then ad = ad-2
+   link == ssown_heaparea
+   %while link#0 %cycle
+      r == record(link)
+      %if r_ad=ad %or r_ad<ad<r_ad+r_len %start; !Conditions separated for efficiency
+         hlink == ssown_heaphole;        !put in right place in hole list
+
+         %while hlink#0 %cycle
+            rh == record(hlink)
+            %exit %if rh_len>r_len
+            hlink == rh_link
+         %repeat
+         moveto(link, hlink)
+         %if heapcheckingrequired=yes %then areacheck
+         %return
+      %finish
+      link == r_link
+   %repeat
+   printstring("Failed to dispose - heap contains no data at address X")
+   phex(ad); newline
+%end;                                    ! of DISPOSEHEAP
+
+!-----------------------------------------------------------------------
+
+
+%record %format stackhf(%integer end, start, size)
+
+%const %string (10) stack full= "Stack full"
+%const %string (11) stackempty= "Stack empty"
+
+%const %string (8) stackfile= "T#STACK"
+
+%routine open(%integer x, %integer %name j)
+   %integer conad
+   %record (stackhf) %name h
+   %record (conff) %name conf
+
+   %if ssown_stackfile=0 %start
+      outfile(stackfile, 4096, 0, 4, conad, j)
+      %if j=0 %start
+         conf == record(ssown_conf(ssown_confpos))
+         conf_opens = 100
+         ssown_stackfile = conad
+         h == record(conad)
+         h_end = 32
+         h_start = 32
+      %finish
+      %return
+   %finish
+
+   j = 0
+   h == record(ssown_stackfile)
+   %return %unless h_end+x>h_size
+   %if h_size<(1<<20) %start
+      changefilesize(stackfile, h_size<<1, j)
+      %return %unless j=0
+      h_size = h_size<<1
+   %else
+      ssown_ssfname = "Stack limit of 1 megabyte exceeded"
+      j = 100
+   %finish
+%end;                                    ! open
+
+
+%external %routine spush %alias "s#push"(%string (255) s, %integer %name j)
+   %integer len, ad
+   %record (stackhf) %name h
+
+   j = 0
+   open(length(s)+1, j)
+   %if j=0 %start
+      ad = ssown_stackfile
+      h == record(ad)
+      s = s."
+"
+      len = h_end-h_start
+      h_end = h_end+length(s)
+      move(len, ad+h_start, ad+h_start+length(s))
+      move(length(s), addr(s)+1, ad+h_start)
+   %finish
+%end;                                    ! spush
+
+
+%external %routine push %alias "c#push"
+   %integer j
+   %string (255) s
+
+   getstring("What;expression", s)
+   spush(s, j)
+   setreturncode(j)
+%end;                                    ! push
+
+
+%external %routine squeue %alias "s#queue"(%string (255) s, %integer %name j)
+   %record (stackhf) %name h
+
+   j = 0
+   open(length(s)+1, j)
+   %if j=0 %start
+      h == record(ssown_stackfile)
+      s = s."
+"
+      move(length(s), addr(s)+1, ssown_stackfile+h_end)
+      h_end = h_end+length(s)
+   %finish
+%end;                                    ! queue
+
+
+%external %routine queue %alias "c#queue"
+   %integer j
+   %string (255) s
+
+   getstring("What;expression", s)
+   squeue(s, j)
+   setreturncode(j)
+%end;                                    ! queue
+
+
+%external %routine pop %alias "s#pop"(%string %name s, %integer %name j)
+   %integer ch, p, len, ad
+   %record (stackhf) %name h
+
+   j = 0
+   open(0, j)
+   %if j=0 %start
+      s = ""
+      ad = ssown_stackfile
+      h == record(ad)
+      p = h_start
+      %cycle
+         %if p>=h_end %start
+            h_end = h_start
+            ssown_ssfname = stack empty
+            j = 100
+            %return
+         %finish
+         ch = byteinteger(ad+p)
+         p = p+1
+         %exit %if ch=nl
+         s = s.tostring(ch)
+      %repeat
+      len = h_end-p
+      move(len, ad+p, ad+h_start)
+      h_end = h_end-length(s)-1
+   %finish
+%end;                                    ! pop
+
+%external %routine exec %alias "s#exec"(%string (255) file, %integer type, %integer %name j)
+   %record (stackhf) %name h
+
+   j = 0
+   open(0, j)
+   %if j=0 %start
+      h == record(ssown_stackfile)
+      %if h_start=h_end %start
+         ssown_ssfname = stack empty
+         j = 100
+         %return
+      %finish
+!      %if file = "" %then file = stackfile %else file = stackfile . "," . file
+      top n tail(file)
+      file = ".OUT" %if file=""
+      inner obey(stackfile, file, 0, type, j)
+   %finish
+%end;                                    ! exec
+
+
+%external %routine hide %alias "s#hide"(%integer %name j)
+   %integer end, ad
+   %record (stackhf) %name h
+
+   j = 0
+   open(16, j)
+   %return %unless j=0
+   ad = ssown_stackfile
+   %return %if ad=0
+   h == record(ad)
+   end = (h_end+3)&(-4)
+   integer(ad+end) = h_start
+   integer(ad+end+4) = h_end
+   end = end+8
+   h_start = end
+   h_end = end
+%end;                                    ! hide
+
+%external %routine reveal %alias "s#reveal"
+   %integer ad
+   %record (stackhf) %name h
+
+   ad = ssown_stackfile
+   %return %if ad=0
+   h == record(ad)
+   %return %if h_start=32
+   ad = ad+h_start-8
+   h_start = integer(ad)
+   h_end = integer(ad+4)
+%end;                                    ! reveal
+
+!-----------------------------------------------------------------------
+
+%end %of %file

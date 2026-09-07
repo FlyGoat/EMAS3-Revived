@@ -1,0 +1,432 @@
+! S51 - Customise
+%end %oflist
+%include "SUBARC:SSOWNF3"
+   %list
+%external %integer %fn %spec getheap %alias "s#getheap"(%integer bytes)
+%external %routine %spec connect %alias "S#CONNECT"(%string (255) file, %integer mode, hole,
+   prot, %integer %name fconad, ffiletype, fdatastart, fdataend, flag)
+
+%external %routine %spec loadfile %alias "S#LOADFILE"(%string (255) file, %integer %name flag,
+   %integer locll)
+%external %routine %spec cascadeload %alias "S#CASCADELOAD"(%integer %name flag, %integer locll)
+%external %integer %fn %spec dstop(%integer %name i)
+%external %integer %fn %spec dflag(%integer %name flag, %string %name txt)
+%external %string %fn %spec htos %alias "S#HTOS"(%integer i, pl)
+%external %routine %spec dprintstring(%string %name s)
+%external %string %fn %spec itos %alias "S#ITOS"(%integer i)
+%external %integer %fn %spec checkname %alias "s#checkname"(%string %name name,
+   %integer %name type, qualifier)
+%external %integer %fn %spec dsfi(%string %name xfile index, %integer %name xfsys, xtype, xset,
+   %string %name xs, %integer %array %name xi)
+%external %integer %fn %spec lookloaded %alias "S#LOOKLOADED"(%string (31) entry,
+   %integer %name type, %record (ent4f) %name ent4)
+%external %routine %spec move %alias "S#MOVE"(%integer len, from, to)
+
+%external %routine %spec uctranslate %alias "S#UCTRANSLATE"(%integer ad, len)
+%external %integer %fn %spec dset write once(%integer %name adr, len)
+%external %routine %spec set conlevel %alias "s#setconlevel"(%string (255) file,
+   %integer conlevel, %integer %name flag)
+
+%const %integer useranal=0
+
+!------------------------------- CUSTFILEANAL ----------------------------------
+
+%external %routine custfileanal %alias "s#custfileanal"(%integer action, %string (255) controlfile)
+%integer pt, conad, type, dstart, dend, flag, j, k, keyno, amess, messptr
+%integer ad, len, linestart, base, hit, fail, unsats, loadlev, prot
+%record (ent4f) ent4
+%string (255) ep, wk
+
+! The customising arrangements are as follows.  Currently four items of data
+! are stored, on analysis of the CONTROLFILE.  The Subsystem stores these in
+! Director's "write-once" area in a specific order, namely
+!
+!              1.         The special SEARCHDIR list.
+!              2.         Entry point to the ALLOWCONNECT procedure
+!              3.         Entry point to the ALLOWCOMMAND procedure
+!              4.         Entry point to the start-up procedure (CUSTINIT)
+!              5.         Entry point to the exit procedure (ONEXIT)
+!
+! The order of these values matches the order of the keywords in the "KEY"
+! arrays below.
+!
+! The reason for ordering is that Subsystem needs to look in specific places
+! (after UINF_WO BASE) for the entry points etc.  It cannot store pointers
+! within SSOWN for example, as these are read-write and can be fiddled with.
+! Since we don't want to restrict the order in which the fields are
+! presented in the CONTROLFILE, we first store the data on the stack, and place
+! them in the write-once area after the analysis.  Further, unless the
+! CONTROLFILE exists, we don't want to store any data at all in the write-once
+! area, so that the write-once area is referenced only when necessary.  (The
+! call of DSET WRITE ONCE sets a bit in the read-only local controller stack
+! segment for subsequent inspection).  Pointers to the four areas are stored
+! temporarily in successive words in
+
+%integer %array values(1:5)
+
+%const %integer topkey=5
+   %const %string (15) %array key(1:topkey)= %c
+"SEARCHDIRLIST=",  "ALLOWCONNECT=",  "ALLOWCOMMAND=", "INIT=", "ONEXIT="
+   %const %string (15) %array keyep(1:topkey)= %c
+"S#SEARCHDIRS", "S#ALLOWCONNECT", "S#ALLOWCOMMAND", "S#CSUPINIT", "S#ONEXIT"
+   %const %integer %array keypw(1:topkey)= %c
+x'00010004', x'00050020',  x'0004001C',  x'0004001C', x'00000000'
+
+%routine %spec rstrg(%string %name s)
+%routine %spec err(%integer i)
+
+   fail = 0
+   unsats = 0
+   amess = 0; messptr = 0
+   dstart = 0; dend = 0; type = 0;       ! This line to avoid Unass Var only
+   %for j = 1, 1, 5 %cycle; values(j) = -1; %repeat
+
+   %if controlfile#"" %start
+      ! There IS a controlfile.
+      %if action = useranal %then prot = 0 %else prot = 8 {Permanent connect} 
+      connect(controlfile, 0, 0, prot, conad, type, dstart, dend, flag)
+      %if (flag=0 %or flag = 118) %and dend>dstart %start
+         %if type = sscharfiletype %then %start
+         ! What have we got?
+         ! This handles a character file of the form
+         ! SEARCHDIRLIST=FILE1,FILE2 etc
+         ! ALLOCONNECT=OBJECTFILE
+         ! ALLOWCOMMMAND=OBJECTFILE 
+         ! INITALISE=OBJECTFILE
+         ! ONEXIT=OBJECTFILE
+         dstart = dstart+conad; dend = dend+conad
+         pt = dstart
+         %cycle {up bytes of controlfile}
+            linestart = pt
+            rstrg(wk)
+            %if wk="" %then %continue
+
+            hit = 0
+            %for keyno = 1, 1, topkey %cycle
+
+               %if wk->ep.(key(keyno)).wk %and ep="" %start
+                  hit = 1
+                  ! WK contains everything after "="
+                  %if keyno=1 %start
+
+                     ! SEARCHDIRLIST=
+                     k = linestart
+                     k = k+1 %until byteinteger(k-1)='='
+                     base = k
+                     %cycle
+                        %exit %if (byteinteger(k)=nl %and byteinteger(k-1)#',') %or k>=dend
+                        k = k+1
+                     %repeat
+                     pt = k+1
+                     len = k-base
+                     %if len>0 %start
+                        ! Allocate space on stack.  AD points to the place.
+                        ! The amount of space is LEN+8.  We want R11 to be
+                        ! left word-aligned so we increment it by (LEN+8)+3 and
+                        ! shift off the bottom two bits.
+                        *st_11, ad; *a_11, len; *la_11, 11(11)
+                        *srl_11, 2(0); *sll_11, 2(0)
+
+                        move(len, base, ad+8)
+                        uctranslate(ad+8, len)
+                        ! Set up first two words like file header words
+                        integer(ad) = len+8
+                        integer(ad+4) = 8
+                     %finish %else ad = 0 {allow client user's searchdir list}
+
+                     values(1) = ad
+
+                  %else
+
+                     ! Allowconnect/Allowcommand/Custinit/OnExit
+                     %if wk="" %then values(keyno) = 0 {allow all} %else %start
+                        flag = checkname(wk{preloadfile}, 1 {fileormem}, x'21' {obj,readble})
+                        %if flag=0 %start
+                           %if action=useranal %then loadlev = ssown_loadlevel %else %start
+
+                              ! Now that we are doing a full load for Course-supervisor-supplied routines
+                              ! (rather than a PRELOAD as before), the directories are (were) getting connectd
+                              ! at level 2.  This following statement is a frig, as they want (need) to end up
+                              ! at level zero.  Normally loader connects at current level and the next
+                              ! TIDYFILES sets level to zero, but a TIDYFILES does not follow this load.
+
+                              ! (The CUSTINIT field value 1 is referenced in LOADFILE and CONNDIRS in S11)
+                              ssown_custinit = 1; ! (Gets overwrittne with an address below)
+
+                              loadlev = 0 {perm}
+                           %finish
+
+                           loadfile(wk, flag, loadlev)
+                           unsats = unsats+ssown_sscomreg(7)
+                           {count of  unsatisfied references outstanding}
+                           %if flag=0 %or flag=350 {already loaded} %start
+                              ep = keyep(keyno)
+                              flag = lookloaded(ep, 2 {code}, ent4); ! Flag 32 is success
+                              %if flag#0 %start {success}
+                                   ! Check parameter specifications
+                                   %unless ent4_parmword=keypw(keyno) %then err(4)
+                                   *st_11, ad; *la_11, 16(11)
+                                   values(keyno) = ad
+                                   move(16, addr(ent4), ad)
+                              %finish %else err(7)
+                           %finish {else preload failed} %else err(3)
+                        %finish {preloadfile OK} %else err(6)
+
+                     %finish {non-null controlfile name}
+
+                  %finish
+               %finish
+            %repeat {keyword search}
+            %if hit=0 %then err(1)
+         %repeat %until pt>=dend {up bytes of controlfile}
+         %finish { character file } %else %if type = ssobjfiletype %then %start
+
+            ! As it is most common for text control files to all point to
+            ! the same object file for the S#CSUPINIT, S#ALLLOWCOMMAND,
+            ! S#ALLOWCONNECT and S#ONEXIT routines this code allows that object
+            ! file itself to be named as the control file.
+            ! This leaves the problem of specifying search directories. This
+            ! can be done by specifying
+            ! %externalintegerfn searchdirs %alias "S#SEARCHDIRS"(%integername as)
+            ! This function must return as its result the number of searchdirs
+            ! defined and set 'ad' to be the address of the first element in
+            ! an array of %string(255).
+            ! eg %externalintegerfn searchdirs %alias "S#SEARCHDIRS"(%integername ad)
+            !    %conststring(255)%array dirs(1:2)="ERCLIB:GENERAL","PLULIB:PACKDIR"
+            !       ad = addr(dirs(0))
+            !       %result = 2
+            !    %end
+
+            %if action=useranal %then loadlev = ssown_loadlevel %else %start
+               ! (The CUSTINIT field value 1 is referenced in LOADFILE and CONNDIRS in S11)
+               ssown_custinit = 1; ! (Gets overwrittne with an address below)
+               loadlev = 0 {perm}
+            %finish
+
+            loadfile(controlfile, flag, loadlev)
+            unsats = unsats+ssown_sscomreg(7)
+            {count of unsatisfied references outstanding}
+            %if flag=0 %or flag=350 {already loaded} %start
+               %for keyno = 1, 1, 5 %cycle
+                  ep = keyep(keyno)
+                  %if action = useranal %then printstring("Entry ".ep." ")
+                  flag = lookloaded(ep, 2 {code}, ent4); ! Flag 32 is success
+                  %if flag#0 %start {success}
+                     ! Check parameter specifications
+                     %if ent4_parmword=keypw(keyno) %then %start
+                         %if action = useranal %then printstring("supplied") %and newline
+                         *st_11, ad; *la_11, 16(11)
+                         values(keyno) = ad
+                         move(16, addr(ent4), ad)
+                     %finish %else err(4)
+                  %finish %else %start
+                     values(keyno) = -1
+                     %if action = useranal %then printstring(" not supplied") %and newline
+                  %finish
+               %repeat
+
+               ! We have now set pointers to the relevant routines for
+               ! S#CSUPINIT, S#ALLOWCOMMAND, S#ALLOWCONNECT and S#ONEXIT which
+               ! may be entered later but in order to remain compatible
+               ! with the text control file version we want to set a
+               ! pointer to a text area containing comma-separated names
+               ! of directories. We build that here by entering the
+               ! S#SEARCHDIRS function.
+               %if values(1) { searchdirlist } # -1 %then %start
+                  printstring("Calling S#SEARCHDIRS") %and newline %if action = useranal
+                  ad = values(1)
+                  *la_0, ad; ! Set ad as the %integername parameter
+                  *l_1, ad; *stm_4, 0, 16(11); *lm_12, 15, 0(1)
+                  *basr_15, 14 ;! Enter the function
+                  *st_1, j;! Store the result in j
+                  printstring(itos(j)." directories") %and newline %if action = useranal
+                  %if j > 0 %then %start
+                     k = getheap(16+256 * j)
+                     values(1) = k
+                     integer(k+4) = 8 ;! Set up a 'data start' value
+                     k = k + 8
+                     %for j = 1, 1, j %cycle;! Copy each of the strings
+                        wk = string(ad+256*(j-1))
+                        move(length(wk), addr(wk)+1, k)
+                        k = k + length(wk) + 1
+                        byteinteger(k - 1) = ','
+                     %repeat
+                     integer(values(1)) = k - values(1) -1 {set length (without last ',') }
+                     uctranslate(values(1)+8, integer(values(1)))
+                     %if action = useranal %then %start
+                        printsymbol(byteinteger(k)) %for k = values(1), 1, values(1) + integer(values(1))
+                        newline
+                     %finish
+                  %finish %else values(1) = 0
+               %finish
+               flag = 0
+            %finish {else preload failed} %else err(3)
+         %finish {neither chatacter or object file }%else err(2)
+      %finish {controlfile connects OK} %else err(2)
+   %finish
+
+   %if unsats>0 %start
+      cascade load(flag, 0)
+      %if flag#0 %or ssown_sscomreg(7)#0 %then keyno = 0 %and err(5)
+   %finish
+
+   %if fail#0 %start
+      %for j = 1, 1, 5 %cycle; values(j) = -1; %repeat
+      values(4) = -amess
+   %finish
+
+   ! Now move the data into the write-once area.
+   %if action=useranal %start
+      newline
+      %if fail=0 %then printstring("Checks OK") %else printstring("Errors")
+      newline
+      setconlevel(controlfile, 0, flag)
+   %else
+      %if fail#0 %then %start
+         printstring("Invalid Control file - Access Barred")
+         newlines(2)
+         flag = dstop(100)
+      %finish
+      %for j = 1, 1, 5 %cycle
+         ad = values(j)
+         %if j=1 %and ad>0 %then len = integer(ad) %else len = 16
+         k = dset write once(ad, len)
+         %if k#0 %then k = dstop(140);   ! This should jolly not occur
+         ! The CUSTINIT value does not strictly need the write-once protection
+         ! and is driven from the SSOWN field
+         %if j=4 {CUSTINIT} %then ssown_custinit = ad
+      %repeat
+      ! [On 370/XA, UINF_WO BASE points within *Director's* UINF segment number, which is
+      ! different from the Subsystem's segment and inaccessible to it.]
+      ssown_custinit = integer(addr(uinf)+uinf_wo base&x'FFFFF'+12)
+   %finish
+
+!-------------------------------------- ERR ------------------------------------
+
+%routine err(%integer eno)
+%string (255) ww
+%const %integer maxmess=1024
+%const %integer toperr=7
+   %const %string (45) %array errors(1:toperr)= %c
+{1} "Unrecognised keyword",
+{2} "Control file fails to connect/has wrong type",
+{3} "PRELOAD failed",
+{4} "Wrong number of parameters",
+{5} "Unsatisfied references",
+{6} "Preload file/name invalid/inaccessible",
+{7} "Required entry point not found"
+
+   %if amess=0 %then amess = getheap(maxmess)
+   fail = 1
+   ww = "Error ".itos(eno)
+   %if flag#0 %then ww = ww." ".itos(flag)."/"
+   %if eno=2 %then ww = ww.itos(type)." ".itos(dend) %else %if eno=4 %then %c
+      ww = ww.htos(ent4_parmword, 8)
+   ww = "  ".errors(eno)
+   ww = ww.tostring(nl)
+   %if action#useranal %then dprintstring(ww)
+   printstring(ww)
+   len = length(ww)+1
+   %if messptr+len+1<maxmess %start
+      string(amess+messptr) = ww
+      byteinteger(amess+messptr) = nl
+      messptr = messptr+len
+      byteinteger(amess+messptr) = 0;    ! terminator
+   %finish
+%end;                                    ! err
+
+!-------------------------------------- RSTRG ----------------------------------
+
+%routine rstrg(%string %name s)
+%integer ch
+%string (255) wk
+   wk = ""
+   %cycle
+      %if pt=dend %then ch = nl %else ch = byteinteger(pt)
+      %if 'a'<=ch<='z' %then ch = ch&(\(x'20')); ! Upper case if letter
+      pt = pt+1
+      %if ch=nl %start
+         %if action=useranal %then printstring("Line:".wk) %and newline
+         s = wk
+         %return
+      %finish
+      wk = wk.tostring(ch)
+   %repeat
+%end;                                    ! rstrg
+
+%end;                                    ! CUSTFILEANAL
+
+!------------------------------- CUSTOMISE -------------------------------------
+
+%external %routine customise %alias "S#CUSTOMISE"
+%integer j, flag
+%string (255) file, csupvr
+%integer %array iii(0:1)
+   csupvr = "\\RUBBISH"
+   flag = dsfi(ssown_ssowner, ssown_ssownfsys, 44 {course supervisor}, 0, csupvr, iii)
+   %if csupvr#"" %start
+      ! Process has the Course Supervisor field set.
+
+      file = "\\RUBBISH"
+      j = dsfi(csupvr, -1, 2 {controlfile}, 0, file, iii)
+
+      %if file#"" %then custfileanal(1, file)
+   %finish
+%end;                                    ! CUSTOMISE
+
+!     The following procedures could be farmed out to BASEDIR or elsewhere, but
+!     they're pretty small...
+
+%external %routine %spec getstring %alias "S#GETSTRING"(%string (255) vector, %string %name value)
+
+
+%external %routine checkcontrolfile %alias "EMAS#CHECKCONTROLFILE"
+%string (255) file
+   getstring("Controlfile;file,read;?;
+Give the filename whose contents are to checked as a customising control-file", file)
+   custfileanal(0, file)
+%end;                                    ! Check control file
+
+%routine controlinner(%string (6) user, %integer set, %string (255) file, %integer %name flag)
+%string (255) mess
+%integer i
+%integer %array cca(0:12)
+   %if set=1 %and length(file)>18 %start
+      printstring("Fails - length of user+filename may not exceed 18 chars".snl)
+      flag = 1
+      %return
+   %finish
+   flag = dsfi(user, -1, 2, set, file, cca)
+   %if flag#0 %start
+      i = dflag(flag, mess)
+      printstring("Fails - ".mess.snl)
+   %finish %else printstring(snl."Controlfile for ".user." is ".file.snl.snl)
+%end {controlinner}
+
+%external %routine setcontrolfile %alias "EMAS#SETCONTROLFILE"
+%string (255) user, file
+%integer flag
+   getstring("User;user;(".ssown_ssowner.");The supervising usernumber", user)
+   getstring("Controlfile;file,exist,ornull;();", file)
+   controlinner(user, 1, file, flag)
+%end {setcontrolfile}
+
+%external %routine setcfile %alias "EMAS#SETCFILE"
+%integer mode, flag
+%string (255) file, user
+   getstring( %c
+      "Controlfile;file,exist,ornull,orequals;();The supervisor's controlfile (or =)", file)
+   %if file="=" %then mode = 0 %and file = "" %else mode = 1
+   getstring("User;user;".ssown_ssowner.";The supervising usernumber", user)
+   controlinner(user, mode, file, flag)
+   %if flag=0 %and file#"" %then printstring("Checking contents:".snl) %and custfileanal(0, file)
+%end {setcfile}
+
+%external %routine controlfile %alias "EMAS#CONTROLFILE"
+%string (6) user
+%integer flag
+   getstring("User;user;".ssown_ssowner.";The supervising usernumber", user)
+   controlinner(user, 0, "", flag)
+%end {controlfile}
+
+%end %of %file

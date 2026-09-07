@@ -1,0 +1,1644 @@
+%include "ercc07:ctoptnass"
+%recordformat parmf(%integer dest,srce,(%integer p1,p2,p3,p4,p5,p6 %c
+                                         %or %string(23)text))
+!
+%if multiocp=yes %start
+  %externalroutinespec reservelog
+  %externalroutinespec releaselog
+%finish
+%externalroutinespec dumptable(%integer no,ad,len)
+%externalroutinespec etoi(%integer ad,len)
+%externalstringfnspec htos(%integer n,p)
+%externalroutinespec move(%integer len,from,to)
+%externalroutinespec opmess(%string(63)s)
+%externalroutinespec pkmonrec(%string(23)text,%record(parmf)%name p)
+%externalroutinespec pon(%record(parmf)%name p)
+%if va mode=yes %start;   ! supervisor
+  %externalroutinespec dpon(%record(parmf)%name p,%integer delay)
+%finishelsestart;   ! chopsupe
+  %routine dpon(%record(parmf)%name p,%integer flag)
+  pon(p)
+  %end
+%finish
+%externalroutinespec prhex(%integer n)
+%externalintegerfnspec realise(%integer vad)
+%externallongintegerspec kmon
+!
+%externalintegerfnspec rtv(%integer realad)
+%externalintegerfn softtrans(%integer virtad,segtbase)
+!***********************************************************************
+!*    translates virtad by software to a realad using segtbase as cr(1)*
+!*    result=0 if failure else result = a real address                 *
+!***********************************************************************
+%integer seg,page,rad1,rad2,vad1,vad2,ste,pte,highseg,highpage,pfra
+      seg=virtad>>sshift
+      page=virtad>>12&(segepsize-1)
+!
+! step 1 remove limit from seg base and check it
+!
+      %if xa=yes %start
+         highseg=(segtbase&127+1)*16-1
+         segtbase=segtbase&x'7ffff000'
+      %else
+         highseg=(segtbase>>24+1)*16-1
+         segtbase=segtbase&x'ffffc0'
+      %finish
+      rad1=segtbase+4*seg;              ! real address of seg table entry
+      %result=0 %if seg>highseg
+!
+! step 2 extract seg table entry and check it. compute pte real address
+!
+      vad1=rtv(rad1)
+      ste=integer(vad1)
+      %if xa=yes %start
+         %result=0 %if ste&x'20'#0;     ! test invalid bit
+         highpage=(ste&15+1)*16-1
+         rad2=ste&x'7fffffc0'
+      %else
+         %result=0 %if ste&x'1'#0;      ! test invalid bit
+         highpage=ste>>28
+         %if xa=amdahl %then highpage=(highpage+1)*16-1
+         rad2=ste&x'00fffff8'
+      %finish
+!
+! step 3 get page table entry and check it
+!
+      %result=0 %if page>highpage
+      rad2=rad2+ptesize*page
+      vad2=rtv(rad2)
+      %if ptesize=2 %start
+         pte=shortinteger(vad2)
+         pfra=(pte&x'fff0')<<8
+         %result=0 %if pte&x'8'#0
+      %else
+         pte=integer(vad2)
+         pfra=pte&x'7ffff000'
+         %result=0 %if pte&x'400'#0
+      %finish
+      vad1=rtv(-1);                     ! clear rtv tables
+      %result=pfra+virtad&x'fff'
+%end;      ! softtrans
+!***********************************************************************
+!
+!                          IBM/370 TAPE HANDLER
+!
+!***********************************************************************
+!
+%externalroutine tape(%record(parmf)%name p)
+!
+%constinteger top cmd=28;                    { cmd fn
+%constbyteintegerarray cmds(0:top cmd)= %c
+x'02',                                {  0 RF read sequence starts
+x'0c',                                {  1 RB read reverse sequence starts
+x'02',                                {  2 RF retry sequence both
+x'0c',                                {  3 RB    ditto
+x'37',                                {  4 FSB    ditto
+x'0c',                                {  5 RB    ditto
+x'02',                                {  6 RF    ditto
+x'27',                                {  7 BSB    ditto
+x'02',                                {  8 RF    ditto
+x'0c',                                { 9 RB    ditto
+x'01',                                { 10 W write
+x'1f',                                { 11 WTM write tape mark
+x'27',                                { 12 BSB write(tm) retry sequence
+x'17',                                { 13 ERG    ditto
+x'37',                                { 14 FSB user skip block fore
+x'27',                                { 15 BSB    ditto aft
+x'3f',                                { 16 FSF user skip TM fore
+x'2f',                                { 17 BSF    ditto aft
+x'07',                                { 18 REW user rewind
+x'17',                                { 19 ERG user erase
+x'37',                                { 20 FSB internal position skip
+x'27',                                { 21 BSB    ditto
+x'37',                                { 22 FSB internal TM look-ahead skip
+x'0f',                                { 23 RUN unload
+x'04',                                { 24 SENSE
+x'cb',                                { 25 MS2 800
+x'c3',                                { 26 MS2 1600
+x'd3',                                 { 27 MS2 6250
+x'03'                                  { 28 noop for testing online status
+!
+%constinteger last read cmd=9;  ! just that
+%constinteger last retry cmd=11
+%constintegerarray setmode(2:8)=25,26,0(4),27
+%constinteger private=top cmd+1
+%constinteger forward mask=x'145';  ! read cmds that are forward
+%constinteger reverse mask=x'22a';  ! and reverse
+!
+%constinteger max xfer=x'ffff';  ! 64k
+%constbyteinteger sli=x'20',sd=x'10',cd=x'80',cc=x'40'
+!
+%constlonginteger long1=x'0000000000000001'
+!
+%constinteger ok=0, notok=-1
+!
+%constinteger manual=1,loading=2,loaded=3,claimed=4,sensing=5,unloading=6
+%conststring(11)%array states(0:6)= %c
+" na ",
+" manual ",
+" loading ",
+" loaded ",
+" claimed ",
+" unloading ",
+" sensing "
+! drive states.
+!
+%constbyteinteger chee=1, dvee=2;  ! channel end expected, device end expected
+!
+%constinteger nrzi=2,pe=3,gcr=8;  ! historical
+!*
+%constinteger ignshort=1,ignlong=2
+!
+%constinteger me=x'310000'
+!
+%constinteger controller=x'300000';  ! slow device driver
+%constinteger alloc=11, dealloc=5, exec=12
+!
+%constinteger on=1, off=0
+!
+%constinteger reject=2,bad params=1,not claimed=2,sno not found=4,busy=8
+!
+!------------------------------ formats ------------------------------
+!
+%recordformat pf(%integer dest,srce,p1,p2,p3,p4,p5,p6)
+!
+%recordformat shortpf(%integer dest,srce,p1,p2,p3,p4)
+!
+%recordformat clf(%integer dest,srce,ident, (%shortinteger h1,perm,
+  %string(7) dsn %or %integer reply,sno,%byteinteger d1,d2,d3,devid),
+  %string(3) mnem,%byteinteger d4,d5,d6,mode)
+!
+%recordformat reqf(%integer addr,length,stba,
+  %byteinteger state,cmd,final cmd,
+  (%byteinteger target pos %or %byteinteger tm),
+  %integer ccwflags,ignsl,skip tot,
+  (%integer count %or %integer private attn),
+  %integer retries,retry limit,%integer count1);    ! 44 bytes
+!
+%if ccwformat=0 %start;   ! 24 bit addressing
+  %recordformat ccwf((%byteinteger command %or %integer address),
+    %byteinteger flags,spare,%shortinteger length)
+  ! assigning address before command does it
+%finishelsestart
+  %recordformat ccwf(%byteinteger command,flags,%shortinteger length,
+    %integer address)
+%finish
+%recordformat tf(%integer link,%string(3) mnem,%integer lab1,lab2,
+  %string(7)dsn,
+  %record(reqf)req,%record(shortpf)rep,
+  %byteinteger s0,s1,s2,s3,s4,s5,s6,s7,
+  %byteinteger s8,s9,s10,s11,s12,s13,s14,ustat,prop1,prop2,prop3,
+  state,mode,load state,overmode,save state,
+  %integer sno,csw1,csw2,
+  %record(ccwf)%array ccws(1:17),
+  %integer faults,ops,routes tried)
+%constinteger tfsize=276
+!
+!
+%include "ercc07:ibmsup_dtform1s"
+!------------------------- external specs ---------------------------
+!
+!
+!=====================================================================
+!
+%owninteger firsttp=0, volums=0, initialised=0
+%owninteger read retries=15,write retries=15
+! write retries are limited by the max interblock gap=300 inches.
+! 6 assumes a max block size of @64k at 1600 bpi(ie 40 inches).
+! it really should be a function of the written length
+%owninteger rlevel=0
+! reporting level:
+!  2**0 - report parm records in
+!  2**1 - report parm records out
+!  2**2 - dump table after chain fired
+%ownintegername lastlink
+%ownrecord(reqf) timely req
+%ownrecord(pf) tick please
+%record(dtform)%name d
+%record(tf)%name t
+%record(reqf)%name req
+%record(shortpf)%name rep
+%record(pf)pp
+%integername prevlink
+%integer i,j,ndecks,mode,act,sno,tmon
+%string(4) m
+%switch actsw(1:13)
+!
+%routinespec fire chain
+%routinespec terminate
+%routinespec tell volums(%integer load type)
+!
+%routine printdiags(%string(255) s)
+newline
+printstring("tape: protem diags: ".s."
+device table:")
+dumptable(0,addr(d),256)
+printstring("tape record:")
+dumptable(0,addr(t),tfsize)
+%end
+!
+%routine mon(%integer mode,%record(pf)%name p)
+%conststring(4)%array modes(1:3)= %c
+  "in","out","in??"
+pkmonrec("
+tape(".modes(mode)."): ",p)
+%end;      ! routine mon
+!
+!
+%routine mypon(%record(pf)%name p,%integer delay)
+%if tmon#0 %or rlevel&2#0 %then mon(2,p)
+%if delay=0 %then pon(p) %else dpon(p,delay)
+%end;      ! routine mypon
+!
+!
+%routine report(%string(255) mess)
+!***********************************************************************
+! reports abnormal conditions to log
+!***********************************************************************
+%constbyteintegerarray hx(0:15)=  %c
+'0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F'
+!
+%routine pbyte(%byteinteger n)
+printsymbol(hx(n>>4))
+printsymbol(hx(n&x'f'))
+%end;     ! routine pbyte
+!
+%integer i,j,size
+t_faults=t_faults+1
+reservelog %if multiocp=yes
+printstring("
+tape error// abnormal termination - ".mess."
+deck ".t_mnem)
+printstring(" faults (deck/req) ")
+prhex((t_faults<<16)!req_retries)
+printstring(" req id ")
+prhex(rep_p1)
+space
+printstring(t_dsn) %unless 3<=t_load state<=4
+! it might be junk in that case.
+%if req_cmd<10 %start
+  mess=" read"
+%finishelseif req_cmd<12 %start
+  mess=" write"
+%finishelse mess=" other"
+printstring(mess)
+printstring("
+ust  s0  s1  s2  s3  s4  s5  s6  s7  s8  s9 s10 s11 s12 s13 s14
+")
+space
+pbyte(t_ustat)
+j = addr(t_s0)
+%for i=0,1,14 %cycle
+  spaces(2)
+  pbyte(byteinteger(j+i))
+%repeat
+size=tfsize
+dump table(61,addr(t),size)
+releaselog %if multiocp=yes
+%end;       ! routine report
+!
+!
+%integerfn search tps(%integer swind,imatch,%string(6) smatch)
+!**********************************************************************
+! called to scan t chain matching imatch or smatch returning ok
+! or notok,leaving t mapped to matching record.
+! or to scan entire chain without matching, when result is irrelevant
+! and t is left mapped to last record.
+! swind=1 - smatch mnemonic
+!      =2 - smatch dsn
+!      =3 - imatch sno
+!      =4 - scan and tell volums
+!      =5 - scan and display
+!**********************************************************************
+%string(7) dsn
+%switch sw(1:5)
+%result=notok %if firsttp=0; ! chain empty
+t==record(firsttp)
+prevlink==firsttp
+!
+%cycle
+  ->sw(swind)
+  !
+sw(1):;   ! match mnem
+  %if t_mnem=smatch %thenresult=ok
+  ->next
+  !
+sw(2):;   ! match dsn
+  %if t_dsn=smatch %thenresult=ok
+  ->next
+  !
+sw(3):;   ! match sno
+  %if t_sno=imatch %thenresult=ok
+  ->next
+  !
+sw(4):;    ! tell volums
+%if loaded<=t_state<=claimed %then tell volums(1)
+! could it be claimed if volums only just here?
+->next
+!
+sw(5):;    ! tell oper
+%if loaded<=t_state<=sensing %then dsn=t_dsn %else dsn=""
+opmess(htos(t_sno,4)." ".t_mnem.states(t_state).dsn)
+->next
+!
+next:
+  %result=notok %if t_link=0
+  prevlink==t_link
+  t==record(t_link)
+%repeat
+%end;       ! fn search tps
+!*
+!*
+%routine tell volums(%integer load type)
+!***********************************************************************
+! tells volums about load or unload of drive.
+! load type=0(not loaded), 1(loaded)
+! volums also needs to know loaded with label(1) or no label(2)
+!***********************************************************************
+%recordformat vf(%integer dest,srce,type,load,%string(4)mnem, %c
+  %string(7) dsn,%byteinteger d1,mode,perm)
+%record(vf) v
+%if volums=0 %thenreturn;  ! volums not there
+%if load type=1 %and t_dsn="NOLABEL" %then load type=2
+v=0
+v_dest=volums
+v_srce=me
+v_type=4
+v_load=load type
+v_dsn=t_dsn %unless load type=0
+v_mnem=t_mnem
+v_perm=2-((t_prop1>>1)&1)
+v_mode=t_mode
+mypon(v,0)
+%end;      ! routine tell volums
+!
+!
+%routine load
+!***********************************************************************
+! entered to get props and, if appropriate, load each deck successfully
+! allocated at start-up, and thereafter for any deck giving an auto
+! attention, and
+! to unload or release/rewind a deck when user releases it or at
+! disaster.
+!***********************************************************************
+%owninteger vol1=x'e5d6d3f1'
+%integer i,ch
+%string(7) dsn
+%string(40) s
+%switch ldsw(0:9)
+!
+->ldsw(t_load state)
+!
+ldsw(0):;   ! do sense for properties
+t_load state=1
+t_state=loading
+resense:
+rep=0
+req=0
+! req_stba=0
+req_addr=addr(t_s0)
+req_addr=realise(req_addr) %if va mode=yes
+req_length=8
+req_ccwflags=sli
+req_cmd=24
+fire chain
+%return
+!
+ldsw(1):;   ! reply from sense
+%if rep_p2#0 %start
+    %if rep_p2=15 %or t_s0&x'40'#0 %start;  ! non-existent or not ready
+         t_state=manual
+         ->exit
+    %finish
+  ->load fail
+%finish
+! rep_p2=0
+req=0
+req_cmd=18
+req_addr=0
+req_length=1
+t_load state=2
+fire chain
+%return
+!
+ldsw(2):;    ! reply from initial rewind
+%if rep_p2#0 %start
+  ->load fail
+%finish
+! so its loaded.  lets try to read something like a label.
+! rep_p2=0
+req=0
+! req_stba=0
+req_addr=addr(t_lab1)
+req_addr=realise(req_addr) %if va mode=yes
+req_length=16
+req_cmd=0;    ! read forward
+req_final cmd=8;  ! standard
+req_target pos=1
+req_ignsl=ignlong;   ! surely will be
+req_retry limit=4
+! this acually only gives us 2 goes at it, since reverse reads long
+! are inevitably failures (see ok(1) in 'terminate')
+t_load state=3
+fire chain
+%return
+!
+ldsw(3):;    ! reply from label read
+%if rep_p2#0 %start;  ! failed
+  ch=0
+  %if t_s1&1#0 %start;                  ! wrong mode
+    ! undefined mode...
+    ! the only thing that can be done to this tape is a write at bt,
+    ! after a mode override in 'claim volume'.
+    t_mode=0
+    opmess(t_mnem." undefined mode")
+  %finish %else %start
+    %if t_s6&x'10'#0 %then t_mode=gcr %else t_mode=pe
+  %finish
+  ! so some error other than mode, maybe noise. retain it as 'NOLABEL'.
+%finishelsestart;      ! read succeeded.
+  t_load state=4
+  ->resense;         ! to get mode
+ldsw(4):
+  ch=0
+  %if t_s6&x'10'#0 %then t_mode=gcr %else t_mode=pe
+  ! ibm labels are 80 bytes starting 'vol1' in ebcdic.
+  ! icl may be 86,96 or greater if ipl blocks. each begins with integer
+  ! block count and shortinteger byte length.
+  %if t_lab1=0 %then move(10,addr(t_lab1)+6,addr(t_lab1))
+  ! ie it was a block count, so move data field down.
+  %if t_lab1=vol1 %start;   ! format ok
+    move(6,addr(t_lab1)+4,addr(dsn)+1)
+    length(dsn)=6
+    etoi(addr(dsn)+1,6)
+    ! now check for valid chars in dsn
+    %for i=1,1,6 %cycle
+      ch=charno(dsn,i)
+      %unless '0'<=ch<='9' %or 'A'<=ch<='Z' %or ch=' ' %start
+        opmess(t_mnem." faulty dsn - ".dsn)
+        ch=0
+        %exit
+      %finish
+    %repeat
+  %finish
+%finish
+! so undefined mode, or read failed other than identifier,
+! or an invalid format read, or an invalid dsn read,
+! all get here with ch=0 and are all treated as NOLABEL.
+! get here with ch#0 only if good dsn read.
+%if ch#0 %then t_dsn=dsn %else t_dsn="NOLABEL"
+t_prop1=t_s1
+t_prop2=t_s6
+rep=0
+req_cmd=18
+t_load state=5
+fire chain
+%return
+!
+ldsw(5):;     ! final rewind
+%if rep_p2#0 %then ->load fail
+!
+t_state=loaded
+tell volums(1)
+s=t_mnem." loaded ".t_dsn
+%if t_mode=gcr %then s=s." 6250" %elseif t_mode=pe %then s=s." 1600"
+opmess(s)
+!
+exit:
+t_load state=0
+%return
+!
+load fail:
+opmess(t_mnem." load failed")
+t_load state=6
+! and drop thru' to .......
+!
+unload:
+ldsw(6):ldsw(8):;  ! entry point for unload, release/rewind
+%if loaded<=t_state<=claimed %then tell volums(0)
+t_dsn="";  ! just to keep 'claim volume' tidy
+rep=0
+req=0
+%if t_load state=6 %then req_cmd=23 %else req_cmd=18
+!                        disconnect         rewind
+t_load state=t_load state+1
+t_state=unloading
+fire chain
+%return
+!
+ldsw(7):;    ! reply from unload
+%if rep_p2#0 %and t_s0&x'40'=0 %thenc
+       s=" unload fails. press reset/unload" %else s=" unloaded"
+! it might already be unloaded if private chain user has done it.
+opmess(t_mnem.s)
+t_state=manual
+->exit
+!
+ldsw(9):;       ! reply from rlsr/rwnd
+%if rep_p2#0 %start
+  opmess(t_mnem." rlse/rwnd fails")
+  t_load state=6
+  ->unload
+%finish
+! now re-read label. we're at bt and rep_p2=0 so go straight to read
+t_load state=2
+t_state=loading
+->ldsw(2)
+!
+!
+%end;     ! routine load
+!*
+!*
+%routine claim volume(%record(clf)%name p)
+!**********************************************************************
+! allocates volume to requesting user.
+! p_dsn is required volume, or p_mnem if p_dsn="NOLABEL".
+! p_perm is required perm, 1=read, 2=rite
+! p_mode is required mode:
+!   mode&b'1011'=8(6250), 3(1600) or 2(800) overrides mode established in label read,
+!     if no override mode specified and no mode established at label
+!     read (some other mode recorded or blank tape), then reject.
+!   a mode of zero thus uses current tape mode.
+!**********************************************************************
+%integer overmode,i
+%if p_dsn="NOLABEL" %then i=search tps(1,0,p_mnem) %c
+                    %else i=search tps(2,0,p_dsn)
+overmode=p_mode&b'1011'
+%if i=ok %and t_state=sensing %start
+  ! claim has arrived between timely sense and reply. just send it round
+  mypon(p,0)
+  %return
+%finish
+%if i=notok %or t_state#loaded %start
+  ! if search fails, then dsn not found, or mnemonic not present
+  ! if search succeeds, t mapped. if state#loaded then tape already
+  ! claimed. this latter check is done by volums before coming here,
+  ! but we do it here for chopsupe (no volums around yet).
+  p_reply=1
+%finishelseif t_prop1&2#0 %and p_perm=2 %start
+  ! n0 ring fitted and write requested
+  p_reply=2
+%finishelseif overmode=1 %or overmode>8 %or (overmode=0 %and t_mode=0) %start
+  ! invalid override mode, or
+  ! no override mode and none established at label read
+  p_reply=3
+%finishelsestart; ! all ok
+  t_state=claimed
+  t_overmode=overmode
+  t_sno=(t_sno+x'100')&x'ffff'
+  ! bottom byte is sno provided by controller. top byte is cyclic 0-255.
+  ! so if we lose a deck and do not get the expected release from user
+  ! we can reallocate the deck without fear of the outstanding sno coming.
+  ! but caution*** the sno (stream actually) provided by controller is not
+  ! guaranteed to be only a byte. if there are enough devices it could
+  ! go over.
+  p_sno=me!t_sno
+  p_mode=t_mode
+  p_reply=ok
+%finish
+p_dest=p_srce
+p_srce=me!12
+mypon(p,0)
+%end;       ! routine claim volume
+!
+!
+%routine terminate
+!**********************************************************************
+! entered on chain termination.
+!**********************************************************************
+%constinteger error classes=5
+%constinteger usms=14
+%conststring(24)%array usmess(0:usms)= %c
+   "Status modifier,",
+   "Control unit end,",   { masked out below so never reported }
+   "Busy,",
+   "",        {channel end}
+   "",        {device end}
+   "Unit check,",
+   "",        {unit exception}
+   "PCI,",
+   "",        {wrong length}
+   "Program check,",
+   "Protection check,",
+   "Channel data check,",
+   "Channel control check,",
+   "Interface control check,",
+   "Chaining check,"
+%string(255)mess
+%integer status,after,error class,skip,rembc,flag,i,reload
+%record(ccwf)%name ccw
+%switch ok(0:top cmd),us(1:error classes),ls,tm(0:top cmd)
+!
+%integerfn diagnose
+! result is error class deduced from sense bits after a unit check has happened.
+! error classes are:-
+!     1. offline
+!     2. severe error which precludes continuation since position may be lost,
+!        or it should never happen so we have a bug (eg mode errors)
+!     3. reversed into BT
+!     4. not retriable, but safe to continue
+!     5. retriable
+!
+%if t_s0&b'01000000'#0 %thenresult=1;   ! intervention reqd, ie offline
+%if t_s0&b'10110010'#0 %thenresult=2;   ! command reject, bus out,
+                                        ! equipment check, word count zero(?)
+%if t_s0&b'00000100'#0 %thenresult=5;   ! overrun
+! thats all in s0 except data-check which is dealt with below
+%if t_s1&b'00001000'#0 %thenresult=3;   ! load point, ie rev BT
+%if t_s1&b'00000001'#0 %thenresult=2;   ! mode. a bug unless _load state=3
+%if t_s5&b'00010000'#0 %thenresult=2;   ! write mode or ARA failure
+! all the other bits we are interested in also set either equip check(above) or
+! data check
+%if t_s0&b'00001000'#0 %start;          ! data check
+  %if t_s5&b'00001000'#0 %thenresult=2;   ! start read check. maybe lost position
+  %result=5
+%finish
+%result=2;     ! catch all else
+%end;        ! fn diagnose
+!
+!********* terminate starts here **********
+!
+reload=0
+%if t_csw2=-1 %start;      ! time-out
+  report("time-out")
+  rep_p2=3
+  ->reply
+%finish
+status=t_csw2>>16&x'5fff';    ! attention not used, and we're not interested
+                              ! control unit end
+t_ustat=status>>8&x'ff';      ! for the record
+%if status&x'52bf'#0 %start
+  ! all but, attention,CUE,CE,DE,UE,IL(length)
+  %if p_p4=0 %start;        ! devio has sensed ok
+    move(15,d_sensedatad,addr(t_s0))
+  %finishelsestart;   ! sense failed
+    ! is it special case of disabled controller
+    %if xa#yes %and status&15=15 %and d_cuu>>8#4 %and t_load state=1 %start
+      ! all these bits set for something on channel 8 or 5 and doing initial
+      ! sense for properties. assume its channel disabled and try the
+      ! alternate channel unless tried already
+      %if t_routes tried=0 %start
+        t_routes tried=1
+        i=d_cuu>>8;  ! current channel
+        %if i=8 %then i=5 %else i=8
+        j=d_cuu
+        i=(i<<8)!(d_cuu&255)
+        p=0
+        p_dest=controller!15
+        p_srce=me
+        p_p1=integer(addr(t_mnem))&x'ffffff'
+        p_p2=i
+        p_p3=0
+        mypon(p,0);    ! add new route as alternate
+        p_p2=j
+        p_p3=1
+        mypon(p,0);   ! remove primary making the alternate the primary
+        opmess(t_mnem." channel ".htos(j>>8,1)." disabled?")
+        opmess("switching to alternate channel.")
+        reload=1
+        ->reply;     ! and try load again
+      %finishelsestart;   ! tried both
+        opmess(t_mnem." both channels disabled?")
+      %finish
+    %finishelse pkmonrec("tape sense fails:",p)
+  %finish
+  %if status=x'000f' %start;  ! simulation by devio
+    report("CU inoperational")
+    rep_p2=15
+    ->reply
+  %finish
+  %if req_cmd=23 %and status=x'600' %then ->ok(23)
+  ! ie unload, which gives DE+UC. How ridiculous
+  flag=status&x'52bf'
+  mess=""
+  %for i=14,-1,0 %cycle
+    %if (flag>>i)&1#0 %then mess=mess.usmess(14-i)
+  %repeat
+  length(mess)=length(mess)-1
+  report(mess) %unless t_load state=1 %and status=x'200' %and t_s0=x'40'
+  ! ie unless off line at initial sense at IPL
+  !
+  %if status&x'50bf'#0 %start;  ! all above except Unit Check
+    rep_p2=3
+    ->reply
+  %finish
+%finish
+!
+! so get here CE,DE,UC,UE,IL
+%if status&x'200'#0 %start
+  ! UC. this can occur with DE or CE+DE or by itself. It always means a failure
+  ! and there is nothing else to come
+  error class=diagnose
+  ->us(error class)
+%finish
+!
+! here with CE,DE,UE,IL
+%if status&x'800'#0 %start;   ! CE
+  %if req_state=chee %start;  ! expected
+    req_state=dvee
+    %returnif status&x'400'=0;  ! which is still to come
+  %finishelsestart;  ! unexpected
+    report("unexpected channel end")
+    %return
+  %finish
+%finish
+%if status&x'400'#0 %start;    ! DE
+  %if req_state=dvee %start;   ! expected
+    ! so successful, qualifified by TM or length
+    ! now compute remanent byte count. _csw1 point at last ccw used, and
+    ! _csw2 gives how much of that outstanding. all the subsequent ccws
+    ! are also outstanding
+    i=t_csw1&255
+    %if i>0 %start
+      ccw==t_ccws(i)
+      rembc=t_csw2&max xfer
+      %while ccw_flags&cd#0 %cycle
+        i=i+1
+        ccw==t_ccws(i)
+        rembc=rembc+ccw_length
+      %repeat
+    %finishelse rembc=0;   ! and we won't require it anyway
+    %if status&x'100'#0 %start; ! UE means tape mark
+      ->tm(req_cmd)
+    %finishelseif status&x'40'#0 %start;  ! IL
+      ->ls(req_cmd)
+    %finishelse ->ok(req_cmd)
+  %finishelseif req_state=chee %start
+    ! it seems that the first time a deck (unloaded at IPL) comes on-line
+    ! thereafter, it gives DE via both controllers if both have already been
+    ! addressed. The second one arrives here while we are in the load sequence.
+    ! if the other controller is currently busy, the DE can be delayed and cause
+    ! confusion about the termination of the load sequence chains, so
+    ! the first sense in the load sequence is dponned with a 2sec delay to let
+    ! the other controller clear from its worst case, ie 64 K transfer.
+    ! I don't think this can be confused with the more common case which follows
+    %if t_load state=1 %start
+      report("duplicate DE ?")
+      %return
+    %finish
+    ! DE when CE expected. this means the deck has gone off-line and back on
+    ! since it was last addressed. It may be a new tape.
+    tell volums(0) %if loaded<=t_state<=sensing
+    opmess(t_mnem." unloaded")
+    t_dsn=""
+    rep_p2=3;  ! for the user, if any
+    reload=1; ! to initiate it at reply below
+    ->reply
+  %finishelsestart;   ! req_state=0
+    ! DE when nothing expected. this is normal loadup of deck. should be only
+    ! in state manual
+    %if t_state=manual %start
+      load
+      %return
+    %finish
+    ! otherwise drop out to spurious
+  %finish
+%finish
+!
+! get here if nothing sensible set
+report("spurious termination")
+%return
+!
+!
+reply:
+%if req_cmd=private %start
+  rep_p3=t_csw1
+  rep_p4=t_csw2
+%finish
+! notoinal p5 and p6 always go back with s0-s7
+req_state=0
+mypon(record(addr(rep)),0) %if rep_dest#0;  ! reply to user if not 'load'
+%if reload#0 %start
+  t_load state=0;  ! aborting loading or unloading
+  rep_dest=0;    ! if it was a user we want to go to 'load as well
+%finish
+load %if rep_dest=0
+%return
+!
+!
+!*********** ok *********** ok *********** ok *********** ok ***********
+!
+ok(0):ok(2):ok(6):ok(8):       ! forward reads
+ls(0):ls(2):ls(6):ls(8):
+after=1
+->readok
+!
+ok(1):ok(3):ok(5):ok(9):       ! reverse reads
+ls(1):ls(3):ls(5):ls(9):
+after=0
+!
+readok:
+! long/short only abterm. goes back to user with p2=1 and p4 long/short.
+! the latter distinguishing it from media error.
+!
+! are we on the right side of the block
+skip=req_target pos-after
+! target pos set in accept request.
+! so skip=1 means a forward skip required
+!        =0 means position correct
+!        =-1 means a reverse skip required
+rep_p2=0
+rep_p3=req_length
+%if status&x'40'#0 %start;               ! wrong length
+  %if rembc=0 %start;   ! it was long
+    %if skip#0 %start
+      ! it was read in a direction other than the original request. this
+      ! cant be counted a success since weve fetched the wrong end.
+      ! simulate a media error and continue with retries.
+      ->us(5)
+    %finish
+    ! so we read in the right direction. tell user it was long
+    rep_p4=2
+    ! _p3 is correct
+    %if req_ignsl&ignlong=0 %then rep_p2=1
+  %finishelsestart;   ! rembc>0, ie it was short
+    rep_p3=req_length-rembc
+    %if after=0 %and req_ccwflags&sd=0 %start
+      ! not readcheck and read in reverse. data is at top of buffer
+      rep_p3=-rep_p3;  ! indicate this to user
+    %finish
+    rep_p4=1;                             ! short
+    %if req_ignsl&ignshort=0 %then rep_p2=1
+  %finish
+%finish
+%if req_ccwflags&sd#0 %and rep_p2=0 %then rep_p4=req_retries
+! 'no data' set, so it was a readcheck. tell retries.
+%unless req_retries=0 %start
+  %if length(t_dsn)>7 %then length(t_dsn)=0
+  ! might be if were in load sequence of non-standard label
+  printstring(t_mnem." ".t_dsn." ".htos(req_retries,3)." read retry ok
+")
+%finish
+!
+! thats the reply all set up
+test final skip:
+! caution. we come here from us(4) also
+%if skip=0 %then ->reply
+!
+! so final skip required
+do final skip:
+! caution*** we come here from tm(1,2,14,15,22) also.
+%if skip>0 %then req_cmd=20 %else req_cmd=21
+fire chain
+%return
+!
+!------------------------------------------------------------------
+ok(4):ok(7):    ! skips embedded in read retry sequence
+ok(12):         ! in write retry
+req_cmd=req_cmd+1
+fire chain
+%return
+!
+!------------------------------------------------------------------
+ok(10):ok(11): ! write,write tm
+%unless req_retries=0 %start
+  rep_p4=req_retries
+  printstring(t_mnem." ".t_dsn." ".htos(req_retries,3)." write retry ok
+")
+%finish
+->reply
+!
+!------------------------------------------------------------------
+ok(13):;           ! erase for write and write tm retry
+! come here from tm(13) also
+req_cmd=req_final cmd;  ! set up in 'accept request'
+! everything else remains ok
+fire chain
+%return
+!
+!------------------------------------------------------------------
+!
+ok(14):ok(15):;     ! skip blocks, fore and aft
+test skip end:;     ! caution. also come here from skip tm fore and aft
+req_count=req_count+1
+%if req_count<req_skiptot %start;  ! not finished
+  %if req_cmd=16 %and req_tm#0 %then req_cmd=22;   ! tm look-ahead
+  fire chain;     ! the same one again
+  %return
+%finish
+! so finished
+%if req_cmd=16 %and req_tm=0 %then req_tm=1;   ! implied
+%if req_cmd<16 %then rep_p3=req_count %else rep_p3=req_count*req_tm
+!                      blocks                 tms (count1 must be =0)
+->reply
+!
+!------------------------------------------------------------------
+!
+ok(16):ok(17):;     ! skip tms, fore and aft
+%if req_tm=0 %then ->test skip end
+! special for restores. implies 1 tm/logical file and no tm look-ahead
+req_count1=req_count1+1
+%if req_count1=req_tm %start;   ! one files worth
+  req_count1=0
+  ->test skip end
+%finish
+fire chain
+%return
+!
+!------------------------------------------------------------------
+!
+ok(18):;     ! rewind
+->reply
+!
+!------------------------------------------------------------------
+!
+ok(19):;     ! erase
+->reply
+!
+!------------------------------------------------------------------
+!
+ok(20):ok(21):;   ! final position skip. reply all set up
+->reply
+!
+!------------------------------------------------------------------
+!
+ok(22):;      ! test for tm. success means tm not seen on forward skip
+req_cmd=16;  ! replace original chain which was skip fore to tm
+fire chain
+%return
+!
+!------------------------------------------------------------------
+ok(23):;        ! unload
+->reply
+!
+!------------------------------------------------------------------
+!
+ok(24):;         ! sense
+->reply;  ! to load
+!
+!------------------------------------------------------------------
+ok(25):ok(26):ok(27):;      ! setmode and write at BT
+t_mode=t_overmode
+t_overmode=0
+->reply
+!
+!-------------------------------------------------------------------
+!
+ok(28):      ! noop
+! testing on line status
+t_state=t_save state
+req_state=0
+%return
+!
+!-----------------------------------------------------------------
+!
+!
+!*********** us *********** us *********** us *********** us ***********
+!
+us(1):;        ! offline
+%if loaded<=t_state<=sensing %then tell volums(0)
+t_dsn=""
+t_load state=0;   ! aborting loading or unloading
+opmess(t_mnem." unloaded") %unless t_state=loading
+%if t_state=claimed %start
+  t_state=manual
+  rep_p2=3
+  ->reply
+%finish
+t_state=manual
+req_state=0
+%return
+!
+!------------------------------------------------------------------
+!
+us(2):       ! cannot continue
+rep_p2=3;    ! disaster
+->reply
+!
+!------------------------------------------------------------------
+!
+us(3):;      ! reversed into bt. read rev or skip rev only
+%if req_cmd=1 %or req_cmd=15 %start
+  rep_p2=4
+  %if req_cmd=15 %then rep_p3=req_count;  ! number skipped before here
+%finishelsestart
+  printstring(t_mnem."***unexpected rev bt ***
+")
+  rep_p2=3
+%finish
+->reply
+!
+!------------------------------------------------------------------
+!
+us(4):;        ! straight back
+! caution***. come here from us(5) also
+rep_p2=1
+! now a final reposition may be required if it was a read
+%if req_cmd<=last read cmd %start
+  skip=req_target pos-((forward mask>>req_cmd)&1)
+  ->test final skip
+%finish
+->reply
+!
+!------------------------------------------------------------------
+!
+us(5):;       ! retriable
+! we do not expect to get class 5 errors om commands other than reads
+! write and write tm, for all of which retries are defined.
+!
+%if req_cmd<=last retry cmd %start;  ! all the ones we expect
+  req_retries=req_retries+1
+  %if req_retries>req_retry limit %start
+    %if length(t_dsn)>7 %then length(t_dsn)=0
+    ! might be for load of non-standard labelled
+    printstring(t_mnem." unrecovered error ".t_dsn."
+")
+    ->us(4)
+  %finish
+  ! ie, test for final skip if read, otherwise straight back
+  %if req_cmd<=last read cmd %start
+    %if req_cmd=req_final cmd %then req_cmd=req_cmd-7 %c
+                                  %else req_cmd=req_cmd+1
+    ! set back to start+1, else next in basic sequence
+  %finishelsestart;   ! write or write tm
+    req_cmd=12;     ! skip rev ready to erase written length
+  %finish
+  fire chain
+  %return
+%finish
+!
+! so we shouldn't be here.
+rep_p2=3
+printstring(t_mnem."*** unexpected recoverable error ***
+");   ! its 'reported' above
+->reply
+!
+!
+!*********** tm *********** tm *********** tm *********** tm ***********
+!
+tm(0):tm(1):;      ! read fore and aft
+%if req_retries=0 %start
+  ! just to make sure we are on the primary read of a sequence
+  %if req_cmd=0 %then skip=-1 %else skip=1
+  rep_p2=4
+  ->do final skip
+%finish
+! else drop thru' to......
+!
+!------------------------------------------------------------------
+!
+tm(2):tm(3):tm(4):tm(5):tm(6):tm(7):tm(8):tm(9):
+tm(12):tm(16):tm(17):tm(18):tm(23):tm(24):tm(25):tm(26):tm(27):tm(28):
+! read retries,read retry skips and setmodes
+! write retry reverse skip
+! skip tm fore and aft,rewind,unload,sense,nop
+report("unexpected tm")
+rep_p2=3
+->reply
+!
+!------------------------------------------------------------------
+!
+tm(10):tm(11):tm(19):;   ! must be et after write, write tm or erase
+! the write was otherwise ok.
+rep_p2=4
+->reply
+!
+!------------------------------------------------------------------
+! tm(12) at tm(2) above
+!------------------------------------------------------------------
+!
+tm(13):;          ! et on erase during write(tm) retry 'skiprev,erase'
+rep_p2=4;  ! this remains the reply if it finally succeeds
+->ok(13)
+!
+!------------------------------------------------------------------
+!
+tm(14):tm(15):;    ! skip fore and aft
+%if req_tm#0 %then->test skip end
+! ie exactly as success if tms to be treated as blocks
+%if req_cmd=14 %then skip=-1 %else skip=1
+rep_p2=4
+rep_p3=req_count
+->do final skip
+!
+!------------------------------------------------------------------
+!
+! tm(16,17,18) defined at tm(2) above
+!
+!------------------------------------------------------------------
+!
+! tm(19) defined at tm(10) above
+!
+!------------------------------------------------------------------
+!
+tm(20):tm(21):;    ! positioning skips can be TM
+->reply;           ! all set up
+!
+!------------------------------------------------------------------
+!
+tm(22):;        ! look-ahead for tm after skip tm fore. found one
+rep_p2=4
+rep_p3=req_count*req_tm
+! there is now a reverse skip to do
+skip=-1
+->do final skip
+!
+!------------------------------------------------------------------
+!
+! tm(23,24,25,26,27,28) defined at tm(2) above
+!
+!------------------------------------------------------------------
+!
+!*********** ls *********** ls *********** ls *********** ls ***********
+!
+! ls(0-3,5,6,8,9) defined at ok(0) above
+!
+!------------------------------------------------------------------
+!
+ls(*):
+report("spurious incorrect length")
+rep_p3=3;  ! for now treat this as disaster since it should never happen
+->reply;   ! and if it does there may be something fundamentally wrong.
+!
+!
+!
+%end;        ! routine terminate
+!
+!
+%integerfn accept request
+!**********************************************************************
+! checks user request and reformats it for use by 'fire chain'.
+! since we've got here with t and req mapped via the sno from the user
+! we know the deck is loaded and claimed.
+!**********************************************************************
+! defined requests (historically quaint) are:
+!   0=erase
+!   1=read
+!   2=write
+!   3=undef
+!   4=read check
+!   5=private
+!   6=read rev
+!   7=undef
+!   8=skip blocks
+!   9=skip tms
+!  10=write tm
+!  11-16=undef
+!  17=rewind
+%constinteger top req=17
+%constbyteintegerarray cmdi(0:top req)= %c
+19,0,10,255,0,private,1,255,14,16,11,255(6),18
+! these are the commands to effect the request.(see arrays cmds above).
+%constbyteintegerarray final cmdi(0:top req)= %c
+0,8,10,0,8,0,9,0,0,0,11,0(6),0
+! these are the final chains for those which can be retried
+!
+%constinteger readmask=x'52';  ! read,read rev,read check
+%constinteger writemask=x'405';! write,erase,writetm
+%constinteger xfermask=x'56';  ! all reads,write
+%constinteger skipmask=x'300'; ! skip block,skip tm
+!
+%integer type,type bit,ctrl
+!
+%integerfn copy control block(%integer vaddr,len,stl,stb,toaddr)
+!
+! vaddr is the virtual addr of the user control block. this is supposed
+! to be in a locked area (dlock), and stl,stb are supposed to contain
+! the st delivered by that dlock, ie a vm consisting solely of locked space.
+! we wish to copy the control block into the device record.
+! since the users lst is not locked we need to access the control block via
+! this stb.
+! if we validate the control block via the stb and it succeeds, then the
+! former must be in locked space, and we can proceed to copy it without fear
+! of a vs error. however it is possible that the stb itself is rubbish
+! so to check the existence of the st entry address which the control block
+! validate will go for, we first validate it as a public address. if
+! this succeeds then the ste all exists and in the same smac. we can
+! therefore go ahead with the control block validate without fear of a store
+! timeout.
+! the control block validate may fail either if its segment is outside the
+! supplied stb limit(either one or both rubbish), or if the control block is
+! not contained in the locked space defined by the stb.
+! none of this guarantees that we actually copy the users control block. all
+! the above checks could succeed on garbage addresses. however, we will not
+! fall over setting it up, and what happens after depends on what the device
+! controller makes of the supposed control block.
+!
+!     no validation just yet!
+!
+move(len,vaddr,toaddr)
+%result=0
+%end;      ! fn copy control block
+!
+! ********** accept request starts here **********
+req=0
+rep=0;  ! reply record
+rep_dest=p_srce
+rep_srce=p_dest
+rep_p1=p_p1;   ! ident
+!
+!
+req_stba=p_p6;  ! seg table base real addr. 0 if buff already real
+type=p_p2&x'ff'
+%if type>top req %thenresult=notok; ! not defined
+req_cmd=cmdi(type)
+%if req_cmd=255 %thenresult=notok;  ! ditto
+%if type=5 %start;  ! private chain
+  %if copy control block(p_p3,48,0,0,addr(t_ccws(1)))#0 %thenresult=notok
+  ! assume 6 consecutive ccws just now
+  req_private attn=p_p4;   ! attn dest
+  %result=ok
+%finish
+req_final cmd=final cmdi(type)
+req_retry limit=write retries
+! this is overwritten if it is a read, and irrelevant for others
+type bit=1<<type
+req_length=p_p2>>16
+%if req_length&x'8000'#0 %then req_length=req_length!x'ffff0000'
+%if req_length=0 %then req_length=p_p4
+ctrl=(p_p2>>8)&x'ff'
+%if type bit&writemask#0 %and t_prop1&2#0 %thenresult=notok; ! no ring
+%if type bit&xfermask#0 %start;  ! read,readrev,readcheck,write
+  req_addr=p_p3
+  %if type bit&readmask#0 %start;  ! read,readrev,readcheck
+    req_retry limit=read retries
+    %if type=4 %start;  ! readcheck
+      req_stba=0;  ! in case it isn't. fire chain needs it for 'sd' bit
+      req_addr=0
+      req_length=max xfer
+      req_ccwflags=sd;            ! skip data
+      req_ignsl=ignshort;        ! is this necessary?
+      req_target pos=1
+    %finishelsestart;   ! read or readrev
+      req_ignsl=ctrl>>2&3
+      %if type=1 %then req_target pos=1 %else req_target pos=0
+      !                read                   readrev
+    %finish
+  %finish %else req_ccwflags=sli;           ! must SLI on writes ?
+  %if ctrl&2#0 %then req_retry limit=0
+  ! no error recovery. note that write tm recovery is not affected.
+  %unless 0<req_length<=max xfer %thenresult=notok
+%finishelseif type bit&skipmask#0 %start;  ! skip block, skip tm
+  req_skiptot=req_length
+  %if req_skiptot=0 %thenresult=notok
+  %if req_skiptot<0 %then req_cmd=req_cmd+1 %andc
+                                       req_skiptot=-req_skiptot
+  %if type=8 %start;  ! skip block
+    req_tm=ctrl&1;   ! treat tm as block
+  %finishelsestart;   ! skip tms
+    ! ctrl is number of tms/logical file
+    ! zero implies 1/logical file with no tm lookahead
+    req_tm=ctrl
+  %finish
+%finish
+%result=ok
+%end;      ! fn accept req
+!
+!
+%routine fire chain
+!**********************************************************************
+! entered with request set up in t_req. specifically req_cmd is to
+! be fired.
+!**********************************************************************
+%owninteger dest=controller+exec,srce=me+5,p1,p2,p3,p4,p5,p6
+%record(ccwf)%name ccw
+%integer len,adr,j,dir,l,rad,start
+%constinteger xfermask=x'100076f'; ! reads, write and sense
+%if req_cmd=private %then ->fire;  ! ccws all set up
+%if req_cmd<=last retry cmd %then t_ops=t_ops+1
+j=1
+start=1
+ccw==t_ccws(1)
+ccw=0
+ccw_length=1;  ! all ccws must have non-zero count. this is overwritten
+                ! below where appropriate
+%if t_overmode#0 %start;   ! mode change required
+  %if req_cmd=10 %start;   ! only a write
+    ccw_flags=sli!cc
+    ccw_command=cmds(setmode(t_overmode))
+    j=2
+    start=2
+    ccw==t_ccws(2)
+    ccw=0
+    ccw_length=1
+  %finishelse t_overmode=0
+%finish
+ccw_flags=sli
+%if (1<<req_cmd)&xfermask#0 %start;    ! need an address and length
+  adr=req_addr
+  dir=1;     ! forward
+  %if (1<<req_cmd)&reverse mask#0 %start
+    adr=adr+req_length-1
+    dir=-1
+  %finish
+  %if req_stba=0 %start;  ! addr already real, or its 0 for readcheck
+    ccw_address=adr
+    ccw_length<-req_length
+  %finishelsestart
+    ! addr is virtual. need as many data-chained ccws as there are epages
+    ! req_stba is real addr of seg table base
+    ! the works is in store
+    len=req_length
+    %cycle
+      rad=softtrans(adr,req_stba);    ! real
+      %if rad=0 %then printdiags("v to r fails") %andreturn
+      l=rad&(pagesize-1)
+      %if dir>0 %then l=pagesize-l %else l=l+1
+      ! ie how many bytes forward to end of frame, or back to start
+      %if len<l %then l=len;    ! dont need that many
+      ccw_address=rad
+      ccw_length=l
+      len=len-l;   ! still to go
+      %if len=0 %thenexit
+      ! more to go
+      ccw_flags=cd;    ! chain data
+      j=j+1
+      ccw==t_ccws(j)
+      ccw=0
+      adr=adr+l*dir;   ! next frame up or down
+    %repeat
+  %finish;    ! virt addr
+  ccw_flags=req_ccwflags;    ! SD andor SLI into last or only
+%finish;     ! transfer
+t_ccws(start)_command=cmds(req_cmd)
+%if start>1 %then req_cmd=setmode(t_overmode)
+! to take us to an appropriate switch in 'terminate'
+fire:
+p1=addr(t_ccws(1))
+p2=t_sno&x'ff'
+req_state=chee
+%if t_load state=1 %then j=2 %else j=0
+mypon(record(addr(dest)),j)
+! ie the first sense in the load sequence gets a 2 sec delay to let any
+! duplicate DEs get through.
+%if rlevel&4#0 %then dumptable(61,addr(t),tfsize)
+%end;        ! routine fire chain
+!
+!
+!******************* tape starts here **********************************
+!
+%if kmon&(long1<<49)#0 %then tmon=1 %else tmon=0
+%if tmon#0 %or rlevel&1#0 %then mon(1,p)
+!
+act=p_dest&x'ffff'
+%if act>64 %then sno=act %and act=1
+%unless (initialised>0 %or act=4) %and 1<=act<=17 %then ->faulty p
+!
+->actsw(act)
+!
+reply:
+p_dest=p_srce
+p_srce=me!act
+mypon(p,0)
+%return
+!
+!
+actsw(7):;    ! user release
+sno=p_p2&x'ffff'
+actsw(1):;    ! user request, sno set from p_dest above.
+%if search tps(3,sno,"")=ok %start;  ! found sno and mapped t
+  req==t_req
+  rep==t_rep
+  %if t_state=claimed %start;  ! the deck remains accessible
+    %if req_state=0 %start;   ! idle
+      %if act=1 %start;    ! user request
+        %if accept request=ok %start;   ! checks ok
+          fire chain;   ! reply when term comes
+          %return
+        %finishelse p_p4=bad params
+      %finishelsestart;    ! user release, act 7
+        t_load state=6+p_p5<<1;   ! ie 6 for unload, 8 for rlse/rwnd
+        load
+        p_p4=ok
+      %finish
+    %finishelse p_p4=busy
+  %finishelseif t_state=sensing %start
+    ! request or release has come while we're sensing it. just send it round
+    ! with a seconds delay to let the sense termination in
+    mypon(p,1)
+    %return
+  %finishelse p_p4=not claimed
+%finishelse p_p4=sno not found
+%if p_p4=ok %then p_p2=ok %else p_p2=reject
+!   only successful rlse        all others
+->reply
+!
+!
+actsw(2):;     ! termination/attention from controller
+! p_p1=csw1, p_p2=csw2
+! p_p3=device entry address
+! p_p4=0 %if sense ok
+d==record(p_p3)
+t==record(d_ua ad)
+req==t_req
+rep==t_rep
+t_csw1=p_p1
+t_csw2=p_p2
+terminate
+%return
+!
+!
+actsw(3):;     ! controller allocate/deallocate replies
+! p_p1=0 success
+! p_p2=sno (alloc only)
+! p_p3=device entry address
+! p_p6=mnemonic(alloc only)
+d==record(p_p3)
+%if p_srce&x'ff'=alloc %start
+  %if p_p1#ok %thenreturn;  ! alloc failed. see comment at actsw(4)
+  ! so allocated ok. set up device record
+  i=p_p6!x'3000000';   ! string mnem
+  m=string(addr(i))
+  %if search tps(1,0,m)=ok %start
+    ! it shouldnt already be there
+    opmess(m." allocate twice?")
+    %return
+  %finish
+  lastlink=d_ua ad
+  t==record(d_ua ad)
+  t=0
+  req==t_req
+  rep==t_rep
+  lastlink==t_link;  ! this is now last
+  t_mnem=m
+  t_sno=p_p2
+  ! t_state=0, not available
+  ! t_load state=0, ready for load
+  load;  ! get props and see if anything loaded
+%finishelsestart;  ! deallocate
+  %if p_p1#ok %start
+    opmess(" deallocate fails ".htos(p_p1,8))
+    %return
+  %finish
+  t==record(d_ua ad)
+  ! deallocs come via volums which doesnt allow them if in use, so there
+  ! shouldnt be any request outstanding. we might be in a load or unload
+  ! sequence but thats irrelevant. nothing to do but unlink it.
+  m=t_mnem
+  i=search tps(1,0,m);  ! really just to set up 'prevlink'
+  %if i#ok %start;   ! dear dear. whats happened?
+    opmess(m." dealloc srch fails?")
+    %return
+  %finish
+  prevlink=t_link;  ! unlink it
+  ! and reset last if this was it
+  %if t_link=0 %then lastlink==prevlink
+%finish
+%return
+!
+!
+actsw(4):;     ! once/device from controller at startup
+!
+! this entry also used by volums to mode on/off deck or cluster.
+!p_p1=base mnemonic, p2=on/off(1/0), p3=number of decks
+!
+%if p_srce&x'ff0000'=controller %start
+  ! initialising call
+  %if initialised=0 %start
+    lastlink==firsttp
+    ! now set up constrecords
+    timely req=0
+    timely req_cmd=28;     ! noop to test online status
+    ! used at actsw(11) below
+    tick please=0
+    tick please_dest=x'a0002'
+    tick please_srce=me
+    tick please_p1=me!11;   ! my target
+    tick please_p2=10;      ! seconds
+    mypon(tick please,0)
+    initialised=1
+  %finish
+  ndecks=1
+  mode=on
+%finishelsestart
+  ! volums
+  ndecks=p_p3
+  mode=p_p2
+%finish
+%if mode=on %then pp_dest=controller!alloc %c
+            %else pp_dest=controller!dealloc
+pp_srce=me!3;   ! where controller replies come
+pp_p2=me!2;  ! where events are notified
+pp_p1=p_p1;     ! base mnem
+p_p1=0;         ! for reply to volums, see below
+%while ndecks>0 %cycle
+  i=pp_p1!x'3000000'
+  i=search tps(1,0,string(addr(i)));  ! is it there
+  %if (mode=on %and i=ok) %or (mode=off %and i=notok) %thenc
+      p_p1=p_p1+1 %else mypon(pp,0)
+  ! ie if on and already there, or off and not there, then increment
+  ! count of 'not done' for volums. otherwise do it
+  pp_p1=pp_p1+1;  ! next mnem
+  ndecks=ndecks-1
+%repeat
+%if p_srce&x'ff0000'=controller %thenreturn
+! so it was volums. reply. p1 already set
+->reply
+!
+!
+actsw(5):;    ! execute request fails
+! failures are p1=1 - sno out of range, ie unknown to controller
+!                =2 - device not ready
+!                ='BCCW' - bad CCW address (alignment?)
+!              p2=sno
+!              p3=device address if p1=2,
+!                 CCW address if p1=BCCW
+! the sno in p2 is only the bottom byte of our full one(see fire chain)
+! so we cannot use it to search for tp. further if p1=1, controller clearly
+! does not give a device addr in p3, so we have no way of telling which
+! of our entries was used to initiate this request
+opmess("controller rejects request")
+printstring("execute request fails - p1=".htos(p_p1,3). %c
+                                                   " p2=".htos(p_p2,2))
+%if p_p1#1 %start;  ! we can locate it
+  dumptable(61,p_p3,tfsize)
+  dumptable(61,p_p6,64)
+  d==record(p_p3)
+  t==record(d_ua ad)
+  req==t_req
+  rep==t_rep
+  %if req_state#0 %start;  ! tell the user or 'load'
+    req_state=0
+    rep_p2=reject
+    rep_p4=not claimed
+    %if rep_dest#0 %then mypon(record(addr(rep)),0) %else load
+  %finish
+%finish
+%return
+!
+!
+actsw(6):;     ! volums reporting in
+volums=p_srce
+i=search tps(4,0,"");   ! report all loaded to volums
+%return
+!
+!
+! actsw(7) defined at actsw(1) above
+!
+!
+actsw(8):;     ! set reporting level
+%if p_p1<=7 %start
+  rlevel=p_p1
+%finishelseif 0<=p_p2<=255 %start
+  %if p_p1=16 %start
+    read retries=p_p2
+  %finishelseif p_p1=17 %start
+    write retries=p_p2
+  %finish
+%finish
+%return
+!
+!
+actsw(9):;     ! send failure details
+%if search tps(3,p_p1&x'ffff',"")=ok %start
+  p_p1=0
+  p_p2=t_csw1
+  p_p3=t_csw2
+  move(12,addr(t_s0),addr(p_p4))
+%finishelsestart
+  p_p1=reject
+  p_p4=sno not found
+%finish
+->reply
+!
+!
+actsw(10):;     ! dump table, sno in p1
+%if search tps(3,p_p1&x'ffff',"")=ok %start
+  dumptable(61,addr(t),tfsize)
+%finish
+%return
+! no reply
+!
+!
+actsw(11):;     ! clock tick
+! poke a sense at all loaded or claimed and idle decks to see if they have gone offline
+! and maybe back on again
+! (we have to do claimed as well, in case the claimee never issues next
+!  request or release, as when fallen over, since we would never see the deck
+!  again.)
+%unless firsttp=0 %start
+  t==record(firsttp)
+  %cycle
+    rep==t_rep
+    req==t_req
+    %if t_state=loaded %or (t_state=claimed %and req_state=0) %start
+      t_save state=t_state
+      rep=0
+      req=timely req
+      fire chain
+      t_state=sensing
+    %finish
+    %exitif t_link=0
+    t==record(t_link)
+  %repeat
+%finish
+mypon(tick please,0);  ! another in 10 secs
+%return
+!
+!
+actsw(12):;     ! claim volume
+claim volume(p)
+! reply has gone
+%return
+!
+!
+actsw(13):;     ! display tps
+i=search tps(5,0,"")
+%return
+!
+!
+faulty p:
+mon(3,p)
+%end;      ! routine tape
+!
+%endoffile
