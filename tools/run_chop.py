@@ -81,8 +81,9 @@ def run_session(
     screens = []
     with (directory / f"{name}.log").open("w") as log:
         process = subprocess.Popen(
-            [hercules, "-f", str(config), "-r", "/dev/null"],
+            [hercules, "-f", str(config)],
             cwd=config.parent,
+            env={**os.environ, "HERCULES_RC": "/dev/null"},
             stdin=subprocess.PIPE,
             stdout=log,
             stderr=subprocess.STDOUT,

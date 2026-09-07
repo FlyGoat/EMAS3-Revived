@@ -55,3 +55,14 @@ Compilation logs are beside the system objects under `build/supervisor`,
 `build/chopsupe`, `build/director` and `build/executives`.
 
 Next, [create the disks and start EMAS](running.md).
+
+## Automated builds
+
+GitHub Actions builds on pushes to `main`, pull requests, and tags. Each run
+uploads an `emas3-revived` artifact containing `emas3-revived.tar.gz`: the boot
+disk, two initialized system disks, and `hercules.cnf`. Extract the archive and
+run `HERCULES_RC=/dev/null hercules -f hercules.cnf` from that directory. The terminal
+port is 3272.
+
+Pushing a tag also attaches the archive to a GitHub Release. Rerunning a tag
+build replaces the archive on its existing release.

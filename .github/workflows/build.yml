@@ -1,0 +1,83 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Jiaxun Yang <jiaxun.yang@flygoat.com>
+
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    container: registry.fedoraproject.org/fedora:43
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    env:
+      SOURCE_DATE_EPOCH: '0'
+    steps:
+      - name: Install build tools and Hyperion
+        run: |
+          dnf install -y clang llvm gcc make git tar gzip sdl-hercules
+          # Run without the package's optional real-time scheduling capability.
+          setcap -r /usr/bin/hercules
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          python-version: '3.12'
+          enable-cache: false
+      - name: Build compiler and images
+        run: make -j2 host-driver system-images chop-ipl-disk
+      - name: Initialize system disks
+        run: .venv/bin/python tools/provision_disks.py build/emas3-revived
+      - name: Package disks and Hercules configuration
+        run: |
+          .venv/bin/python - <<'PYTHON'
+          from pathlib import Path
+          directory = Path("build/emas3-revived").resolve()
+          config = directory / "hercules.cnf"
+          config.write_text(config.read_text().replace(str(directory) + "/", ""))
+          PYTHON
+          mkdir -p dist
+          tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 \
+            --numeric-owner -cf - -C build/emas3-revived \
+            chop.3380 emas0.3380 emas1.3380 hercules.cnf |
+            gzip -n > dist/emas3-revived.tar.gz
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: emas3-revived
+          path: dist/emas3-revived.tar.gz
+          if-no-files-found: error
+          overwrite: true
+
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: emas3-revived
+          path: dist
+      - name: Publish tagged release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/emas3-revived.tar.gz --clobber
+          else
+            gh release create "$RELEASE_TAG" dist/emas3-revived.tar.gz \
+              --verify-tag --title "$RELEASE_TAG" --generate-notes
+          fi

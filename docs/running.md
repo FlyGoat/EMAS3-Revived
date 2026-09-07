@@ -15,7 +15,7 @@ With disks in that directory, launch Hercules there:
 
 ```sh
 cd build/ipl
-"${HERCULES:-hercules}" -f hercules.cnf -r /dev/null
+HERCULES_RC=/dev/null "${HERCULES:-hercules}" -f hercules.cnf
 ```
 
 Connect a TN3270 terminal to `127.0.0.1:3271`, then enter `ipl 150` at the
@@ -48,7 +48,7 @@ Full startup and an interactive guest IMP environment are not yet available.
 ## Start an existing installation
 
 ```sh
-"${HERCULES:-hercules}" -f build/emas/hercules.cnf -r /dev/null
+HERCULES_RC=/dev/null "${HERCULES:-hercules}" -f build/emas/hercules.cnf
 ```
 
 Connect a TN3270 terminal to `127.0.0.1:3272`, or the port selected during
