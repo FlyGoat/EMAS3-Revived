@@ -376,12 +376,17 @@
 !
 %CONSTSTRING(1) SNL="
 "
-%constinteger TOPEXEC = 7
+! FlyGoat: INFORM and PADOUT are unavailable. Disable for now.
+!%constinteger TOPEXEC = 7
+%constinteger TOPEXEC = 5
 ! The order of these things MATTERS.  Values coded into routines in XOP.
+!%CONSTSTRING(6)%ARRAY EXEC(2 : TOPEXEC) = "VOLUMS", "SPOOLR",
+!            "MAILER", "FTRANS", "INFORM", "PADOUT"
 %CONSTSTRING(6)%ARRAY EXEC(2 : TOPEXEC) = "VOLUMS", "SPOOLR",
-            "MAILER", "FTRANS", "INFORM", "PADOUT"
+            "MAILER", "FTRANS"
 
-%constintegerarray msgkb(0:topexec) = 4, 0, 16, 16, 16, 128, 16, 16
+!%constintegerarray msgkb(0:topexec) = 4, 0, 16, 16, 16, 128, 16, 16
+%constintegerarray msgkb(0:topexec) = 4, 0, 16, 16, 16, 128
 
 %constinteger normal = 0
 %constinteger info = 1

@@ -127,9 +127,12 @@ def provision(directory, port):
             "M/MAILLIST 0",
             "M/MAILLIST 1",
             "M/CREATE",
+            "S/QUEUES",
+            "S/STREAMS",
             "D/CLOSEDOWN",
         ],
-        ["INDNO: 72", "Already open fsys 0", "Already open fsys 1", "Already exists"],
+        ["INDNO: 72", "Already open fsys 0", "Already open fsys 1", "Already exists",
+         "All queues", "JOURNAL", "All streams", "LP0"],
         8,
     )
     print(f"Disks initialized: {directory}", flush=True)

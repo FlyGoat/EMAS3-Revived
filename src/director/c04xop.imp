@@ -2356,7 +2356,9 @@ nobr:
 !-----------------------------------------------------------------------
 
 %routine advise exec(%integer fsys)
-%const %byte %integer %array execdacts(2:topexec)=26,58,27,58,58,58; ! ??????
+! FlyGoat: Match EXEC with INFORM and PADOUT disabled.
+!%const %byte %integer %array execdacts(2:topexec)=26,58,27,58,58,58; ! ??????
+%const %byte %integer %array execdacts(2:topexec)=26,58,27,58; ! ??????
 %integer i, j
 %record (parmf) p
    %cycle i = topexec, -1, 2
@@ -4817,7 +4819,8 @@ pr(35):                                  ! FSYS  complete message from an FCHECK
       doperr("START ".exec(k), 0, j) %unless j=0
    %repeat
 
-   xoper(X'00320007', "NEWSTART REMOTE")
+   ! FlyGoat: REMOTE's console runtime is missing. Use SPOOLR directly.
+   ! xoper(X'00320007', "NEWSTART REMOTE")
 
    ! Open to users and look for Autofile unless D/CLOSE USERS has been given
    d_initial delay = 3 %if d_initial delay<0
