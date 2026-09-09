@@ -21,6 +21,7 @@ IMAGES = {
     "volums": (1024, "build/executives/ivolums"),
     "spoolr": (1152, "build/executives/ispoolr"),
     "mailer": (1280, "build/executives/imailer"),
+    "subsystem": (1536, "build/subsystem/basefile"),
 }
 
 
@@ -135,7 +136,36 @@ def provision(directory, port):
          "All queues", "JOURNAL", "All streams", "LP0"],
         8,
     )
-    print(f"Disks initialized: {directory}", flush=True)
+    console(
+        "login-accounts",
+        [
+            "SLOAD 0 64", "D/NEWUSER ERCC01 0 32", "D/NEWUSER SUBSYS 0 32",
+            "D/NEWSTART SUBSYS", "NEWDIRECTORY BASEDIR", "PERMIT BASEDIR",
+            "LOGOFF", "D/CLOSEDOWN",
+        ],
+        ["New directory 'SUBSYS:BASEDIR' created"],
+        5,
+    )
+    console(
+        "login-create",
+        [
+            "SLOAD 0 64", "D/NEWSTART ERCC01", "SSVSN", "FILES",
+            "COPY SS#PROFILE,LOGINTEST", "FILES LOGINTEST", "LOGOFF", "D/CLOSEDOWN",
+        ],
+        ["Command: from", "01 JAN-(a)", "LOGINTEST is a copy of SS#PROFILE",
+         "  LOGINTEST"],
+        5,
+    )
+    console(
+        "login-restart",
+        [
+            "SLOAD 0 64", "D/NEWSTART ERCC01", "FILES LOGINTEST",
+            "DESTROY LOGINTEST", "LOGOFF", "D/CLOSEDOWN",
+        ],
+        ["Command: from", "  LOGINTEST"],
+        5,
+    )
+    print(f"Disks initialized with ERCC01 terminal login: {directory}", flush=True)
 
 
 def main():

@@ -42,8 +42,11 @@ The resulting directory contains:
 - `chop.3380`, `emas0.3380`, `emas1.3380`: the boot and system disks.
 - `*.log`, `*.txt`, `*-printer.txt`: emulator, console and printer output.
 
-The current installation starts the supervisor, Director, spooler and mailer.
-Full startup and an interactive guest IMP environment are not yet available.
+Provisioning installs the subsystem basefile, creates ERCC01 and SUBSYS, and
+verifies an ERCC01 session and file persistence across a reboot. REMOTE, INFORM
+and PADOUT remain disabled. MAILER's site configuration and directory files
+are not supplied, so it reports missing files and stays closed; this does not
+prevent subsystem login or SPOOLR operation.
 
 ## Start an existing installation
 
@@ -54,6 +57,10 @@ HERCULES_RC=/dev/null "${HERCULES:-hercules}" -f build/emas/hercules.cnf
 Connect a TN3270 terminal to `127.0.0.1:3272`, or the port selected during
 provisioning. Enter `ipl 150` at the Hercules console. Once the loader is ready,
 enter `SLOAD 0 64` in the guest terminal to load the supervisor.
+
+For a user session, enter `D/NEWSTART ERCC01` at `COMMAND:`. At the
+`Command: from NUMBER` prompt, try `SSVSN` and `FILES`, then `LOGOFF` to return
+to the operator console. This uses the privileged TN3270 operator console.
 
 To shut down, enter `D/CLOSEDOWN` in the guest terminal and wait for closedown
 to finish before entering `quit` at the Hercules console.
