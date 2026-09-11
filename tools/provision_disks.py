@@ -26,13 +26,13 @@ IMAGES = {
 }
 
 
-def configure(directory, port):
+def configure(directory, port, year=1970):
     text = (ROOT / "config/hercules-chop.cnf").read_text()
     for filename in ("chop.3380", "emas0.3380", "emas1.3380", "operator-printer.txt"):
         text = text.replace(filename, f'"{directory / filename}"')
     text = text.replace("127.0.0.1:3271", f"127.0.0.1:{port}")
     text = text.replace(
-        "YROFFSET -38", f"YROFFSET {1988 - datetime.now(timezone.utc).year}"
+        "YROFFSET -38", f"YROFFSET {year - datetime.now(timezone.utc).year}"
     )
     config = directory / "hercules.cnf"
     config.write_text(text)
@@ -57,7 +57,8 @@ def provision(directory, port):
             raise FileNotFoundError(f"missing build input: {path}")
     directory.mkdir(parents=True)
     shutil.copyfile(inputs["chop"], directory / "chop.3380")
-    config = configure(directory, port)
+    # Keep new disks older than the runtime clock
+    config = configure(directory, port, year=1970)
 
     def console(name, commands, expected, wait):
         print(name, flush=True)
