@@ -22,6 +22,7 @@ IMAGES = {
     "spoolr": (1152, "build/executives/ispoolr"),
     "mailer": (1280, "build/executives/imailer"),
     "subsystem": (1536, "build/subsystem/basefile"),
+    "imp": (1856, "build/compiler/imp"),
 }
 
 
@@ -140,7 +141,9 @@ def provision(directory, port):
         "login-accounts",
         [
             "SLOAD 0 64", "D/NEWUSER ERCC01 0 32", "D/NEWUSER SUBSYS 0 32",
+            "D/UNPRG", "SUBSYS:IMP 0", "EMAS00 1856",
             "D/NEWSTART SUBSYS", "NEWDIRECTORY BASEDIR", "PERMIT BASEDIR",
+            "PERMIT IMP", "INSERT IMP,BASEDIR",
             "LOGOFF", "D/CLOSEDOWN",
         ],
         ["New directory 'SUBSYS:BASEDIR' created"],

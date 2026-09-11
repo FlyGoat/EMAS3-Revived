@@ -22,7 +22,8 @@ include mk/fixers.mk
 include mk/system.mk
 include mk/executives.mk
 include mk/subsystem.mk
+include mk/compiler.mk
 include mk/disks.mk
 
 .PHONY: system-images
-system-images: supervisor-image loader-image director-image executive-images subsystem-image
+system-images: supervisor-image loader-image director-image executive-images subsystem-image compiler

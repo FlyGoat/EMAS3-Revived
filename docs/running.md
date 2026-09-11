@@ -42,8 +42,9 @@ The resulting directory contains:
 - `chop.3380`, `emas0.3380`, `emas1.3380`: the boot and system disks.
 - `*.log`, `*.txt`, `*-printer.txt`: emulator, console and printer output.
 
-Provisioning installs the subsystem basefile, creates ERCC01 and SUBSYS, and
-verifies an ERCC01 session and file persistence across a reboot. REMOTE, INFORM
+Provisioning installs the subsystem basefile and creates ERCC01 and SUBSYS.
+It installs the IMP compiler in `SUBSYS:IMP` and registers it in `SUBSYS:BASEDIR`.
+It verifies an ERCC01 session and file persistence across a reboot. REMOTE, INFORM
 and PADOUT remain disabled. MAILER's site configuration and directory files
 are not supplied, so it reports missing files and stays closed; this does not
 prevent subsystem login or SPOOLR operation.
@@ -61,6 +62,22 @@ enter `SLOAD 0 64` in the guest terminal to load the supervisor.
 For a user session, enter `D/NEWSTART ERCC01` at `COMMAND:`. At the
 `Command: from NUMBER` prompt, try `SSVSN` and `FILES`, then `LOGOFF` to return
 to the operator console. This uses the privileged TN3270 operator console.
+
+To create a small IMP source file, start a fresh user session and enter each
+line below at the command prompt:
+
+```text
+QUEUE "%begin"
+QUEUE 'printstring("Hello from IMP"); newline'
+QUEUE "%endofprogram"
+COPY T#STACK,HELLOS
+IMP HELLOS,HELLOO
+RUN HELLOO
+```
+
+`QUEUE` appends each quoted source line to the session's temporary stack file.
+`COPY` saves it as `HELLOS`; `IMP` compiles it to `HELLOO`, and `RUN` prints
+`Hello from IMP`. Use a fresh session so the stack contains only these lines.
 
 To shut down, enter `D/CLOSEDOWN` in the guest terminal and wait for closedown
 to finish before entering `quit` at the Hercules console.

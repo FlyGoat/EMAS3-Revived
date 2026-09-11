@@ -1,5 +1,4 @@
 ! Derived native PUT; address and file-service port remains incomplete.
-%include "host_addresses.imp"
 {*********************}
 {*     EMAS 370      *}
 {*   PUT INTERFACE   *}
@@ -48,6 +47,10 @@
 {* External/system declarations *}
 %constantinteger XIMPLP64=0
 %constantinteger XIMPLITTLEENDIAN=0
+! Native address handles are not needed in a 32-bit guest.
+%if XIMPLP64=1 %start
+%include "host_addresses.imp"
+%finish
 
 %externalroutinespec newgen %alias "S#NEWGEN"(%string(255)f,g,%integername flag)
 %externalintegerfnspec UInfI %alias "S#UINFI"(%integer I)
@@ -1035,7 +1038,11 @@ Out:
    FlushCode(JumpType)
    CodeBuffer_Used = LastUsed
    CodeBuffer_Reg = Reg
+   %if XIMPLP64=1 %start
    CodeBuffer_Label = HOST ADDRESS HANDLE(BYTEINTEGER(Addr(Lab)))
+   %finish %else %start
+   CodeBuffer_Label = Addr(Lab)
+   %finish
    LastUsed = Tem
    %if Reg>0 %then PIX RX(L,Reg&15,12,0,0)
    %if Reg<0 %then PIXRX(Op,Mask,0,-Reg,0) %else PIXRX(Op,Mask,12,Reg&15,0)
@@ -1076,7 +1083,11 @@ Out:
    CodeBuffer_Line = CurrentLine
    CodeBuffer_Used = LastUsed
    CodeBuffer_Reg = Reg
+   %if XIMPLP64=1 %start
    CodeBuffer_Label = HOST ADDRESS HANDLE(BYTEINTEGER(Addr(Lab)))
+   %finish %else %start
+   CodeBuffer_Label = Addr(Lab)
+   %finish
    PIXRS(Op,Reg1,Reg2,0,0)
 %end { of PJIndex }
 
@@ -1825,7 +1836,11 @@ ThruType(Fragment):
 ThruType(JumpType): { Process Jump entry }
          JRec == Record(I)
          J = I + Sizeof(JRec)
+         %if XIMPLP64=1 %start
          LRec == Record(ADDR(HOST HANDLE ADDRESS(JRec_Label)))
+         %finish %else %start
+         LRec == Record(JRec_Label)
+         %finish
          %if JRec_Used#0 %then Used == Record(JRec_Used) {4 Byte jump originally planted}
          %if JRec_Reg=0 %thenstart
             %if JRec_Used#0 %thenstart { Try to use  offset from a PUsing }
@@ -1851,7 +1866,11 @@ ThruType(JumpType): { Process Jump entry }
             %finish
          %finishelsestart
             %if JRec_Reg>0 %thenstart { 8 byte form was planted }
+               %if XIMPLP64=1 %start
                LRec == Record(ADDR(HOST HANDLE ADDRESS(JRec_Label)))
+               %finish %else %start
+               LRec == Record(JRec_Label)
+               %finish
                %if JRec_Used#0 %thenstart
                   Used == Record(JRec_Used)
                   {%if LRec_Ca=Used_Ca %thenstart}      { Shorten to 2 Bytes }
@@ -1951,7 +1970,11 @@ Finished:
       JRec == Record(I)
       %if JRec_Type=JumpType %thenstart
          %if JRec_Label=0 %then JumpFail("Missing label for jump.")
+         %if XIMPLP64=1 %start
          LRec == Record(ADDR(HOST HANDLE ADDRESS(JRec_Label)))
+         %finish %else %start
+         LRec == Record(JRec_Label)
+         %finish
          Ofst = LRec_Ca
          %if Ofst=-1 %then JumpFail("Label not set for forward jump") %and %stop
          JAd = I + Sizeof(JRec) + JRec_Offset

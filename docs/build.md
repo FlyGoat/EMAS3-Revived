@@ -36,6 +36,7 @@ The outputs are:
 | File | Purpose |
 | --- | --- |
 | `build/host/emas-imp` | Hosted IMP compiler |
+| `build/compiler/imp` | IMP compiler installed in SUBSYS |
 | `build/ipl/chop.3380` | Boot disk containing the loader |
 | `build/supervisor/isup-fixed` | Supervisor image |
 | `build/director/ERCC04:DIRECTOR` | Director image |
@@ -52,6 +53,11 @@ IMP source to an IBM object file, use:
 ```sh
 build/host/emas-imp input.imp output
 ```
+
+The `system-images` target also builds the IMP compiler for EMAS.
+To rebuild it alone, run `make compiler`. The output
+`build/compiler/imp` is a loadable IBM object installed by the provisioning
+script; per-module compiler listings are in the same directory.
 
 Compilation logs are beside the system objects under `build/supervisor`,
 `build/chopsupe`, `build/director` and `build/executives`.

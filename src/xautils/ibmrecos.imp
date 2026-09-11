@@ -1,5 +1,5 @@
 %include "xautils_ctoptxa"
-%systemstringfunctionspec htos(%integer value,places)
+%externalstring(255)%fnspec htos %alias "S#HTOS"(%integer value,places)
 %constantinteger XIMPLP64=0
 %if XIMPLP64=1 %start
 %externalroutine ibmrecode(%longinteger xstart,finish,%integer cax)
